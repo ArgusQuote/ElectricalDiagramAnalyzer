@@ -1,0 +1,41 @@
+# Core runtime
+numpy>=1.23,<2
+pillow
+opencv-python
+matplotlib
+tqdm
+
+# OCR
+easyocr
+
+# Detectron2 stack
+torch==2.4.1+cu121     # CUDA 12.1 build (your A5000 GPU)
+torchvision==0.19.1+cu121
+torchaudio==2.4.1+cu121
+-f https://download.pytorch.org/whl/torch_stable.html
+
+detectron2==0.6
+pycocotools
+fvcore
+iopath
+omegaconf
+hydra-core
+yacs
+tabulate
+termcolor
+black
+
+# Anvil Uplink
+anvil-uplink
+
+# Utils
+protobuf
+grpcio
+portalocker
+absl-py
+tensorboard
+tensorboard-data-server
+
+# Dev tools
+jupyter
+notebook

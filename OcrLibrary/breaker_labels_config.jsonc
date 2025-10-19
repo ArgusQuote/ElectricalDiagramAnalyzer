@@ -1,0 +1,172 @@
+{
+  // ==== 1) Labels / Synonyms (expanded & normalized) ====
+  "labels": {
+    // ADDED strong synonyms per your list; kept "CB" but downweight via header_classifier rules below
+    "trip": [
+      "TRIP", "TRP", "AMPS", "AMP", "AMPS.", "AMPS:", "AMPS/PH",
+      "BKR", "BREAKER", "SIZE", "CURRENT", "AMPERAGE", "CB AMPS"
+    ],
+    "poles": [
+      "POLES", "POLE", "P", "PLS"
+    ],
+    "description": [
+      "CIRCUIT DESCRIPTION", "CB DESCRIPTION", "DESCRIPTION", "LOAD DESCRIPTION",
+      "DESIGNATION", "LOAD DESIGNATION", "CB DESIGNATION", "NAME"
+    ],
+    // unchanged but kept explicit for clarity
+    "trip_poles":  ["TRIP/POLE", "TRIP/POLES", "TRIP-POLES", "TRIP-POLE"],
+    "ckt":         ["CCT", "CKT", "CIRCUIT"],
+    "footer":      ["TOTAL LOAD", "TOTAL AMPS", "PANEL TOTALS", "ESTIMATED DEMAND", "NOTES"],
+    "phase_banner":["A B C", "ABC"]
+  },
+
+  // ==== 2) Normalization (NEW) ====
+  "normalize": {
+    // fix common EasyOCR slips, including what we saw: "Trlp" -> "TRIP", "Clrcult Descrlptlon" -> "CIRCUIT DESCRIPTION"
+    "map": [
+      { "pattern": "(?i)trlp",                     "replace": "TRIP" },
+      { "pattern": "(?i)clrcuit",                  "replace": "CIRCUIT" },
+      { "pattern": "(?i)descr[i1]pt[i1]on",        "replace": "DESCRIPTION" },
+      { "pattern": "(?i)c[il]rcuit descr[i1]pt[i1]on", "replace": "CIRCUIT DESCRIPTION" },
+      { "pattern": "(?i)amp(erage)?",              "replace": "AMPS" },
+      { "pattern": "(?i)bkr",                      "replace": "BREAKER" },
+      { "pattern": "(?i)trp",                      "replace": "TRIP" },
+      { "pattern": "(?i)pl?s\\b",                  "replace": "POLES" },
+      { "pattern": "(?i)po1es",                    "replace": "POLES" },    // 1→L confusion
+      { "pattern": "(?i)o",                        "replace": "O" },        // conf stabilizers
+      { "pattern": "(?i)\\bcb\\b",                 "replace": "CB" }        // keep CB literal; we downweight it below
+    ],
+    "strip": true,          // trim whitespace & collapse spaces
+    "casefold": true        // uppercase for matching
+  },
+
+  // ==== 3) Header classifier policy (NEW) ====
+  "header_classifier": {
+    // We only need OCR & text similarity right now
+    "weights": {
+      "string_sim": 0.70,
+      "ocr_conf":   0.30,
+      "geom_hint":  0.00     // kill geometry in header scoring
+    },
+    "accept_threshold": 0.62,
+    // Bias: discourage ambiguous "CB" as a header on its own unless paired with a stronger token nearby
+    "penalties": [
+      { "if_regex": "^CB$", "penalty": 0.15 }
+    ],
+    // Heuristics that help separate headers (row 1) from values (row 2)
+    "header_hints": {
+      "favor_top_of_band": true,     // boost higher y within the y_band
+      "numeric_value_regex": "^[0-9]+(?:\\.[0-9]+)?\\s*(A|AMP|AMPS)?$",
+      "value_bias": 0.18             // reduce header score when token looks like a numeric value (e.g., "20 A", "1.5")
+    },
+    // Dedup: EasyOCR emits duplicates from multi-pass—keep strongest near same spot
+    "dedupe": {
+      "x_tol_px": 24,
+      "y_tol_px": 18,
+      "keep": "max_conf"
+    },
+    // Allow mirrored columns (left/right) for each type
+    "allow_multiple_per_type": true,
+    // Optional: some panels print TRIP and POLES twice (mirrored). Keep both if above threshold.
+    "max_per_type": 4
+  },
+
+  // ==== 4) Row-level rules (kept; minor tweak) ====
+  "row_rules": {
+    "trip": {
+      "min": 10,
+      "max": 1200,
+      "multiples_of": 5,
+      "common_whitelist": [
+        15,20,25,30,35,40,45,50,60,70,80,90,
+        100,125,150,175,200,225,250,300,350,400,450,500,600,800,1000,1200
+      ],
+      "reject_if_has_decimal": true,
+      "ocr_fixups": [
+        { "pattern": "\\bO\\b", "replace": "0" },
+        { "pattern": "[\\u2013\\u2014]", "replace": "-" }
+      ],
+      "confidence_weights": {
+        "ocr_conf": 0.35,
+        "value_plausibility": 0.45,
+        "context_consistency": 0.20
+      }
+    },
+    "poles": {
+      "allowed": [1, 2, 3],
+      "allow_bare_number": true,
+      "reject_if_has_letter_A": true,
+      "reject_if_decimal": true,
+      "confidence_weights": {
+        "ocr_conf": 0.40,
+        "value_plausibility": 0.45,
+        "context_consistency": 0.15
+      }
+    },
+    "description": {
+      "disallow_terms": ["SPACE", "BLANK", "EMPTY", "FILLER"],
+      "allow_terms":    ["SPARE", "SPARES"],
+      "casefold": true,
+      "strip_symbols": true,
+      "min_len": 1,
+      "reject_numeric_only": true,
+      "min_alpha_chars": 2,
+      "disallow_regex": ["^\\s*\\d+(?:[\\s\\./]\\d+)?\\s*$"],
+      "flags": {
+        "mark_spare_if_exact": true,
+        "treat_disallow_as_blank": true
+      }
+    }
+  },
+
+  // ==== 5) Phase banner (disable geometry-first bias for now) ====
+  "phase_cluster": {
+    "mode": "ocr_first",            // was geometry_first
+    "allow_double_cluster": true,
+    "allow_single_cluster": true
+  },
+
+  // ==== 6) Structural constraints (relaxed—don’t force both sides yet) ====
+  "constraints": {
+    "unique_per_side": false,       // let OCR report multiple; we’ll pick later
+    "prefer_combined_if_stronger": true,
+    "must_have_both_sides": false   // don’t require mirrored headers
+  },
+
+  // ==== 7) Scoring blend (turn off geometry for header/band picking) ====
+  "scoring": {
+    "string_sim_weight": 0.75,
+    "ocr_conf_weight":   0.25,
+    "geom_priors_weight":0.00,
+    "accept_threshold":  0.62,
+    "tie_break_bias_px": 18
+  },
+
+  // ==== 8) Fallbacks (keep but DO NOT use during header discovery) ====
+  "fallbacks": {
+    "enable_for_headers": false,    // NEW flag so parser doesn’t touch these yet
+    "frac_l_trip":   [0.260, 0.300],
+    "frac_l_poles":  [0.305, 0.335],
+    "frac_r_poles":  [0.655, 0.690],
+    "frac_r_trip":   [0.695, 0.735]
+  },
+
+  // ==== 9) Peripheral / guards (safe to keep as-is) ====
+  "peripheral_filter": {
+    "x_margin_frac": 0.12,
+    "y_margin_frac": 0.00
+  },
+  "edge_whiten": {
+    "enable": true,
+    "x_margin_frac": 0.06,
+    "y_margin_frac": 0.02,
+    "min_px": 2
+  },
+  "ocr_top_guard": {
+    "frac": 0.05,
+    "min_px": 6
+  },
+
+  // unchanged (not used in header OCR pass but fine to keep)
+  "tall_column_split": { "enable": true, "height_frac": 0.34, "min_px": 160, "aspect_min": 5.5 }
+}

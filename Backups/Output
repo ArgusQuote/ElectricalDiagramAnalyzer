@@ -1,0 +1,567 @@
+from ._anvil_designer import outputTemplate
+from anvil import *
+from anvil import BlobMedia
+import anvil.server
+import anvil.users
+import json
+
+# ---------- CSV inclusion policy ----------
+ALWAYS_INCLUDE = {
+  "Interior","Interior/Box","Box","Trim","Cover",
+  "Main Breaker","Main Breaker Kit",
+  "Blanks/Filler","Breaker"
+}
+# Optional by default (user can check to include)
+OPTIONAL_DEFAULT_OFF = {
+  "SPD","Service Entrance Kit","Service Entrance Barrier Kit",
+  "Neutral","Neutral (100%)","Neutral (200%)","Feed-Thru Lugs"
+}
+# Optional but pre-checked (cheap/convenient)
+OPTIONAL_DEFAULT_ON = {"Ground Bar Kit"}
+
+class output(outputTemplate):
+  def __init__(self, result: dict, job_name: str = None, **properties):
+    self.init_components(**properties)
+    if not anvil.users.get_user():
+      open_form('login'); return
+    self._panel_order = []
+    
+    if hasattr(self, "btn_show_raw"):
+      self.btn_show_raw.set_event_handler('click', self.btn_show_raw_click)
+    if hasattr(self, "download_btn"):
+      self.download_btn.set_event_handler('click', lambda **e: self._export_csv())
+
+    # cache of the flattened rows we show in the main grid
+    self._flat_rows = []
+    
+    # Where the VM payload lives
+    self.result = result or {}
+    self.job_name = (job_name or "").strip()
+
+    # Title
+    if hasattr(self, "label_job"):
+      self.label_job.text = f"BOM - {self.job_name or '(untitled)'}"
+    else:
+      self.add_component(Label(text=f"BOM - {self.job_name or '(untitled)'}",
+                               role="headline"), slot=None)
+
+    self._set_ttp_label()
+    
+    if not hasattr(self, "content_panel"):
+      self.content_panel = ColumnPanel()
+      self.add_component(self.content_panel)
+    
+    self._render_panel_table()  # Detected Panels (top grid, no checkboxes)
+    self._render()              # BOM grid
+
+  # ---------- Rendering ----------
+  def _render(self):
+    self.content_panel.clear()
+    rules = (self.result or {}).get("rules_result") or {}
+    if not isinstance(rules, dict) or not rules:
+      self.content_panel.add_component(Label(text="No results to display."))
+      btn_bar = FlowPanel()
+      btn_raw = Button(text="Show raw JSON", tag="raw")
+      btn_raw.set_event_handler('click', self._top_click)
+      btn_bar.add_component(btn_raw)
+      return
+  
+    rows_by_des = self._normalize_rules(rules)
+  
+    flat_rows = []
+    for desig in self._iter_designations_in_panel_order(rows_by_des):
+      rows = rows_by_des[desig]
+      rows.sort(key=lambda r: (r.get("_order", 999), r.get("item_type",""), r.get("product","")))
+      for r in rows:
+        r.pop("_order", None)
+      flat_rows.extend(rows)
+  
+    if not flat_rows:
+      flat_rows = [{
+        "designation": "(none)",
+        "item_type": "Note",
+        "product": "No displayable items were found in rules_result.",
+        "qty": 0,
+        "notes": "",
+        "csv_selectable": False,
+        "csv_include": False,
+      }]
+  
+    self._flat_rows = flat_rows
+  
+    if hasattr(self, "data_grid_1"):
+      self.data_grid_1.columns = [
+        {"id":"item_type","title":"Item Type","data_key":"item_type"},
+        {"id":"product",  "title":"Product",  "data_key":"product"},
+        {"id":"designation","title":"Designation","data_key":"designation"},
+        {"id":"qty",      "title":"Quantity", "data_key":"qty", "width":80},
+        {"id":"include",  "title":"Include",  "data_key":"include", "width":90},
+      ]
+      try:
+        self.data_grid_1.show_header = False
+      except Exception:
+        self.data_grid_1.auto_header = False
+      try:
+        self.data_grid_1.show_page_controls = False
+      except Exception:
+        pass
+      self.data_grid_1.rows_per_page = 1000
+      self.data_grid_1.role = "bom-grid"
+  
+      rp = getattr(self, "repeating_panel_1", None)
+      if rp:
+        try: rp.remove_from_parent()
+        except Exception: pass
+  
+      for c in list(self.data_grid_1.get_components()):
+        if isinstance(c, DataRowPanel):
+          c.remove_from_parent()
+  
+      hdr = DataRowPanel(role="custom-grid-header")
+      hdr.add_component(Label(text="Item Type",   bold=True), column="item_type")
+      hdr.add_component(Label(text="Product",     bold=True), column="product")
+      hdr.add_component(Label(text="Designation", bold=True), column="designation")
+      hdr.add_component(Label(text="Quantity",    bold=True), column="qty")
+      hdr.add_component(Label(text="Include",     bold=True, align="center"), column="include")
+      self.data_grid_1.add_component(hdr, slot="header")
+  
+      # ----- rows with spacer between designations
+      last_des = None
+      for i, row in enumerate(self._flat_rows):
+        des = (row.get("designation") or "").strip()
+        if last_des is not None and des != last_des:
+          self._add_spacer_row()
+        self._add_row_to_grid(row, idx=i)
+        last_des = des
+  
+    btn_bar = FlowPanel()
+    self.content_panel.add_component(btn_bar)
+
+  def _format_duration_ms(self, ms: int) -> str:
+    try:
+      ms = int(ms)
+    except Exception:
+      return ""
+    if ms < 0:
+      ms = 0
+    secs, msec = divmod(ms, 1000)
+    mins, sec = divmod(secs, 60)
+    hrs, min_ = divmod(mins, 60)
+    if hrs:
+      return f"{hrs}h {min_}m {sec}.{msec:03d}s"
+    if mins:
+      return f"{min_}m {sec}.{msec:03d}s"
+    return f"{sec}.{msec:03d}s"
+  
+  def _set_ttp_label(self):
+    lbl = getattr(self, "label_ttp", None)
+    if not isinstance(lbl, Label):
+      return
+  
+    s = (self.result.get("cycle_time_str") or "").strip()
+    if s:
+      lbl.text = f"Processed in {s}"
+      return
+  
+    start_ms = self.result.get("noticed_ts_ms")
+    end_ms   = self.result.get("parse_done_ts_ms")
+    if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)):
+      lbl.text = f"Processed in {self._format_duration_ms(int(end_ms - start_ms))}"
+      return
+  
+    ct = self.result.get("cycle_time_ms")
+    if isinstance(ct, (int, float)):
+      lbl.text = f"Processed in {self._format_duration_ms(int(ct))}"
+      return
+  
+    lbl.text = ""
+
+  def _extract_panels(self) -> list:
+    res = self.result or {}
+    items = []
+
+    if isinstance(res.get("components"), list):
+      items = res["components"]
+    elif isinstance(res.get("component"), dict):
+      items = [res["component"]]
+
+    out = []
+    for it in items:
+      if not isinstance(it, dict):
+        continue
+      if (it.get("type") or "").lower() != "panelboard":
+        continue
+      attrs = it.get("attrs") or {}
+      out.append({
+        "name": it.get("name") or "(unnamed)",
+        "amperage":            attrs.get("amperage", "NONE"),
+        "voltage":             attrs.get("voltage", "NONE"),
+        "main_brk_amps":       attrs.get("mainBreakerAmperage", "NONE"),
+        "int_rating":          attrs.get("intRating", "NONE"),
+        "spaces":              attrs.get("spaces", "NONE"),
+      })
+
+    if out:
+      # Record the visual order used by the top grid (normalized + original)
+      self._panel_order = [ (str(r.get("name") or "").strip(),  # original
+                             str(r.get("name") or "").strip().upper())  # norm
+                           for r in out ]
+      return out
+
+    rr = res.get("rules_result") or {}
+    if isinstance(rr, dict) and rr:
+      rows = []
+      # dict preserves insertion order; use it as fallback order
+      self._panel_order = [ (k, str(k).strip().upper()) for k in rr.keys() ]
+      for name, _ in self._panel_order:
+        rows.append({
+          "name": name or "(no name detected)",
+          "amperage": "NONE",
+          "voltage": "NONE",
+          "main_brk_amps": "NONE",
+          "int_rating": "NONE",
+          "spaces": "NONE",
+        })
+      return rows
+
+    return out
+
+  def _iter_designations_in_panel_order(self, rows_by_des: dict):
+    """
+    Yield designations in the same order as the top panel table (self._panel_order),
+    then append any designations not present in that list, preserving their insertion order.
+    """
+    # Build a normalized lookup from rows_by_des
+    def _norm(s): return str(s or "").strip().upper()
+    by_norm = {}
+    for k in rows_by_des.keys():
+      nk = _norm(k)
+      # Keep first occurrence if duplicates
+      if nk not in by_norm:
+        by_norm[nk] = k
+
+    seen = set()
+    # self._panel_order is a list of (original, normalized) tuples
+    panel_order = getattr(self, "_panel_order", []) or []
+    for orig, nk in panel_order:
+      if nk in by_norm and nk not in seen:
+        seen.add(nk)
+        yield by_norm[nk]   # yield the actual key present in rows_by_des
+
+    # Append leftovers (preserve dict insertion order)
+    for k in rows_by_des.keys():
+      nk = _norm(k)
+      if nk not in seen:
+        yield k
+
+  def _render_panel_table(self):
+      dg = getattr(self, "data_grid_2", None)
+      if not isinstance(dg, DataGrid):
+          self.data_grid_2 = dg = DataGrid()
+          try:
+              self.add_component(dg, index=0)
+          except Exception:
+              self.add_component(dg)
+  
+      # Always (re)configure and (re)render from here ↓
+      dg.width = "100%"
+      dg.show_header = True
+      dg.show_page_controls = False
+      dg.rows_per_page = 1000
+      dg.role = "bom-grid"
+  
+      dg.columns = [
+          {"id": "name",          "title": "Name",                "data_key": "name"},
+          {"id": "amperage",      "title": "Amps",                "data_key": "amperage"},
+          {"id": "voltage",       "title": "Volts",               "data_key": "voltage"},
+          {"id": "main_brk_amps", "title": "Main Breaker Amps",   "data_key": "main_brk_amps"},
+          {"id": "int_rating",    "title": "Interrupting Rating", "data_key": "int_rating"},
+          {"id": "spaces",        "title": "Spaces",              "data_key": "spaces"},
+      ]
+  
+      # Clear previous rows
+      for c in list(dg.get_components()):
+          c.remove_from_parent()
+  
+      # Header row
+      hdr = DataRowPanel(role="custom-grid-header")
+      hdr.add_component(Label(text="Name",                bold=True), column="name")
+      hdr.add_component(Label(text="Amps",                bold=True, align="center"), column="amperage")
+      hdr.add_component(Label(text="Volts",               bold=True, align="center"), column="voltage")
+      hdr.add_component(Label(text="Main Breaker Amps",   bold=True, align="center"), column="main_brk_amps")
+      hdr.add_component(Label(text="Interrupting Rating", bold=True, align="center"), column="int_rating")
+      hdr.add_component(Label(text="Spaces",              bold=True, align="center"), column="spaces")
+      dg.add_component(hdr, slot="header")
+  
+      def _fmt(v):
+          if v in (None, ""): return "NONE"
+          s = str(v)
+          return "NONE" if s.upper() == "NONE" else s
+  
+      rows = self._extract_panels()
+      if not rows:
+          dr = DataRowPanel()
+          dr.add_component(Label(text="(No panels detected)"), column="name")
+          dg.add_component(dr)
+          return
+  
+      for i, r in enumerate(rows):
+          role = "zebra-even" if (i % 2 == 0) else "zebra-odd"
+          dr = DataRowPanel(role=role)
+          def C(v): return Label(text=_fmt(v), align="center")
+          dr.add_component(Label(text=_fmt(r.get("name"))), column="name")
+          dr.add_component(C(r.get("amperage")),      column="amperage")
+          dr.add_component(C(r.get("voltage")),       column="voltage")
+          dr.add_component(C(r.get("main_brk_amps")), column="main_brk_amps")
+          dr.add_component(C(r.get("int_rating")),    column="int_rating")
+          dr.add_component(C(r.get("spaces")),        column="spaces")
+          dg.add_component(dr)
+
+  def _add_spacer_row(self):
+    """Insert a blank-looking row to visually separate designations."""
+    dr = DataRowPanel(role="spacer-row")
+    dr.add_component(Label(text=" "), column="item_type")
+    dr.add_component(Label(text=" "), column="product")
+    dr.add_component(Label(text=" "), column="designation")
+    dr.add_component(Label(text=" "), column="qty")
+    dr.add_component(Label(text=" "), column="include")
+    self.data_grid_1.add_component(dr)
+  
+  # -- helper to render a row into the main grid, with checkbox on the right
+  def _add_row_to_grid(self, row_dict: dict, idx: int = None):
+    role = "zebra-even" if (isinstance(idx, int) and idx % 2 == 0) else "zebra-odd"
+    dr = DataRowPanel(role=role)
+  
+    dr.add_component(Label(text=str(row_dict.get("item_type",""))),   column="item_type")
+    dr.add_component(Label(text=str(row_dict.get("product",""))),     column="product")
+    dr.add_component(Label(text=str(row_dict.get("designation",""))), column="designation")
+    dr.add_component(Label(text=str(row_dict.get("qty",""))),         column="qty")
+  
+    itype = (row_dict.get("item_type") or "").strip()
+    show_cb = itype not in ("Note", "Skipped")
+    if show_cb:
+      is_selectable = bool(row_dict.get("csv_selectable", False))
+      cb = CheckBox()
+      cb.checked = bool(row_dict.get("csv_include", False))
+      cb.enabled = is_selectable            # ALL real items are selectable; notes are not rendered as cb
+      cb.tooltip = "Include this row in CSV"
+      # direct update of the row dict
+      def _on_change(sender=cb, r=row_dict, **e):
+        r["csv_include"] = bool(sender.checked)
+      cb.set_event_handler('change', _on_change)
+      dr.add_component(cb, column="include")
+    else:
+      dr.add_component(Label(text=""), column="include")
+  
+    self.data_grid_1.add_component(dr)
+
+  def _top_click(self, sender, **e):
+    if isinstance(sender, Button) and sender.tag == "raw":
+      try:
+        alert(TextArea(text=json.dumps(self.result, indent=2), height=400, width="100%"),
+              title="Raw payload", large=True, buttons=[("Close", True)])
+      except Exception:
+        alert("No raw data to display.")
+      return
+
+  # ---------- Normalization ----------
+  def _normalize_rules(self, rules_result: dict) -> dict:
+    """
+    Return { designation -> [ {designation,item_type,product,qty,notes,_order,csv_*}, ... ] }
+    Enforces order: Interior → Box → Trim/Cover → Main (breaker/kit) → Accessories → Breakers → Blanks/Filler → Notes
+    """
+    ORDER = {
+      "Interior": 10, "Interior/Box": 10,
+      "Box": 20,
+      "Main": 25,
+      "Trim": 30, "Cover": 30, "Trim/Cover": 30,
+      "Accessory": 40,
+      "Breaker": 60,
+      "Blanks/Filler": 70,
+      "Note": 90,
+    }
+
+    rows_by_des = {}
+    for designation, payload in (rules_result or {}).items():
+      designation = (designation or "").strip()  # trim only; keep original case
+      if not isinstance(payload, dict):
+        continue
+      out_rows = []
+
+      def add_row(des, item_type, product, qty, notes, order):
+        r = self._row(des, item_type, product, qty, notes, order)
+        # CSV flags:
+        # - ALWAYS_INCLUDE: pre-checked, but selectable (user can uncheck)
+        # - OPTIONAL_DEFAULT_ON: pre-checked, selectable
+        # - OPTIONAL_DEFAULT_OFF: unchecked, selectable
+        # - Else (Notes/Skipped): unchecked, not selectable
+        if item_type in ALWAYS_INCLUDE:
+          r["csv_selectable"] = True
+          r["csv_include"] = True
+        elif item_type in OPTIONAL_DEFAULT_ON:
+          r["csv_selectable"] = True
+          r["csv_include"] = True
+        elif item_type in OPTIONAL_DEFAULT_OFF:
+          r["csv_selectable"] = True
+          r["csv_include"] = False
+        else:
+          r["csv_selectable"] = False
+          r["csv_include"] = False
+        out_rows.append(r)
+
+      # 1) Interior / Box / Trim/Cover
+      if isinstance(payload.get("Interior"), str):
+        add_row(designation, "Interior", payload["Interior"], 1, "", ORDER["Interior"])
+      if isinstance(payload.get("Interior/Box"), str):
+        add_row(designation, "Interior/Box", payload["Interior/Box"], 1, "", ORDER["Interior/Box"])
+      if isinstance(payload.get("Box"), str):
+        add_row(designation, "Box", payload["Box"], 1, "", ORDER["Box"])
+      if isinstance(payload.get("Trim"), str):
+        add_row(designation, "Trim", payload["Trim"], 1, "", ORDER["Trim"])
+      if isinstance(payload.get("Cover"), str):
+        add_row(designation, "Cover", payload["Cover"], 1, "", ORDER["Cover"])
+
+      # 1.5) Main breaker items (pre-checked, selectable)
+      mb = payload.get("Main Breaker")
+      if isinstance(mb, str) and mb.strip():
+        add_row(designation, "Main Breaker", mb.strip(), 1, "", ORDER["Main"])
+      mbk = payload.get("Main Breaker Kit")
+      if isinstance(mbk, str) and mbk.strip():
+        add_row(designation, "Main Breaker Kit", mbk.strip(), 1, "", ORDER["Main"])
+
+      # Service-entrance suppression: block if any “not suitable” note appears
+      def _has_not_suitable(txt):
+        return isinstance(txt, str) and ("not suitable" in txt.lower())
+      se_note_block = _has_not_suitable(payload.get("Service Entrance Note"))
+      se_kit_text   = payload.get("Service Entrance Kit")
+      se_kit_is_note = _has_not_suitable(se_kit_text)
+      notes_list = payload.get("Notes") if isinstance(payload.get("Notes"), list) else []
+      notes_block = any(_has_not_suitable(n) for n in notes_list)
+      se_blocked = se_note_block or se_kit_is_note or notes_block
+
+      # 2) Accessories (use the actual label)
+      def add_acc(label_key, pretty_label=None, when=True):
+        if not when:
+          return
+        val = payload.get(label_key)
+        if isinstance(val, str) and val.strip() and "not suitable" not in val.lower():
+          add_row(designation, (pretty_label or label_key), val.strip(), 1, "", ORDER["Accessory"])
+      add_acc("Ground Bar Kit", "Ground Bar Kit")
+      add_acc("Neutral", "Neutral")
+      add_acc("Neutral (100%)", "Neutral (100%)")
+      add_acc("Neutral (200%)", "Neutral (200%)")
+      add_acc("Feed-Thru Lugs", "Feed-Thru Lugs")
+      add_acc("SPD", "SPD")
+      add_acc("Service Entrance Kit", "Service Entrance Kit", when=not se_blocked)
+      add_acc("Service Entrance Barrier Kit", "Service Entrance Barrier Kit", when=not se_blocked)
+
+      # 3) Breakers
+      for key, val in payload.items():
+        if isinstance(val, list) and key.startswith("Branch Breakers"):
+          for b in val:
+            if not isinstance(b, dict):
+              continue
+            pn = b.get("Part Number") or b.get("part_number") or ""
+            qty = int(b.get("count", 1) or 1)
+            ir  = b.get("Interrupting Rating") or b.get("interrupting_rating") or ""
+            note = f"IR: {ir}" if ir else ""
+            add_row(designation, "Breaker", pn, qty, note, ORDER["Breaker"])
+
+      # 4) Blanks / Filler
+      blanks = payload.get("I-LINE Blanks & Extensions")
+      if isinstance(blanks, dict) and isinstance(blanks.get("Items"), list):
+        for it in blanks["Items"]:
+          pn = (it or {}).get("Part Number") or ""
+          qty = int((it or {}).get("Quantity", 1) or 1)
+          add_row(designation, "Blanks/Filler", pn, qty, "", ORDER["Blanks/Filler"])
+      fp = payload.get("Filler Plates")
+      if isinstance(fp, dict):
+        pn = fp.get("Part Number") or ""
+        qty = int(fp.get("Quantity", 1) or 1)
+        covers = fp.get("Covers")
+        note = f"Covers: {covers}" if covers else ""
+        if pn:
+          add_row(designation, "Blanks/Filler", pn, qty, note, ORDER["Blanks/Filler"])
+
+      # 5) Notes
+      def add_note(label_key):
+        txt = payload.get(label_key)
+        if isinstance(txt, str) and txt.strip():
+          add_row(designation, "Note", txt.strip(), 0, label_key, ORDER["Note"])
+      add_note("Note")
+      add_note("Service Entrance Note")
+      sek = payload.get("Service Entrance Kit")
+      if isinstance(sek, str) and "not suitable" in sek.lower():
+        add_row(designation, "Note", sek.strip(), 0, "Service Entrance", ORDER["Note"])
+
+      # 6) Skipped payloads
+      skipped = payload.get("Skipped")
+      if isinstance(skipped, str) and skipped.strip():
+        add_row(designation, "Skipped", skipped.strip(), 0, "", ORDER["Note"])
+
+      # 7) Notes list
+      notes_list = payload.get("Notes")
+      if isinstance(notes_list, list):
+        for n in notes_list:
+          if isinstance(n, str) and n.strip():
+            add_row(designation, "Note", n.strip(), 0, "", ORDER["Note"])
+
+      if out_rows:
+        rows_by_des[designation] = out_rows
+
+    return rows_by_des
+
+  def _row(self, designation, item_type, product, qty, notes, order):
+    product_s = "" if product is None else str(product)
+    notes_s   = "" if notes is None else str(notes)
+    return {
+      "designation": designation,
+      "item_type": item_type,
+      "product": product_s,
+      "qty": int(qty or 0),
+      "notes": notes_s,
+      "_order": order,
+      # csv flags are added by caller in _normalize_rules
+    }
+
+  # -------- CSV export ----------
+  def _export_csv(self):
+    """
+    Export CSV with headers: Product,Designation,Quantity
+    Include only rows where csv_include is True (user-controlled).
+    """
+    try:
+      rows = self._flat_rows or []
+      lines = ["Product,Designation,Quantity"]
+      for r in rows:
+        itype = (r.get("item_type") or "").strip()
+        if itype in ("Note","Skipped"):
+          continue
+        if not bool(r.get("csv_include", False)):
+          continue
+        prod = (r.get("product") or "").replace('"','""')
+        des  = (r.get("designation") or "").replace('"','""')
+        qty  = str(r.get("qty", 0))
+        lines.append(f"\"{prod}\",\"{des}\",{qty}")
+      csv_bytes = ("\n".join(lines)).encode("utf-8")
+      media = BlobMedia("text/csv", csv_bytes, name="bill_of_materials.csv")
+      download(media)
+    except Exception as ex:
+      alert(f"Could not export CSV:\n{ex}")
+
+  # -------- Buttons --------
+  def btn_show_raw_click(self, **event_args):
+    try:
+      raw = json.dumps(self.result, indent=2, default=str)
+      alert(TextArea(text=raw, height=400, width="100%"),
+            title="Raw payload", large=True, buttons=[("Close", True)])
+    except Exception as e:
+      alert(f"No raw data to display.\n{e}")
+
+  def new_job_btn_click(self, **event_args):
+    open_form('upload')
+
+  def logout_btn_click(self, **event_args):
+    anvil.users.logout()
+    Notification("Logged out", timeout=1.5).show()
+    open_form('login')

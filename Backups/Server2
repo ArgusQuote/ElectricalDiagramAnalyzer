@@ -1,0 +1,75 @@
+import anvil.files
+from anvil.files import data_files
+import anvil.users
+import anvil.server
+import json, time
+
+def _jsonify(x):
+  return json.loads(json.dumps(x, default=str))
+
+def _is_pdf(media):
+  if not media: return False
+  ct = (getattr(media, "content_type", "") or "").lower()
+  name = (getattr(media, "name", "") or "").lower()
+  return ("pdf" in ct) or name.endswith(".pdf")
+
+def _owner_email() -> str:
+  u = anvil.users.get_user()
+  if not u:
+    raise anvil.server.ExecutionError("User not logged in")
+  try:
+    em = (u['email'] or "").strip().lower()
+  except Exception:
+    em = ""
+  if not em:
+    raise anvil.server.ExecutionError("Your account has no email address.")
+  return em
+
+@anvil.server.callable(require_user=True)
+def submit_for_detection(file, ui_overrides=None, **kwargs):
+  if not _is_pdf(file):
+    raise anvil.server.ExecutionError("PDFs only")
+  owner_email = _owner_email()
+  job_note = kwargs.get("job_note")
+  out = anvil.server.call(
+    "vm_submit_for_detection",
+    media=file,
+    ui_overrides=(ui_overrides or {}),
+    job_note=job_note,
+    owner_email=owner_email
+  )
+  out = dict(out or {})
+  out["owner_email"] = owner_email
+  out["owner_id"] = owner_email
+  return json.loads(json.dumps(out, default=str))
+
+@anvil.server.callable(require_user=True)
+def get_job_status(job_id):
+  """Resilient poll: auto-retry on Uplink disconnects; report a soft-unknown."""
+  owner_email = _owner_email()
+  for attempt in range(3):
+    try:
+      out = anvil.server.call("vm_get_job_status", job_id, owner_email)
+      return json.loads(json.dumps(out, default=str))
+    except anvil.server.UplinkDisconnectedError:
+      # Transient: brief backoff and try again; on last attempt, return soft unknown
+      if attempt < 2:
+        time.sleep(0.75 * (attempt + 1))
+        continue
+      return {"state": "unknown", "error": "uplink_disconnected"}
+    except Exception as e:
+      return {"state": "error", "error": f"Status unavailable: {type(e).__name__}: {e}"}
+
+@anvil.server.callable(require_user=True)
+def cancel_job(job_id: str) -> bool:
+  owner_email = _owner_email()
+  try:
+    return bool(anvil.server.call("vm_cancel_job", job_id, owner_email))
+  except Exception:
+    return False
+
+@anvil.server.callable(require_user=True)
+def list_jobs(limit: int = 50):
+  owner_email = _owner_email()
+  out = anvil.server.call("vm_list_jobs", owner_email, int(limit))
+  return _jsonify(out)

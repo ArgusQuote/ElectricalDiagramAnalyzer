@@ -1,0 +1,147 @@
+from ._anvil_designer import loginTemplate
+from anvil import *
+import anvil.server
+import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+
+TOS_MD = """
+Effective Date: September 29, 2025
+1. Introduction
+These Terms of Service (“Terms”) govern your use of the Argus Quoting Platform, provided by Argus
+Industrial Solutions, LLC (“Argus”, “we”, or “our”). By accessing or using our platform, you agree to
+these Terms.
+2. Eligibility
+You must be at least 18 years old and authorized to act on behalf of your company to use the Argus
+Quoting Platform. Our services are currently intended for use within the United States only.
+3. Account Registration
+You agree to provide accurate information when creating an account. You are responsible for
+maintaining the confidentiality of your login credentials and for all activity under your account.
+4. Use of the Platform
+You may use the platform solely for internal business purposes related to quoting electrical switchgear.
+You may not reverse engineer, reproduce, scrape, or misuse any part of the platform. Quote outputs
+are informational and may require human review. Accuracy is not guaranteed.
+5. Uploaded Materials
+You retain ownership of the documents you upload. Argus may store and use uploaded materials to
+improve the platform and support your quoting activities. You are responsible for ensuring you have the
+right to upload any files you submit.
+6. Subscription and Billing
+Use of the platform is free during the pilot period. If you transition to a paid subscription, all billing is
+handled via Stripe. All fees are non-refundable unless otherwise stated in writing.
+7. Termination
+We may suspend or terminate your access at any time, for any reason, with or without notice. You may
+cancel your use of the platform at any time. To request account or data deletion, please email
+argusquote@gmail.com.
+8. Intellectual Property
+Argus owns all rights to the platform, including software code, interface, models, and underlying
+technology. Use of the platform does not grant you any ownership or license beyond basic access. You
+may not use the platform or its outputs to train competing systems or tools. The Argus Quoting Platform
+is patent pending.
+9. Feedback and Testimonials
+By submitting feedback or testimonials, you grant Argus permission to use your input to improve the
+platform and highlight success stories in marketing or case studies. We will not use identifying company
+names or job details without your permission.
+10. Disclaimers
+The platform is provided “as-is” without warranties of any kind. Argus is not responsible for any errors,
+losses, or liabilities arising from the use of the platform or its outputs.
+11. Modifications to the Service
+We reserve the right to modify or discontinue features at any time. Material changes will be
+communicated through the platform or by email.
+12. Governing Law
+These Terms are governed by the laws of the State of Texas. Any legal action must be brought in the
+state or federal courts located in Texas.
+13. Contact Us
+If you have questions about these Terms, please contact us at argusquote@gmail.com.
+"""
+PRIV_MD = """
+Effective Date: September 29, 2025
+1. Who We Are
+Argus Industrial Solutions, LLC (“Argus”, “we”, or “our”) provides a software platform (the “Argus
+Quoting Platform”) for automating switchgear quotations. This Privacy Policy describes what
+information we collect and how we use it.
+2. Information We Collect
+We collect the following types of information from users of our platform:
+- Account Information: name, email address, company name, and password.
+- Uploaded Files: electrical drawings and related job materials.
+- Usage Data: login timestamps, file activity logs, and general platform actions.
+- Billing Data: handled entirely through Stripe; we do not store card details.
+- Platform and Hosting Data: Collected and processed through Anvil (our app builder) and stored
+securely using Google Cloud infrastructure. Some data may also be processed using Google Cloud
+services for purposes such as file parsing, detection, or analysis.
+3. How We Use Your Information
+We use the data we collect to:
+- Operate and maintain the Argus Quoting Platform
+- Train and improve our detection and quoting models
+- Provide customer support and troubleshooting
+- Analyze platform usage and performance
+- Notify users about system updates (if opted-in)
+4. Data Storage and Security
+User data is stored securely on Google Cloud and processed via Anvil. Data is encrypted in transit and
+access is limited to authorized internal personnel only.
+5. Data Sharing
+We do not sell or rent your data. We share limited information only with trusted third parties required to
+operate the platform, including Anvil (application hosting), Stripe (billing), and Google Cloud (data
+storage and processing). We may also use anonymized data to improve our system or for internal
+reporting.
+6. Data Retention
+Uploaded documents (such as electrical drawings) are retained for internal analysis, system
+improvement, and historical access. Files may be stored indefinitely, though we reserve the right to
+periodically archive or delete old uploads as needed. Users may request permanent deletion of
+uploaded files at any time by contacting us.
+7. Cookies
+We use cookies to maintain secure user sessions and provide a “stay logged in” feature. These cookies
+do not track browsing activity and are used solely to support login functionality. We do not use cookies
+for advertising or analytics purposes.
+8. User Rights
+You may request to access, update, or delete your personal data at any time. You may also opt out of
+any email communications. Contact us at the email below to make such requests.
+9. Third-Party Services
+We use the following services to operate the Argus Quoting Platform:
+- Anvil (platform infrastructure)
+- Stripe (payment processing)
+
+- Google Cloud (file storage and processing)
+We currently do not use any other analytics or behavioral tracking tools.
+10. Children’s Privacy
+The Argus Quoting Platform is not intended for children under the age of 18. We do not knowingly
+collect data from minors.
+11. Geographic Scope
+Our platform is intended for use within the United States only. We do not knowingly solicit or process
+data from jurisdictions requiring GDPR or similar international privacy laws.
+12. Changes to This Policy
+We may update this Privacy Policy from time to time. Any material changes will be communicated via
+email or platform notification.
+13. Contact Us
+If you have questions about this Privacy Policy or want to request data changes or deletions, please
+contact us at:
+argusquote@gmail.com
+"""
+
+class login(loginTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+    if hasattr(self, "login_btn"):
+      self.login_btn.set_event_handler('click', self.login_btn_click)
+    if hasattr(self, "tos_btn"):
+      self.tos_btn.set_event_handler('click', self.tos_btn_click)
+    if hasattr(self, "priv_pol_btn"):
+      self.priv_pol_btn.set_event_handler('click', self.priv_pol_btn_click)
+      
+  def login_btn_click(self, **event_args):
+    user = anvil.users.login_with_form(allow_cancel=False)
+    if user:
+      user = anvil.users.get_user()  # gets the row object
+      open_form('upload')
+  
+  def _show_markdown_modal(self, title: str, markdown_text: str):
+    container = ColumnPanel()
+    container.add_component(Label(text=title, bold=True))
+    container.add_component(RichText(content=markdown_text, format="markdown"))
+    alert(content=container, large=True, buttons=[("Close", True)])
+  
+  def tos_btn_click(self, **event_args):
+    self._show_markdown_modal("Terms of Service", TOS_MD)
+  
+  def priv_pol_btn_click(self, **event_args):
+    self._show_markdown_modal("Privacy Policy", PRIV_MD)

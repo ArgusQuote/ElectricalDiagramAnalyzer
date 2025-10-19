@@ -1,0 +1,94 @@
+{
+  "version": 1,
+
+  // Header OCR keywords (column labels, header/footer anchors, phase banner)
+  "labels": {
+    "trip":        ["TRIP", "TRP", "CB"],
+    "poles":       ["POLE", "POLES", "P", "PLS"],
+    "trip_poles":  ["TRIP/POLE", "TRIP/POLES", "TRIP-POLES", "TRIP-POLE"],
+    "ckt":         ["CCT", "CKT", "CIRCUIT"],
+    "footer":      ["TOTAL LOAD", "TOTAL AMPS", "PANEL TOTALS", "ESTIMATED DEMAND", "NOTES"],
+    "phase_banner":["A B C", "ABC"]
+  },
+
+  // Row-level parsing rules used by the extractor
+  "row_rules": {
+    "trip": {
+      "min": 10,
+      "max": 1200,
+      "multiples_of": 5,                       // trips are typically multiples of 5
+      "common_whitelist": [
+        15,20,25,30,35,40,45,50,60,70,80,90,
+        100,125,150,175,200,225,250,300,350,400,450,500,600,800,1000,1200
+      ],
+      "reject_if_has_decimal": true,           // avoid picking 0.7, 1.9, etc.
+      "ocr_fixups": [
+        { "pattern": "\\bO\\b",        "replace": "0" },      // O→0 singleton
+        { "pattern": "[\\u2013\\u2014]", "replace": "-" }     // en/em dash → hyphen
+      ],
+      "confidence_weights": {
+        "ocr_conf": 0.35,
+        "value_plausibility": 0.45,           // in-range + multiple-of-5 + whitelist boost
+        "context_consistency": 0.20
+      }
+    },
+
+    "poles": {
+      "allowed": [1, 2, 3],
+      "allow_bare_number": true,
+      "reject_if_has_letter_A": true,          // helps avoid bleeding from Trip
+      "reject_if_decimal": true,
+      "confidence_weights": {
+        "ocr_conf": 0.40,
+        "value_plausibility": 0.45,            // strictly in {1,2,3}
+        "context_consistency": 0.15
+      }
+    },
+
+    "description": {
+      "disallow_terms": ["SPACE", "BLANK", "EMPTY", "FILLER"],
+      "allow_terms":    ["SPARE", "SPARES"],   // whitelist beats disallow
+      "casefold": true,
+      "strip_symbols": true,                   // normalize punctuation
+      "min_len": 1,
+      "reject_numeric_only": true,             // drop "0.7", "22", etc.
+      "min_alpha_chars": 2,                    // require at least two letters
+      "disallow_regex": ["^\\s*\\d+(?:[\\s\\./]\\d+)?\\s*$"],
+      "flags": {
+        "mark_spare_if_exact": true,           // “SPARE”, “SPARES” → is_spare=true
+        "treat_disallow_as_blank": true        // SPACE/BLANK/EMPTY/FILLER → is_blank=true
+      }
+    }
+  },
+
+  // How to interpret the center A/B/C area
+  "phase_cluster": {
+    "mode": "geometry_first",
+    "allow_double_cluster": true,   // ABCABC
+    "allow_single_cluster": true    // ABC
+  },
+
+  // Structural constraints for header matching
+  "constraints": {
+    "unique_per_side": true,            // at most one TRIP and one POLES (or COMBINED) per side
+    "prefer_combined_if_stronger": true,
+    "must_have_both_sides": true
+  },
+
+  // Scoring blend for header/column detection (string/OCR/geometry)
+  "scoring": {
+    "string_sim_weight": 0.55,
+    "ocr_conf_weight":   0.30,
+    "geom_priors_weight":0.15,
+    "accept_threshold":  0.62,
+    "tie_break_bias_px": 18
+  },
+
+  // Fallback column fractions (only used if geometry+OCR both fail)
+  "fallbacks": {
+    "frac_l_trip":   [0.260, 0.300],
+    "frac_l_poles":  [0.305, 0.335],
+    "frac_r_poles":  [0.655, 0.690],
+    "frac_r_trip":   [0.695, 0.735]
+  }
+}

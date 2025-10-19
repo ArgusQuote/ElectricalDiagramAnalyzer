@@ -1,0 +1,136 @@
+{
+  // Max chars after the first token char for panel names
+  "nameTokenMaxLen": 20,
+
+  // only use the first N text lines from the top for header parsing
+  "headerMaxLines": 12,
+
+  // Lines that should never be considered as containing a name (full-line phrases)
+  "nameHardExclusions": [
+    "PANEL SCHEDULE",
+    "RISER",
+    "NOTES",
+    "LEGEND",
+    "PANEL OPTIONS",
+    "DISTRIBUTION SYSTEM"
+  ],
+
+  // Tokens we never allow as the panel name (checked UPPERCASED)
+  "nameStopwords": [
+    // Panel & gear nouns
+    "BOARD","PANEL","PANELBOARD","SWITCHBOARD","SWITCHGEAR","GEAR","MCC",
+
+    // Meta / descriptors
+    "NEW","EXISTING","TYPICAL","TYPE","SYSTEM","DISTRIBUTION","NORMAL","EMERGENCY",
+    "CRITICAL","LIGHTING","POWER",
+
+    // Ratings & electrical
+    "RATING","INTERRUPTING","AIC","SCCR","SYMMETRICAL","ASYMMETRICAL","RMS",
+    "AMPACITY","LOAD","CAPACITY","SHORT CIRCUIT","FAULT",
+
+    // Units
+    "AMP","AMPS","A","VOLT","VOLTS","V","KA","K.A","KVA","KV","HZ","HERTZ",
+
+    // Phase / wire / poles
+    "PHASE","PHASES","PH","Ø","WIRE","WIRES","CONDUCTOR","CONDUCTORS","POLE","POLES",
+
+    // Enclosure / mounting
+    "NEMA","ENCLOSURE","INDOOR","OUTDOOR","WEATHERPROOF","SURFACE","FLUSH",
+    "MOUNTING","WIDTH","DEPTH","HEIGHT","SECTIONS",
+
+    // Materials / bus
+    "BUS","BUSS","BUSBAR","MATERIAL","ALUMINUM","AL","ALUM","COPPER","CU",
+
+    // Main / service / lugs / feeds
+    "MAIN","MCB","MLO","SERVICE","SERVICE ENTRANCE","SE","S.E.","LUG","LUGS",
+    "FEED","FEEDS","FEEDER","FED FROM","FED BY","FEED THRU","FEED-THRU","FEEDTHRU",
+
+    // Ground/neutral
+    "GROUND","GROUNDED","GND","EARTH","NEUTRAL","NEUT","N",
+
+    // Options / protection
+    "GFI","GFCI","AFCI","SHUNT","TRIP","PROT","PROTECTION","OPTIONS","DATA",
+
+    // Series/brands (avoid grabbing these as names)
+    "I-LINE","ILINE","I LINE","QO","HOM","SQUARE D","SCHNEIDER","EATON","SIEMENS"
+  ],
+
+  // Name anchors: if a line matches pattern, prefer the token immediately after
+  "nameAnchors": [
+    { "pattern": "\\bNEW\\s+BRANCH\\s+PANEL\\b", "score": 6 },
+    { "pattern": "\\bBRANCH\\s+PANEL\\b",        "score": 6 },
+    { "pattern": "\\bCIRCUIT\\s+BREAKER\\s+PANEL\\s*BOARD\\b", "score": 4 },
+    { "pattern": "\\bPANELBOARD\\b",              "score": 6 },
+    { "pattern": "\\bPANEL\\b",                   "score": 6 }
+  ],
+
+  // Label regex lists used by each extractor (case-insensitive)
+  "labels": {
+    "voltage": [
+      "\\bVOLTAGE\\b\\s*:?",
+      "\\bVOLTS?\\b\\s*:?",
+      "\\bV\\s*:\\b"
+    ],
+    "main": [
+      "\\bMAIN\\s*RATING\\b",
+      "\\bMAIN\\s*BREAKER\\b",
+      "\\bMCB\\b"
+    ],
+    "aic": [
+      "\\bA\\s*\\.?\\s*I\\s*\\.?\\s*C\\s*\\.?\\s*RATING\\b",
+      "\\bAIC\\s*RATING\\b",
+      "\\bINTERRUPTING\\s+RATING\\b"
+    ],
+    "bus": [
+      "\\bBUS\\s*RATING\\b",
+      "\\bBUSS?\\b\\s*RATING\\b",
+      "\\bPANEL\\s*RATING\\b",
+      "\\bAMPACITY\\b"
+    ]
+  },
+    "neutral": [
+      "\\bNEUTRAL\\s*RATING\\b\\s*:?",
+      "\\bNEUTRAL\\b\\s*:?"
+    ],
+    "enclosure": [
+      "\\bENCLOSURE\\b\\s*:?",
+      "\\bNEMA\\b\\s*:?",
+      "\\bTYPE\\b\\s*:?"
+    ],
+    "mounting": [
+      "\\bMOUNTING\\b\\s*:?"
+    ],
+
+  // Words that imply MLO (no main breaker)
+  "mloAliases": [
+    "\\bMLO\\b",
+    "\\bMAIN\\s+LUG\\b",
+    "\\bMAIN\\s+LUGS\\b",
+    "\\bMAINS?\\s+LUG\\s+ONLY\\b"
+  ],
+
+  // Fallback singleton voltages to recognize when unlabeled
+  "commonLoneVoltages": ["600","480","277","240","208"],
+  
+  // Hard panel rejects
+  "statusHints": {
+    "existing": [
+      "\\(\\s*E\\s*\\)",         // (E)
+      "\\bEXIST(ING|G)?\\b",     // EXIST / EXISTING
+      "\\bEXSTG\\b"              // EXSTG
+    ],
+    "demo": [
+      "\\bDEMO\\b",
+      "\\bDEMOLISH(ED|ING)?\\b",
+      "\\bREMOVE(D|)\\b",
+      "\\bTO\\s+BE\\s+REMOVED\\b"
+    ],
+    "new": [
+      "\\bNEW\\b",
+      "\\bPROVIDE\\b"            // nice-to-have indicator
+    ]
+  },
+
+  // Any of these statuses means "skip this panel" in final output
+  "skipStatuses": ["existing", "demo"]
+}
