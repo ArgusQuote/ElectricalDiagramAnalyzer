@@ -9,7 +9,7 @@ from typing import Optional, Tuple, List, Dict, Any
 import numpy as np
 import fitz  # PyMuPDF
 import cv2
-
+ 
 # ---- EasyOCR (optional) ----
 try:
     import easyocr
@@ -62,12 +62,18 @@ class PageFilter:
         close_ink_px: int = 3,
         margin_shave_px: int = 6,
         min_whitespace_area_fr: float = 0.01,
-        border_exclude_px: int = 4,
+        # prefer % border; px is optional override
+        border_exclude_fr: float = 0.01,
+        border_exclude_px: int = 0,
         # ---- Footprint shape (percent-of-page & rectangularity) ----
-        rect_w_fr_range: Tuple[float, float] = (0.10, 0.55),
-        rect_h_fr_range: Tuple[float, float] = (0.10, 0.60),
-        min_rectangularity: float = 0.70,
-        min_rect_count: int = 2,
+        rect_w_fr_range: Tuple[float, float] = (0.28, 0.62),   # panel width band (fraction of page width)
+        rect_h_fr_range: Tuple[float, float] = (0.12, 0.55),   # panel height band (fraction of page height)
+        min_rectangularity: float = 0.93,                      # much stricter
+        min_rect_count: int = 2,  
+        min_area_fr: float = 0.020,                            # reject tiny boxes (<2% of page area)
+        aspect_ratio_range: Tuple[float, float] = (1.3, 3.6),  # W/H; panels are wider than tall
+        quad_eps_fr: float = 0.012,                            # approxPolyDP epsilon (perimeter frac)
+        axis_aligned_tolerance_deg: float = 8.0,               # reject tilted boxes
         # ---- Behavior / logging ----
         verbose: bool = True,
         debug: bool = False,             # << Only when True we write JSON log
@@ -105,7 +111,12 @@ class PageFilter:
         self.CLOSE_INK_PX = int(close_ink_px)
         self.MARGIN_SHAVE_PX = int(margin_shave_px)
         self.MIN_WHITESPACE_AREA_FR = float(min_whitespace_area_fr)
+        self.BORDER_EXCLUDE_FR = float(border_exclude_fr)
         self.BORDER_EXCLUDE_PX = int(border_exclude_px)
+        self.MIN_AREA_FR = float(min_area_fr)
+        self.ASPECT_RANGE = aspect_ratio_range
+        self.QUAD_EPS_FR = float(quad_eps_fr)
+        self.AXIS_TOL_DEG = float(axis_aligned_tolerance_deg)
 
         # footprints
         self.RECT_W_FR_RANGE = rect_w_fr_range
@@ -389,7 +400,10 @@ class PageFilter:
             return (False, 0, [])
         hier = hier[0]
 
-        min_border = max(1, int(self.BORDER_EXCLUDE_PX * self.proc_scale))
+        # percent-of-page (fallback to PX if user set it)
+        px_from_fr = int(min(H, W) * self.BORDER_EXCLUDE_FR)
+        px_from_arg = int(self.BORDER_EXCLUDE_PX * self.proc_scale) if self.BORDER_EXCLUDE_PX > 0 else 0
+        min_border = max(1, px_from_fr, px_from_arg)
         boxes: List[Dict[str, float]] = []
         found = 0
 
@@ -414,18 +428,40 @@ class PageFilter:
 
             area_cnt = cv2.contourArea(cnt)
             area_box = w * h
+            # (A) absolute size: area fraction of page
+            if (area_box / float(H * W)) < self.MIN_AREA_FR:
+                continue
             if area_box <= 0:
                 continue
 
+            # (B) strict rectangularity
             rectangularity = area_cnt / float(area_box)
-            if rectangularity >= self.MIN_RECTANGULARITY:
-                found += 1
-                boxes.append({
-                    "bbox_w_frac": round(w_fr, 4),
-                    "bbox_h_frac": round(h_fr, 4),
-                    "rectangularity": round(float(rectangularity), 4),
-                })
-                if found >= self.MIN_RECT_COUNT:
-                    return (True, found, boxes)
+            if rectangularity < self.MIN_RECTANGULARITY:
+                continue
+            # (C) aspect ratio (W/H)
+            aspect = w / float(h)
+            if not (self.ASPECT_RANGE[0] <= aspect <= self.ASPECT_RANGE[1]):
+                continue
+            # (D) 4-corner convex quad
+            peri = cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, self.QUAD_EPS_FR * peri, True)
+            if len(approx) != 4 or not cv2.isContourConvex(approx):
+                continue
+            # (E) axis-aligned (near 0/90 deg)
+            r = cv2.minAreaRect(cnt)   # ((cx,cy),(rw,rh),theta)
+            ang = abs(r[2] % 90.0); ang = min(ang, 90.0 - ang)
+            if ang > self.AXIS_TOL_DEG:
+                continue
+
+            found += 1
+            boxes.append({
+                "bbox_w_frac": round(w_fr, 4),
+                "bbox_h_frac": round(h_fr, 4),
+                "rectangularity": round(float(rectangularity), 4),
+                "aspect": round(float(aspect), 4),
+                "angle_err_deg": round(float(ang), 2),
+            })
+            if found >= self.MIN_RECT_COUNT:
+                return (True, found, boxes)
 
         return (False, found, boxes)
