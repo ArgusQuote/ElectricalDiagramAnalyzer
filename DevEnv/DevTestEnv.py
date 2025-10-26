@@ -11,7 +11,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableAnalyzer3 import BreakerTableAnalyzer
 
 # ---- Inputs/Outputs ----
-INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic2.pdf").expanduser()
+INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/b0deee8ba436c7acf7b1bae41efb77c9.pdf").expanduser()
 FILTER_OUT_DIR = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOuput").expanduser()
 FINDER_OUT_DIR = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOuput").expanduser()
 FILTER_OUT_DIR.mkdir(parents=True, exist_ok=True)
