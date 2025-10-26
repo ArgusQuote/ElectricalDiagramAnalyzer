@@ -6,20 +6,20 @@ import os
 import json
 from pathlib import Path
 
-# ----- Path setup (same as your snippet) -----
+# ---------- PATH SETUP ----------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# ----- Imports -----
-from OcrLibrary.BreakerTableAnalyzer3 import BreakerTableAnalyzer
-from OcrLibrary.PanelHeaderParserV4 import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParser4 import BreakerTableParser
+# ---------- IMPORTS ----------
+from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
+from OcrLibrary.BreakerTableParserAPI import BreakerTablePipeline, API_VERSION
 
-# ====== SET YOUR TEST IMAGE HERE ==========================================
-IMG_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOuput/generic2_electrical_filtered_page001_table01_rect.png'
-# ==========================================================================
+# ---------- INPUTS ----------
+PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic3.pdf'
+OUTPUT_DIR = '~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput'
+# ================================================================
 
 def _first(d: dict, keys, default=None):
     for k in keys:
@@ -28,7 +28,6 @@ def _first(d: dict, keys, default=None):
     return default
 
 def _one_line_breaker(b: dict) -> str:
-    # Try common field names across variants
     num  = _first(b, ["ckt","cct","circuit","circuit_number","number","idx"], default="?")
     desc = _first(b, ["desc","description","label","load","cktdesc","ckt_desc"], default="")
     trip = _first(b, ["trip","amps","amperage","size","rating"], default="")
@@ -44,86 +43,91 @@ def _one_line_breaker(b: dict) -> str:
     return f"  - CKT {num}: {desc}{meta}"
 
 def main():
-    img = str(Path(IMG_PATH).expanduser())
+    pdf_path = str(Path(PDF_PATH).expanduser())
+    out_dir = Path(OUTPUT_DIR).expanduser()
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1) Analyzer
-    analyzer = BreakerTableAnalyzer(debug=True)
-    ana_res = analyzer.analyze(img)
+    print(">>> Running PanelSearchToolV11...")
+    finder = PanelBoardSearch(
+        output_dir=str(out_dir),
+        dpi=400,
+        min_whitespace_area_fr=0.01,
+        margin_shave_px=6,
+        min_void_area_fr=0.004,
+        min_void_w_px=90,
+        min_void_h_px=90,
+        max_void_area_fr=0.50,
+        pad=6,
+        debug=False,
+        verbose=True,
+        save_masked_shape_crop=False,
+        replace_multibox=True,
+    )
+    crops = finder.readPdf(pdf_path)
+    print(f">>> Found {len(crops)} panel image(s)")
 
-    # 2) Header parser (share OCR)
-    header_parser = PanelHeaderParser(debug=True)
-    if hasattr(analyzer, "reader"):
-        header_parser.reader = analyzer.reader
+    if not crops:
+        print(">>> No panels detected — exiting.")
+        return
 
-    hy   = ana_res.get("header_y")
-    gray = ana_res.get("gray")
-    header_kwargs = {}
-    if isinstance(hy, (int, float)) and hasattr(gray, "shape"):
-        H = float(gray.shape[0])
-        header_ratio = max(0.0, min(1.0, float(hy) / H))
-        header_kwargs["header_y_ratio"] = header_ratio
+    # ---------- Run OCR API ----------
+    pipe = BreakerTablePipeline(debug=True)
+    print("\n>>> API Version:", API_VERSION)
 
-    hdr_res = header_parser.parse_panel(img, **header_kwargs)
+    all_results = []
 
-    # 3) Table parser (unless header is 'false positive')
-    hdr_name = (hdr_res or {}).get("name", "")
-    should_run_parser = not (isinstance(hdr_name, str) and hdr_name.strip().lower() == "false positive")
-    if should_run_parser:
-        table_parser = BreakerTableParser(debug=True, reader=getattr(analyzer, "reader", None))
-        tbl_res = table_parser.parse_from_analyzer(ana_res or {})
-    else:
-        tbl_res = None
-        print("[INFO] Skipping breaker table parser due to header false positive")
+    for img_path in crops:
+        print(f"\n\n=========================\nAnalyzing: {img_path}\n=========================")
+        result = pipe.run(img_path)
+        stages  = result.get("results") or {}
+        ana_res = stages.get("analyzer") or {}
+        hdr_res = stages.get("header") or {}
+        tbl_res = stages.get("parser") or {}
 
-    # ---- Summaries
-    print("\n=== ANALYZER ===")
-    print("header_y:", ana_res.get("header_y"))
-    print("footer_y:", ana_res.get("footer_y"))
-    print("spaces  :", ana_res.get("spaces_detected"), "→", ana_res.get("spaces_corrected"))
-    print("gridless:", ana_res.get("gridless_path"))
-    print("overlay :", ana_res.get("page_overlay_path"))
+        # ---- Summaries ----
+        print("\n=== ANALYZER ===")
+        print("header_y:", ana_res.get("header_y"))
+        print("footer_y:", ana_res.get("footer_y"))
+        print("spaces  :", ana_res.get("spaces_detected"), "→", ana_res.get("spaces_corrected"))
+        print("gridless:", ana_res.get("gridless_path"))
+        print("overlay :", ana_res.get("page_overlay_path"))
 
-    print("\n=== HEADER PARSER ===")
-    print("name    :", (hdr_res or {}).get("name"))
-    print("attrs   :", (hdr_res or {}).get("attrs"))
+        print("\n=== HEADER PARSER ===")
+        print("name    :", (hdr_res or {}).get("name"))
+        print("attrs   :", (hdr_res or {}).get("attrs"))
 
-    # Breakers from HEADER attrs (if any)
-    hdr_breakers = ((hdr_res or {}).get("attrs") or {}).get("detected_breakers") or []
-    print(f"\n--- Breakers found in HEADER attrs: {len(hdr_breakers)} ---")
-    for b in hdr_breakers:
-        print(_one_line_breaker(b))
-
-    print("\n=== TABLE PARSER ===")
-    if tbl_res:
-        tbl_breakers = tbl_res.get("detected_breakers") or []
-        print("spaces  :", tbl_res.get("spaces"))
-        print(f"breakers: {len(tbl_breakers)}")
-        print("\n--- Breakers from TABLE parser ---")
-        for b in tbl_breakers:
+        hdr_breakers = ((hdr_res or {}).get("attrs") or {}).get("detected_breakers") or []
+        print(f"\n--- Breakers found in HEADER attrs: {len(hdr_breakers)} ---")
+        for b in hdr_breakers:
             print(_one_line_breaker(b))
-    else:
-        print("parser  : None")
-        tbl_breakers = []
 
-    # Optional JSON dump with full breaker objects for diffing/inspection
-    out_dir = os.path.dirname(img)
-    dump_path = os.path.join(out_dir, "breaker_dump.json")
+        print("\n=== TABLE PARSER ===")
+        if tbl_res:
+            tbl_breakers = tbl_res.get("detected_breakers") or []
+            print("spaces  :", tbl_res.get("spaces"))
+            print(f"breakers: {len(tbl_breakers)}")
+            print("\n--- Breakers from TABLE parser ---")
+            for b in tbl_breakers:
+                print(_one_line_breaker(b))
+        else:
+            print("parser  : None")
+            tbl_breakers = []
+
+        all_results.append({
+            "image": img_path,
+            "results": result,
+            "header_breakers": hdr_breakers,
+            "table_breakers": tbl_breakers,
+        })
+
+    # ---------- Write JSON dump ----------
+    dump_path = out_dir / "breaker_dump_all.json"
     try:
         with open(dump_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "image": img,
-                    "analyzer": {k: v for k, v in ana_res.items() if k in ("header_y","footer_y","spaces_detected","spaces_corrected","gridless_path","page_overlay_path")},
-                    "header": hdr_res,
-                    "table": tbl_res,
-                    "header_breakers": hdr_breakers,
-                    "table_breakers": tbl_breakers,
-                },
-                f, indent=2, ensure_ascii=False, default=str
-            )
+            json.dump(all_results, f, indent=2, ensure_ascii=False, default=str)
         print(f"\n[WROTE] {dump_path}")
     except Exception as e:
-        print(f"[WARN] Could not write {dump_path}: {e}")
+        print(f"[WARN] Could not write dump: {e}")
 
 if __name__ == "__main__":
     main()
