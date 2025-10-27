@@ -14,7 +14,7 @@ if project_root not in sys.path:
 
 # ---------- IMPORTS ----------
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPI import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 
 # ---------- INPUTS ----------
 PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic3.pdf'
