@@ -13,6 +13,8 @@ import platform
 import os as _os
 from anvil import BlobMedia
 
+# from anvil.tables import app_tables  # (disabled in this version)
+
 # ---------- CONFIG ----------
 # Ensure your repo is on sys.path (for imports below)
 REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
@@ -33,7 +35,7 @@ MAX_INFLIGHT_PER_USER = 1
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilter import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline
+from OcrLibrary.BreakerTableParserAPI import parse_image as _btp_parse_image
 import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
@@ -46,7 +48,7 @@ print(">>> ENTRY OK")
 NODE_ID = f"{platform.node()}:{_os.getpid()}"
 print(f">>> NODE_ID={NODE_ID}")
 
-# ---------- OCR warmup (via BreakerTablePipeline) ----------
+# ---------- OCR warmup (via BreakerTableParserAPI) ----------
 def _warmup_ocr_once():
     try:
         import numpy as np, cv2, tempfile
@@ -55,13 +57,13 @@ def _warmup_ocr_once():
             tmp_path = tmp.name
         try:
             cv2.imwrite(tmp_path, img)
-            # Warm analyzer + header (table parser not needed for warmup)
-            pipe = BreakerTablePipeline(debug=False)
-            _ = pipe.run(
+            # Warm analyzer + header readers (parser is not needed for warmup)
+            _ = _btp_parse_image(
                 tmp_path,
                 run_analyzer=True,
                 run_parser=False,
                 run_header=True,
+                debug=False
             )
             print(">>> OCR warmup complete (analyzer + header)")
         finally:
@@ -127,7 +129,7 @@ def _parse_job_note(job_note: str) -> dict:
         parts = [p.strip() for p in job_note.split("|")]
         for p in parts:
             if "=" in p:
-                k, v = p.split("=", 1)   # split on first '='
+                k, v = p.split("=", 1)   # <-- fixed: split on '='
                 out[k.strip()] = v.strip()
     except Exception:
         pass
@@ -445,7 +447,7 @@ def _count_would_skip_breakers(breakers: list[dict], panel_limit: int | None) ->
 
 def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     """
-    Map BreakerTablePipeline result → component schema expected by RulesEngine.
+    Map BreakerTableParserAPI result → component schema expected by RulesEngine.
     Applies your 4-strikes suppression rule.
     """
     stages = (result_dict or {}).get("results") or {}
@@ -511,27 +513,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
         comp["attrs"]["breaker_data_suppressed"] = True
 
     return comp
-
-# ---------- Worker-side call for one image ----------
-def _btp_run_once(
-    image_path: str,
-    *,
-    run_analyzer: bool = True,
-    run_parser: bool = True,
-    run_header: bool = True,
-    debug: bool = False
-) -> dict:
-    """
-    Construct a BreakerTablePipeline and run it for this image.
-    (No global caching; per your request.)
-    """
-    pipe = BreakerTablePipeline(debug=debug)
-    return pipe.run(
-        image_path,
-        run_analyzer=run_analyzer,
-        run_parser=run_parser,
-        run_header=run_header,
-    )
 
 # ---------- Core job processing ----------
 def _process_job(job_id: str):
@@ -618,7 +599,7 @@ def _process_job(job_id: str):
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as ex:
             fut_map = {
                 ex.submit(
-                    _btp_run_once,
+                    _btp_parse_image,
                     img_path,
                     run_analyzer=True,
                     run_parser=True,
@@ -807,7 +788,7 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         ui_overrides=normalized_overrides,
         job_note=(job_note or ""),
         image_count=0,                 # unknown yet
-        step="received",               # explicit early step
+        step="received",               # NEW: explicit early step
         noticed_ts_ms=noticed_ts_ms,
         owner_email=owner_email,
         owner_id=owner_email,
@@ -852,7 +833,7 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "owner_id": owner_email,
         "node_id": NODE_ID,
         "state": "queued",
-        "deferred_render": True
+        "deferred_render": True        # helpful hint for the UI (optional)
     }
 
 @anvil.server.callable
@@ -864,6 +845,7 @@ def vm_list_overlay_images(job_id: str) -> list[str]:
     overlay_dir = (job_root / "pdf_images" / "magenta_overlays")
     if not overlay_dir.is_dir():
         return []
+    # Sorted for stable display order
     return [str(p.resolve()) for p in sorted(overlay_dir.glob("*.png"))]
 
 @anvil.server.callable
@@ -885,6 +867,7 @@ def vm_fetch_image(job_id: str, source_path: str):
     if not p.is_file():
         raise RuntimeError(f"Image not found: {p}")
 
+    # Infer content-type (your crops are PNGs)
     ctype = "image/png" if p.suffix.lower() == ".png" else "application/octet-stream"
     data = p.read_bytes()
     return BlobMedia(ctype, data, name=p.name)
@@ -984,6 +967,7 @@ def vm_cancel_job(job_id: str, owner_id: str) -> bool:
 
     # update status snapshot
     st["canceled"] = True
+    # If it hasn't started, mark canceled immediately; otherwise, worker will observe it
     st["state"] = "canceled" if st.get("state") == "queued" else st.get("state")
     _status_write(job_dir, st["state"], **{k: v for k, v in st.items() if k not in ("state", "ts")})
     return True

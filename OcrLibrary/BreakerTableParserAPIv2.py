@@ -1,4 +1,3 @@
-# OcrLibrary/BreakerTableParserAPI.py
 import sys, os, inspect
 
 # ----- ensure repo root on sys.path -----
