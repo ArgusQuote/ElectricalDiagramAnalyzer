@@ -403,32 +403,49 @@ class BreakerTableParser:
 
         cols: Dict[str, Tuple[int,int]] = {}
 
-        def to_band(pick: dict) -> Optional[Tuple[int,int]]:
+        # Prefer snapping to the actual header pick; only fallback to neighbor bands if needed.
+        # Also reject obviously-wrong snaps when the band center is far from the header center.
+        def band_for_pick(pick: dict, bands: List[Tuple[int,int]], max_dx_frac: float = 0.10) -> Optional[Tuple[int,int]]:
+            if not pick:
+                return None
             x = float(pick.get("x_center", (pick.get("x1",0)+pick.get("x2",0))/2.0))
-            return self._pick_band_containing_x(bands, x)
+            b = self._pick_band_containing_x(bands, x)
+            if b is None:
+                return None
+            bx = 0.5 * (b[0] + b[1])
+            if abs(bx - x) > max_dx_frac * page_width:
+                return None
+            return b
 
-        # Primaries from POLES, neighbors: left side (TRIP left of POLES), right side (TRIP right)
+        # --- LEFT SIDE ---
         if L_poles:
-            lP = to_band(L_poles[0])
+            lP = band_for_pick(L_poles[0], bands)
             if lP:
                 cols["L_POLES"] = lP
-                idx = bands.index(lP) if lP in bands else None
-                if idx is not None and idx-1 >= 0:
-                    cols["L_TRIP"] = bands[idx-1]
-                elif L_trip:
-                    lt = to_band(L_trip[0])
-                    if lt: cols["L_TRIP"] = lt
+        # Prefer TRIP header pick first
+        if L_trip:
+            lt = band_for_pick(L_trip[0], bands)
+            if lt:
+                cols["L_TRIP"] = lt
+        # If no TRIP yet but we have POLES → neighbor to the left
+        if "L_TRIP" not in cols and "L_POLES" in cols:
+            idx = bands.index(cols["L_POLES"]) if cols["L_POLES"] in bands else None
+            if idx is not None and idx-1 >= 0:
+                cols["L_TRIP"] = bands[idx-1]
 
+        # --- RIGHT SIDE ---
         if R_poles:
-            rP = to_band(R_poles[0])
+            rP = band_for_pick(R_poles[0], bands)
             if rP:
                 cols["R_POLES"] = rP
-                idx = bands.index(rP) if rP in bands else None
-                if idx is not None and idx+1 < len(bands):
-                    cols["R_TRIP"] = bands[idx+1]
-                elif R_trip:
-                    rt = to_band(R_trip[0])
-                    if rt: cols["R_TRIP"] = rt
+        if R_trip:
+            rt = band_for_pick(R_trip[0], bands)
+            if rt:
+                cols["R_TRIP"] = rt
+        if "R_TRIP" not in cols and "R_POLES" in cols:
+            idx = bands.index(cols["R_POLES"]) if cols["R_POLES"] in bands else None
+            if idx is not None and idx+1 < len(bands):
+                cols["R_TRIP"] = bands[idx+1]
 
         # Helper to get header center or fall back to band center (NO accidental /2 on header centers)
         def _center_from_header_or_band(hlist, band):
@@ -464,14 +481,14 @@ class BreakerTableParser:
 
         # Backfills from TRIP picks if needed
         if "L_POLES" not in cols and L_trip:
-            lt = to_band(L_trip[0])
+            lt = band_for_pick(L_trip[0], bands)
             if lt:
                 idx = bands.index(lt) if lt in bands else None
                 if idx is not None and idx+1 < len(bands):
                     cols["L_TRIP"] = lt
                     cols["L_POLES"] = bands[idx+1]
         if "R_POLES" not in cols and R_trip:
-            rt = to_band(R_trip[0])
+            rt = band_for_pick(R_trip[0], bands)
             if rt:
                 idx = bands.index(rt) if rt in bands else None
                 if idx is not None and idx-1 >= 0:
