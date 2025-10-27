@@ -17,7 +17,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 
 # ---------- INPUTS ----------
-PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/good_tester_combo.pdf'
+PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic2.pdf'
 OUTPUT_DIR = '~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput'
 # ================================================================
 

@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
+# MS: Changed dpi to 400.
 # -------------------------------
-# Anvil Uplink VM — Dev-parity runner + PageFilter(400dpi) + Rules Engine
+# Anvil Uplink VM (disk only) + Rules Engine defaults + cycle-time
 # -------------------------------
 import os, re, json, sys, threading, traceback
+import concurrent.futures
+from multiprocessing import get_context
 from queue import Queue, Empty
 from pathlib import Path
 from datetime import datetime, timezone
@@ -26,14 +26,14 @@ BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 # Keep legacy dir around (not used directly)
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
-# Worker pool limits (threaded queue; OCR loop itself is single-process for parity)
-MAX_WORKERS = 2
+# Worker pool limits
+MAX_WORKERS = 3
 MAX_INFLIGHT_PER_USER = 1
 
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilter import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline
 import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
@@ -45,7 +45,34 @@ print(">>> ENTRY OK")
 # Identify this connected process (used for sticky routing diagnostics)
 NODE_ID = f"{platform.node()}:{_os.getpid()}"
 print(f">>> NODE_ID={NODE_ID}")
-print(f">>> BreakerTablePipeline API_VERSION: {API_VERSION}")
+
+# ---------- OCR warmup (via BreakerTablePipeline) ----------
+def _warmup_ocr_once():
+    try:
+        import numpy as np, cv2, tempfile
+        img = np.zeros((32, 32, 3), dtype=np.uint8)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            cv2.imwrite(tmp_path, img)
+            # Warm analyzer + header (table parser not needed for warmup)
+            pipe = BreakerTablePipeline(debug=False)
+            _ = pipe.run(
+                tmp_path,
+                run_analyzer=True,
+                run_parser=False,
+                run_header=True,
+            )
+            print(">>> OCR warmup complete (analyzer + header)")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f">>> OCR warmup skipped: {e}")
+
+_warmup_ocr_once()
 
 # ---------- UTILITIES ----------
 def _now_utc():
@@ -79,6 +106,13 @@ def _json_read_or_none(path: Path):
         return None
 
 def _parse_job_note(job_note: str) -> dict:
+    """
+    Parse a job_note string like:
+      "job_name=My Project | submitted_at_utc=2025-03-01T12:34:56Z | user=jane@example.com"
+    into a dict:
+      {"job_name": "...", "submitted_at_utc": "...", "submitted_local": None, "tz_offset_min": None, "user": "..."}
+    Unknown/missing fields are left as None.
+    """
     out = {
         "job_name": None,
         "submitted_at_utc": None,
@@ -88,14 +122,16 @@ def _parse_job_note(job_note: str) -> dict:
     }
     if not job_note:
         return out
+
     try:
         parts = [p.strip() for p in job_note.split("|")]
         for p in parts:
             if "=" in p:
-                k, v = p.split("=", 1)
+                k, v = p.split("=", 1)   # split on first '='
                 out[k.strip()] = v.strip()
     except Exception:
         pass
+
     return out
 
 def _iso_to_stamp(s: str) -> str:
@@ -259,21 +295,20 @@ def _normalize_ui_overrides(overrides: dict | None) -> dict:
 def vm_get_default_overrides() -> dict:
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
-# ---------- PDF → images (Dev-parity + PageFilter 400dpi) ----------
+# ---------- PDF → images ----------
 def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list[str]:
     """
-    Server runner that mirrors dev:
-      1) PageFilter 400dpi (keeps electrical/panel pages)
-      2) PanelBoardSearch(readPdf) @ same DPI as dev (400)
+    Run PageFilter first to keep only probable electrical/panel pages,
+    then pass the (possibly filtered) PDF to PanelBoardSearch to produce crops.
     """
     img_dir.mkdir(parents=True, exist_ok=True)
-    print(f">>> Running PageFilter at 400dpi: {saved_pdf}")
-    pdf_for_finder = str(saved_pdf)
+    print(f">>> rendering PDF → images: {saved_pdf} -> {img_dir} (dpi={dpi})")
 
+    # --- 1) Filter pages (OCR first, footprints only if undecided) ---
     try:
         pf = PageFilter(
-            output_dir=str(img_dir.parent),   # filtered PDF lives next to job folders
-            dpi=400,                          # bumped to 400 for parity intent
+            output_dir=str(img_dir.parent),   # keep filtered PDF alongside job folders
+            dpi=350,                          # raster DPI used only for undecided pages
             longest_cap_px=9000,
             proc_scale=0.5,
             use_ocr=True,
@@ -288,17 +323,21 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
         )
         kept_pages, dropped_pages, filtered_pdf, log_json = pf.readPdf(str(saved_pdf))
         print(f">>> PageFilter: kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")
-        if filtered_pdf and len(kept_pages) > 0:
-            pdf_for_finder = filtered_pdf
-        else:
-            print(">>> PageFilter kept 0 pages — falling back to original PDF")
     except Exception as e:
-        print(f">>> PageFilter error (continuing with original): {e}")
+        print(f">>> PageFilter error: {e}")
+        kept_pages, filtered_pdf = [], None
 
-    print(">>> Running PanelSearchToolV11...")
+    # Choose which PDF to feed into the finder:
+    # - if filter kept at least one page, use filtered_pdf
+    # - else fall back to the original PDF (or return empty if you prefer)
+    pdf_for_finder = filtered_pdf if (filtered_pdf and len(kept_pages) > 0) else str(saved_pdf)
+    if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
+        print(">>> PageFilter kept 0 pages — falling back to original PDF")
+
+    # --- 2) Run the panel finder on the chosen PDF ---
     local_finder = PanelBoardSearch(
         output_dir=str(img_dir),
-        dpi=dpi,                          # 400 to match dev
+        dpi=dpi,
         min_whitespace_area_fr=0.01,
         margin_shave_px=6,
         min_void_area_fr=0.004,
@@ -311,313 +350,21 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
         save_masked_shape_crop=False,
         replace_multibox=True,
     )
-    crops = local_finder.readPdf(pdf_for_finder)
-    print(f">>> Found {len(crops)} panel image(s)")
+
+    try:
+        crops = local_finder.readPdf(pdf_for_finder)
+    except Exception as e:
+        print(f">>> render error: {e}")
+        raise
+
+    print(f">>> rendered {len(crops)} image(s)")
     return crops
 
-# ---------- Dev-style prints ----------
-def _first(d: dict, keys, default=None):
-    for k in keys:
-        if k in d and d[k] not in (None, "", []):
-            return d[k]
-    return default
+# ---------- Rules payload helper ----------
+def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
+    return {"defaults": defaults or {}, "items": items or []}
 
-def _one_line_breaker(b: dict) -> str:
-    num  = _first(b, ["ckt","cct","circuit","circuit_number","number","idx"], default="?")
-    desc = _first(b, ["desc","description","label","load","cktdesc","ckt_desc"], default="")
-    trip = _first(b, ["trip","amps","amperage","size","rating"], default="")
-    poles= _first(b, ["poles","pole","ph","phase"], default="")
-    side = _first(b, ["side","left_right","L/R","lr"], default="")
-    qty  = _first(b, ["count","qty","quantity"], default="")
-    extras = []
-    if side not in ("", None): extras.append(f"side={side}")
-    if poles not in ("", None): extras.append(f"poles={poles}")
-    if qty not in ("", None): extras.append(f"qty={qty}")
-    if trip not in ("", None): extras.append(f"trip={trip}")
-    meta = ("  [" + ", ".join(extras) + "]") if extras else ""
-    return f"  - CKT {num}: {desc}{meta}"
-
-# ---------- Cancel helpers ----------
-def _cancel_path(job_dir: Path) -> Path:
-    return job_dir / ".cancel"
-
-def _is_canceled(job_dir: Path) -> bool:
-    return _cancel_path(job_dir).exists()
-
-def _peek_owner_id(job_dir: Path) -> str:
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-    return str(st.get("owner_id") or "").strip().lower()
-
-# ---------- Shared helpers for component mapping to RulesEngine ----------
-def _to_int_or_none(x):
-    try:
-        return int(str(x).replace(",", "").strip())
-    except Exception:
-        return None
-
-def _count_would_skip_breakers(breakers: list[dict], panel_limit: int | None) -> int:
-    total_bad = 0
-    def _amp_of(b):
-        try:
-            return int(str(b.get("amperage", "")).replace(",", "").strip())
-        except Exception:
-            return None
-    for b in (breakers or []):
-        amps = _amp_of(b)
-        try:
-            qty = int(b.get("count", 1))
-        except Exception:
-            qty = 1
-        bad = False
-        if amps is None:
-            bad = True
-        elif amps < 15 or amps > 1200:
-            bad = True
-        elif isinstance(panel_limit, int) and panel_limit > 0 and amps > panel_limit:
-            bad = True
-        if bad:
-            total_bad += max(1, qty)
-    return total_bad
-
-def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
-    stages = (result_dict or {}).get("results") or {}
-    hdr    = stages.get("header")  or {}
-    prs    = stages.get("parser")  or {}
-
-    name   = hdr.get("name") or ""
-    h_attrs = hdr.get("attrs") or {}
-
-    def _get_int_from_header(*keys):
-        for k in keys:
-            v = h_attrs.get(k)
-            if v is not None:
-                iv = _to_int_or_none(v)
-                if iv is not None:
-                    return iv
-        return None
-
-    amperage   = _get_int_from_header("amperage", "main_amp", "mainAmperage")
-    spaces_h   = _get_int_from_header("spaces")
-    voltage    = _get_int_from_header("voltage")
-    intRating  = _get_int_from_header("intRating", "interrupt_rating", "interruptRating", "kaic", "kaic_rating")
-    main_amp   = _get_int_from_header("mainBreakerAmperage", "main_breaker_amperage", "main_breaker", "mainBreaker")
-    hdr_brkrs  = list(h_attrs.get("detected_breakers") or [])
-
-    spaces_t   = _to_int_or_none((prs or {}).get("spaces"))
-    tbl_brkrs  = list((prs or {}).get("detected_breakers") or [])
-    spaces     = spaces_t if spaces_t is not None else spaces_h
-    det_brkrs  = hdr_brkrs + tbl_brkrs
-
-    # 4-strikes suppression (your rule)
-    panel_limit = next((v for v in (main_amp, amperage) if isinstance(v, int) and v > 0), None)
-    would_skip = _count_would_skip_breakers(det_brkrs, panel_limit)
-
-    comp = {
-        "type": "panelboard",
-        "name": name,
-        "source": src_img,
-        "attrs": {
-            "amperage": amperage,
-            "spaces": spaces,
-            "voltage": voltage,
-            "intRating": intRating,
-            "mainBreakerAmperage": main_amp,
-            "detected_breakers": det_brkrs if would_skip < 4 else [],
-        },
-    }
-    if would_skip >= 4:
-        comp.setdefault("notes", []).append(
-            f"No breakers supplied for '{name or Path(src_img).stem}': {would_skip} breaker(s) failed validation "
-            f"(amps outside 15–1200A and/or exceeded panel/main rating)."
-        )
-        comp["attrs"]["breaker_data_suppressed"] = True
-    return comp
-
-# ---------- Core job processing (DEV-PARITY: single-process OCR loop) ----------
-def _process_job(job_id: str):
-    """
-    Dev-parity runner:
-      - Render (PageFilter 400dpi → PanelSearch 400dpi)
-      - For each crop: BreakerTablePipeline.run(...)   [no flags: like dev]
-      - Print the same summaries you print in dev
-      - Build components → RulesEngine.process_job(...)
-      - Persist status/result JSON
-    """
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-
-    try:
-        print(f">>> worker start: {job_id}")
-        prev = _json_read_or_none(sp["status"]) or {}
-        noticed_ts_ms = prev.get("noticed_ts_ms")
-
-        # Respect early cancel
-        if _is_canceled(job_dir):
-            _status_write(job_dir, "canceled", **{k: v for k, v in prev.items() if k not in ("state","ts")}, noticed_ts_ms=noticed_ts_ms, progress=0.0)
-            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
-            print(f">>> worker canceled before start: {job_id}")
-            return
-
-        # Running snapshot
-        _status_write(job_dir, "running", **{k: v for k, v in prev.items() if k not in ("state","ts")}, noticed_ts_ms=noticed_ts_ms, step="rendering", progress=2.0)
-
-        # Ensure images are present (render if needed)
-        pdf_dir = job_dir / "uploaded_pdfs"
-        img_dir = job_dir / "pdf_images"
-        imgs = sorted(str(p) for p in img_dir.glob("*.png"))
-
-        if not imgs:
-            pdfs = sorted(pdf_dir.glob("*.pdf"))
-            if not pdfs:
-                raise RuntimeError("No PDF found to render.")
-            imgs = render_pdf_to_images(pdfs[0], img_dir, dpi=400)
-            _status_write(job_dir, "running", step="rendered", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=9.0)
-
-        if not imgs:
-            raise RuntimeError("PDF rendered but produced no crops/images.")
-
-        if _is_canceled(job_dir):
-            _status_write(job_dir, "canceled", step="rendered", noticed_ts_ms=noticed_ts_ms, progress=5.0)
-            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
-            print(f">>> worker canceled after render: {job_id}")
-            return
-
-        print(f">>> Running OCR API (dev parity). API_VERSION: {API_VERSION}")
-        print(f">>> parsing {len(imgs)} images")
-        _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=10.0)
-
-        # Dev-style: single-process, same prints
-        pipe = BreakerTablePipeline(debug=True)
-        components = []
-        all_results_dump = []  # like your dev "breaker_dump_all.json"
-
-        total = len(imgs)
-        for idx, img_path in enumerate(imgs, start=1):
-            if _is_canceled(job_dir):
-                _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=10.0 + (idx-1)/max(1,total)*80.0)
-                _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
-                print(f">>> worker canceled mid-parse: {job_id}")
-                return
-
-            print(f"\n\n=========================\nAnalyzing: {img_path}\n=========================")
-            result = pipe.run(img_path)  # dev calls with no flags
-            stages  = result.get("results") or {}
-            ana_res = stages.get("analyzer") or {}
-            hdr_res = stages.get("header") or {}
-            tbl_res = stages.get("parser") or {}
-
-            # ---- Dev-style summaries ----
-            print("\n=== ANALYZER ===")
-            print("header_y:", ana_res.get("header_y"))
-            print("footer_y:", ana_res.get("footer_y"))
-            print("spaces  :", ana_res.get("spaces_detected"), "→", ana_res.get("spaces_corrected"))
-            print("gridless:", ana_res.get("gridless_path"))
-            print("overlay :", ana_res.get("page_overlay_path"))
-
-            print("\n=== HEADER PARSER ===")
-            print("name    :", (hdr_res or {}).get("name"))
-            print("attrs   :", (hdr_res or {}).get("attrs"))
-
-            hdr_breakers = ((hdr_res or {}).get("attrs") or {}).get("detected_breakers") or []
-            print(f"\n--- Breakers found in HEADER attrs: {len(hdr_breakers)} ---")
-            for b in hdr_breakers:
-                print(_one_line_breaker(b))
-
-            print("\n=== TABLE PARSER ===")
-            if tbl_res:
-                tbl_breakers = tbl_res.get("detected_breakers") or []
-                print("spaces  :", tbl_res.get("spaces"))
-                print(f"breakers: {len(tbl_breakers)}")
-                print("\n--- Breakers from TABLE parser ---")
-                for b in tbl_breakers:
-                    print(_one_line_breaker(b))
-            else:
-                print("parser  : None")
-                tbl_breakers = []
-
-            all_results_dump.append({
-                "image": img_path,
-                "results": result,
-                "header_breakers": hdr_breakers,
-                "table_breakers": tbl_breakers,
-            })
-
-            comp = _merge_component_from_btp(result or {}, img_path)
-            comp = _normalize_component_for_none(comp or {})
-            components.append(comp)
-
-            # progress heartbeat
-            pct = 10.0 + (idx / max(1, total)) * 80.0
-            _status_write(job_dir, "running", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
-
-        print(f">>> parse done - {len(components)} components processed")
-
-        # Write a dev-style dump (optional but useful)
-        dump_path = Path(imgs[0]).parent / "breaker_dump_all.json"
-        try:
-            with open(dump_path, "w", encoding="utf-8") as f:
-                json.dump(all_results_dump, f, indent=2, ensure_ascii=False, default=str)
-            print(f"\n[WROTE] {dump_path}")
-        except Exception as e:
-            print(f"[WARN] Could not write dump: {e}")
-
-        parse_done_ts_ms = _epoch_ms()
-        cycle_time_ms = (parse_done_ts_ms - noticed_ts_ms) if isinstance(noticed_ts_ms, int) else None
-        cycle_time_str = _fmt_cycle_time(cycle_time_ms if cycle_time_ms is not None else 0)
-
-        _status_write(
-            job_dir, "running", step="parsed",
-            component_count=len(components), image_count=len(imgs),
-            noticed_ts_ms=noticed_ts_ms, parse_done_ts_ms=parse_done_ts_ms,
-            cycle_time_ms=cycle_time_ms, cycle_time_str=cycle_time_str, progress=92.0
-        )
-
-        # ---- RUN RULES with defaults ----
-        _status_write(job_dir, "running", step="rules", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=95.0)
-        ui_overrides = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
-        rules_payload = {"defaults": ui_overrides, "items": components}
-        try:
-            rules_result = RE2.process_job(rules_payload) or {}
-        except Exception as re_err:
-            rules_result = {"error": f"{type(re_err).__name__}: {re_err}"}
-            print(f">>> rules engine error: {rules_result['error']}")
-
-        try:
-            first_pdf = str(next((job_dir / "uploaded_pdfs").glob("*.pdf")))
-        except StopIteration:
-            first_pdf = ""
-
-        result_json = {
-            "ok": True,
-            "job_id": job_id,
-            "job_dir": str(job_dir),
-            "saved_pdf": first_pdf,
-            "output_dir": str(job_dir / "pdf_images"),
-            "images": imgs,
-            "image_count": len(imgs),
-            "components": components,
-            "rules_result": rules_result,
-            "ui_overrides": ui_overrides,
-            "cycle_time_ms": cycle_time_ms,
-            "cycle_time_str": cycle_time_str,
-            "noticed_ts_ms": noticed_ts_ms,
-            "parse_done_ts_ms": parse_done_ts_ms,
-            "api_version": API_VERSION,
-        }
-
-        _result_write(job_dir, result_json)
-        _status_write(job_dir, "done", result_path=str(_status_paths(job_dir)["result"]), progress=100.0)
-        _jobs_upsert(job_id, state="done", updated_at=_now_utc(), result_json=result_json)
-        print(f">>> worker done: {job_id}")
-
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f">>> worker error [{job_id}]: {e}\n{tb}")
-        _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
-        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=f"{type(e).__name__}: {e}")
-
-# ---------- Queue / Pool state (threaded, not process-pooled) ----------
+# ---------- Queue / Pool state ----------
 _JOB_Q: "Queue[tuple[str,str]]" = Queue()
 _INFLIGHT_BY_USER: dict[str, int] = {}
 _Q_LOCK = threading.RLock()
@@ -640,6 +387,360 @@ def _leave_inflight(owner_id: str):
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         _INFLIGHT_BY_USER[owner_id] = max(0, c - 1)
 
+# ---------- Cancel helpers ----------
+def _cancel_path(job_dir: Path) -> Path:
+    return job_dir / ".cancel"
+
+def _is_canceled(job_dir: Path) -> bool:
+    return _cancel_path(job_dir).exists()
+
+def _peek_owner_id(job_dir: Path) -> str:
+    """Return the owner_id currently on disk for this job (empty if missing)."""
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
+    return str(st.get("owner_id") or "").strip().lower()
+
+# ---------- Shared helpers for component mapping ----------
+def _to_int_or_none(x):
+    try:
+        return int(str(x).replace(",", "").strip())
+    except Exception:
+        return None
+
+def _count_would_skip_breakers(breakers: list[dict], panel_limit: int | None) -> int:
+    """
+    Count how many individual breakers would be 'skipped/rejected':
+      - amperage not numeric
+      - amperage outside supported range [15..1200]
+      - amperage exceeds panel/main limit (if provided)
+    Uses the 'count' field to account for aggregated entries.
+    """
+    total_bad = 0
+
+    def _amp_of(b):
+        try:
+            return int(str(b.get("amperage", "")).replace(",", "").strip())
+        except Exception:
+            return None
+
+    for b in (breakers or []):
+        amps = _amp_of(b)
+        try:
+            qty = int(b.get("count", 1))
+        except Exception:
+            qty = 1
+
+        bad = False
+        if amps is None:
+            bad = True
+        elif amps < 15 or amps > 1200:
+            bad = True
+        elif isinstance(panel_limit, int) and panel_limit > 0 and amps > panel_limit:
+            bad = True
+
+        if bad:
+            total_bad += max(1, qty)
+
+    return total_bad
+
+def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
+    """
+    Map BreakerTablePipeline result → component schema expected by RulesEngine.
+    Applies your 4-strikes suppression rule.
+    """
+    stages = (result_dict or {}).get("results") or {}
+    hdr    = stages.get("header")  or {}
+    prs    = stages.get("parser")  or {}
+
+    # Header fields
+    name   = hdr.get("name") or ""
+    h_attrs = hdr.get("attrs") or {}
+
+    def _get_int_from_header(*keys):
+        for k in keys:
+            v = h_attrs.get(k)
+            if v is not None:
+                iv = _to_int_or_none(v)
+                if iv is not None:
+                    return iv
+        return None
+
+    amperage   = _get_int_from_header("amperage", "main_amp", "mainAmperage")
+    spaces_h   = _get_int_from_header("spaces")
+    voltage    = _get_int_from_header("voltage")
+    intRating  = _get_int_from_header("intRating", "interrupt_rating", "interruptRating", "kaic", "kaic_rating")
+    main_amp   = _get_int_from_header("mainBreakerAmperage", "main_breaker_amperage", "main_breaker", "mainBreaker")
+    hdr_brkrs  = list(h_attrs.get("detected_breakers") or [])
+
+    # Table fields
+    spaces_t   = _to_int_or_none((prs or {}).get("spaces"))
+    tbl_brkrs  = list((prs or {}).get("detected_breakers") or [])
+
+    spaces     = spaces_t if spaces_t is not None else spaces_h
+    det_brkrs  = hdr_brkrs + tbl_brkrs
+
+    # ===== 4-strikes pre-check =====
+    panel_limit = next((v for v in (main_amp, amperage) if isinstance(v, int) and v > 0), None)
+    would_skip = _count_would_skip_breakers(det_brkrs, panel_limit)
+
+    notes = []
+    if would_skip >= 4:
+        det_brkrs = []
+        panel_name = name or Path(src_img).stem
+        notes.append(
+            f"No breakers supplied for '{panel_name}': {would_skip} breaker(s) failed validation "
+            f"(amps outside 15–1200A and/or exceeded panel/main rating)."
+        )
+
+    comp = {
+        "type": "panelboard",
+        "name": name,
+        "source": src_img,
+        "attrs": {
+            "amperage": amperage,
+            "spaces": spaces,
+            "voltage": voltage,
+            "intRating": intRating,
+            "mainBreakerAmperage": main_amp,
+            "detected_breakers": det_brkrs,
+        },
+    }
+
+    if notes:
+        comp["notes"] = notes
+        comp["attrs"]["breaker_data_suppressed"] = True
+
+    return comp
+
+# ---------- Worker-side call for one image ----------
+def _btp_run_once(
+    image_path: str,
+    *,
+    run_analyzer: bool = True,
+    run_parser: bool = True,
+    run_header: bool = True,
+    debug: bool = False
+) -> dict:
+    """
+    Construct a BreakerTablePipeline and run it for this image.
+    (No global caching; per your request.)
+    """
+    pipe = BreakerTablePipeline(debug=debug)
+    return pipe.run(
+        image_path,
+        run_analyzer=run_analyzer,
+        run_parser=run_parser,
+        run_header=run_header,
+    )
+
+# ---------- Core job processing ----------
+def _process_job(job_id: str):
+    """
+    Worker thread: read images → parse panel (Analyzer+Parser+Header) → run rules (with defaults) → write result.
+    """
+    job_dir = BASE_JOBS_DIR / job_id
+    sp = _status_paths(job_dir)
+
+    try:
+        print(f">>> worker start: {job_id}")
+        prev = _json_read_or_none(sp["status"]) or {}
+        print(f">>> DIAG worker prev keys: {sorted(list(prev.keys()))}")
+        print(f">>> DIAG worker prev.owner_id: {str(prev.get('owner_id') or '').strip().lower()!r}")
+
+        noticed_ts_ms = prev.get("noticed_ts_ms")
+        _prev_carry = {
+            k: v for k, v in prev.items()
+            if k not in ("state", "ts", "noticed_ts_ms", "progress")
+        }
+
+        # Respect early cancel
+        if _is_canceled(job_dir):
+            _status_write(job_dir, "canceled", **_prev_carry, noticed_ts_ms=noticed_ts_ms, progress=0.0)
+            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
+            print(f">>> worker canceled before start: {job_id}")
+            return
+
+        # First running write — owner_id should still be present in _prev_carry
+        _status_write(job_dir, "running", **_prev_carry, noticed_ts_ms=noticed_ts_ms, progress=0.0)
+
+        # DIAG: check again after writing
+        peek = _peek_owner_id(job_dir)
+        print(f">>> DIAG after running _status_write: job_id={job_id} owner_id_written={peek!r}")
+
+        _jobs_upsert(job_id, state="running", updated_at=_now_utc())
+
+        ui_overrides = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
+
+        # Ensure images are present
+        pdf_dir = job_dir / "uploaded_pdfs"
+        img_dir = job_dir / "pdf_images"
+        imgs = sorted(str(p) for p in img_dir.glob("*.png"))
+
+        if not imgs:
+            pdfs = sorted(pdf_dir.glob("*.pdf"))
+            if not pdfs:
+                raise RuntimeError("No PDF found to render.")
+
+            # Early heartbeat: rendering start
+            _status_write(job_dir, "running", step="rendering", noticed_ts_ms=noticed_ts_ms, progress=2.0)
+
+            # Render (PageFilter may be slow)
+            try:
+                imgs = render_pdf_to_images(pdfs[0], img_dir)
+            finally:
+                # Heartbeat right after render returns (even on exception path)
+                _status_write(job_dir, "running", step="rendered", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=9.0)
+
+        if not imgs:
+            raise RuntimeError("PDF rendered but produced no crops/images.")
+
+        if _is_canceled(job_dir):
+            _status_write(job_dir, "canceled", step="rendered", noticed_ts_ms=noticed_ts_ms, progress=5.0)
+            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
+            print(f">>> worker canceled after render: {job_id}")
+            return
+
+        print(f">>> parsing {len(imgs)} images")
+        _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=10.0)
+
+        debug_dir = job_dir / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        total = len(imgs)
+        done = 0
+
+        # ---------- IMAGE-LEVEL PARALLELISM (≤4 concurrent) ----------
+        max_workers = max(1, min(4, os.cpu_count() or 1, total))
+        print(f">>> parallel parsing with up to {max_workers} workers for {total} images")
+
+        components = [None] * total  # preserve order
+        ctx = get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as ex:
+            fut_map = {
+                ex.submit(
+                    _btp_run_once,
+                    img_path,
+                    run_analyzer=True,
+                    run_parser=True,
+                    run_header=True,
+                    debug=False
+                ): idx for idx, img_path in enumerate(imgs)
+            }
+
+            for fut in concurrent.futures.as_completed(fut_map):
+                idx = fut_map[fut]
+                img_path = imgs[idx]
+
+                if _is_canceled(job_dir):
+                    # Cancel remaining futures and bail out
+                    ex.shutdown(cancel_futures=True)
+                    pct = 10.0 + (done / max(1, total)) * 80.0
+                    _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
+                    _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
+                    print(f">>> worker canceled mid-parse: {job_id}")
+                    return
+
+                try:
+                    raw = fut.result()
+                    if isinstance(raw, dict) and "_error" in raw:
+                        raise RuntimeError(raw["_error"])
+
+                    comp = _merge_component_from_btp(raw or {}, img_path)
+                    comp = _normalize_component_for_none(comp or {})
+                    attrs = comp.get("attrs") or {}
+                    print(f">>> PANEL RESULTS for {img_path}:")
+                    print(f"    Name: {comp.get('name')}")
+                    print(f"    Amperage: {attrs.get('amperage')}")
+                    print(f"    Voltage: {attrs.get('voltage')}")
+                    print(f"    IntRating: {attrs.get('intRating')}")
+                    print(f"    MainBreakerAmperage: {attrs.get('mainBreakerAmperage')}")
+                    print(f"    Spaces (merged): {attrs.get('spaces')}")
+                    print(f"    Detected breakers: {len(attrs.get('detected_breakers') or [])}")
+                    components[idx] = comp
+                except Exception as e:
+                    print(f">>> ERROR analyzing image {idx + 1}: {e}")
+                    print(f">>> Traceback: {traceback.format_exc()}")
+                    components[idx] = {
+                        "type": "panelboard",
+                        "name": f"image_{idx + 1}",
+                        "_skipped": True,
+                        "reason": f"Parse error: {e}",
+                        "attrs": {},
+                        "source": img_path
+                    }
+
+                # progress after each image completes fully (A→P→H)
+                done += 1
+                pct = 10.0 + (done / max(1, total)) * 80.0
+                _status_write(
+                    job_dir,
+                    "running",
+                    step="parsing",
+                    image_count=total,
+                    noticed_ts_ms=noticed_ts_ms,
+                    progress=pct
+                )
+
+        print(f">>> parse done - {len(components)} components processed")
+
+        parse_done_ts_ms = _epoch_ms()
+        cycle_time_ms = (parse_done_ts_ms - noticed_ts_ms) if isinstance(noticed_ts_ms, int) else None
+        cycle_time_str = _fmt_cycle_time(cycle_time_ms if cycle_time_ms is not None else 0)
+
+        _status_write(job_dir, "running", step="parsed", component_count=len(components), image_count=len(imgs),
+                      noticed_ts_ms=noticed_ts_ms, parse_done_ts_ms=parse_done_ts_ms,
+                      cycle_time_ms=cycle_time_ms, cycle_time_str=cycle_time_str, progress=92.0)
+
+        # ---- RUN RULES with defaults ----
+        _status_write(job_dir, "running", step="rules", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=95.0)
+        if _is_canceled(job_dir):
+            _status_write(job_dir, "canceled", step="rules", noticed_ts_ms=noticed_ts_ms, progress=95.0)
+            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
+            print(f">>> worker canceled before rules: {job_id}")
+            return
+
+        rules_payload = _build_rules_payload(prev.get("ui_overrides") or _DEFAULT_OVERRIDES, components)
+        try:
+            rules_result = RE2.process_job(rules_payload) or {}
+        except Exception as re_err:
+            rules_result = {"error": f"{type(re_err).__name__}: {re_err}"}
+            print(f">>> rules engine error: {rules_result['error']}")
+
+        # ---- RESULT JSON ----
+        try:
+            first_pdf = str(next((job_dir / "uploaded_pdfs").glob("*.pdf")))
+        except StopIteration:
+            first_pdf = ""
+
+        result = {
+            "ok": True,
+            "job_id": job_id,
+            "job_dir": str(job_dir),
+            "saved_pdf": first_pdf,
+            "output_dir": str(job_dir / "pdf_images"),
+            "images": imgs,
+            "image_count": len(imgs),
+            "components": components,
+            "rules_result": rules_result,
+            "ui_overrides": prev.get("ui_overrides") or _DEFAULT_OVERRIDES,
+            "cycle_time_ms": cycle_time_ms,
+            "cycle_time_str": cycle_time_str,
+            "noticed_ts_ms": noticed_ts_ms,
+            "parse_done_ts_ms": parse_done_ts_ms,
+        }
+
+        _result_write(job_dir, result)
+        _status_write(job_dir, "done", result_path=str(_status_paths(job_dir)["result"]), progress=100.0)
+        _jobs_upsert(job_id, state="done", updated_at=_now_utc(), result_json=result)
+        print(f">>> worker done: {job_id}")
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f">>> worker error [{job_id}]: {e}\n{tb}")
+        _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
+        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=f"{type(e).__name__}: {e}")
+
+# ---------- Worker pool ----------
 def _dequeue_loop(idx: int):
     threading.current_thread().name = f"pool-worker-{idx}"
     while not _STOP.is_set():
@@ -648,7 +749,9 @@ def _dequeue_loop(idx: int):
         except Empty:
             continue
 
+        # enforce per-user cap
         if not _enter_inflight(owner_id):
+            # requeue after a tiny delay
             threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
             _JOB_Q.task_done()
             continue
@@ -703,8 +806,8 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         job_dir_path=str(job_dir),
         ui_overrides=normalized_overrides,
         job_note=(job_note or ""),
-        image_count=0,
-        step="received",
+        image_count=0,                 # unknown yet
+        step="received",               # explicit early step
         noticed_ts_ms=noticed_ts_ms,
         owner_email=owner_email,
         owner_id=owner_email,
@@ -713,7 +816,7 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         progress=0.0
     )
 
-    # (Optional) upsert – store meta with zero images for now
+    # 5) (Optional) upsert – store meta with zero images for now
     meta = _parse_job_note(job_note or "")
     _jobs_upsert(
         job_id,
@@ -724,7 +827,7 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         file_path=str(saved_pdf),
         job_note=(job_note or ""),
         user_email=meta.get("user") or "",
-        image_count=0,
+        image_count=0,                 # unknown yet
         ui_overrides=normalized_overrides,
         owner_email=owner_email,
         owner_id=owner_email,
@@ -741,8 +844,8 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "job_dir": str(job_dir),
         "saved_pdf": str(saved_pdf),
         "output_dir": str(job_dir / "pdf_images"),
-        "images": [],
-        "image_count": 0,
+        "images": [],                  # not rendered yet
+        "image_count": 0,              # not rendered yet
         "ui_overrides": normalized_overrides,
         "noticed_ts_ms": noticed_ts_ms,
         "owner_email": owner_email,
@@ -806,6 +909,7 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         node_hint.update({"job_node_id": job_node})
 
     if not job_email:
+        # legacy/missing – backfill with the caller and continue
         st["owner_email"] = req_email
         st["owner_id"] = req_email
         _status_write(job_dir, st.get("state", "unknown"),
