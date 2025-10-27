@@ -1,4 +1,4 @@
-# OcrLibrary/PanelHeaderParserV4.py  (Drop-in replacement)
+# OcrLibrary/PanelHeaderParserV4.py
 import os, re, cv2, json, numpy as np
 from typing import Dict, List, Tuple, Optional
 
@@ -64,8 +64,8 @@ class PanelParser:
     # ====== Role weights (blend of value-shape, label-affinity, side, ctx, penalties) ======
     _WEIGHTS = {
         "VOLTAGE": dict(W_shape=0.60, W_conf=0.15, W_lbl=0.15, W_side=0.03, W_ctx=0.07, W_wrong=0.12, W_y=0.00),
-        "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.08, W_ctx=0.04, W_wrong=0.15, W_y=0.00),
-        "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.22, W_side=0.10, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
+        "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
+        "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.06, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
         "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35)
     }
@@ -282,23 +282,55 @@ class PanelParser:
             ranked_map[role] = ranked
             chosen_map[role] = self._pick_role(role, ranked)
 
-        # BUS vs MAIN arbitration & main mode enforcement
-        if main_mode == "MLO":
+        # ===== Unit-first amps role assignment (explicit A/AMPS drive detection; labels split roles) =====
+        # Gather explicit-unit amps candidates (###A / ### AMPS) from BUS pool (BUS and MAIN share the same objects)
+        unit_amps = [c for c in (value_cands.get("BUS") or []) if bool(c.get("has_unit"))]
+        unit_amps.sort(key=lambda c: (-float(c.get("conf",0.0)), c["y1"], c["x1"]))
+
+        def _role_affinity(c):
+            return (self._label_affinity("BUS", c, labels_map),
+                    self._label_affinity("MAIN", c, labels_map))
+
+        if len(unit_amps) >= 2:
+            # Pick one for BUS and one for MAIN using label affinity; break ties by y/x
+            # Compute preference score: aff_role - aff_other
+            scored = []
+            for c in unit_amps:
+                aff_b, aff_m = _role_affinity(c)
+                scored.append((c, aff_b - aff_m, aff_b, aff_m))
+            # Best BUS-leaning
+            bus_pick  = sorted(scored, key=lambda t: (-(t[1]), -t[2], t[0]["y1"], t[0]["x1"]))[0][0]
+            # Exclude that candidate and pick MAIN-leaning
+            scored_main = [t for t in scored if t[0] is not bus_pick]
+            main_pick = sorted(scored_main, key=lambda t: (-(t[3]-t[2]), -t[3], t[0]["y1"], t[0]["x1"]))[0][0]
+            chosen_map["BUS"]  = bus_pick
+            chosen_map["MAIN"] = main_pick
+
+        elif len(unit_amps) == 1:
+            only = unit_amps[0]
+            if (main_mode or "").upper() == "MLO":
+                chosen_map["BUS"]  = only
+                chosen_map["MAIN"] = None
+            elif (main_mode or "").upper() == "MCB":
+                chosen_map["BUS"]  = only
+                chosen_map["MAIN"] = only
+            else:
+                aff_b, aff_m = _role_affinity(only)
+                if aff_m > aff_b + 0.08:
+                    chosen_map["MAIN"] = only
+                    chosen_map["BUS"]  = chosen_map.get("BUS") or None
+                else:
+                    chosen_map["BUS"]  = only
+                    chosen_map["MAIN"] = chosen_map.get("MAIN") or None
+
+        else:
+            # No explicit-unit amps → keep ranked picks but still apply mode enforcement
+            pass
+
+        # Final mode enforcement (last word)
+        if (main_mode or "").upper() == "MLO":
             chosen_map["MAIN"] = None
-        elif main_mode is None:
-            b, m = chosen_map.get("BUS"), chosen_map.get("MAIN")
-            if b and m:
-                # Prefer the candidate with stronger affinity to its own label
-                aff_b = self._label_affinity("BUS", b, labels_map)
-                aff_m = self._label_affinity("MAIN", m, labels_map)
-                if abs(b["rank"] - m["rank"]) <= 0.06:
-                    if aff_b > aff_m + 0.05:
-                        chosen_map["MAIN"] = None
-                    elif aff_m > aff_b + 0.05:
-                        chosen_map["BUS"] = None
-                # If still ambiguous, prefer BUS as the default rating holder
-                if chosen_map["BUS"] and chosen_map["MAIN"]:
-                    chosen_map["MAIN"] = None
+        # If both still None and we had any amps tokens, BUS fallback will run below as before.
 
         # ===== NAME fallback: pick top-left plausible token if none chosen =====
         if not chosen_map.get("NAME"):
@@ -348,8 +380,9 @@ class PanelParser:
                 m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", (t or "").upper())
                 return int(m.group(1)) if m else None
 
-            # Consider sub-threshold BUS first, then MAIN as a donor
-            pool = bus_ranked + main_ranked
+            # Prefer explicit-unit amps first (then fall back to any amps-looking)
+            unit_first = [c for c in (bus_ranked + main_ranked) if _amps_from_text(c.get("text","")) is not None]
+            pool = unit_first if unit_first else (bus_ranked + main_ranked)
             # keep only entries that *actually* parse as amps in [60..1200]
             pool = [c for c in pool if _amps_from_text(c.get("text","")) is not None]
             if pool:
@@ -639,7 +672,7 @@ class PanelParser:
             return None
 
         LABEL_WORDS = {"PANEL", "PANELBOARD", "BOARD", "PNL"}
-        top = lines[: min(2, len(lines))]
+        top = lines[: min(3, len(lines))]
 
         def _mk_val(ln, tok_text, tok_rect=None, conf_hint=0.65, shape=0.95, ctx=0.30):
             # place box on the token if provided; else use whole line
@@ -742,14 +775,14 @@ class PanelParser:
                 n = int(m_with_unit.group(1))
                 if 60 <= n <= 4000:
                     cand = {"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":xc,"yc":yc,"conf":conf,
-                            "text":raw, "shape":0.80, "ctx":0.12}
+                            "text":raw, "shape":0.90, "ctx":0.12, "has_unit":True}
             elif m_bare_num:
                 n = int(m_bare_num.group(1))
                 # allow bare 60..1200; rely on label affinity to disambiguate from AIC/others
                 if 60 <= n <= 1200:
                     # small score because it's unlabeled; still promotable by BUS fallback
                     cand = {"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":xc,"yc":yc,"conf":conf,
-                            "text":raw, "shape":0.68, "ctx":0.04}
+                            "text":raw, "shape":0.68, "ctx":0.04, "has_unit":False}
 
             if cand is not None:
                 out["BUS"].append(dict(cand))
@@ -853,6 +886,14 @@ class PanelParser:
 
         ranked = []
         for c in cands:
+            # Unit-first tweak: if token explicitly has A/AMPS, emphasize shape and de-emphasize label a bit.
+            if role in ("BUS","MAIN") and bool(c.get("has_unit")):
+                Wu = dict(W)
+                Wu["W_shape"] = min(1.0, Wu["W_shape"] + 0.15)
+                Wu["W_lbl"]   = max(0.0, Wu["W_lbl"]   - 0.06)
+                W  = Wu
+            else:
+                W  = dict(W)
             # label affinity (nearest same-role label)
             S_lbl = 0.0
             if same_labels:
