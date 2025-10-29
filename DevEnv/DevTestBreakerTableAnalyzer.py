@@ -17,10 +17,10 @@ from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 
 # ---------- INPUTS ----------
-PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/good_tester_combo.pdf'
+PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/ELECTRICAL SET (Mark Up).pdf.pdf'
 OUTPUT_DIR = '~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput'
 # ================================================================
-
+ 
 def _first(d: dict, keys, default=None):
     for k in keys:
         if k in d and d[k] not in (None, "", []):
