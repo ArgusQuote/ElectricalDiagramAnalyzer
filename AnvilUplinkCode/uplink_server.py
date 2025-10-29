@@ -310,12 +310,11 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
             longest_cap_px=9000,
             proc_scale=0.5,
             use_ocr=True,
-            ocr_gpu=False,
+            ocr_gpu=True,
             verbose=True,
             debug=False,                      # set True to write JSON log at output_dir/filter_debug/
-            # footprint window (tune as you like)
-            rect_w_fr_range=(0.10, 0.55),
-            rect_h_fr_range=(0.10, 0.60),
+            rect_w_fr_range=(0.20, 0.60),
+            rect_h_fr_range=(0.20, 0.60),
             min_rectangularity=0.70,
             min_rect_count=2,
         )
@@ -341,7 +340,12 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
         min_void_area_fr=0.004,
         min_void_w_px=90,
         min_void_h_px=90,
-        max_void_area_fr=0.50,
+        # ↓ tighten these three to kill giant/near-page blobs
+        max_void_area_fr=0.30,          # was 0.30
+        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
+        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
+        min_whitespace_area_fr=0.01,
+        margin_shave_px=6,
         pad=6,
         debug=False,
         verbose=True,
