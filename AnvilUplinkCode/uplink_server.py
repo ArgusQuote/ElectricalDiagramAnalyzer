@@ -1,6 +1,7 @@
 # Anvil Uplink VM (disk only) + Rules Engine defaults + cycle-time
 # -------------------------------
 import os, re, json, sys, threading, traceback
+import contextlib
 import concurrent.futures
 from multiprocessing import get_context
 from queue import Queue, Empty
@@ -28,6 +29,52 @@ BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 MAX_WORKERS = 3
 MAX_INFLIGHT_PER_USER = 1
 
+# ===== Determinism & Thread Caps (must run before heavy libs init) =====
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("PYTHONHASHSEED", "0")
+
+def _set_runtime_determinism():
+    # OpenCV: cap threads if available
+    try:
+        import cv2
+        try:
+            cv2.setNumThreads(1)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # PyTorch/EasyOCR determinism if present
+    try:
+        import torch
+        torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
+        if hasattr(torch.backends, "cudnn"):
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+    except Exception:
+        pass
+
+def _log_run_fingerprint(tag: str = ""):
+    try:
+        import torch
+        devs = []
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                devs.append(torch.cuda.get_device_name(i))
+        cudnn_det = getattr(getattr(torch.backends, "cudnn", None), "deterministic", None)
+        cudnn_bmk = getattr(getattr(torch.backends, "cudnn", None), "benchmark", None)
+        print(f">>> FPRINT {tag} | torch_cuda={torch.cuda.is_available()} devices={devs} cudnn.det={cudnn_det} cudnn.bmk={cudnn_bmk}")
+    except Exception:
+        print(f">>> FPRINT {tag} | torch not present")
+
+_set_runtime_determinism()
+_log_run_fingerprint("init")
+
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilter import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
@@ -47,6 +94,7 @@ print(f">>> NODE_ID={NODE_ID}")
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
     try:
+        _log_run_fingerprint("warmup")
         import numpy as np, cv2, tempfile
         img = np.zeros((32, 32, 3), dtype=np.uint8)
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
@@ -310,7 +358,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
             longest_cap_px=9000,
             proc_scale=0.5,
             use_ocr=True,
-            ocr_gpu=True,
+            ocr_gpu=False,
             verbose=True,
             debug=False,                      # set True to write JSON log at output_dir/filter_debug/
             rect_w_fr_range=(0.20, 0.60),
@@ -543,6 +591,7 @@ def _process_job(job_id: str):
 
     try:
         print(f">>> worker start: {job_id}")
+        _log_run_fingerprint(f"job_start:{job_id}")
         prev = _json_read_or_none(sp["status"]) or {}
         print(f">>> DIAG worker prev keys: {sorted(list(prev.keys()))}")
         print(f">>> DIAG worker prev.owner_id: {str(prev.get('owner_id') or '').strip().lower()!r}")
@@ -613,77 +662,64 @@ def _process_job(job_id: str):
         total = len(imgs)
         done = 0
 
-        # ---------- IMAGE-LEVEL PARALLELISM (≤4 concurrent) ----------
-        max_workers = max(1, min(4, os.cpu_count() or 1, total))
-        print(f">>> parallel parsing with up to {max_workers} workers for {total} images")
-
+        # ---------- SEQUENTIAL IMAGE PARSING (deterministic per job) ----------
+        print(f">>> sequential parsing for {total} images (per-job determinism)")
         components = [None] * total  # preserve order
-        ctx = get_context("spawn")
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as ex:
-            fut_map = {
-                ex.submit(
-                    _btp_run_once,
+        for idx, img_path in enumerate(imgs):
+            if _is_canceled(job_dir):
+                pct = 10.0 + (done / max(1, total)) * 80.0
+                _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
+                _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
+                print(f">>> worker canceled mid-parse: {job_id}")
+                return
+
+            try:
+                # Run OCR/analysis sequentially
+                raw = _btp_run_once(
                     img_path,
                     run_analyzer=True,
                     run_parser=True,
                     run_header=True,
                     debug=True
-                ): idx for idx, img_path in enumerate(imgs)
-            }
-
-            for fut in concurrent.futures.as_completed(fut_map):
-                idx = fut_map[fut]
-                img_path = imgs[idx]
-
-                if _is_canceled(job_dir):
-                    # Cancel remaining futures and bail out
-                    ex.shutdown(cancel_futures=True)
-                    pct = 10.0 + (done / max(1, total)) * 80.0
-                    _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
-                    _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
-                    print(f">>> worker canceled mid-parse: {job_id}")
-                    return
-
-                try:
-                    raw = fut.result()
-                    if isinstance(raw, dict) and "_error" in raw:
-                        raise RuntimeError(raw["_error"])
-
-                    comp = _merge_component_from_btp(raw or {}, img_path)
-                    comp = _normalize_component_for_none(comp or {})
-                    attrs = comp.get("attrs") or {}
-                    print(f">>> PANEL RESULTS for {img_path}:")
-                    print(f"    Name: {comp.get('name')}")
-                    print(f"    Amperage: {attrs.get('amperage')}")
-                    print(f"    Voltage: {attrs.get('voltage')}")
-                    print(f"    IntRating: {attrs.get('intRating')}")
-                    print(f"    MainBreakerAmperage: {attrs.get('mainBreakerAmperage')}")
-                    print(f"    Spaces (merged): {attrs.get('spaces')}")
-                    print(f"    Detected breakers: {len(attrs.get('detected_breakers') or [])}")
-                    components[idx] = comp
-                except Exception as e:
-                    print(f">>> ERROR analyzing image {idx + 1}: {e}")
-                    print(f">>> Traceback: {traceback.format_exc()}")
-                    components[idx] = {
-                        "type": "panelboard",
-                        "name": f"image_{idx + 1}",
-                        "_skipped": True,
-                        "reason": f"Parse error: {e}",
-                        "attrs": {},
-                        "source": img_path
-                    }
-
-                # progress after each image completes fully (A→P→H)
-                done += 1
-                pct = 10.0 + (done / max(1, total)) * 80.0
-                _status_write(
-                    job_dir,
-                    "running",
-                    step="parsing",
-                    image_count=total,
-                    noticed_ts_ms=noticed_ts_ms,
-                    progress=pct
                 )
+                if isinstance(raw, dict) and "_error" in raw:
+                    raise RuntimeError(raw["_error"])
+
+                comp = _merge_component_from_btp(raw or {}, img_path)
+                comp = _normalize_component_for_none(comp or {})
+                attrs = comp.get("attrs") or {}
+                print(f">>> PANEL RESULTS for {img_path}:")
+                print(f"    Name: {comp.get('name')}")
+                print(f"    Amperage: {attrs.get('amperage')}")
+                print(f"    Voltage: {attrs.get('voltage')}")
+                print(f"    IntRating: {attrs.get('intRating')}")
+                print(f"    MainBreakerAmperage: {attrs.get('mainBreakerAmperage')}")
+                print(f"    Spaces (merged): {attrs.get('spaces')}")
+                print(f"    Detected breakers: {len(attrs.get('detected_breakers') or [])}")
+                components[idx] = comp
+            except Exception as e:
+                print(f">>> ERROR analyzing image {idx + 1}: {e}")
+                print(f">>> Traceback: {traceback.format_exc()}")
+                components[idx] = {
+                    "type": "panelboard",
+                    "name": f"image_{idx + 1}",
+                    "_skipped": True,
+                    "reason": f"Parse error: {e}",
+                    "attrs": {},
+                    "source": img_path
+                }
+
+            # progress after each image completes fully (A→P→H)
+            done += 1
+            pct = 10.0 + (done / max(1, total)) * 80.0
+            _status_write(
+                job_dir,
+                "running",
+                step="parsing",
+                image_count=total,
+                noticed_ts_ms=noticed_ts_ms,
+                progress=pct
+            )
 
         print(f">>> parse done - {len(components)} components processed")
 
