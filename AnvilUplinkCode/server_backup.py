@@ -1,3 +1,5 @@
+# MS: Changed dpi to 400.
+# -------------------------------
 # Anvil Uplink VM (disk only) + Rules Engine defaults + cycle-time
 # -------------------------------
 import os, re, json, sys, threading, traceback
@@ -31,7 +33,7 @@ MAX_INFLIGHT_PER_USER = 1
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilter import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline
 import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
@@ -306,15 +308,16 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     try:
         pf = PageFilter(
             output_dir=str(img_dir.parent),   # keep filtered PDF alongside job folders
-            dpi=400,                          # raster DPI used only for undecided pages
+            dpi=350,                          # raster DPI used only for undecided pages
             longest_cap_px=9000,
             proc_scale=0.5,
             use_ocr=True,
-            ocr_gpu=True,
+            ocr_gpu=False,
             verbose=True,
             debug=False,                      # set True to write JSON log at output_dir/filter_debug/
-            rect_w_fr_range=(0.20, 0.60),
-            rect_h_fr_range=(0.20, 0.60),
+            # footprint window (tune as you like)
+            rect_w_fr_range=(0.10, 0.55),
+            rect_h_fr_range=(0.10, 0.60),
             min_rectangularity=0.70,
             min_rect_count=2,
         )
@@ -335,15 +338,12 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     local_finder = PanelBoardSearch(
         output_dir=str(img_dir),
         dpi=dpi,
+        min_whitespace_area_fr=0.01,
+        margin_shave_px=6,
         min_void_area_fr=0.004,
         min_void_w_px=90,
         min_void_h_px=90,
-        # ↓ tighten these three to kill giant/near-page blobs
-        max_void_area_fr=0.30,          # was 0.30
-        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
-        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
-        min_whitespace_area_fr=0.01,
-        margin_shave_px=6,
+        max_void_area_fr=0.50,
         pad=6,
         debug=False,
         verbose=True,
@@ -519,7 +519,7 @@ def _btp_run_once(
     run_analyzer: bool = True,
     run_parser: bool = True,
     run_header: bool = True,
-    debug: bool = True
+    debug: bool = False
 ) -> dict:
     """
     Construct a BreakerTablePipeline and run it for this image.
@@ -601,10 +601,6 @@ def _process_job(job_id: str):
             return
 
         print(f">>> parsing {len(imgs)} images")
-        try:
-            print(f">>> BreakerTable API Version: {API_VERSION}")
-        except Exception:
-            pass
         _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=10.0)
 
         debug_dir = job_dir / "debug"
@@ -627,7 +623,7 @@ def _process_job(job_id: str):
                     run_analyzer=True,
                     run_parser=True,
                     run_header=True,
-                    debug=True
+                    debug=False
                 ): idx for idx, img_path in enumerate(imgs)
             }
 
