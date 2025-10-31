@@ -527,17 +527,17 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     spaces     = spaces_t if spaces_t is not None else spaces_h
     det_brkrs  = hdr_brkrs + tbl_brkrs
 
-    # ===== 4-strikes pre-check =====
+    # ===== 2-strikes pre-check =====
     panel_limit = next((v for v in (main_amp, amperage) if isinstance(v, int) and v > 0), None)
     would_skip = _count_would_skip_breakers(det_brkrs, panel_limit)
 
     notes = []
-    if would_skip >= 4:
+    if would_skip >= 2:
         det_brkrs = []
         panel_name = name or Path(src_img).stem
         notes.append(
             f"No breakers supplied for '{panel_name}': {would_skip} breaker(s) failed validation "
-            f"(amps outside 15–1200A and/or exceeded panel/main rating)."
+            f"(2 or more breakers had detection errors - User review required)."
         )
 
     comp = {

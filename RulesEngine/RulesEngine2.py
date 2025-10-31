@@ -407,7 +407,7 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool]:
         elif desired_at_240 >= 42:
             base = "QOH"
         elif (voltage in (208, 240)) and desired_at_240 >= 25:
-            base = "QH"  # 25–41k needs H-family at 240V
+            base = "QH"  # 25-41k needs H-family at 240V
         elif desired_at_240 >= 22:
             base = "QO-VH" if allow_plug else "QOB-VH"
         else:
@@ -494,7 +494,7 @@ class PanelboardEngine(BaseEngine):
             validated = []
             for i, b in enumerate(raw["detected_breakers"]):
                 if not isinstance(b, dict):
-                    notes.append(f"Skipped breaker #{i+1}: not a dict.")
+                    notes.append("A breaker was skipped: not a valid data structure.")
                     continue
 
                 poles = _safe_int(b.get("poles"), 0)
@@ -507,16 +507,12 @@ class PanelboardEngine(BaseEngine):
                 if amps  <= 0:              bad_fields.append("amperage")
                 if cnt   <= 0:              bad_fields.append("count")
                 if bad_fields:
-                    notes.append(
-                        f"Skipped breaker #{i+1}: missing/invalid {', '.join(bad_fields)}."
-                    )
+                    notes.append(f"A breaker was skipped: missing or invalid {', '.join(bad_fields)}.")
                     continue
 
                 # Standard amp window only
                 if amps < MIN_BREAKER_AMP or amps > MAX_BREAKER_AMP:
-                    notes.append(
-                        f"Skipped breaker #{i+1}: amperage {amps}A outside supported 15–1200A."
-                    )
+                    notes.append(f"A breaker was skipped: amperage {amps}A outside supported 15-1200A.")
                     continue
 
                 # Append exactly once after all checks
@@ -617,7 +613,7 @@ class PanelboardEngine(BaseEngine):
                 b_amps = _safe_int(br.get("amperage"), 0)
                 if b_amps > limit_amps:
                     notes.append(
-                        f"Rejected breaker #{i+1}: requested {b_amps}A exceeds "
+                        f"A breaker was rejected: requested {b_amps}A exceeds "
                         f"panel/main limit of {limit_amps}A."
                     )
                     over_limit_found = True
@@ -1689,7 +1685,7 @@ class PanelboardEngine(BaseEngine):
             elif desired_at_240 >= 42:
                 base = "QOH"
             elif (rating_voltage in (208, 240)) and desired_at_240 >= 25:
-                base = "QH"  # 25–41k requires H-family at 240V
+                base = "QH"  # 25-41k requires H-family at 240V
             elif desired_at_240 >= 22:
                 base = "QO-VH" if allow_plug else "QOB-VH"
             else:
