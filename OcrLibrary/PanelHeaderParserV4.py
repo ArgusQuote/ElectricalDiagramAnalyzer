@@ -72,45 +72,6 @@ class PanelParser:
 
     _THRESH = {"VOLTAGE":0.55, "BUS":0.54, "MAIN":0.54, "AIC":0.54, "NAME":0.50}
 
-    # ====== Non-panel label hits (quick gate) ======
-    _NOT_PANEL_LABELS = {
-        "WIREWAY",
-        "WW",
-        "FEEDER",
-        "MECHANICAL",
-        "CHART",
-        "FEEDER",
-        "TRANSFORMER",
-        "XFMR",
-        "TRANSFMR",
-        "GENERATOR",
-        "DISCONNECT",
-        "EQUIPMENT",
-        "DETAIL",
-        "ELEVATION",
-        "MECHANICAL",
-        "MECH",
-        "METER"
-    }
-
-    def _line_hits_not_panel(self, lines) -> tuple[bool, str]:
-        """
-        Scan the top few lines for clear 'not panel' signals.
-        Return (hit, matched_token). Robust to spacing/case.
-        """
-        import re
-        if not lines:
-            return (False, "")
-        top = lines[: min(4, len(lines))]  # only need a quick sniff test
-        for ln in top:
-            up = (ln.get("text") or "").upper()
-            for token in self._NOT_PANEL_LABELS:
-                # whole-word or phrase match; tolerate extra spaces
-                t = re.sub(r"\s+", r"\\s+", token.strip())
-                if re.search(rf"(^|\W){t}(\W|$)", up):
-                    return (True, token)
-        return (False, "")
-
     _SIGMA_PX = 80.0
 
     def __init__(self, debug: bool = False, voltage_first_number_only: bool = True):
@@ -232,24 +193,6 @@ class PanelParser:
         lines = self._group_into_lines(tokens)
         header_cap = max(1, int(self.labels_cfg.get("headerMaxLines", 15)))
         lines = lines[:header_cap]
-
-        # --- Non-panel quick gate (bail before heavy association/scoring) ---
-        hit_not_panel, matched = self._line_hits_not_panel(lines)
-        if hit_not_panel:
-            # Return a lightweight header result that marks this as a false positive.
-            # Downstream UI will show name="false positive", attrs=Nones, and still keep the image.
-            return {
-                "type": "panelboard",
-                "name": "false positive",
-                "attrs": {
-                    "amperage": None,
-                    "voltage": None,
-                    "intRating": None,
-                    "mainBreakerAmperage": None,
-                    "detected_breakers": [],   # ensure nothing downstream tries to use breakers
-                    "_reason": f"non-panel label hit: {matched}",
-                },
-            }
 
         # ===== Association pipeline =====
         labels_map = self._collect_label_candidates(items)
