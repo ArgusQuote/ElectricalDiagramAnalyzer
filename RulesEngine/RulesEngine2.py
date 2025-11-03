@@ -512,7 +512,7 @@ class PanelboardEngine(BaseEngine):
 
                 # Standard amp window only
                 if amps < MIN_BREAKER_AMP or amps > MAX_BREAKER_AMP:
-                    notes.append(f"A breaker was skipped: amperage {amps}A outside supported 15-1200A.")
+                    notes.append(f"A breaker was skipped: detected amperage {amps}A outside supported 15-1200A.")
                     continue
 
                 # Append exactly once after all checks
