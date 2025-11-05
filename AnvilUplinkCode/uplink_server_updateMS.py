@@ -1,9 +1,6 @@
 # Anvil Uplink VM (disk only) + Rules Engine defaults + cycle-time
 # -------------------------------
 import os, re, json, sys, threading, traceback
-import contextlib
-import concurrent.futures
-from multiprocessing import get_context
 from queue import Queue, Empty
 from pathlib import Path
 from datetime import datetime, timezone
@@ -11,6 +8,25 @@ import anvil.server
 import platform
 import os as _os
 from anvil import BlobMedia
+
+# --- Determinism & thread limits (must be before EasyOCR/PyTorch loads) ---
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+try:
+    import torch
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:
+        pass
+except Exception:
+    pass
 
 # ---------- CONFIG ----------
 # Ensure your repo is on sys.path (for imports below)
@@ -26,54 +42,8 @@ BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
 # Worker pool limits
-MAX_WORKERS = 3
+MAX_WORKERS = 3          # thread workers for different jobs
 MAX_INFLIGHT_PER_USER = 1
-
-# ===== Determinism & Thread Caps (must run before heavy libs init) =====
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("PYTHONHASHSEED", "0")
-
-def _set_runtime_determinism():
-    # OpenCV: cap threads if available
-    try:
-        import cv2
-        try:
-            cv2.setNumThreads(1)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    # PyTorch/EasyOCR determinism if present
-    try:
-        import torch
-        torch.set_num_threads(1)
-        torch.set_num_interop_threads(1)
-        if hasattr(torch.backends, "cudnn"):
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
-
-def _log_run_fingerprint(tag: str = ""):
-    try:
-        import torch
-        devs = []
-        if torch.cuda.is_available():
-            for i in range(torch.cuda.device_count()):
-                devs.append(torch.cuda.get_device_name(i))
-        cudnn_det = getattr(getattr(torch.backends, "cudnn", None), "deterministic", None)
-        cudnn_bmk = getattr(getattr(torch.backends, "cudnn", None), "benchmark", None)
-        print(f">>> FPRINT {tag} | torch_cuda={torch.cuda.is_available()} devices={devs} cudnn.det={cudnn_det} cudnn.bmk={cudnn_bmk}")
-    except Exception:
-        print(f">>> FPRINT {tag} | torch not present")
-
-_set_runtime_determinism()
-_log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilter import PageFilter
@@ -94,7 +64,6 @@ print(f">>> NODE_ID={NODE_ID}")
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
     try:
-        _log_run_fingerprint("warmup")
         import numpy as np, cv2, tempfile
         img = np.zeros((32, 32, 3), dtype=np.uint8)
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
@@ -309,7 +278,7 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     out = dict(dst)
     for k, v in (src or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
+            out = {**out, k: _deep_merge(out[k], v)}
         else:
             out[k] = v
     return out
@@ -358,7 +327,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
             longest_cap_px=9000,
             proc_scale=0.5,
             use_ocr=True,
-            ocr_gpu=False,
+            ocr_gpu=False,                    # <— keep GPU free for EasyOCR in pipeline
             verbose=True,
             debug=False,                      # set True to write JSON log at output_dir/filter_debug/
             rect_w_fr_range=(0.20, 0.60),
@@ -373,8 +342,6 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
         kept_pages, filtered_pdf = [], None
 
     # Choose which PDF to feed into the finder:
-    # - if filter kept at least one page, use filtered_pdf
-    # - else fall back to the original PDF (or return empty if you prefer)
     pdf_for_finder = filtered_pdf if (filtered_pdf and len(kept_pages) > 0) else str(saved_pdf)
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
@@ -386,10 +353,10 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
         min_void_area_fr=0.004,
         min_void_w_px=90,
         min_void_h_px=90,
-        # ↓ tighten these three to kill giant/near-page blobs
-        max_void_area_fr=0.30,          # was 0.30
-        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
-        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
+        # ↓ tighten these to kill giant/near-page blobs
+        max_void_area_fr=0.30,
+        void_w_fr_range=(0.20, 0.60),
+        void_h_fr_range=(0.20, 0.55),
         min_whitespace_area_fr=0.01,
         margin_shave_px=6,
         pad=6,
@@ -527,17 +494,17 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     spaces     = spaces_t if spaces_t is not None else spaces_h
     det_brkrs  = hdr_brkrs + tbl_brkrs
 
-    # ===== 2-strikes pre-check =====
+    # ===== 4-strikes pre-check =====
     panel_limit = next((v for v in (main_amp, amperage) if isinstance(v, int) and v > 0), None)
     would_skip = _count_would_skip_breakers(det_brkrs, panel_limit)
 
     notes = []
-    if would_skip >= 2:
+    if would_skip >= 4:
         det_brkrs = []
         panel_name = name or Path(src_img).stem
         notes.append(
             f"No breakers supplied for '{panel_name}': {would_skip} breaker(s) failed validation "
-            f"(2 or more breakers had detection errors - User review required)."
+            f"(amps outside 15–1200A and/or exceeded panel/main rating)."
         )
 
     comp = {
@@ -560,27 +527,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
 
     return comp
 
-# ---------- Worker-side call for one image ----------
-def _btp_run_once(
-    image_path: str,
-    *,
-    run_analyzer: bool = True,
-    run_parser: bool = True,
-    run_header: bool = True,
-    debug: bool = True
-) -> dict:
-    """
-    Construct a BreakerTablePipeline and run it for this image.
-    (No global caching; per your request.)
-    """
-    pipe = BreakerTablePipeline(debug=debug)
-    return pipe.run(
-        image_path,
-        run_analyzer=run_analyzer,
-        run_parser=run_parser,
-        run_header=run_header,
-    )
-
 # ---------- Core job processing ----------
 def _process_job(job_id: str):
     """
@@ -591,7 +537,6 @@ def _process_job(job_id: str):
 
     try:
         print(f">>> worker start: {job_id}")
-        _log_run_fingerprint(f"job_start:{job_id}")
         prev = _json_read_or_none(sp["status"]) or {}
         print(f">>> DIAG worker prev keys: {sorted(list(prev.keys()))}")
         print(f">>> DIAG worker prev.owner_id: {str(prev.get('owner_id') or '').strip().lower()!r}")
@@ -660,27 +605,26 @@ def _process_job(job_id: str):
         debug_dir.mkdir(parents=True, exist_ok=True)
 
         total = len(imgs)
-        done = 0
 
-        # ---------- SEQUENTIAL IMAGE PARSING (deterministic per job) ----------
-        print(f">>> sequential parsing for {total} images (per-job determinism)")
-        components = [None] * total  # preserve order
+        # ---------- SEQUENTIAL parsing with ONE pipeline (dev-style) ----------
+        print(f">>> sequential parsing (dev-style) for {total} images")
+        components = [None] * total
+        pipe = BreakerTablePipeline(debug=True)   # <— reuse one OCR/Torch instance
+
         for idx, img_path in enumerate(imgs):
             if _is_canceled(job_dir):
-                pct = 10.0 + (done / max(1, total)) * 80.0
-                _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
+                _status_write(job_dir, "canceled", step="parsing", image_count=total,
+                              noticed_ts_ms=noticed_ts_ms, progress=10.0 + (idx / max(1, total)) * 80.0)
                 _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
                 print(f">>> worker canceled mid-parse: {job_id}")
                 return
 
             try:
-                # Run OCR/analysis sequentially
-                raw = _btp_run_once(
+                raw = pipe.run(
                     img_path,
                     run_analyzer=True,
                     run_parser=True,
                     run_header=True,
-                    debug=True
                 )
                 if isinstance(raw, dict) and "_error" in raw:
                     raise RuntimeError(raw["_error"])
@@ -697,6 +641,7 @@ def _process_job(job_id: str):
                 print(f"    Spaces (merged): {attrs.get('spaces')}")
                 print(f"    Detected breakers: {len(attrs.get('detected_breakers') or [])}")
                 components[idx] = comp
+
             except Exception as e:
                 print(f">>> ERROR analyzing image {idx + 1}: {e}")
                 print(f">>> Traceback: {traceback.format_exc()}")
@@ -710,8 +655,7 @@ def _process_job(job_id: str):
                 }
 
             # progress after each image completes fully (A→P→H)
-            done += 1
-            pct = 10.0 + (done / max(1, total)) * 80.0
+            pct = 10.0 + ((idx + 1) / max(1, total)) * 80.0
             _status_write(
                 job_dir,
                 "running",
@@ -884,8 +828,8 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "job_dir": str(job_dir),
         "saved_pdf": str(saved_pdf),
         "output_dir": str(job_dir / "pdf_images"),
-        "images": [],                  # not rendered yet
-        "image_count": 0,              # not rendered yet
+        "images": [],
+        "image_count": 0,
         "ui_overrides": normalized_overrides,
         "noticed_ts_ms": noticed_ts_ms,
         "owner_email": owner_email,

@@ -20,7 +20,7 @@ from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 PDF_PATH = '~/Documents/Diagrams/Panels_Example.pdf'
 OUTPUT_DIR = '~/Documents/Diagrams/PanelSearchOutput'
 # ================================================================
-
+ 
 def _first(d: dict, keys, default=None):
     for k in keys:
         if k in d and d[k] not in (None, "", []):

@@ -7,8 +7,23 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "V19_4_SPLIT_WITH_HEADER"
+API_VERSION = "V2_HEADER_VALIDATE_SKIP"
 API_ORIGIN  = __file__
+
+# Panel validation snap map for spaces normalization
+SNAP_MAP = {
+    16: 18, 20: 18,
+    28: 30, 32: 30,
+    40: 42, 44: 42,
+    52: 54, 56: 54,
+    64: 66, 68: 66,
+    70: 72, 74: 72,
+    82: 84, 86: 84,
+}
+# Header-level validation (pre-table-parse)
+VALID_VOLTAGES = {120, 208, 240, 480, 600}
+AMP_MIN = 100
+AMP_MAX = 1200
 
 # ----- resilient imports (package and fallback local) -----
 try:
@@ -30,7 +45,7 @@ class BreakerTablePipeline:
     Class-based, single point of entry that runs:
       1) BreakerTableAnalyzer3.analyze()
       2) PanelHeaderParserV4.PanelParser.parse_panel()
-      3) BreakerTableParser4.parse_from_analyzer()  (unless header says 'false positive')
+      3) BreakerTableParser4.parse_from_analyzer()
 
     Mirrors the working Dev test env you shared.
     """
@@ -41,6 +56,138 @@ class BreakerTablePipeline:
         # stage objects (created on demand so we can reuse OCR reader)
         self._analyzer = None
         self._header_parser = None
+
+    # ---- numeric helpers ----
+    def _to_int_or_none(self, v):
+        """
+        Robust converter: pulls digits only (handles '114A', '90 A', '13640 VA').
+        Returns int or None.
+        """
+        if v is None:
+            return None
+        s = ''.join(ch for ch in str(v) if ch.isdigit())
+        if not s:
+            return None
+        try:
+            return int(s)
+        except Exception:
+            return None
+
+    # ---- validation helpers ----
+    def _mask_header_non_name(self, header_result: dict | None, *, detected_name):
+        """
+        Preserve header schema. Keep 'name'; set all other scalar attrs to 'x'.
+        If attrs dict exists, keep it as a dict and set its keys to 'x'
+        (except 'detected_breakers' which stays an empty list for downstream safety).
+        """
+        out = dict(header_result) if isinstance(header_result, dict) else {}
+        out["name"] = detected_name
+        attrs = out.get("attrs")
+        if isinstance(attrs, dict):
+            masked = {}
+            for k in attrs.keys():
+                if k == "detected_breakers":
+                    masked[k] = []
+                else:
+                    masked[k] = "x"
+            out["attrs"] = masked
+        else:
+            out["attrs"] = {}
+        # Any other top-level non-name fields → "x"
+        for k in list(out.keys()):
+            if k not in ("name", "attrs"):
+                out[k] = "x"
+        return out
+
+    def _mask_parser_non_name(self, parser_result: dict | None, *, detected_name):
+        """
+        Preserve parser schema. Keep 'name'. Set 'spaces' to 'x' and
+        'detected_breakers' to [] if present. Any other keys → 'x'.
+        """
+        out = dict(parser_result) if isinstance(parser_result, dict) else {}
+        out["name"] = detected_name
+        if "spaces" in out:
+            out["spaces"] = "x"
+        else:
+            out["spaces"] = "x"
+        # Always expose detected_breakers for downstream callers
+        out["detected_breakers"] = []
+        return out or {"name": detected_name, "spaces": "x", "detected_breakers": []}
+
+    def _extract_panel_keys(self, analyzer_result: dict | None, header_result: dict | None, parser_result: dict | None):
+        """
+        Build a single normalized header view for validation and downstream use.
+        Priority:
+          1) HeaderParser normalized attrs
+          2) Analyzer normalized picks (if exported)
+        Also supports both flat and nested (header['attrs']) schemas.
+        """
+        ar = analyzer_result or {}
+        hdr = header_result or {}
+        attrs = hdr.get("attrs") if isinstance(hdr.get("attrs"), dict) else {}
+        prs = parser_result or {}
+
+        # --- Pull analyzer's normalized header if available ---
+        ah = {}
+        nh = ar.get("normalized_header")
+        if isinstance(nh, dict):
+            ah = {
+                "name": nh.get("name"),
+                "voltage": nh.get("voltage"),
+                "bus_amps": nh.get("bus"),
+                "main_amps": nh.get("main"),
+            }
+
+        def pick(d: dict, *keys):
+            for k in keys:
+                if k in d and d[k] is not None:
+                    return d[k]
+            return None
+
+        # Normalized priority: HeaderParser first, then Analyzer normalized
+        name = pick(hdr, "name") or ah.get("name")
+
+        # Voltage may be in header or header['attrs'] or analyzer normalized
+        volts = pick(hdr, "volts", "voltage", "v") or pick(attrs, "volts", "voltage", "v") or ah.get("voltage")
+
+        # Bus amps (panel bus rating)
+        bus_amps = pick(hdr, "bus_amps", "busamps", "bus", "amperage") \
+                   or pick(attrs, "bus_amps", "busamps", "bus", "amperage") \
+                   or ah.get("bus_amps")
+
+        # Main amps optional; various spellings including camelCase
+        main_amps = pick(hdr, "main_amps", "main", "main_rating", "main_breaker_amps", "mainBreakerAmperage") \
+                    or pick(attrs, "main_amps", "main", "main_rating", "main_breaker_amps", "mainBreakerAmperage") \
+                    or ah.get("main_amps")
+
+        spaces = prs.get("spaces")
+        return name, volts, bus_amps, main_amps, spaces
+
+    def _parse_voltage(self, v):
+        """Return system voltage from strings like '208Y/120', '480/277', '120/240', or bare '208', else None."""
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v if v in VALID_VOLTAGES else None
+        import re
+        s = str(v)
+        m_pair = re.search(r'(?<!\d)(120|208|240|277|480|600)\s*[Y/]\s*(120|208|240|277|480|600)(?!\d)', s, flags=re.I)
+        if m_pair:
+            hi = max(int(m_pair.group(1)), int(m_pair.group(2)))
+            return hi if hi in VALID_VOLTAGES else None
+        m_single = re.search(r'(?<!\d)(120|208|240|480|600)(?!\d)', s)
+        return int(m_single.group(1)) if m_single and int(m_single.group(1)) in VALID_VOLTAGES else None
+
+    def _is_valid_amp(self, val) -> bool:
+        """
+        Accept ints (or numeric-like strings) in [AMP_MIN, AMP_MAX] whose last digit is 0 or 5.
+        """
+        n = self._to_int_or_none(val)
+        if n is None:
+            return False
+        if n < AMP_MIN or n > AMP_MAX:
+            return False
+        return (n % 10) in (0, 5)
 
     # ---- helpers ----
     def _ensure_analyzer(self):
@@ -110,16 +257,35 @@ class BreakerTablePipeline:
                 if self.debug:
                     print(f"[WARN] Header parser failed: {e}")
 
-        # --- 3) Table Parser (last; skip on header false-positive) ---
+        # --- 3) Pre-parse validation (header-only); then Table Parser ---
         should_run_parser = run_parser
+        panel_status = None
+
+        # Header-only checks: volts (required), bus_amps (required), main_amps (optional)
         try:
-            hdr_name = (header_result or {}).get("name", "")
-            if isinstance(hdr_name, str) and hdr_name.strip().lower() == "false positive":
+            detected_name, volts, bus_amps, main_amps, _spaces_unused = self._extract_panel_keys(analyzer_result, header_result, None)
+
+            volts_i = self._parse_voltage(volts)
+            volts_invalid = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
+            bus_invalid   = not self._is_valid_amp(bus_amps)                          # REQUIRED
+            main_invalid  = (main_amps is not None) and (not self._is_valid_amp(main_amps))  # OPTIONAL
+
+            if volts_invalid or bus_invalid or main_invalid:
+                panel_status = f"unable to detect key information on panel ({detected_name})"
+                # Mask header & parser safely (preserve schema); SKIP heavy parse
+                header_result = self._mask_header_non_name(header_result, detected_name=detected_name)
+                parser_result = self._mask_parser_non_name(None, detected_name=detected_name)
                 should_run_parser = False
                 if self.debug:
-                    print("[INFO] Skipping breaker table parser due to header false positive")
-        except Exception:
-            pass
+                    miss = []
+                    if volts_invalid: miss.append(f"volts={volts!r}")
+                    if bus_invalid:   miss.append(f"bus_amps={bus_amps!r}")
+                    if main_invalid:  miss.append(f"main_amps={main_amps!r}")
+                    print("[INFO] Skipping TABLE PARSER due to invalid header fields "
+                        f"(name={detected_name!r}; {', '.join(miss)})")
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Header pre-parse validation failed: {e}")
 
         if should_run_parser:
             # lazy-import if we couldn't import above
@@ -156,7 +322,42 @@ class BreakerTablePipeline:
             except Exception:
                 pass
 
-        # --- combined result (same shape as before) ---
+        # --- panel validity & masking logic (spaces check; only if not flagged already) ---
+        try:
+            if panel_status is None:
+                detected_name, volts, bus_amps, main_amps, spaces = self._extract_panel_keys(analyzer_result, header_result, parser_result)
+                # volts/bus/main re-check for safety + spaces validation
+                volts_i = self._parse_voltage(volts)
+                volts_invalid  = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
+                bus_invalid    = not self._is_valid_amp(bus_amps)                         # REQUIRED
+                main_invalid   = (main_amps is not None) and (not self._is_valid_amp(main_amps))  # OPTIONAL
+                # Normalize spaces, then allow any positive int (or, if you prefer, only allow the snapped set)
+                if isinstance(spaces, int):
+                    spaces_norm = SNAP_MAP.get(spaces, spaces)
+                    # permissive: any positive int is fine
+                    spaces_invalid = spaces_norm is None or spaces_norm <= 0
+                    # or strict to your canonical set:
+                    # CANON = set(SNAP_MAP.values())
+                    # spaces_invalid = spaces_norm not in CANON
+                else:
+                    spaces_invalid = True
+
+                if spaces_invalid or volts_invalid or bus_invalid or main_invalid:
+                    panel_status = f"unable to detect key information on panel ({detected_name})"
+                    header_result = self._mask_header_non_name(header_result, detected_name=detected_name)
+                    parser_result = self._mask_parser_non_name(parser_result,  detected_name=detected_name)
+                    if self.debug:
+                        miss = []
+                        if volts_invalid: miss.append(f"volts={volts!r}")
+                        if bus_invalid:   miss.append(f"bus_amps={bus_amps!r}")
+                        if main_invalid:  miss.append(f"main_amps={main_amps!r}")
+                        print("[INFO] Skipping TABLE PARSER due to invalid header fields "
+                            f"(name={detected_name!r}; {', '.join(miss)})")
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Panel validation/masking failed: {e}")
+
+        # --- combined result ---
         return {
             "apiVersion": API_VERSION,
             "origin": API_ORIGIN,
@@ -170,6 +371,7 @@ class BreakerTablePipeline:
                 "parser": parser_result,
                 "header": header_result,
             },
+            "panelStatus": panel_status,  # None if OK; message if flagged
         }
 
 
@@ -235,3 +437,7 @@ if __name__ == "__main__":
     print("\n>>> Stage Summary:")
     for key, val in result["results"].items():
         print(f"  {key}: {'OK' if val else 'None'}")
+    if result.get("panelStatus"):
+        print(f"  status: {result['panelStatus']}")
+    else:
+        print("  status: OK")
