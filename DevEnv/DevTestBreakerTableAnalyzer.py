@@ -17,8 +17,8 @@ from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 
 # ---------- INPUTS ----------
-PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/good_tester_combo.pdf'
-OUTPUT_DIR = '~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput'
+PDF_PATH = '~/Documents/Diagrams/Panels_Example.pdf'
+OUTPUT_DIR = '~/Documents/Diagrams/PanelSearchOutput'
 # ================================================================
 
 def _first(d: dict, keys, default=None):
