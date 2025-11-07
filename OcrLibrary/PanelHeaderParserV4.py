@@ -47,7 +47,7 @@ class PanelParser:
             r"\bBUS{1,2}\b", r"\bBUS{1,2}\s*RATING\b", r"\bPANEL\s*RATING\b", r"\bAMPACITY\b", r"\bRATING\b"
         ],
         "MAIN": [r"\bMAIN\s*(RATING|BREAKER|DEVICE|TYPE)\b", r"\bMAIN\s*(TYPE|RATING|BREAKER|DEVICE)\b", r"\bMCB\b",
-                 r"\bMLO\b", r"\bMAIN\s*LUGS?\b", r"\bMAIN\s*TYPE\b", r"\bMAINS?\b"
+                 r"\bMLO\b", r"\bMAIN\s*LUGS?\b", r"\bMAIN\s*TYPE\b", r"\bMAINS?\b", r"\bMAIN\b"
         ],
         "AIC": [
             r"\bA\.?\s*I\.?\s*C\.?\b", r"\bAIC\b", r"\bKAIC\b", r"\bSCCR\b",
@@ -375,33 +375,44 @@ class PanelParser:
 
         # NAME
         name = (chosen_map["NAME"]["text"] if chosen_map["NAME"] else "") or ""
+        name = self._normalize_name_output(name)
 
         # VOLTAGE
         voltage_val = None
         if chosen_map["VOLTAGE"]:
-            txtU = chosen_map["VOLTAGE"]["text"].upper()
-            txtN = self._normalize_voltage_text(txtU)
-            # Accept: 480Y/277, 480Y277, 277/480V, 208/120, etc. (slash optional; OCR fixes)
+            txtU0 = chosen_map["VOLTAGE"]["text"].upper()
+            txtU  = self._normalize_digits(txtU0)
+            txtN  = self._normalize_voltage_text(txtU)
+
+            # 1) Try proper pair first: 480Y/277, 277/480V, 208/120, etc.
             m = re.search(r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b', txtN)
             if m:
                 a, b = int(m.group(1)), int(m.group(2))
                 voltage_val = 120 if (120 in (a, b) and 240 in (a, b)) else max(a, b)
             else:
-                # single like 480 V (or just 480)
+                # 2) Single number fallback
                 m2 = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
-                voltage_val = int(m2.group(1)) if m2 else None
+                if m2:
+                    n = int(m2.group(1))
+                    # Special rule: if the only thing we caught is 277, assume standard 480/277 → 480
+                    if n == 277:
+                        voltage_val = 480
+                    else:
+                        voltage_val = n
 
         # BUS
         bus_amp = None
         if chosen_map["BUS"]:
-            m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", chosen_map["BUS"]["text"].upper())
+            tU = self._normalize_digits(chosen_map["BUS"]["text"].upper())  # CHG
+            m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", tU)
             if m: bus_amp = _to_int(m.group(1))
 
         # MAIN
         main_amp = None
         self.last_main_type = None
         if chosen_map["MAIN"]:
-            txtU = chosen_map["MAIN"]["text"].upper()
+            txtU0 = chosen_map["MAIN"]["text"].upper()
+            txtU  = self._normalize_digits(txtU0)  # CHG
             m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", txtU)
             if m: main_amp = _to_int(m.group(1))
             if re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txtU): self.last_main_type = "MLO"
@@ -410,13 +421,15 @@ class PanelParser:
         # AIC → kA (65kA, 65 kA, 65,000 A, 65000)
         int_rating_ka = None
         if chosen_map["AIC"]:
-            t = chosen_map["AIC"]["text"].upper().replace(" ", "")
+            t_raw = chosen_map["AIC"]["text"].upper()
+            t_fix = self._normalize_digits(t_raw)                 # CHG
+            t_nos = t_fix.replace(" ", "")
             # e.g. 65kA
-            mk = re.search(r"\b(\d{2,3})K?A\b", t)
-            if mk and "KA" in t:
+            mk = re.search(r"\b(\d{2,3})K?A\b", t_nos)
+            if mk and "KA" in t_nos:
                 int_rating_ka = int(mk.group(1))
             else:
-                m = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", chosen_map["AIC"]["text"].upper())
+                m = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", t_fix)
                 if m:
                     val = int(m.group(1).replace(",", ""))
                     int_rating_ka = max(1, val // 1000)
@@ -604,59 +617,124 @@ class PanelParser:
             return "MCB"
         return None
 
+    def _normalize_name_output(self, s: str) -> str:
+        import re
+        u = (s or "").strip()
+        u = re.sub(r'^(?:PANEL(?:BOARD)?\b\s*:?)\s*', '', u, flags=re.I)  # drop ONLY the leading label
+        u = re.sub(r'\s{2,}', ' ', u).strip()
+        return u
+
     def _simple_name_from_top(self, lines) -> Optional[dict]:
         """
-        Prefer the top 1-2 lines. If a label word like PANEL/PANELBOARD/BOARD appears,
-        choose the FIRST short alphanum token to its RIGHT on the same line.
-        Else fall back to the first short alphanum token on those lines.
+        Robust name extraction:
+        1) Handle SINGLE-TOKEN '...Panel: NAME' (colon inside same token)
+        2) Handle MULTI-TOKEN '... Panel : NAME ...' (window to the right)
+        3) Fallbacks (label-without-colon, short ID)
+        Prefers names that contain at least one letter to avoid picking bare numbers like '3'.
         """
         import re
         if not lines:
             return None
 
         LABEL_WORDS = {"PANEL", "PANELBOARD", "BOARD", "PNL"}
+        HARD_STOPS = {
+            "SYSTEM","DISTRIBUTION","VOLT","VOLTS","VOLTAGE","V","PHASE","PHASES","PH","Ø",
+            "WIRE","WIRES","RATING","BUS","MAIN","MCB","MLO","AIC","KAIC","SCCR","FAULT",
+            "MOUNTING","FEED","FEEDS","FED","FROM","BY","FEED-THRU","FEEDTHRU","FEED THRU",
+            "NUMBER","NO.","ENCLOSURE","TYPE","NOTES","TABLE","SCHEDULE","DATE","REV","NEUTRAL"
+        }
+
+        VOLT_RE = re.compile(r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b')
+        AMPS_RE = re.compile(r'\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b', re.I)
+
+        def _mk_val_by_rects(rects, texts, confs, conf_hint=None, shape=0.98, ctx=0.38):
+            r1, r2 = rects[0], rects[-1]
+            x1,y1 = min(r1[0], r2[0]), min(r1[1], r2[1])
+            x2,y2 = max(r1[2], r2[2]), max(r1[3], r2[3])
+            text  = re.sub(r"\s+", " ", " ".join((t or "").strip() for t in texts)).strip()
+            conf  = float(conf_hint if conf_hint is not None else (sum(confs)/max(1,len(confs))))
+            return {"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":0.5*(x1+x2),"yc":0.5*(y1+y2),
+                    "conf":conf,"text":text,"shape":shape,"ctx":ctx}
+
+        def _has_letter(s: str) -> bool:
+            return any(ch.isalpha() for ch in s or "")
+
         top = lines[: min(3, len(lines))]
 
-        def _mk_val(ln, tok_text, tok_rect=None, conf_hint=0.65, shape=0.95, ctx=0.30):
-            # place box on the token if provided; else use whole line
-            if tok_rect is None:
-                x1,y1,x2,y2 = ln["rect"]
-            else:
-                x1,y1,x2,y2 = tok_rect
-            return {
-                "x1":x1,"y1":y1,"x2":x2,"y2":y2,
-                "xc":0.5*(x1+x2),"yc":0.5*(y1+y2),
-                "conf":conf_hint,"text":tok_text,
-                "shape":shape,"ctx":ctx
-            }
-
-        # pass 1: “LABEL  ID” on same line → pick ID
+        # PASS 0: SINGLE-TOKEN "…Panel: NAME" → split inside the token itself
         for ln in top:
-            toks = ln["tokens"]  # list of (rect, text, conf)
+            for (r,t,c) in ln["tokens"]:
+                raw = (t or "").strip()
+                up  = raw.upper()
+                if ":" in up:
+                    # Find a PANEL-ish word before the colon within the same token
+                    parts = up.split(":", 1)
+                    left, right = parts[0], parts[1]
+                    if any(lbl in left.split() for lbl in LABEL_WORDS):
+                        # Clean right part; allow spaces and keep inner 'PANEL'
+                        right_clean = re.sub(r"[^A-Za-z0-9._\-/\s]", "", right).strip()
+                        if right_clean and _has_letter(right_clean) and not VOLT_RE.search(right_clean) and not AMPS_RE.search(right_clean):
+                            return _mk_val_by_rects([r], [right_clean], [c], conf_hint=float(c or 0.75), shape=0.98, ctx=0.40)
+
+        # PASS 1: MULTI-TOKEN colon window to the right of a PANEL label token
+        for ln in top:
+            toks = ln["tokens"]
+            colon_idx = None
+            for i,(r,t,c) in enumerate(toks):
+                if ":" in (t or ""):
+                    has_panel_left = any(
+                        ((tt or "").strip().upper().strip(":") in LABEL_WORDS)
+                        for (_,tt,_) in toks[max(0, i-4):i+1]
+                    )
+                    if has_panel_left:
+                        colon_idx = i
+                        break
+            if colon_idx is None:
+                continue
+
+            picked_rects, picked_texts, picked_confs = [], [], []
+            MAX_TOKENS = 6
+            for j in range(colon_idx + 1, len(toks)):
+                (r,t,c) = toks[j]
+                raw = (t or "").strip()
+                up  = raw.upper().strip()
+                if ":" in raw: break
+                if up in HARD_STOPS: break
+                if VOLT_RE.search(up) or AMPS_RE.search(up): break
+                if up and up not in self._NAME_STOPWORDS:
+                    # keep fairly short tokens; allow multi-word names; must contain a letter
+                    if (_has_letter(up) and (re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,24}", up) or len(up) <= 16)):
+                        picked_rects.append(r); picked_texts.append(raw); picked_confs.append(float(c or 0.7))
+                if len(picked_rects) >= MAX_TOKENS:
+                    break
+            if picked_rects:
+                return _mk_val_by_rects(picked_rects, picked_texts, picked_confs)
+
+            # Fallback on this line: first short ID after colon that has a letter
+            for j in range(colon_idx + 1, len(toks)):
+                (r,t,c) = toks[j]
+                up = (t or "").strip().upper().strip(":")
+                if up and _has_letter(up) and up not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,12}", up):
+                    return _mk_val_by_rects([r],[t],[c], conf_hint=float(c or 0.7), shape=0.96, ctx=0.35)
+
+        # PASS 2: Label present but no colon → first short ID to its right (must have a letter)
+        for ln in top:
+            toks = ln["tokens"]
             for i,(r,t,c) in enumerate(toks):
                 up = (t or "").strip().upper().strip(":")
                 if up in LABEL_WORDS:
-                    # scan rightwards for the first short, clean ID
                     for j in range(i+1, len(toks)):
-                        (r2, t2, c2) = toks[j]
+                        (r2,t2,c2) = toks[j]
                         up2 = (t2 or "").strip().upper().strip(":")
-                        if up2 and up2 not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-\/]{0,12}", up2):
-                            return _mk_val(ln, up2, tok_rect=r2, conf_hint=float(c2 or 0.7), shape=0.96, ctx=0.35)
+                        if up2 and _has_letter(up2) and up2 not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,12}", up2):
+                            return _mk_val_by_rects([r2],[t2],[c2], conf_hint=float(c2 or 0.7), shape=0.96, ctx=0.35)
 
-        # pass 2: “PANEL[: ]ID” anywhere on the top lines
-        for ln in top:
-            m = re.search(r"\bPANEL(?:BOARD)?\b\s*:?\s*([A-Z0-9][A-Z0-9._\-\/]{1,12})", ln["text"].upper())
-            if m:
-                tok = m.group(1)
-                if tok and tok not in self._NAME_STOPWORDS:
-                    return _mk_val(ln, tok)
-
-        # pass 3: first short alphanum token on those lines
+        # PASS 3: Last resort: first short token on top lines that has a letter
         for ln in top:
             for (r,t,conf) in ln["tokens"]:
                 up = (t or "").strip().upper().strip(":")
-                if up and up not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-\/]{0,12}", up):
-                    return _mk_val(ln, up, tok_rect=r, conf_hint=float(conf or 0.6), shape=0.92, ctx=0.20)
+                if up and _has_letter(up) and up not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,12}", up):
+                    return _mk_val_by_rects([r],[t],[conf], conf_hint=float(conf or 0.6), shape=0.92, ctx=0.20)
 
         return None
 
@@ -696,11 +774,12 @@ class PanelParser:
         for it in items:
             raw = str(it["text"] or "")
             txt = raw.upper()
+            txtD = self._normalize_digits(txt)
             conf = float(it["conf"])
             x1,y1,x2,y2,xc,yc = it["x1"],it["y1"],it["x2"],it["y2"],it["xc"],it["yc"]
 
             # VOLTAGE (pairs or single; tolerate OCR typos and missing slash)
-            txtN = self._normalize_voltage_text(txt)
+            txtN = self._normalize_voltage_text(txtD)
             pair = re.search(r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b', txtN)
             single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)  # 3–4 digits, no trailing V required
             if pair or single:
@@ -710,8 +789,8 @@ class PanelParser:
                                        "conf":conf,"text":raw,"shape":min(1.0,shape),"ctx":min(1.0,ctx)})
 
             # BUS/MAIN (accept "###A", "### A", and bare "###" when in rating ranges)
-            m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMPS?\.?)\b", txt)  # 60..9999 A w/ unit
-            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txt)           # bare 2–4 digits
+            m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMPS?\.?)\b", txtD)  # 60..9999 A w/ unit
+            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)           # bare 2–4 digits
 
             cand = None
             if m_with_unit:
@@ -733,7 +812,7 @@ class PanelParser:
 
             # AIC (10k..100k) and KA forms: 65kA, 65 kA
             # Normalize spaces for kA form matching
-            t_nos = txt.replace(" ", "")
+            t_nos = txtD.replace(" ", "")
             mk = re.search(r"\b(\d{2,3})KA\b", t_nos)
             if mk:
                 val_ka = int(mk.group(1))
@@ -743,7 +822,7 @@ class PanelParser:
                     out["AIC"].append({"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":xc,"yc":yc,
                                        "conf":conf,"text":raw,"shape":shape,"ctx":ctx})
             else:
-                AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txt)  # e.g. 65000, 65,000A
+                AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A
                 if AIC:
                     val = int(AIC.group(1).replace(",", ""))
                     if 10000 <= val <= 100000:
@@ -862,6 +941,23 @@ class PanelParser:
                 y = float(c["yc"])
                 S_y = max(0.0, min(1.0, 1.0 - (y - band_top) / max(1.0, 1.0 * self._SIGMA_PX)))
 
+            # --- Role-keyword bias: push "BUS..." toward BUS - and "MAIN..." toward MAIN ---
+            tu = str(c.get("text", "")).upper()
+            hint = 0.0
+            if role == "BUS":
+                if re.search(r"\bBUS\b|\bBUS\s*RATING\b|\bPANEL\s*RATING\b", tu):
+                    hint += 1.0
+                if re.search(r"\bMAIN\b|\bMCB\b|\bMAIN\s*(BREAKER|DEVICE|LUGS?)\b", tu):
+                    hint -= 1.0
+            elif role == "MAIN":
+                if re.search(r"\bMAIN\b|\bMCB\b|\bMAIN\s*(BREAKER|DEVICE|LUGS?)\b", tu):
+                    hint += 1.0
+                if re.search(r"\bBUS\b|\bBUS\s*RATING\b|\bPANEL\s*RATING\b", tu):
+                    hint -= 1.0
+
+            # Scale the bias
+            W_hint = 0.22
+
             TOTAL = (
                 W["W_shape"] * float(c.get("shape", 0.0))
                 + W["W_conf"]  * float(c.get("conf", 0.0))
@@ -870,6 +966,7 @@ class PanelParser:
                 + W["W_ctx"]   * float(c.get("ctx", 0.0))
                 - W["W_wrong"] * float(S_wrong)
                 + W["W_y"]     * float(S_y)
+                + W_hint       * float(hint)
             )
             ranked.append({
                 **c,
@@ -905,13 +1002,21 @@ class PanelParser:
         u = re.sub(r'(?<=\d)[IL](?=\d)', '/', u)
 
         # Replace letter O BETWEEN digits with zero
-        u = re.sub(r'(?<=\d)O(?=\d)', '0', u)
+        u = re.sub(r'(?<=\d)[Oo](?=\d)', '0', u)
 
         # Normalize common separators/spaces
         u = u.replace(',', ' ')
         u = u.replace('.', ' ')
         u = re.sub(r'\s+', ' ', u)
 
+        return u
+
+    def _normalize_digits(self, s: str) -> str:
+        u = s or ""
+        # O/o between digits → 0  (e.g., 2O8 → 208, 6o0 → 600)
+        u = re.sub(r'(?<=\d)[Oo](?=\d)', '0', u)
+        # O/o after a digit and before A/AMPS (e.g., 2OA, 20AMPS → 20A/20AMPS)
+        u = re.sub(r'(?<=\d)[Oo](?=\s*(?:A|AMPS?)\b)', '0', u, flags=re.I)
         return u
 
     # ======= overlay & legacy helpers =======

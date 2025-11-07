@@ -27,11 +27,11 @@ AMP_MAX = 1200
 
 # ----- resilient imports (package and fallback local) -----
 try:
-    from OcrLibrary.BreakerTableAnalyzer3 import BreakerTableAnalyzer, ANALYZER_VERSION
+    from OcrLibrary.BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
     from OcrLibrary.BreakerTableParser4   import BreakerTableParser,  PARSER_VERSION
     from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
 except ModuleNotFoundError:
-    from BreakerTableAnalyzer3 import BreakerTableAnalyzer, ANALYZER_VERSION
+    from BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
     from PanelHeaderParserV4   import PanelParser as PanelHeaderParser
     # Table parser may not exist in some light envs; import lazily inside run if needed
     try:
