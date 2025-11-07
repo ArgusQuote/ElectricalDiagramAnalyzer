@@ -14,11 +14,11 @@ if project_root not in sys.path:
 
 # ---------- IMPORTS ----------
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
 
 # ---------- INPUTS ----------
-PDF_PATH = '~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/ELECTRICAL SET (Mark Up).pdf.pdf'
-OUTPUT_DIR = '~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput'
+PDF_PATH = '~/jobs/TAMU_RICHARDSON_PETROLEUM__20251106_212341/E7.1_ELECTRICAL_SCHEDULES_ADD2_electrical_filtered.pdf'
+OUTPUT_DIR = '~/debug/Outputs'
 # ================================================================
  
 def _first(d: dict, keys, default=None):
