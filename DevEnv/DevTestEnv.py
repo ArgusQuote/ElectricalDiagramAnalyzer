@@ -16,7 +16,7 @@ if project_root not in sys.path:
 from PageFilter.PageFilter import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
-from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
 INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/E7.1_ELECTRICAL_SCHEDULES_ADD2_electrical_filtered.pdf").expanduser()
