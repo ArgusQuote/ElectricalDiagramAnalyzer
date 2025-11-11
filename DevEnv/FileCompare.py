@@ -13,8 +13,8 @@ import cv2
 from PIL import Image
 
 # ---------- EDIT THESE ----------
-IMG_A   = os.path.expanduser("~/Documents/Diagrams/CaseStudy1/Panels_Example_page001_table01_rect.png")
-IMG_B   = os.path.expanduser("~/Documents/Diagrams/CaseStudy5/Last4pgs_page002_table01_rect.png")
+IMG_A   = os.path.expanduser("~/Documents/Diagrams/CaseStudyLast5pgs/Last5pgs_page002_table01_rect.png")
+IMG_B   = os.path.expanduser("~/Documents/Diagrams/CaseStudyFiltered/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_table01_rect.png")
 OUT_DIR = os.path.expanduser("~/Documents/Diagrams/CompareOut")
 # Align mode: "resize_to_A" (default) or "error_if_mismatch"
 ALIGN_MODE = "resize_to_A"

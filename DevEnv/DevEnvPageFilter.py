@@ -6,12 +6,11 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir) 
 if project_root not in sys.path: sys.path.append(project_root) 
 
-from PageFilter.PageFilter import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV12 import PanelBoardSearch
+from PageFilter.PageFilterV2 import PageFilter
 
 # ---- Inputs/Outputs ----
 INPUT_PDF = Path("~/Documents/Diagrams/ELECTRICAL SET (Mark Up).pdf").expanduser()
-FILTER_OUT_DIR = Path("~/Documents/Diagrams/PdfOuput").expanduser()
+FILTER_OUT_DIR = Path("~/Documents/Diagrams/PdfOuput2").expanduser()
 FILTER_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---- 1) Run PageFilter ----
@@ -23,7 +22,7 @@ FILTER = PageFilter(
     use_ocr=True,
     ocr_gpu=False,
     verbose=True,
-    debug=True,
+    debug=False,
     # Relaxed ranges
     rect_w_fr_range=(0.10, 0.75),
     rect_h_fr_range=(0.10, 0.85),
@@ -31,6 +30,10 @@ FILTER = PageFilter(
     min_rect_count=1,         # 1 big table box is enough to KEEP
     # A bit more permissive area cut
     min_whitespace_area_fr=0.004,
+    use_ghostscript_letter=True,       # turn GS letter step on/off
+    letter_orientation="landscape",    # "portrait" or "landscape"
+    gs_use_cropbox=True,               # True: fit what's inside CropBox; False: use MediaBox
+    gs_compat="1.7",                   # PDF compatibility level
 )
 kept_pages, dropped_pages, filtered_pdf, log_json = FILTER.readPdf(str(INPUT_PDF))
 print(f"[PageFilter] kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")

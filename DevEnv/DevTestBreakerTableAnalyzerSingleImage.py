@@ -20,8 +20,8 @@ if project_root not in sys.path:
 from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 
 # ---------- INPUTS ----------
-PNG_PATH   = '~/Documents/Diagrams/CaseStudy4/ELECTRICAL SET (Mark Up)_electrical_altered2_page002_table01_rect.png'
-OUTPUT_DIR = '~/Documents/Diagrams/Case5Panel'   # destination where we WANT artifacts
+PNG_PATH   = '~/Documents/Diagrams/CaseStudyGhostScript/Last5_LetterLandscape_VECTOR_page002_table01_rect.png'
+OUTPUT_DIR = '~/Documents/Diagrams/CaseGhostScriptPanel'   # destination where we WANT artifacts
 
 # ================================================================
 def _copy_if_exists(src_path: str | None, dest_dir: Path):

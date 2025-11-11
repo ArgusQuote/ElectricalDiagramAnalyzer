@@ -6,11 +6,11 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir) 
 if project_root not in sys.path: sys.path.append(project_root) 
 
-from VisualDetectionToolLibrary.PanelSearchToolV12 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV13 import PanelBoardSearch
 
 # ---- Inputs/Outputs ----
-INPUT_PDF = Path("~/Documents/Diagrams/Last4pgs.pdf").expanduser()
-FINDER_OUT_DIR = Path("~/Documents/Diagrams/CaseStudy5").expanduser()
+INPUT_PDF = Path("~/Documents/Diagrams/PdfOuput/Last5_LetterLandscape_VECTOR.pdf").expanduser()
+FINDER_OUT_DIR = Path("~/Documents/Diagrams/CaseStudyGhostScript").expanduser()
 FINDER_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---- 2) Run PanelBoardSearch on chosen PDF ----
@@ -30,7 +30,10 @@ FINDER = PanelBoardSearch(
     debug=False,
     verbose=True,
     save_masked_shape_crop=False,
-    replace_multibox=True,
+    
+    # normalization for pipeline
+    norm_fixed_width_px=1489,
+    norm_fixed_height_px=1184,  
 )
 
 crops = FINDER.readPdf(str(INPUT_PDF))
