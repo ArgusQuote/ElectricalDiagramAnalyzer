@@ -1,33 +1,33 @@
-import anvil.files
-from anvil.files import data_files
-import time
+import anvil.email
 import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
 import anvil.server
-import json
+from datetime import datetime
 
-def _jsonify(x):
-  return json.loads(json.dumps(x, default=str))
+@anvil.server.callable
+def record_tos_acceptance(required_version: int):
+  user = anvil.users.get_user()
+  if not user:
+    raise ValueError("Not logged in.")
+  user['tos_accepted'] = True
+  user['tos_accepted_at'] = datetime.utcnow()
+  user['tos_version'] = int(required_version)
+  return True
 
-def _is_pdf(media):
-  if not media: return False
-  ct = (getattr(media, "content_type", "") or "").lower()
-  name = (getattr(media, "name", "") or "").lower()
-  return ("pdf" in ct) or name.endswith(".pdf")
+@anvil.server.callable
+def require_tos_or_bounce():
+  user = anvil.users.get_user()
+  if not user:
+    raise PermissionError("Not logged in.")
 
-@anvil.server.callable(require_user=True)
-def submit_for_detection(file, ui_overrides=None, **kwargs):
-  if not _is_pdf(file):
-    raise anvil.server.ExecutionError("PDFs only")
-  job_note = kwargs.get("job_note")
-  out = anvil.server.call("vm_submit_for_detection", file, ui_overrides or {}, job_note)
-  return _jsonify(out)
-
-@anvil.server.callable(require_user=True)
-def get_job_status(job_id):
-  # Always ask the VM (reads disk). Keep it short so UI stays snappy.
+  CURRENT_TOS_VERSION = 1
   try:
-    out = anvil.server.call("vm_get_job_status", job_id)
-    return json.loads(json.dumps(out, default=str))
-  except Exception as e:
-    # Soft error to keep the client timer polling
-    return {"state": "error", "error": f"Status unavailable: {type(e).__name__}: {e}"}
+    tos_ok = bool(user['tos_accepted']) and int(user['tos_version'] or 0) >= CURRENT_TOS_VERSION
+  except KeyError:
+    tos_ok = False
+
+  if not tos_ok:
+    raise PermissionError("Terms of Service not accepted.")
+  return True

@@ -1,0 +1,81 @@
+import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+import anvil.server
+import anvil.email
+from datetime import datetime
+
+ADMIN_EMAIL = "argusquote@gmail.com"   # change if needed
+USER_FROM   = "no-reply@argusnotifications.com"  # or your default Anvil sender
+
+def _clean_email(e: str) -> str:
+  return (e or "").strip().lower()
+
+@anvil.server.callable
+def record_lead(name: str, company: str, email: str, source: str):
+  name = (name or "").strip()
+  company = (company or "").strip()
+  email = _clean_email(email)
+  source = (source or "").strip() or "Unspecified"
+
+  if not name or not company or not email:
+    raise ValueError("Missing required fields.")
+  if "@" not in email or "." not in email:
+    raise ValueError("Please provide a valid email address.")
+
+  # Save lead
+  app_tables.leads.add_row(
+    name=name,
+    company=company,
+    email=email,
+    source=source,
+    created=datetime.utcnow()
+  )
+
+  result = {"ok": True, "admin_email_sent": False, "user_email_sent": False, "errors": []}
+
+  # ---- Admin notification ----
+  try:
+    admin_subject = "New Argus Sign-up"
+    admin_body = (
+      f"New lead captured:\n\n"
+      f"Name: {name}\n"
+      f"Company: {company}\n"
+      f"Email: {email}\n"
+      f"Source: {source}\n"
+      f"Time (UTC): {datetime.utcnow():%Y-%m-%d %H:%M:%S}\n"
+    )
+    # No custom from_address; safe default Anvil sender.
+    anvil.email.send(
+      to=ADMIN_EMAIL,
+      subject=admin_subject,
+      text=admin_body,
+      reply_to=email   # reply goes to the lead
+    )
+    result["admin_email_sent"] = True
+  except Exception as e:
+    result["errors"].append(f"Admin email failed: {type(e).__name__}: {e}")
+
+  # ---- Auto-reply to user ----
+  try:
+    user_subject = "Thanks for signing up - Argus"
+    user_body = (
+      f"Hi {name},\n\n"
+      "Thanks for signing up for Argus. Our team will reach out soon with next steps.\n\n"
+      "- Argus Team"
+    )
+    anvil.email.send(
+      to=email,
+      subject=user_subject,
+      text=user_body
+      # no from_address; uses default sender
+    )
+    result["user_email_sent"] = True
+  except Exception as e:
+    result["errors"].append(f"User email failed: {type(e).__name__}: {e}")
+
+  # Optional: print to Server Logs for debugging
+  print("record_lead result:", result)
+
+  return result

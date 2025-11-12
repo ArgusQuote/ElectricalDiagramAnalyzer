@@ -1,0 +1,28 @@
+from ._anvil_designer import aboutTemplate
+from anvil import *
+import anvil.server
+import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+from anvil import alert
+from ..SignupModal import SignupModal
+
+class about(aboutTemplate):
+  def __init__(self, **properties):
+    # Set Form properties and Data Bindings.
+    self.init_components(**properties)
+
+    # Any code you write here will run before the form opens.
+
+  def back_btn_click(self, **event_args):
+    open_form('login')
+
+  def sign_up_btn_click(self, **event_args):
+    alert(
+      SignupModal(),
+      title="Sign up today!",
+      large=False,
+      buttons=None,
+      dismissible=True
+    )

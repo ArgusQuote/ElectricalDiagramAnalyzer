@@ -1,0 +1,63 @@
+from ._anvil_designer import FeedbackDialogTemplate
+# client_code/FeedbackDialog/__init__.py
+from anvil import *
+
+class FeedbackDialog(FeedbackDialogTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+
+    # --- Layout (simple & clean) ---
+    root = ColumnPanel(spacing='medium')
+    root.role = None
+    root.width = "100%"
+    self.add_component(root)
+
+    # Title / question
+    title = Label(text="How accurate was this CSV?", align="center", bold=True)
+    title.font_size = 18
+    root.add_component(title)
+
+    # Radio choices
+    self.group_name = "acc_group"
+    self.opt_perfect = RadioButton(text="Perfect (no changes)", group_name=self.group_name)
+    self.opt_good    = RadioButton(text="Good (some changes)", group_name=self.group_name)
+    self.opt_bad     = RadioButton(text="Bad (lots of changes / wrong)", group_name=self.group_name)
+
+    for rb in (self.opt_perfect, self.opt_good, self.opt_bad):
+      rb.font_size = 14
+      rb.set_event_handler('change', self._on_choice_change)
+      root.add_component(rb)
+
+    # Buttons row
+    buttons = FlowPanel(align='right', spacing='small')
+    root.add_component(buttons)
+
+    self.submit_btn = Button(text="Submit", role="outlined-button", enabled=False)
+    self.submit_btn.set_event_handler('click', self._on_submit)
+    buttons.add_component(self.submit_btn)
+
+    # Result
+    self.rating = None
+
+  def _on_choice_change(self, **e):
+    # Enable submit only when a choice is made
+    self.submit_btn.enabled = any([
+      self.opt_perfect.selected,
+      self.opt_good.selected,
+      self.opt_bad.selected
+    ])
+
+  def _on_cancel(self, **e):
+    self.rating = None
+    self.raise_event('x-close-alert')
+
+  def _on_submit(self, **e):
+    if self.opt_perfect.selected:
+      self.rating = "perfect"
+    elif self.opt_good.selected:
+      self.rating = "good"
+    elif self.opt_bad.selected:
+      self.rating = "bad"
+    else:
+      self.rating = None
+    self.raise_event('x-close-alert')
