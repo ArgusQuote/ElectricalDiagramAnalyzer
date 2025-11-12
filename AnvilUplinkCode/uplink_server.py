@@ -76,7 +76,7 @@ _set_runtime_determinism()
 _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
-from PageFilter.PageFilter import PageFilter
+from PageFilter.PageFilterV2 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
 import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
@@ -365,6 +365,12 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
             rect_h_fr_range=(0.20, 0.60),
             min_rectangularity=0.70,
             min_rect_count=2,
+            # A bit more permissive area cut
+            min_whitespace_area_fr=0.004,
+            use_ghostscript_letter=True,       # turn GS letter step on/off
+            letter_orientation="landscape",    # "portrait" or "landscape"
+            gs_use_cropbox=True,               # True: fit what's inside CropBox; False: use MediaBox
+            gs_compat="1.7"                    # PDF compatibility level            
         )
         kept_pages, dropped_pages, filtered_pdf, log_json = pf.readPdf(str(saved_pdf))
         print(f">>> PageFilter: kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")
