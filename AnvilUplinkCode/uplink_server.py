@@ -37,6 +37,14 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
+# ---------- WATCHDOG CONFIG ----------
+WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "15"))  # dial in prod
+WATCHDOG_KILL_GRACE_SEC = int(os.environ.get("WATCHDOG_KILL_GRACE_SEC", "3"))
+WATCHDOG_ERROR_MSG = (
+  "This job took over {mins} minutes to process. "
+  "Please trim the PDF to only relevant pages and try again."
+)
+
 def _set_runtime_determinism():
     # OpenCV: cap threads if available
     try:
@@ -587,6 +595,18 @@ def _btp_run_once(
         run_header=run_header,
     )
 
+def _run_job_target(job_id: str):
+  """
+  Subprocess entrypoint that runs the actual job logic.
+  Keeping this thin ensures termination is clean.
+  """
+  try:
+    _process_job(job_id)
+  except Exception as e:
+    # _process_job already writes status on exceptions, but as a backstop:
+    job_dir = BASE_JOBS_DIR / job_id
+    _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
+
 # ---------- Core job processing ----------
 def _process_job(job_id: str):
     """
@@ -788,25 +808,62 @@ def _process_job(job_id: str):
 
 # ---------- Worker pool ----------
 def _dequeue_loop(idx: int):
-    threading.current_thread().name = f"pool-worker-{idx}"
-    while not _STOP.is_set():
-        try:
-            job_id, owner_id = _JOB_Q.get(timeout=0.5)
-        except Empty:
-            continue
+  threading.current_thread().name = f"pool-worker-{idx}"
+  mp = get_context("spawn")  # safer than fork for libs like torch/opencv
 
-        # enforce per-user cap
-        if not _enter_inflight(owner_id):
-            # requeue after a tiny delay
-            threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
-            _JOB_Q.task_done()
-            continue
+  while not _STOP.is_set():
+    try:
+      job_id, owner_id = _JOB_Q.get(timeout=0.5)
+    except Empty:
+      continue
 
+    # enforce per-user cap
+    if not _enter_inflight(owner_id):
+      threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
+      _JOB_Q.task_done()
+      continue
+
+    proc = None
+    try:
+      # Spawn child process for this job
+      proc = mp.Process(target=_run_job_target, args=(job_id,), daemon=True)
+      proc.start()
+
+      # Watchdog wait
+      timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
+      proc.join(timeout=timeout_sec)
+
+      if proc.is_alive():
+        # Timed out: mark canceled/error, terminate child, clean up
+        job_dir = BASE_JOBS_DIR / job_id
+        # Mark cancel file so future reads show canceled intent
         try:
-            _process_job(job_id)
-        finally:
-            _leave_inflight(owner_id)
-            _JOB_Q.task_done()
+          with open(_cancel_path(job_dir), "w") as f:
+            f.write("1")
+        except Exception:
+          pass
+
+        # Write an error status/result snapshot with message
+        msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
+        _status_write(job_dir, "error", error=msg)
+        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
+
+        # Try graceful term then hard kill
+        try:
+          proc.terminate()
+        except Exception:
+          pass
+        proc.join(timeout=WATCHDOG_KILL_GRACE_SEC)
+        if proc.is_alive():
+          try:
+            proc.kill()  # Python 3.9+ on POSIX
+          except Exception:
+            pass
+          proc.join(timeout=1)
+
+    finally:
+      _leave_inflight(owner_id)
+      _JOB_Q.task_done()
 
 for i in range(MAX_WORKERS):
     t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
@@ -934,6 +991,26 @@ def vm_fetch_image(job_id: str, source_path: str):
     ctype = "image/png" if p.suffix.lower() == ".png" else "application/octet-stream"
     data = p.read_bytes()
     return BlobMedia(ctype, data, name=p.name)
+
+@anvil.server.callable
+def vm_set_watchdog_timeout(minutes: int) -> dict:
+  """
+  Set the watchdog timeout (minutes) at runtime.
+  Persists only for this process lifetime.
+  """
+  global WATCHDOG_TIMEOUT_MIN
+  try:
+    m = int(minutes)
+    if m < 1 or m > 60:
+      raise ValueError("minutes must be between 1 and 60")
+    WATCHDOG_TIMEOUT_MIN = m
+    return {"ok": True, "watchdog_min": WATCHDOG_TIMEOUT_MIN}
+  except Exception as e:
+    return {"ok": False, "error": str(e), "watchdog_min": WATCHDOG_TIMEOUT_MIN}
+
+@anvil.server.callable
+def vm_get_watchdog_timeout() -> int:
+  return int(WATCHDOG_TIMEOUT_MIN)
 
 @anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
