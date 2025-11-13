@@ -497,8 +497,12 @@ class BreakerTableParser:
     def _columns_from_header_map(self, header_map: Dict[str, List[dict]], page_width: int,
                                 gray_for_lines: np.ndarray, header_y: int, footer_y: int) -> Dict[str, Tuple[int,int]]:
         """
-        Trips-only: choose TRIP columns from OCR header picks and SNAP to nearest
-        grid bands detected in [header_y, footer_y]. All POLES handling removed.
+        Choose TRIP and POLES columns from OCR header picks and SNAP to nearest
+        grid bands detected in [header_y, footer_y].
+
+        - If both TRIP and POLES headers exist on a side, we snap both.
+        - If only one exists on a side, we snap just that one (treated as mixed).
+        - If we don't see ANY TRIP headers at all, we fall back to hard-coded bands.
         """
         W = int(page_width)
         mid = W / 2.0
@@ -507,20 +511,34 @@ class BreakerTableParser:
         vlines = self._detect_vertical_lines(gray_for_lines, header_y, footer_y)
         bands  = self._bands_from_vlines(vlines, W)
 
-        # Helper to choose left/right picks for TRIP only
+        # Helper to choose left/right picks for TRIP
         def side_picks_trip(left: bool) -> List[dict]:
             items = header_map.get("trip", []) or []
             if not items:
                 return []
             if left:
                 return sorted([d for d in items if float(d.get("x_center", 0)) <  mid],
-                            key=lambda d: d["x_center"])
+                              key=lambda d: d["x_center"])
             else:
                 return sorted([d for d in items if float(d.get("x_center", 0)) >= mid],
-                            key=lambda d: d["x_center"])
+                              key=lambda d: d["x_center"])
 
-        L_trip = side_picks_trip(True)
-        R_trip = side_picks_trip(False)
+        # Helper to choose left/right picks for POLES
+        def side_picks_poles(left: bool) -> List[dict]:
+            items = header_map.get("poles", []) or []
+            if not items:
+                return []
+            if left:
+                return sorted([d for d in items if float(d.get("x_center", 0)) <  mid],
+                              key=lambda d: d["x_center"])
+            else:
+                return sorted([d for d in items if float(d.get("x_center", 0)) >= mid],
+                              key=lambda d: d["x_center"])
+
+        L_trip  = side_picks_trip(True)
+        R_trip  = side_picks_trip(False)
+        L_poles = side_picks_poles(True)
+        R_poles = side_picks_poles(False)
 
         cols: Dict[str, Tuple[int,int]] = {}
 
@@ -537,23 +555,41 @@ class BreakerTableParser:
                 return None
             return b
 
-        # --- LEFT / RIGHT TRIP bands only ---
+        # --- LEFT TRIP / POLES bands ---
         if L_trip:
             lt = band_for_pick(L_trip[0], bands)
             if lt:
                 cols["L_TRIP"] = lt
+        if L_poles:
+            lp = band_for_pick(L_poles[0], bands)
+            if lp:
+                cols["L_POLES"] = lp
 
+        # --- RIGHT TRIP / POLES bands ---
         if R_trip:
             rt = band_for_pick(R_trip[0], bands)
             if rt:
                 cols["R_TRIP"] = rt
+        if R_poles:
+            rp = band_for_pick(R_poles[0], bands)
+            if rp:
+                cols["R_POLES"] = rp
 
-        # Final safety fallbacks: trips only (no POLES keys returned)
-        fb = self._tp_fallback(W)
-        if "L_TRIP" not in cols and "L_TRIP" in fb:
-            cols["L_TRIP"] = fb["L_TRIP"]
-        if "R_TRIP" not in cols and "R_TRIP" in fb:
-            cols["R_TRIP"] = fb["R_TRIP"]
+        # Final safety:
+        # Only use the hard-coded fallback TRIP/POLES bands if we didn't detect
+        # ANY TRIP headers at all (left or right). If we saw at least one TRIP
+        # header, DO NOT fabricate the other side – leave it missing so the
+        # mixed-column logic can kick in instead of snapping to a random band.
+        if ("L_TRIP" not in cols) and ("R_TRIP" not in cols):
+            fb = self._tp_fallback(W)
+            if "L_TRIP" in fb and "L_TRIP" not in cols:
+                cols["L_TRIP"] = fb["L_TRIP"]
+            if "R_TRIP" in fb and "R_TRIP" not in cols:
+                cols["R_TRIP"] = fb["R_TRIP"]
+            if "L_POLES" in fb and "L_POLES" not in cols:
+                cols["L_POLES"] = fb["L_POLES"]
+            if "R_POLES" in fb and "R_POLES" not in cols:
+                cols["R_POLES"] = fb["R_POLES"]
 
         return cols
 
@@ -604,10 +640,16 @@ class BreakerTableParser:
             cv2.putText(overlay, raw, (x1b, max(14, y1b-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 3, cv2.LINE_AA)
             cv2.putText(overlay, raw, (x1b, max(14, y1b-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1, cv2.LINE_AA)
 
-        # POLES removed
-        for c in header_map.get("trip", []):         draw_pick(c, RED,   "TRIP")
-        for c in header_map.get("description", []):  draw_pick(c, BLUE,  "DESC")
-        for c in header_map.get("ckt", []):          draw_pick(c, BLACK, "CKT")
+        # draw header picks: TRIP, DESC, CKT, POLES
+        GREEN = (0,255,0)
+        for c in header_map.get("trip", []):
+            draw_pick(c, RED, "TRIP")
+        for c in header_map.get("description", []):
+            draw_pick(c, BLUE, "DESC")
+        for c in header_map.get("ckt", []):
+            draw_pick(c, BLACK, "CKT")
+        for c in header_map.get("poles", []):
+            draw_pick(c, GREEN, "POLES")
 
         return overlay
 
@@ -650,7 +692,7 @@ class BreakerTableParser:
 
     def _classify_top_rows_headers(self, top_rows_dump: List[dict], y_band: Tuple[int, int], page_width: int):
         """
-        Hard-coded header classifier for: CKT, DESCRIPTION, TRIP. (POLES removed)
+        Hard-coded header classifier for: CKT, DESCRIPTION, TRIP, POLES.
         - Prefilters to header row, splits glued tokens, scores by vocab similarity.
         - Picks up to 2 per type with global X conflict guard.
         - RETURNS x1/x2 so overlay can draw exact boxes.
@@ -659,11 +701,15 @@ class BreakerTableParser:
         import re, difflib
 
         VOCAB = {
-            "ckt": ["CKT", "CCT"],
-            "description": ["CIRCUIT DESCRIPTION", "DESCRIPTION", "LOAD DESCRIPTION", "DESIGNATION", "LOAD DESIGNATION", "NAME"],
+            "ckt": ["CKT", "CCT", "CIRCUIT"],
+            "description": [
+                "CIRCUIT DESCRIPTION", "DESCRIPTION", "LOAD DESCRIPTION",
+                "DESIGNATION", "LOAD DESIGNATION", "NAME", "REMARKS", "COMMENTS"
+            ],
             "trip": ["TRIP", "AMPS", "AMP", "BREAKER", "BKR", "SIZE"],
+            "poles": ["POLE", "POLES", "POLE/S", "SPACES", "SPACE", "POLES/SPACES"],
         }
-        TYPES = ("ckt", "description", "trip")   # <-- poles removed
+        TYPES = ("ckt", "description", "trip", "poles")
         ACCEPT_THR = 0.60
         X_TOL = 24
         STR_W, CONF_W = 0.90, 0.10
@@ -672,7 +718,10 @@ class BreakerTableParser:
             s = (s or "").upper()
             s = re.sub(r"[\[\]():.,/_\-]+", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
-            return s.replace("TRLP","TRIP").replace("DESCRLPTION","DESCRIPTION")
+            # small common OCR fixes
+            s = s.replace("TRLP", "TRIP").replace("DESCRLPTION", "DESCRIPTION")
+            s = s.replace("POLE5", "POLES")
+            return s
 
         def sim(a: str, b: str) -> float:
             return difflib.SequenceMatcher(a=norm(a), b=norm(b)).ratio()
@@ -733,18 +782,19 @@ class BreakerTableParser:
                 x_left = x_right + 1
             return out
 
-        # only non-poles roles now
+        # Regex hooks for multi-role splits (mainly for CKT+DESC combos)
         ROLE_RX = {
             "trip":  re.compile(r"\b(amp(s)?|size|breaker|bkr)\b|\(A\)", re.I),
             "ckt":   re.compile(r"\b(ckt|cct|circuit)\b", re.I),
-            "desc":  re.compile(r"\b(desc(ription)?|designation|name)\b", re.I),
+            "desc":  re.compile(r"\b(desc(ription)?|designation|name|remark|comment)\w*", re.I),
+            "poles": re.compile(r"\b(pole|poles|space|spaces)\b", re.I),
         }
 
         def split_multi_role(d):
             txt = d["text"]
             hits = {k: bool(rx.search(txt)) for k,rx in ROLE_RX.items()}
-            # no poles/trip split anymore; keep the special ckt+desc splitter
-            if hits["ckt"] and re.search(r"\b(remark|note|comment|desc)\w*", txt, re.I):
+            # keep the special CKT+DESC splitter; don't overcomplicate the others
+            if hits["ckt"] and ROLE_RX["desc"].search(txt):
                 return split_by_words(d)
             return [d]
 
@@ -778,7 +828,8 @@ class BreakerTableParser:
             lst = sorted(lst, key=lambda d: (-d["score"], d["x"]))
             keep = []
             for c in lst:
-                if any(abs(c["x"] - k["x"]) <= X_TOL for k in keep): continue
+                if any(abs(c["x"] - k["x"]) <= X_TOL for k in keep): 
+                    continue
                 keep.append(c)
             return keep
 
@@ -788,18 +839,28 @@ class BreakerTableParser:
         picks = {t: [] for t in TYPES}
         used_x = []
         def claim(x):
-            if any(abs(x-ux) <= X_TOL for ux in used_x): return False
-            used_x.append(x); return True
+            if any(abs(x-ux) <= X_TOL for ux in used_x): 
+                return False
+            used_x.append(x)
+            return True
 
         for t in TYPES:
+            # first pass: high-score
             for c in sorted(candidates[t], key=lambda d: -d["score"]):
-                if len(picks[t]) >= 2: break
-                if c["score"] < ACCEPT_THR: continue
-                if claim(c["x"]): picks[t].append(c)
+                if len(picks[t]) >= 2: 
+                    break
+                if c["score"] < ACCEPT_THR:
+                    continue
+                if claim(c["x"]):
+                    picks[t].append(c)
+            # second pass: best remaining if we still have room
             for c in candidates[t]:
-                if len(picks[t]) >= 2: break
-                if any(c is pc for pc in picks[t]): continue
-                if claim(c["x"]): picks[t].append(c)
+                if len(picks[t]) >= 2:
+                    break
+                if any(c is pc for pc in picks[t]):
+                    continue
+                if claim(c["x"]):
+                    picks[t].append(c)
             picks[t].sort(key=lambda d: d["x"])
 
         header_map = {
@@ -812,7 +873,6 @@ class BreakerTableParser:
                 "score": float(c["score"]),
             } for c in picks[t]] for t in TYPES
         }
-        header_map["poles"] = []  # explicit empty
 
         # ---- print once ----
         print("\n==== HEADER CLASSIFY (hard-coded) ====")
@@ -823,9 +883,11 @@ class BreakerTableParser:
             print("Detections (left→right):")
             for r in sorted(readable_rows, key=lambda d: d["x"]):
                 s = r["scores"]
-                print(f'  "{r["text"]}"  x={r["x"]:.1f}  conf={r["conf"]:.2f}  '
+                print(
+                    f'  "{r["text"]}"  x={r["x"]:.1f}  conf={r["conf"]:.2f}  '
                     f'ckt={s["ckt"]:.2f}  desc={s["description"]:.2f}  '
-                    f'trip={s["trip"]:.2f}  -> {r["best"].upper()}')
+                    f'trip={s["trip"]:.2f}  poles={s["poles"]:.2f}  -> {r["best"].upper()}'
+                )
         print("Picks:")
         for t in TYPES:
             picked = header_map[t]
@@ -1145,7 +1207,7 @@ class BreakerTableParser:
                 self.reader = easyocr.Reader(['en'], gpu=True)
             except Exception:
                 self.reader = easyocr.Reader(['en'], gpu=False)
-        try:
+        try: 
             up = cv2.resize(roi_gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
             det = self.reader.readtext(
                 up, detail=1, paragraph=False, allowlist="123",
@@ -1711,6 +1773,88 @@ class BreakerTableParser:
 
         return keep
 
+    def _parse_mixed_trip_pole_value(self, raw: str):
+        """
+        Parse a single mixed TRIP/POLE cell, e.g.:
+            '20A 1P'
+            '20/1'
+            '20A 1'
+            '20 2'
+        Rules:
+        - If a number is followed by 'A' → amps.
+        - If a number is followed by 'P' → poles.
+        - If no A/P present:
+            • amps must be a "nice" breaker size (ends in 0 or 5, within sane range)
+            • poles must be 1, 2, or 3.
+        Returns (amps, poles) or None if we can't be confident.
+        """
+        if not raw:
+            return None
+
+        s = str(raw).upper().replace("O", "0").strip()
+
+        # Grab all integers in the string
+        nums = [int(n) for n in re.findall(r"\d+", s)]
+        if not nums:
+            return None
+
+        amps = None
+        poles = None
+
+        # --- Explicit A/P tags ----------------------------------------------
+        # e.g. '20A 1P', '20 A', '1P', 'P 1'
+        m_amp = re.search(r"(\d+)\s*A\b|A\s*(\d+)", s)
+        if m_amp:
+            g = next((g for g in m_amp.groups() if g), None)
+            if g is not None:
+                amps = int(g)
+
+        m_pole = re.search(r"(\d+)\s*P\b|P\s*(\d+)", s)
+        if m_pole:
+            g = next((g for g in m_pole.groups() if g), None)
+            if g is not None:
+                poles = int(g)
+
+        # --- Heuristics when tags are missing -------------------------------
+        def looks_like_amp(v: int) -> bool:
+            # "nice" breaker sizes: end in 0 or 5 and within a sane range
+            return (10 <= v <= 1200) and (v % 5 == 0)
+
+        def looks_like_pole(v: int) -> bool:
+            return (1 <= v <= 3)
+
+        # Fill amps from numeric pattern if still unknown
+        if amps is None:
+            amp_candidates = [n for n in nums if looks_like_amp(n)]
+            if amp_candidates:
+                amps = amp_candidates[0]
+
+        # Fill poles from numeric pattern if still unknown
+        if poles is None:
+            pole_candidates = [n for n in nums if looks_like_pole(n)]
+            if pole_candidates:
+                # avoid reusing the same number if it matched amps too
+                if amps is not None and len(pole_candidates) > 1 and pole_candidates[0] == amps:
+                    poles = pole_candidates[1]
+                else:
+                    poles = pole_candidates[0]
+
+        # Special case: two-number patterns like '20/1', '20 1'
+        if (amps is None or poles is None) and len(nums) == 2:
+            a, b = nums
+            if amps is None or poles is None:
+                if looks_like_amp(a) and looks_like_pole(b):
+                    amps, poles = a, b
+                elif looks_like_amp(b) and looks_like_pole(a):
+                    amps, poles = b, a
+
+        if amps is None or poles is None:
+            return None
+
+        # Clamp poles to 1..3 just in case
+        poles = max(1, min(3, int(poles)))
+        return int(amps), int(poles)
+
     # === main scan (identical outputs/paths) ===
     def _scan_tp_column_strips(
         self,
@@ -1743,11 +1887,8 @@ class BreakerTableParser:
                 x1, x2 = max(0, m - 1), min(W - 1, m + 1)
             return x1, x2
 
+        # --- OCR helpers -----------------------------------------------------
         def read_trip_strip(col_img: np.ndarray):
-            """
-            Return row-ordered tokens and boxes from the TRIP column.
-            We now keep amperage (e.g., '20A' or '20') AND tags like '2P', '3P', '/', '-'.
-            """
             if col_img is None or col_img.size == 0 or self.reader is None:
                 return [], []
             sx = 2.0
@@ -1761,8 +1902,7 @@ class BreakerTableParser:
                 try:
                     return self.reader.readtext(
                         im, detail=1, paragraph=False,
-                        # NEW: allow 'P', slashes, hyphens so we can see '2P','3P','/','-'
-                        allowlist="0123456789AP/- ",
+                        allowlist="0123456789A ",
                         mag_ratio=mag, contrast_ths=0.05, adjust_contrast=0.7,
                         text_threshold=0.40, low_text=0.25,
                     )
@@ -1778,31 +1918,14 @@ class BreakerTableParser:
             dets = sorted(dets, key=lambda d: y_center(d[0]) if d else 0.0)
 
             last_y = -1e9
-            for box, raw_txt, _ in dets:
+            for box, txt, _ in dets:
                 yc = y_center(box)
                 if abs(yc - last_y) < 10:
                     continue
-
-                txt = (raw_txt or "").upper().strip()
-                # normalize common variants
-                txt = txt.replace(" ", "")
-                txt = txt.replace("AMP", "A").replace("AMPS", "A")
-                # keep ONLY useful tokens: amperage number (with/without 'A'), '2P','3P','/','-'
-                keep_token = None
-
-                # tag tokens
-                if re.fullmatch(r"[23]P", txt):
-                    keep_token = txt  # '2P' or '3P'
-                elif txt in ("/", "-"):
-                    keep_token = txt
-                else:
-                    # amperage like '20A' or '20'
-                    m = re.search(r"\d{1,4}", txt)
-                    if m:
-                        keep_token = m.group(0) + ("A" if "A" in txt else "")
-
-                if not keep_token:
+                nums = re.findall(r"\d+", (txt or ""))
+                if not nums:
                     continue
+                keep = max(nums, key=lambda n: len(n))
 
                 xs = [int(round(p[0] / sx)) for p in box]
                 ys = [int(round(p[1] / sx)) for p in box]
@@ -1810,15 +1933,68 @@ class BreakerTableParser:
                 y1b, y2b = min(ys), max(ys)
                 w = x2b - x1b + 1
                 h = y2b - y1b + 1
-                # drop tiny dash-like fragments
                 if h <= max(2, int(0.02 * col_img.shape[0])) and w >= int(3.0 * h):
                     continue
 
-                out_texts.append(keep_token)
-                boxes.append((x1b, y1b, x2b, y2b, keep_token))
+                out_texts.append(keep)
+                boxes.append((x1b, y1b, x2b, y2b, keep))
                 last_y = yc
 
             return out_texts, boxes
+
+        def read_mixed_trip_pole_strip(col_img: np.ndarray):
+            """
+            OCR a strip where TRIP and POLES are in the *same* column
+            (e.g., '20A 1P', '20/1', '20 2'). Returns raw text per row.
+            """
+            if col_img is None or col_img.size == 0 or self.reader is None:
+                return [], []
+
+            sx = 2.0
+            up = cv2.resize(col_img, None, fx=sx, fy=sx, interpolation=cv2.INTER_CUBIC)
+            g  = cv2.GaussianBlur(up, (3,3), 0)
+            g  = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8)).apply(g)
+
+            def pass_once(im, mag):
+                try:
+                    return self.reader.readtext(
+                        im, detail=1, paragraph=False,
+                        allowlist="0123456789APap/ -",
+                        mag_ratio=mag, contrast_ths=0.05, adjust_contrast=0.7,
+                        text_threshold=0.40, low_text=0.25,
+                    )
+                except Exception:
+                    return []
+
+            dets = []
+            for im in (g, cv2.bitwise_not(g)):
+                dets += pass_once(im, 1.6)
+                dets += pass_once(im, 2.0)
+
+            def y_center(box): return sum(p[1] for p in box) / 4.0 if box else 0.0
+            dets = sorted(dets, key=lambda d: y_center(d[0]) if d else 0.0)
+
+            texts = []
+            boxes = []
+            last_y = -1e9
+            for box, txt, _ in dets:
+                yc = y_center(box)
+                if abs(yc - last_y) < 10:
+                    continue
+                raw = str(txt or "").strip()
+                if not raw:
+                    continue
+
+                xs = [int(round(p[0] / sx)) for p in box]
+                ys = [int(round(p[1] / sx)) for p in box]
+                x1b, x2b = min(xs), max(xs)
+                y1b, y2b = min(ys), max(ys)
+
+                texts.append(raw)
+                boxes.append((x1b, y1b, x2b, y2b, raw))
+                last_y = yc
+
+            return texts, boxes
 
         def read_poles_with_boxes(col_img: np.ndarray):
             """
@@ -1925,6 +2101,7 @@ class BreakerTableParser:
 
             return texts, boxes, votes
  
+        # --- main bands / mixed detection -----------------------------------
         bands = {
             "l_trip":  cols.get("L_TRIP"),
             "l_poles": cols.get("L_POLES"),
@@ -1933,6 +2110,12 @@ class BreakerTableParser:
         }
 
         finds = {k: [] for k in bands.keys()}
+
+        # Detect sides where we only have one of TRIP/POLES -> treat as mixed column
+        left_mixed  = (bands["l_trip"] is not None) ^ (bands["l_poles"] is not None)
+        right_mixed = (bands["r_trip"] is not None) ^ (bands["r_poles"] is not None)
+        left_done = False
+        right_done = False
 
         cw_cfg = self._cfg.get("central_window", {})
         cw_enable = bool(cw_cfg.get("enable", True))
@@ -1944,6 +2127,13 @@ class BreakerTableParser:
         for key, band in bands.items():
             if band is None:
                 continue
+
+            # skip second pass on mixed side (we handle both TRIP+POLES in one go)
+            if key in ("l_trip", "l_poles") and left_mixed and left_done:
+                continue
+            if key in ("r_trip", "r_poles") and right_mixed and right_done:
+                continue
+
             x1b, x2b = clamp_band(band)
             x_pad = 3 if key in ("l_trip", "r_trip") else 0
             if x_pad:
@@ -1991,17 +2181,53 @@ class BreakerTableParser:
             crop_path = os.path.join(crops_dir, f"{base}_{key}.png")
             cv2.imwrite(crop_path, crop)
 
-            if key in ("l_poles", "r_poles"):
-                texts, boxes, vote_dbg = read_poles_with_boxes(crop)
+            # --- mixed vs normal reading ------------------------------------
+            vote_dbg = []
+            boxes = []
+            if (key in ("l_trip", "l_poles")) and left_mixed:
+                # Single left column with mixed TRIP/POLE data
+                raw_texts, boxes = read_mixed_trip_pole_strip(crop)
+                amps_list: List[int] = []
+                poles_list: List[int] = []
+                for raw in raw_texts:
+                    parsed = self._parse_mixed_trip_pole_value(raw)
+                    if parsed is None:
+                        continue
+                    a, p = parsed
+                    amps_list.append(a)
+                    poles_list.append(p)
+                # store as strings for compatibility with downstream _to_int
+                finds["l_trip"] = [str(a) for a in amps_list]
+                finds["l_poles"] = [str(p) for p in poles_list]
+                left_done = True
+            elif (key in ("r_trip", "r_poles")) and right_mixed:
+                # Single right column with mixed TRIP/POLE data
+                raw_texts, boxes = read_mixed_trip_pole_strip(crop)
+                amps_list = []
+                poles_list = []
+                for raw in raw_texts:
+                    parsed = self._parse_mixed_trip_pole_value(raw)
+                    if parsed is None:
+                        continue
+                    a, p = parsed
+                    amps_list.append(a)
+                    poles_list.append(p)
+                finds["r_trip"] = [str(a) for a in amps_list]
+                finds["r_poles"] = [str(p) for p in poles_list]
+                right_done = True
             else:
-                texts, boxes = read_trip_strip(crop)
-                vote_dbg = []
+                # Legacy behavior: dedicated TRIP or POLES columns
+                if key in ("l_poles", "r_poles"):
+                    texts, boxes, vote_dbg = read_poles_with_boxes(crop)
+                else:
+                    texts, boxes = read_trip_strip(crop)
+                    vote_dbg = []
 
-            texts, boxes = self._filter_peripheral_values(texts, boxes, crop.shape)
-            finds[key] = [t for t in texts if t]
-            finds[f"{key}_boxes"] = boxes
+                texts, boxes = self._filter_peripheral_values(texts, boxes, crop.shape)
+                finds[key] = [t for t in texts if t]
 
-            if save_debug and debug_dir:
+            # --- debug outputs ----------------------------------------------
+            if save_debug and debug_dir and crop is not None and crop.size:
                 ov = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR) if len(crop.shape) == 2 else crop.copy()
                 for (ex1,ey1,ex2,ey2) in erased_boxes:
                     cv2.rectangle(ov, (ex1,ey1), (ex2,ey2), (0,0,255), 2)  # red = header wipes
@@ -2019,8 +2245,8 @@ class BreakerTableParser:
                     "crop_path": crop_path,
                     "boxes": [{"x1":bx1,"y1":by1,"x2":bx2,"y2":by2,"text":str(t)} for (bx1,by1,bx2,by2,t) in boxes],
                     "erased": [{"x1":a,"y1":b,"x2":c,"y2":d} for (a,b,c,d) in erased_boxes],
-                    "dash_removed": [{"x1":a,"y1":b,"x2":c,"y2":d} for (a,b,c,d) in (dash_removed or [])],  # NEW
-                    "texts": finds[key],
+                    "dash_removed": [{"x1":a,"y1":b,"x2":c,"y2":d} for (a,b,c,d) in (dash_removed or [])],
+                    "texts": finds.get(key, []),
                     "votes": vote_dbg
                 }
 

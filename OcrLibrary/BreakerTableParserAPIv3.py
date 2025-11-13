@@ -1,5 +1,4 @@
 import sys, os, inspect
-import re
 
 # ----- ensure repo root on sys.path -----
 _THIS_FILE  = os.path.abspath(__file__)
@@ -8,7 +7,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "V2_HEADER_VALIDATE_SKIP+ALT_ROUTER"
+API_VERSION = "V2_HEADER_VALIDATE_SKIP"
 API_ORIGIN  = __file__
 
 # Panel validation snap map for spaces normalization
@@ -29,38 +28,16 @@ AMP_MAX = 1200
 # ----- resilient imports (package and fallback local) -----
 try:
     from OcrLibrary.BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
-    from OcrLibrary.BreakerTableParser4   import BreakerTableParser,  PARSER_VERSION
+    from OcrLibrary.BreakerTableParserALT   import BreakerTableParser,  PARSER_VERSION
     from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
-    # NEW: ALT parser (package form)
-    try:
-        from OcrLibrary.BreakerTableParserALT import BreakerTableParser as BreakerTableParserALT
-        try:
-            from OcrLibrary.BreakerTableParserALT import PARSER_VERSION as PARSER_ALT_VERSION
-        except Exception:
-            PARSER_ALT_VERSION = "unknown"
-    except Exception:
-        BreakerTableParserALT = None
-        PARSER_ALT_VERSION    = "unknown"
-
 except ModuleNotFoundError:
     from BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
     from PanelHeaderParserV4   import PanelParser as PanelHeaderParser
     # Table parser may not exist in some light envs; import lazily inside run if needed
     try:
-        from BreakerTableParser4 import BreakerTableParser, PARSER_VERSION  # type: ignore
+        from BreakerTableParserALT import BreakerTableParser, PARSER_VERSION  # type: ignore
     except Exception:
         BreakerTableParser, PARSER_VERSION = None, "unknown"  # lazy fallback
-
-    # NEW: ALT parser (fallback local)
-    try:
-        from BreakerTableParserALT import BreakerTableParser as BreakerTableParserALT  # type: ignore
-        try:
-            from BreakerTableParserALT import PARSER_VERSION as PARSER_ALT_VERSION  # type: ignore
-        except Exception:
-            PARSER_ALT_VERSION = "unknown"
-    except Exception:
-        BreakerTableParserALT = None
-        PARSER_ALT_VERSION    = "unknown"
 
 
 class BreakerTablePipeline:
@@ -95,74 +72,6 @@ class BreakerTablePipeline:
             return int(s)
         except Exception:
             return None
-
-    # ---- ALT routing: detect presence of a "Poles" header column ----
-    def _has_poles_column(self, analyzer_result: dict | None, header_result: dict | None) -> bool:
-        """
-        Returns True if the header line appears to include a 'poles' column.
-        Strategy:
-          1) Inspect header_result text (cheap).
-          2) If unknown, OCR a tight band around analyzer_result['header_y'] with analyzer.reader.
-        """
-        TOKENS = {"POLES", "POLE"}  # Avoid bare 'P' (too noisy)
-
-        # 1) Inspect structured header_result fields
-        if isinstance(header_result, dict):
-            hay = []
-            for k, v in header_result.items():
-                if k == "attrs" and isinstance(v, dict):
-                    for kk, vv in v.items():
-                        if isinstance(vv, str):
-                            hay.append(vv)
-                elif isinstance(v, str):
-                    hay.append(v)
-            blob = " ".join(hay).upper()
-            if any(t in blob for t in TOKENS):
-                return True
-
-        # 2) OCR near header_y with analyzer's reader
-        ar = analyzer_result or {}
-        gray = ar.get("gray")
-        header_y = ar.get("header_y")
-        reader = getattr(self._ensure_analyzer(), "reader", None)
-
-        if gray is None or header_y is None or reader is None:
-            return False
-
-        try:
-            H, W = getattr(gray, "shape", (0, 0))
-            if not H or not W:
-                return False
-
-            y1 = max(0, int(header_y) - 10)
-            y2 = min(H, int(header_y) + 70)
-            roi = gray[y1:y2, 0:W]
-            if roi.size == 0:
-                return False
-
-            def ocr(img, mag):
-                try:
-                    return reader.readtext(
-                        img, detail=1, paragraph=False,
-                        allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/",
-                        mag_ratio=mag, contrast_ths=0.05, adjust_contrast=0.7,
-                        text_threshold=0.4, low_text=0.25
-                    )
-                except Exception:
-                    return []
-
-            det = ocr(roi, 1.6) + ocr(roi, 2.0)
-            for box, txt, conf in det:
-                n = re.sub(r"[^A-Z]", "", (txt or "").upper().replace("1","I").replace("0","O"))
-                if any(tok in n for tok in TOKENS):
-                    if self.debug:
-                        print(f"[ALT_ROUTER] Poles token near header: {txt} (conf={conf:.2f})")
-                    return True
-            return False
-        except Exception as e:
-            if self.debug:
-                print(f"[ALT_ROUTER] Poles OCR check failed: {e}")
-            return False
 
     # ---- validation helpers ----
     def _mask_header_non_name(self, header_result: dict | None, *, detected_name):
@@ -296,9 +205,8 @@ class BreakerTablePipeline:
         image_path: str,
         *,
         run_analyzer: bool = True,
-        run_header:  bool  = True,
-        run_parser:  bool  = True,
-        parser_used        = None,   # NEW: 'default' or 'alt'
+        run_header:  bool = True,
+        run_parser:  bool = True,
     ) -> dict:
         """
         Execute the pipeline in strict order:
@@ -351,16 +259,6 @@ class BreakerTablePipeline:
 
         # --- 3) Pre-parse validation (header-only); then Table Parser ---
         should_run_parser = run_parser
-        # --- Choose parser (ALT if no Poles column) ---
-        use_alt = False
-        if should_run_parser:
-            try:
-                use_alt = not self._has_poles_column(analyzer_result, header_result)
-            except Exception as e:
-                if self.debug:
-                    print(f"[ALT_ROUTER] Detection failed (fallback to default): {e}")
-                use_alt = False
-        
         panel_status = None
 
         # Header-only checks: volts (required), bus_amps (required), main_amps (optional)
@@ -390,7 +288,7 @@ class BreakerTablePipeline:
                 print(f"[WARN] Header pre-parse validation failed: {e}")
 
         if should_run_parser:
-            # lazy-import default parser if needed
+            # lazy-import if we couldn't import above
             global BreakerTableParser
             if BreakerTableParser is None:
                 try:
@@ -403,27 +301,9 @@ class BreakerTablePipeline:
                             print(f"[WARN] Table parser unavailable: {e}")
                         BreakerTableParser = None
 
-            # lazy-import ALT if we intend to use it and it's not loaded yet
-            global BreakerTableParserALT
-            if use_alt and BreakerTableParserALT is None:
+            if BreakerTableParser is not None:
                 try:
-                    from OcrLibrary.BreakerTableParserALT import BreakerTableParser as BreakerTableParserALT  # type: ignore
-                except Exception:
-                    try:
-                        from BreakerTableParserALT import BreakerTableParser as BreakerTableParserALT  # type: ignore
-                    except Exception as e:
-                        if self.debug:
-                            print(f"[WARN] ALT table parser unavailable: {e}")
-                        BreakerTableParserALT = None
-
-            parser_cls = BreakerTableParserALT if (use_alt and BreakerTableParserALT is not None) else BreakerTableParser
-            parser_used = "alt" if (parser_cls is not None and parser_cls is BreakerTableParserALT) else "default"
-            if self.debug:
-                print(f"[ALT_ROUTER] parser_used={parser_used}  (has_poles={not use_alt})")
-
-            if parser_cls is not None:
-                try:
-                    parser = parser_cls(debug=self.debug, reader=getattr(analyzer, "reader", None))
+                    parser = BreakerTableParser(debug=self.debug, reader=getattr(analyzer, "reader", None))
                     if analyzer_result is not None:
                         parser_result = parser.parse_from_analyzer(analyzer_result)
                     else:
@@ -485,7 +365,6 @@ class BreakerTablePipeline:
                 "analyzer": run_analyzer,
                 "parser": run_parser,
                 "header": run_header,
-                "parserUsed": parser_used,  # NEW: 'default' or 'alt'
             },
             "results": {
                 "analyzer": analyzer_result,
@@ -546,30 +425,6 @@ if __name__ == "__main__":
     run_analyzer = "--no-analyzer" not in args
     run_parser = "--no-parser" not in args
     run_header = "--no-header" not in args
-
-    # Parser4 banner
-    try:
-        modP = sys.modules.get(BreakerTableParser.__module__) if BreakerTableParser else None
-        implP = None
-        if modP:
-            implP = inspect.getsourcefile(BreakerTableParser) or inspect.getfile(BreakerTableParser)
-        print(">>> DEV Parser4 version:", PARSER_VERSION if 'PARSER_VERSION' in globals() else "unknown")
-        if implP:
-            print(">>> DEV Parser4 file:", os.path.abspath(implP))
-    except Exception:
-        pass
-
-    # ALT banner
-    try:
-        if BreakerTableParserALT:
-            modALT = sys.modules.get(BreakerTableParserALT.__module__)
-            implALT = inspect.getsourcefile(BreakerTableParserALT) or inspect.getfile(BreakerTableParserALT)
-            print(">>> DEV ParserALT version:", PARSER_ALT_VERSION)
-            print(">>> DEV ParserALT file:", os.path.abspath(implALT))
-        else:
-            print(">>> DEV ParserALT: not available")
-    except Exception:
-        pass
 
     pipeline = BreakerTablePipeline(debug=True)
     result = pipeline.run(
