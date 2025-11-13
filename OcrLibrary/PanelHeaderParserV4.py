@@ -66,7 +66,7 @@ class PanelParser:
         "VOLTAGE": dict(W_shape=0.60, W_conf=0.15, W_lbl=0.15, W_side=0.03, W_ctx=0.07, W_wrong=0.12, W_y=0.00),
         "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
-        "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.06, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
+        "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.12, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
         "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35)
     }
 
@@ -422,7 +422,7 @@ class PanelParser:
         int_rating_ka = None
         if chosen_map["AIC"]:
             t_raw = chosen_map["AIC"]["text"].upper()
-            t_fix = self._normalize_digits(t_raw)                 # CHG
+            t_fix = self._normalize_digits(t_raw)
             t_nos = t_fix.replace(" ", "")
             # e.g. 65kA
             mk = re.search(r"\b(\d{2,3})K?A\b", t_nos)
@@ -433,6 +433,15 @@ class PanelParser:
                 if m:
                     val = int(m.group(1).replace(",", ""))
                     int_rating_ka = max(1, val // 1000)
+                else:
+                    # discrete small kA fallback (e.g. chosen token is just "65")
+                    SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
+                    m_small2 = re.search(r'(?<!\d)(\d{2,3})(?!\d)', t_fix)
+                    if m_small2:
+                        n = int(m_small2.group(1))
+                        if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', t_fix):
+                            int_rating_ka = n
+
 
         # Prefer the explicit tag on the CHOSEN MAIN value (if present).
         # If that’s absent, fall back to the global scan.
@@ -771,6 +780,14 @@ class PanelParser:
 
         _VOLTY_WORDS = {"V", "VOLTS", "VOLT", "VOLTAGE", "WYE", "DELTA", "PHASE", "PH", "WIRES", "WIRE", "Ø"}
 
+        # precompute AIC/SCCR label positions for adjacency checks
+        aic_labels: list[dict] = []
+        aic_label_rxs = [re.compile(rx, re.I) for rx in self._LABELS.get("AIC", [])]
+        for it2 in items:
+            t2 = str(it2.get("text", "") or "")
+            if any(rx.search(t2) for rx in aic_label_rxs):
+                aic_labels.append(it2)
+
         for it in items:
             raw = str(it["text"] or "")
             txt = raw.upper()
@@ -820,7 +837,7 @@ class PanelParser:
                     shape = 0.90
                     ctx = 0.10
                     out["AIC"].append({"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":xc,"yc":yc,
-                                       "conf":conf,"text":raw,"shape":shape,"ctx":ctx})
+                                    "conf":conf,"text":raw,"shape":shape,"ctx":ctx})
             else:
                 AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A
                 if AIC:
@@ -829,7 +846,32 @@ class PanelParser:
                         shape = 0.85 + (0.10 if "," in AIC.group(1) else 0.0)
                         ctx = 0.08 if re.search(r"\b(SYMMETRICAL|AIC|A\.?\s*I\.?\s*C\.?|SCCR)\b", txt) else 0.0
                         out["AIC"].append({"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":xc,"yc":yc,
-                                           "conf":conf,"text":raw,"shape":min(1.0,shape),"ctx":ctx})
+                                        "conf":conf,"text":raw,"shape":min(1.0,shape),"ctx":ctx})
+                else:
+                    # === NEW: discrete small kA values just to the right of an AIC/SCCR label ===
+                    # Use permitted kA set and forbid "A"/"AMPS" units so we don't confuse with bus/main amps.
+                    SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
+                    # Look for a plain 2–3 digit number
+                    m_small = re.search(r'(?<!\d)(\d{2,3})(?!\d)', txtD)
+                    if m_small:
+                        n = int(m_small.group(1))
+                        if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', txtD):
+                            # Must be horizontally to the right of an AIC label and on roughly the same row
+                            for L in aic_labels:
+                                yov = max(0, min(y2, L["y2"]) - max(y1, L["y1"]))  # vertical overlap
+                                dx = x1 - L["x2"]                                   # distance to the right
+                                if yov > 0 and 0 <= dx <= 3 * med_h:
+                                    shape = 0.88
+                                    ctx = 0.20  # extra context because it's directly tied to AIC label
+                                    out["AIC"].append({
+                                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                                        "xc": xc, "yc": yc,
+                                        "conf": conf,
+                                        "text": raw,
+                                        "shape": shape,
+                                        "ctx": ctx
+                                    })
+                                    break  # only need to prove adjacency to one label
 
             # NAME candidates (short, alphanum, higher & larger)
             up = raw.strip().upper().strip(":")
