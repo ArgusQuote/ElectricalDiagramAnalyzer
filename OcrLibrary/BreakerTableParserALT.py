@@ -11,6 +11,7 @@ except Exception:
 
 # Keep OCR conservative to avoid junk tokens
 _HEADER_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./ -"
+_COMBO_ALLOWLIST = "0123456789AP/ -"
 
 # --- header OCR tuning (vertical pad + upscale) ---
 _HDR_BAND_H      = 84     # was effectively ~80 via default arg; give a bit more room
@@ -315,6 +316,13 @@ def detect_header_columns(reader, img_bgr: np.ndarray, header_y: int):
             col_map["NOTES"] = c
     return col_map
 
+def _first2(t):
+    """Return (y1,y2) from any row tuple/list; ignore extra fields safely."""
+    try:
+        return int(t[0]), int(t[1])
+    except Exception:
+        return None, None
+
 PARSER_VERSION = "V19_4_Parser"
 PARSER_ORIGIN  = __file__
 
@@ -512,6 +520,56 @@ class BreakerTableParser:
                 self.reader = easyocr.Reader(['en'], gpu=True)
             except Exception:
                 self.reader = easyocr.Reader(['en'], gpu=False)
+
+    def _save_column_strips(self, img, cols, rows_y_spans, *, debug_dir: str, base_name: str):
+        """
+        Save a raw crop for each detected column strip:
+          L_TRIP, L_POLES, R_TRIP, R_POLES, L_COMBO, R_COMBO
+        The crop spans all row bands (with light padding).
+        """
+        if not debug_dir or not rows_y_spans:
+            return
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+        except Exception:
+            pass
+        H, W = img.shape[:2]
+        row_pad_y = max(4, int(0.006 * H))
+        col_pad_x = max(3, int(0.003 * W))
+        all_y1 = max(0, min(int(a) for (a, b) in rows_y_spans) - row_pad_y)
+        all_y2 = min(H - 1, max(int(b) for (a, b) in rows_y_spans) + row_pad_y)
+        # Robustly handle row tuples with >2 elements (take first two)
+        def _y1y2(t):
+            try:
+                return int(t[0]), int(t[1])
+            except Exception:
+                # Fallback: treat as empty span
+                return 0, 0
+        ys1 = []
+        ys2 = []
+        for t in rows_y_spans:
+            y1i, y2i = _y1y2(t)
+            ys1.append(y1i)
+            ys2.append(y2i)
+        if not ys1 or not ys2:
+            return
+        all_y1 = max(0, min(ys1) - row_pad_y)
+        all_y2 = min(H - 1, max(ys2) + row_pad_y)
+        for k in ("L_TRIP","L_POLES","R_TRIP","R_POLES","L_COMBO","R_COMBO"):
+            if k not in cols:
+                continue
+            x1, x2 = map(int, cols[k])
+            xx1 = max(0, x1 - col_pad_x); xx2 = min(W - 1, x2 + col_pad_x)
+            if xx2 <= xx1 or all_y2 <= all_y1:
+                continue
+            strip = img[all_y1:all_y2, xx1:xx2]
+            if strip.ndim == 2:
+                strip = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
+            out_path = os.path.join(debug_dir, f"{base_name}_{k.lower()}_strip.png")
+            try:
+                cv2.imwrite(out_path, strip)
+            except Exception:
+                pass
 
     def _group_text_by_xcenters(self, items, y_band, *,
                                 min_conf=0.10, pad_frac=0.20, pad_min=6,
@@ -821,11 +879,9 @@ class BreakerTableParser:
                     all_items=dump, header_map=header_map
                 )
                 # draw detected vertical gridlines for visual confirmation
-                try:
-                    for x in (vlines_header or []):
+                if 'vlines_header' in locals() and vlines_header:
+                    for x in vlines_header:
                         cv2.line(hdr_overlay, (int(x), int(y1_dbg)), (int(x), int(y2_dbg)), (40,40,40), 1)
-                except Exception:
-                    pass
                 cv2.imwrite(hdr_ov_path, hdr_overlay)
             except Exception as e:
                 print(f"[PARSER] Failed to write header overlay: {e}")
@@ -852,6 +908,17 @@ class BreakerTableParser:
         # === from header_map -> SNAP columns -> crop/OCR -> outputs ===
         rows_boxes = self._row_boxes_from_centers(work_gray.shape, centers, header_y, footer_y)
         n_rows = len(centers or [])
+
+        # DEFINE paths early so base_name is available everywhere below
+        base_dir  = os.path.dirname(gridless_path or src_path or ".")
+        debug_dir = debug_dir or os.path.join(base_dir, "debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        gridless_out_path = (
+            gridless_path
+            or (src_path and os.path.splitext(src_path)[0] + "_gridless.png")
+            or os.path.join(base_dir, "gridless.png")
+        )
+        base_name = os.path.splitext(os.path.basename(gridless_out_path))[0]
 
         # Build HARD header bands from vertical gridlines within the header OCR band
         vlines_header = self._detect_vertical_lines(orig_gray, int(y1_dbg), int(y2_dbg))
@@ -944,13 +1011,30 @@ class BreakerTableParser:
             header_y=int(header_y),
             footer_y=int(footer_y)
         )
+        # --- COMBO PRECOMPUTE (left/right) using full table row spans (strip scan) ---
+        body_row_spans = []
+        for t in rows_boxes:
+            try:
+                y1 = int(t[0]); y2 = int(t[1])
+            except Exception:
+                # If the analyzer ever hands us something malformed, keep going
+                y1, y2 = 0, 0
+            body_row_spans.append((y1, y2))
+        left_combo  = None
+        right_combo = None
+
+        if "L_COMBO" in cols_snapped:
+            left_combo = self.read_combo_for_rows(
+                work_gray, cols_snapped, body_row_spans, side="L",
+                debug_dir=debug_dir, base_name=base_name
+            )
+        if "R_COMBO" in cols_snapped:
+            right_combo = self.read_combo_for_rows(
+                work_gray, cols_snapped, body_row_spans, side="R",
+                debug_dir=debug_dir, base_name=base_name
+            )
         
         # 2) Run the column strip scan (single or chunked like V19_4)
-        base_dir  = os.path.dirname(gridless_path or src_path or ".")
-        debug_dir = analyzer_payload.get("debug_dir") or os.path.join(base_dir, "debug")
-        gridless_out_path = gridless_path or (src_path and os.path.splitext(src_path)[0] + "_gridless.png") or os.path.join(base_dir, "gridless.png")
-        os.makedirs(debug_dir, exist_ok=True)
-
         all_finds = {}
         chunk_meta = None
 
@@ -1025,6 +1109,10 @@ class BreakerTableParser:
                 "bottom": {"rows": n_rows-21, "y_band": [int(y_bot_min), int(y_bot_max)]},
             }
 
+        # ALWAYS save raw column-strip crops (combined or separated)
+        if self.debug and debug_dir:
+            self._save_column_strips(work_gray, cols_snapped, rows_boxes, debug_dir=debug_dir, base_name=base_name)
+
         # Build detected_breakers (same as V19_4)
         def _to_int(s):
             try: return int(str(s).strip())
@@ -1033,6 +1121,14 @@ class BreakerTableParser:
         counts = {}
         L_A, L_P = all_finds.get("l_trip", []),  all_finds.get("l_poles", [])
         R_A, R_P = all_finds.get("r_trip", []),  all_finds.get("r_poles", [])
+
+        # If a side is combined, trust the combo OCR and SKIP the separated reads
+        if left_combo is not None:
+            L_A = [ (c.get("amps")  if c else None) for c in left_combo ]
+            L_P = [ (c.get("poles") if c else None) for c in left_combo ]
+        if right_combo is not None:
+            R_A = [ (c.get("amps")  if c else None) for c in right_combo ]
+            R_P = [ (c.get("poles") if c else None) for c in right_combo ]
         for a_list, p_list in ((L_A, L_P), (R_A, R_P)):
             n = max(len(a_list), len(p_list))
             for i in range(n):
@@ -1534,6 +1630,249 @@ class BreakerTableParser:
         y_threshold = 0.5 * (top_mean + bot_mean)
         return float(y_threshold), float(top_mean)
     
+    def _crop_row_band(self, img, x1, x2, y1, y2, pad=3):
+        H, W = img.shape[:2]
+        yy1 = max(0, y1 - pad); yy2 = min(H, y2 + pad)
+        xx1 = max(0, x1 - pad); xx2 = min(W, x2 + pad)
+        return img[yy1:yy2, xx1:xx2]
+
+    def _ocr_combo_cell(self, crop, *, return_dets: bool = False):
+        """
+        OCR a combined TRIP/POLES cell crop.
+        If return_dets=True, returns (text, dets) where dets is a list of tuples:
+            [ (box, text, conf), ... ] with 'box' in crop's coordinate space.
+        """
+        if crop is None or crop.size == 0:
+            return ("", []) if return_dets else ""
+
+        up  = cv2.resize(crop, None, fx=1.0, fy=1.0, interpolation=cv2.INTER_CUBIC)  # keep 1.0 so boxes map directly
+        gry = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY) if up.ndim == 3 else up
+        gry = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gry)
+
+        if not _HAS_OCR:
+            return ("", []) if return_dets else ""
+
+        try:
+            reader = self.reader or easyocr.Reader(['en'], gpu=False, verbose=False)
+        except Exception:
+            reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+
+        inv = cv2.bitwise_not(gry)
+
+        def _read(img):
+            try:
+                # Keep mag_ratio=1.0 so coordinates match 'img'
+                return reader.readtext(
+                    img, detail=1, paragraph=False,
+                    allowlist=_COMBO_ALLOWLIST,
+                    text_threshold=0.45, low_text=0.30, mag_ratio=1.0
+                )
+            except Exception:
+                return []
+
+        # Try both polarities and merge left→right
+        dets_gry = _read(gry)
+        dets_inv = _read(inv)
+        dets = dets_gry + dets_inv
+        if not dets:
+            return ("", []) if return_dets else ""
+
+        dets.sort(key=lambda r: ((r[0][0][0] + r[0][2][0]) / 2.0))
+        text = " ".join(t for _, t, _ in dets).upper()
+        text = text.replace("--", "-").strip()
+        text = re.sub(r"\s+", " ", text)
+
+        return (text, dets) if return_dets else text
+
+    def _parse_combo_text(self, s: str) -> dict:
+        import re
+        raw = s or ""
+        u = raw.upper()
+
+        # Keep only useful symbols
+        u = re.sub(r"[^0-9AP/ -]", " ", u)
+        u = re.sub(r"\s+", " ", u).strip()
+
+        # Normalize obvious noise: 'O'→'0' in numeric contexts
+        u = re.sub(r"(?<=\d)O(?=\d)", "0", u)
+
+        # Canonical patterns (order matters)
+        pats = [
+            # 20/1P or 1P/20 or 20A/1P or 1P/20A
+            r"^(?P<amps>\d{2,3})A?\s*/\s*(?P<poles>[123])P?$",
+            r"^(?P<poles>[123])P?\s*/\s*(?P<amps>\d{2,3})A?$",
+
+            # 20A 1P  |  1P 20A
+            r"^(?P<amps>\d{2,3})A?\s+(?P<poles>[123])P$",
+            r"^(?P<poles>[123])P\s+(?P<amps>\d{2,3})A?$",
+
+            # 20A1P   |  1P20A  (glued)
+            r"^(?P<amps>\d{2,3})A?(?P<poles>[123])P$",
+            r"^(?P<poles>[123])P(?P<amps>\d{2,3})A?$",
+
+            # 20/1 or 1/20 (no letters)
+            r"^(?P<amps>\d{2,3})\s*/\s*(?P<poles>[123])$",
+            r"^(?P<poles>[123])\s*/\s*(?P<amps>\d{2,3})$",
+
+            # Loose "20 1P" / "1P 20"
+            r"^(?P<amps>\d{2,3})\s+(?P<poles>[123])P$",
+            r"^(?P<poles>[123])P\s+(?P<amps>\d{2,3})$",
+        ]
+        for p in pats:
+            m = re.match(p, u)
+            if m:
+                amps  = int(m.group("amps"))
+                poles = int(m.group("poles"))
+                if 15 <= amps <= 250 and amps % 5 == 0 and 1 <= poles <= 3:
+                    return {"amps": amps, "poles": poles, "raw": raw, "method": "regex"}
+
+        # Heuristic fallback: pick exactly one small-digit as poles and one 2–3 digit multiple-of-5 as amps
+        nums = [int(x) for x in re.findall(r"\d+", u)]
+        amps = poles = None
+        for n in nums:
+            if poles is None and n in (1, 2, 3):
+                poles = n
+            elif amps is None and 15 <= n <= 250 and n % 5 == 0:
+                amps = n
+            if amps is not None and poles is not None:
+                break
+
+        return {"amps": amps, "poles": poles, "raw": raw, "method": "digits"}
+
+    def read_combo_for_rows(self, img, cols, rows_y_spans, side="L", *, debug_dir=None, base_name="page"):
+        """
+        Scan the combined TRIP/POLES column as a vertical strip, one row at a time,
+        mirroring the separated-column scanner geometry/padding so crops match.
+        Returns: list of dicts [{"amps": int|None, "poles": int|None, "raw": str, "method": str}, ...]
+        """
+        key = f"{side}_COMBO"
+        if key not in cols:
+            return [None] * len(rows_y_spans)
+
+        x1, x2 = map(int, cols[key])
+        H, W = img.shape[:2]
+
+        # match separated-strip padding behavior
+        # (pad is derived from median row gap in parse_from_analyzer; we do a light per-row pad here)
+        row_pad_y = max(4, int(0.006 * H))
+        col_pad_x = max(3, int(0.003 * W))
+
+        xx1 = max(0, x1 - col_pad_x)
+        xx2 = min(W - 1, x2 + col_pad_x)
+
+        out = []
+        dbg_lines = []
+
+        # Use only the first two elements of each row span (y1, y2)
+        def _y1y2(t):
+            try:
+                return int(t[0]), int(t[1])
+            except Exception:
+                return None, None
+        for row_t in rows_y_spans:
+            ry1, ry2 = _y1y2(row_t)
+            if ry1 is None or ry2 is None:
+                out.append({"amps": None, "poles": None, "raw": "", "method": "empty"})
+                continue
+            yy1 = max(0, int(ry1) - row_pad_y)
+            yy2 = min(H - 1, int(ry2) + row_pad_y)
+            if yy2 <= yy1 or xx2 <= xx1:
+                out.append({"amps": None, "poles": None, "raw": "", "method": "empty"})
+                continue
+
+            crop = img[yy1:yy2, xx1:xx2]
+            txt = self._ocr_combo_cell(crop)  # same OCR path, but see improved _ocr_combo_cell below
+            parsed = self._parse_combo_text(txt)
+            out.append(parsed)
+
+            dbg_lines.append({
+                "row_band": [int(ry1), int(ry2)],
+                "crop_band": [int(yy1), int(yy2)],
+                "x_band": [int(xx1), int(xx2)],
+                "raw": txt,
+                "parsed": parsed
+            })
+
+        # optional debug drop, mirrors your other column_data artifacts
+        try:
+            if debug_dir:
+                os.makedirs(debug_dir, exist_ok=True)
+                self._write_json(
+                    os.path.join(debug_dir, f"{base_name.lower()}_{side.lower()}_combo_strip.json"),
+                    {"x_band": [int(xx1), int(xx2)], "rows": dbg_lines}
+                )
+        except Exception:
+            pass
+
+        # --- optional: draw a single overlay for the whole combined column strip ---
+        try:
+            if debug_dir:
+                os.makedirs(debug_dir, exist_ok=True)
+
+                # Build a single tall overlay spanning all rows we scanned on this side.
+                ys1 = []
+                ys2 = []
+                for row_t in rows_y_spans:
+                    r1, r2 = _y1y2(row_t)
+                    if r1 is None or r2 is None:
+                        continue
+                    ys1.append(r1); ys2.append(r2)
+                if not ys1 or not ys2:
+                    return out
+                all_y1 = min(ys1) - row_pad_y
+                all_y2 = max(ys2) + row_pad_y
+                all_y1 = max(0, all_y1)
+                all_y2 = min(H - 1, all_y2)
+                strip = img[all_y1:all_y2, xx1:xx2].copy()
+                if strip.ndim == 2:
+                    strip_bgr = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
+                else:
+                    strip_bgr = strip
+
+                # Re-scan rows to get per-row detections (so we can draw boxes)
+                # (We reuse the same crops we already used above, but now collect det boxes.)
+                YELLOW = (0, 200, 255)
+                WHITE  = (255, 255, 255)
+
+                for row_t in rows_y_spans:
+                    r1, r2 = _y1y2(row_t)
+                    if r1 is None or r2 is None:
+                        continue
+                    yy1 = max(0, int(r1) - row_pad_y)
+                    yy2 = min(H - 1, int(r2) + row_pad_y)
+                    if yy2 <= yy1 or xx2 <= xx1:
+                        continue
+
+                    crop = img[yy1:yy2, xx1:xx2]
+                    raw_txt, dets_here = self._ocr_combo_cell(crop, return_dets=True)
+
+                    # Draw each detection box with label; map crop coords -> strip coords via offsets
+                    for (box, txt, conf) in dets_here:
+                        xs = [int(p[0]) for p in box]
+                        ys = [int(p[1]) for p in box]
+                        x1b, x2b = max(0, min(xs)), min((xx2-xx1) - 1, max(xs))
+                        # convert to strip-relative Y by adding (yy1 - all_y1)
+                        y1b = max(0, min((yy1 - all_y1) + min(ys), strip_bgr.shape[0] - 1))
+                        y2b = max(0, min((yy1 - all_y1) + max(ys), strip_bgr.shape[0] - 1))
+                        if x2b <= x1b or y2b <= y1b:
+                            continue
+
+                        cv2.rectangle(strip_bgr, (x1b, y1b), (x2b, y2b), YELLOW, 2)
+                        label = f'{str(txt)[:18]} ({float(conf):.2f})'
+                        cv2.putText(strip_bgr, label, (x1b, max(12, y1b - 4)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 2, cv2.LINE_AA)
+
+                out_name = f"{base_name.lower()}_{side.lower()}_combo_overlay.png"
+                out_path = os.path.join(debug_dir, out_name)
+                cv2.imwrite(out_path, strip_bgr)
+        except Exception as _e:
+            # non-fatal; keep pipeline going
+            pass
+
+        return out
+
+
+
     @staticmethod
     def _cluster_by_xline(items: List[dict], x_gap: int = 36, y_overlap_min: float = 0.35) -> List[dict]:
         """
