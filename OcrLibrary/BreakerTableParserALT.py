@@ -344,6 +344,110 @@ ROLE_RX = {
                          r"LOAD\s+DESIGNATION|DESIGNATION|NAME)\b", re.I),
 }
 
+def _visual_normalize_header_label(s: str) -> str:
+    """
+    Fix common OCR confusions for header labels (e.g., TRLP->TRIP, CLRCULT->CIRCUIT, etc.).
+    Keep this VERY targeted to avoid collateral damage.
+    """
+    u = " ".join((s or "").upper().split())
+    # targeted word-level corrections seen in real dumps
+    replacements = {
+        # TRIP/Pole family
+        "TRLP": "TRIP",
+        "POLE": "POLES",  # harmless upgrade when header prints singular
+        # CIRCUIT/Description family
+        "CLRCULT": "CIRCUIT",
+        "DESCRLPTION": "DESCRIPTION",
+        "DESCRLPTLON": "DESCRIPTION",
+        "DESCRLPTLN":  "DESCRIPTION",
+        "DESARLPTBN":  "DESCRIPTION",
+        "DESARLPTION": "DESCRIPTION",
+        # Receptacle (noise word that was bleeding into labels)
+        "RECEPTACK":   "RECEPTACLE",
+        "RECEPTACKE":  "RECEPTACLE",
+    }
+    toks = u.split()
+    fixed = [replacements.get(t, t) for t in toks]
+    return " ".join(fixed)
+
+def classify_header_columns_basic(header_groups_lr: List[dict], dump: List[dict], page_width: Optional[int] = None) -> dict:
+    """
+    Score each header band/group as one of: ckt / description / trip / poles / combo.
+    'combo' = column label that clearly implies both TRIP(AMPS) and POLES (e.g., 'TRIP POLE', 'AMP, POLES', 'BRKR AMP POLES').
+    Returns:
+      {
+        "bands": [
+          { "key", "band":[x1,x2], "label", "role", "scores":{trip,poles,ckt,description}, "flags":{has_trip,has_poles,is_combo} }
+        ],
+        "panel_hints": {"likely_combined": bool},
+        "version": "colroles_v1"
+      }
+    """
+    import difflib, re
+    VOCAB = {
+        "ckt": ["CKT", "CCT", "CKT NO", "CKT NO.", "CIRCUIT NO"],
+        "description": ["CIRCUIT DESCRIPTION","DESCRIPTION","LOAD DESCRIPTION","DESIGNATION","LOAD DESIGNATION","NAME"],
+        "trip": ["TRIP","AMPS","AMP","BREAKER","BKR","SIZE","BRKR","BRKR AMP","BRKR AMPS"],
+        "poles": ["POLES","POLE","P","AMP, POLES","AMPS, POLES","BRKR POLES"],
+    }
+    ACCEPT_THR = 0.60
+
+    def _norm(s: str) -> str:
+        s = " ".join((s or "").upper().split())
+        s = s.replace("AMP .","AMP").replace("AMP.","AMP").replace("AMP ","AMP")
+        s = re.sub(r"[\[\]():.,/_\-]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def _sim(a: str, b: str) -> float:
+        return difflib.SequenceMatcher(a=_norm(a), b=_norm(b)).ratio()
+
+    def _best_sim(token: str, vocab: list) -> float:
+        return max((_sim(token, v) for v in vocab), default=0.0)
+
+    out_bands = []
+    for g in (header_groups_lr or []):
+        label_raw = g.get("raw_join") or ""
+        label     = _visual_normalize_header_label(label_raw)
+        # regex flags on normalized label
+        t_trip  = bool(ROLE_RX["trip"].search(label))
+        t_poles = bool(ROLE_RX["poles"].search(label))
+        # similarity scoring on normalized label
+        s_ckt   = _best_sim(label, VOCAB["ckt"])
+        s_desc  = _best_sim(label, VOCAB["description"])
+        s_trip  = _best_sim(label, VOCAB["trip"])
+        s_poles = _best_sim(label, VOCAB["poles"])
+
+        is_combo = (t_trip and t_poles) or ("AMP, POLES" in _norm(label)) or ("TRIP POLE" in _norm(label)) or ("BRKR AMP POLES" in _norm(label))
+
+        role = "unknown"
+        if is_combo:
+            role = "combo"
+        else:
+            # choose strongest single role over threshold
+            cand = [("ckt", s_ckt), ("description", s_desc), ("trip", s_trip), ("poles", s_poles)]
+            cand.sort(key=lambda x: x[1], reverse=True)
+            if cand and cand[0][1] >= ACCEPT_THR:
+                role = cand[0][0]
+
+        out_bands.append({
+            "key": g.get("key"),
+            "band": list(map(int, g.get("band") or [0,0])),
+            "label": label_raw,
+            "label_norm": label,
+            "role": role,
+            "scores": {"trip": float(s_trip), "poles": float(s_poles), "ckt": float(s_ckt), "description": float(s_desc)},
+            "flags": {"has_trip": bool(t_trip), "has_poles": bool(t_poles), "is_combo": bool(is_combo)},
+        })
+
+    # panel-level hinting
+    n_combo = sum(1 for b in out_bands if b["role"] == "combo")
+    n_trip  = sum(1 for b in out_bands if b["role"] == "trip")
+    n_poles = sum(1 for b in out_bands if b["role"] == "poles")
+    likely_combined = (n_combo > 0) or ((n_trip > 0) ^ (n_poles > 0))
+
+    return {"bands": out_bands, "panel_hints": {"likely_combined": bool(likely_combined)}, "version": "colroles_v1"}
+
 def split_by_words(d: dict) -> list:
     """
     Split a glued header like 'CIRCUITDESCRIPTION' or 'TRIP(A)' into word-ish chunks.
@@ -765,15 +869,6 @@ class BreakerTableParser:
         rows_boxes = self._row_boxes_from_centers(work_gray.shape, centers, header_y, footer_y)
         n_rows = len(centers or [])
 
-        # 1) Columns from header_map, snapped to grid (use ORIGINAL gray for v-lines)
-        cols_snapped = self._columns_from_header_map(
-            header_map=header_map,
-            page_width=W,
-            gray_for_lines=orig_gray,
-            header_y=int(header_y),
-            footer_y=int(footer_y)
-        )
-
         # Build HARD header bands from vertical gridlines within the header OCR band
         vlines_header = self._detect_vertical_lines(orig_gray, int(y1_dbg), int(y2_dbg))
         header_bands  = self._bands_from_vlines(vlines_header, W)
@@ -788,6 +883,7 @@ class BreakerTableParser:
             gap_mult=2.6,
             gap_min_px=32
         )
+        
         header_grouped = {g["key"]: g for g in header_groups_lr}
         header_band_labels = {g["key"]: g["raw_join"] for g in header_groups_lr}
 
@@ -797,6 +893,74 @@ class BreakerTableParser:
             print(f"     raw={[t['text'] for t in g.get('tokens',[])]}")
         print("-----------------------------------")
 
+        # Classify each header band into roles (ckt/description/trip/poles/combo) and set panel hints
+        col_class = classify_header_columns_basic(header_groups_lr, dump, page_width=W)
+        if self.debug:
+            print("==== COLUMN ROLES (scored) ====")
+            for b in col_class.get("bands", []):
+                sc = b["scores"]
+                lbl = b.get("label","")
+                lbn = b.get("label_norm","")
+                print(f"{b['key']:>3} {b['band']} -> {b['role']}  "
+                      f"[trip={sc['trip']:.2f} poles={sc['poles']:.2f} ckt={sc['ckt']:.2f} desc={sc['description']:.2f}]  "
+                      f"flags={b['flags']}  label='{lbl}'  norm='{lbn}'")
+            print("Panel hints:", col_class.get("panel_hints", {}))
+
+        # --- Synthesize header_map picks from grouped bands + role classifier ---
+        header_map_synth = {"trip": [], "poles": [], "ckt": [], "description": []}
+
+        def _add_pick(role: str, g: dict):
+            x1, x2 = int(g["band"][0]), int(g["band"][1])
+            xc = 0.5 * (x1 + x2)
+            header_map_synth[role].append({
+                "text": g.get("label", g.get("raw_join", "")),
+                "text_norm": g.get("label_norm", g.get("raw_join", "")),
+                "conf": 1.0,
+                "x_center": float(xc),
+                "x1": x1, "x2": x2,
+                "y1": int(y1_dbg), "y2": int(y2_dbg),
+                "roles": [role],
+            })
+
+        roles_by_key = {b["key"]: b for b in (col_class.get("bands") or [])}
+        for g in header_groups_lr:
+            b = roles_by_key.get(g["key"])
+            if not b:
+                continue
+            role = b.get("role", "unknown")
+            if role == "combo":
+                _add_pick("trip", g)
+                _add_pick("poles", g)
+            elif role in ("trip", "poles", "ckt", "description"):
+                _add_pick(role, g)
+
+        # If upstream left nothing in header_map, or it's empty, use the synthesized one.
+        def _empty(hm: dict) -> bool:
+            return not hm or not any(hm.get(k) for k in ("trip","poles","ckt","description"))
+
+        if _empty(header_map):
+            header_map = header_map_synth
+            if self.debug:
+                print("[SNAP] Using synthesized header_map from grouped labels/roles.")
+        else:
+            # Merge: prefer explicit picks but allow synthesized to backfill missing roles
+            for k in ("trip","poles","ckt","description"):
+                if not header_map.get(k):
+                    header_map[k] = list(header_map_synth.get(k) or [])
+
+        if self.debug:
+            counts = {k: len(header_map.get(k) or []) for k in ("ckt","description","trip","poles")}
+            print(f"[SNAP] header_map picks -> {counts}")
+
+        # Now that we have picks, snap to true grid bands using ORIGINAL gray
+        cols_snapped = self._columns_from_header_map(
+            header_map=header_map,
+            page_width=W,
+            gray_for_lines=orig_gray,
+            header_y=int(header_y),
+            footer_y=int(footer_y)
+        )
+        
         # 2) Run the column strip scan (single or chunked like V19_4)
         base_dir  = os.path.dirname(gridless_path or src_path or ".")
         debug_dir = analyzer_payload.get("debug_dir") or os.path.join(base_dir, "debug")
@@ -918,7 +1082,8 @@ class BreakerTableParser:
             "header_debug": header_dbg,
             "header_band_grouped": header_grouped,  # Tokens grouped by x-center lines
             "header_band_labels": header_band_labels,  # Canonical label per x-center group
-            "header_groups_lr": header_groups_lr     # Ordered groups (L→R), no semantics
+            "header_groups_lr": header_groups_lr,    # Ordered groups (L→R), no semantics
+            "column_roles": col_class                # Band roles + panel_hints (combined vs separate)
           }
 
     def _detect_vertical_lines(self, gray: np.ndarray, y1: int, y2: int) -> List[int]:
@@ -1112,9 +1277,20 @@ class BreakerTableParser:
                     cols["R_POLES"] = bands[idx-1]
 
         # Final safety
+        picks_were_empty = not any(header_map.get(k) for k in ("trip","poles","ckt","description"))
         fb = self._tp_fallback(W)
         for k, v in fb.items():
             cols.setdefault(k, v)
+
+        if self.debug:
+            try:
+                dbg_cols = {k: (int(v[0]), int(v[1])) for k, v in cols.items()}
+                if picks_were_empty:
+                    print("[SNAP] No header picks available; using _tp_fallback bands (likely misaligned).")
+                else:
+                    print(f"[SNAP] Columns snapped from header picks: {dbg_cols}")
+            except Exception:
+                pass
 
         return cols
 
