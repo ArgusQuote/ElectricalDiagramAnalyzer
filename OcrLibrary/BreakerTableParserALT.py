@@ -26,11 +26,6 @@ _HDR_FALLBACK_MULT = 1.40   # was ~2.20; reduce overscan under header
 _HDR_TRIM_TOP_PX   = 2
 _HDR_TRIM_BOT_PX   = 6
 
-def _token_overlap_score(a: str, b: str) -> int:
-    aa = set(a.split()); bb = set(b.split())
-    inter = len(aa & bb)
-    return inter*2 - abs(len(aa)-len(bb))
-
 def _is_numeric_or_phaseish(raw: str) -> bool:
     """
     Returns True if the token should be ignored for header purposes because:
@@ -508,16 +503,6 @@ def split_multi_role(d: dict) -> list:
 
 
 class BreakerTableParser:
-    """
-        This class performs ONLY the second stage:
-      - takes analyzer payload (gridless image, tp_cols, centers, header/footer)
-      - crops 4 TP columns, saves crops next to gridless image
-      - does OCR for TRIP/POLES with same logic (incl. dash/peripheral filters)
-      - writes column_data.json (or top/bottom when chunked)
-      - builds detected_breakers
-      - writes per-crop debug overlays/json to <src_dir>/debug when debug=True
-    """
-
     def __init__(self, debug: bool = False, config_path: str = "breaker_labels_config.jsonc", reader=None):
         self.debug = debug
         self._cfg = _load_jsonc(config_path) or {}
@@ -715,7 +700,6 @@ class BreakerTableParser:
             g["key"] = f"C{i}"
         return groups
 
-    # ======= public =======
     def parse_from_analyzer(self, analyzer_payload: Dict) -> Dict:
         gray        = analyzer_payload["gray"]
         centers     = analyzer_payload["centers"]
@@ -1131,7 +1115,6 @@ class BreakerTableParser:
 
         return sorted(set(centroid(p) for p in peaks))
 
-
     def _bands_from_vlines(self, vlines: List[int], page_width: int) -> List[Tuple[int,int]]:
         """
         Convert sorted vertical line x-positions into x-bands (columns).
@@ -1152,6 +1135,25 @@ class BreakerTableParser:
             bands.append((a, b))
         return bands
 
+    def _header_span_band(self, pick: dict, page_width: int, pad: int = 8, min_width: int = 24):
+        """
+        Build a [x1,x2] band from the header token's bbox, padded.
+        Ensures a minimum width so skinny headers still cover the whole column.
+        """
+        if not pick:
+            return None
+        x1 = int(pick.get("x1", pick.get("left", 0)))
+        x2 = int(pick.get("x2", pick.get("right", 0)))
+        if x2 < x1:
+            x1, x2 = x2, x1
+        x1 = max(0, x1 - pad)
+        x2 = min(page_width, x2 + pad)
+        if (x2 - x1) < min_width:
+            cx = (x1 + x2) // 2
+            half = max(min_width // 2, 1)
+            x1 = max(0, cx - half)
+            x2 = min(page_width, cx + half)
+        return (x1, x2)
 
     def _pick_band_containing_x(self, bands: List[Tuple[int,int]], x: float) -> Optional[Tuple[int,int]]:
         for (a,b) in bands:
@@ -1192,6 +1194,10 @@ class BreakerTableParser:
         L_trip  = side_picks("trip",  True)
         R_trip  = side_picks("trip",  False)
 
+        # Detect if each side is a single combined TRIP/POLES header (your existing heuristic)
+        combined_left  = self._is_combined_side(header_map, left=True,  page_width=W)
+        combined_right = self._is_combined_side(header_map, left=False, page_width=W)
+
         cols: Dict[str, Tuple[int,int]] = {}
 
         # Prefer snapping to the actual header pick; only fallback to neighbor bands if needed.
@@ -1209,34 +1215,60 @@ class BreakerTableParser:
             return b
 
         # --- LEFT SIDE ---
-        if L_poles:
-            lP = band_for_pick(L_poles[0], bands)
-            if lP:
-                cols["L_POLES"] = lP
-        # Prefer TRIP header pick first
-        if L_trip:
-            lt = band_for_pick(L_trip[0], bands)
-            if lt:
-                cols["L_TRIP"] = lt
-        # If no TRIP yet but we have POLES → neighbor to the left
-        if "L_TRIP" not in cols and "L_POLES" in cols:
-            idx = bands.index(cols["L_POLES"]) if cols["L_POLES"] in bands else None
-            if idx is not None and idx-1 >= 0:
-                cols["L_TRIP"] = bands[idx-1]
+        if combined_left:
+            # Prefer a band made from the header bbox so we cover the full header cell
+            left_pick = (L_trip[0] if L_trip else (L_poles[0] if L_poles else None))
+            b = self._header_span_band(left_pick, W, pad=8, min_width=24) if left_pick else None
+            if b is None and bands:
+                # fallback: nearest precomputed band
+                if left_pick:
+                    xc = float(left_pick.get("x_center", (left_pick.get("x1",0)+left_pick.get("x2",0))/2.0))
+                    nb = self._pick_band_containing_x(bands, xc)
+                    if nb: b = nb
+            if b:
+                cols["L_COMBO"] = b
+            # Skip separate L_TRIP/L_POLES logic entirely when combined.
+        else:
+            if L_poles:
+                lP = band_for_pick(L_poles[0], bands)
+                if lP:
+                    cols["L_POLES"] = lP
+            # Prefer TRIP header pick first
+            if L_trip:
+                lt = band_for_pick(L_trip[0], bands)
+                if lt:
+                    cols["L_TRIP"] = lt
+            # If no TRIP yet but we have POLES → neighbor to the left
+            if "L_TRIP" not in cols and "L_POLES" in cols:
+                idx = bands.index(cols["L_POLES"]) if cols["L_POLES"] in bands else None
+                if idx is not None and idx-1 >= 0:
+                    cols["L_TRIP"] = bands[idx-1]
 
         # --- RIGHT SIDE ---
-        if R_poles:
-            rP = band_for_pick(R_poles[0], bands)
-            if rP:
-                cols["R_POLES"] = rP
-        if R_trip:
-            rt = band_for_pick(R_trip[0], bands)
-            if rt:
-                cols["R_TRIP"] = rt
-        if "R_TRIP" not in cols and "R_POLES" in cols:
-            idx = bands.index(cols["R_POLES"]) if cols["R_POLES"] in bands else None
-            if idx is not None and idx+1 < len(bands):
-                cols["R_TRIP"] = bands[idx+1]
+        if combined_right:
+            right_pick = (R_trip[0] if R_trip else (R_poles[0] if R_poles else None))
+            b = self._header_span_band(right_pick, W, pad=8, min_width=24) if right_pick else None
+            if b is None and bands:
+                xc = float(right_pick.get("x_center", (right_pick.get("x1",0)+right_pick.get("x2",0))/2.0)) if right_pick else None
+                if xc is not None:
+                    nb = self._pick_band_containing_x(bands, xc)
+                    if nb: b = nb
+            if b:
+                cols["R_COMBO"] = b
+            # Skip separate R_TRIP/R_POLES logic entirely when combined.
+        else:
+            if R_poles:
+                rP = band_for_pick(R_poles[0], bands)
+                if rP:
+                    cols["R_POLES"] = rP
+            if R_trip:
+                rt = band_for_pick(R_trip[0], bands)
+                if rt:
+                    cols["R_TRIP"] = rt
+            if "R_TRIP" not in cols and "R_POLES" in cols:
+                idx = bands.index(cols["R_POLES"]) if cols["R_POLES"] in bands else None
+                if idx is not None and idx+1 < len(bands):
+                    cols["R_TRIP"] = bands[idx+1]
 
         # Helper to get header center or fall back to band center (NO accidental /2 on header centers)
         def _center_from_header_or_band(hlist, band):
@@ -1260,15 +1292,15 @@ class BreakerTableParser:
                 )
                 cols["L_TRIP"], cols["L_POLES"] = left_band, right_band
 
-        # Backfills from TRIP picks if needed
-        if "L_POLES" not in cols and L_trip:
+        # Backfills from TRIP picks if needed (disabled on combined side)
+        if not combined_left and "L_POLES" not in cols and L_trip:
             lt = band_for_pick(L_trip[0], bands)
             if lt:
                 idx = bands.index(lt) if lt in bands else None
                 if idx is not None and idx+1 < len(bands):
                     cols["L_TRIP"] = lt
                     cols["L_POLES"] = bands[idx+1]
-        if "R_POLES" not in cols and R_trip:
+        if not combined_right and "R_POLES" not in cols and R_trip:
             rt = band_for_pick(R_trip[0], bands)
             if rt:
                 idx = bands.index(rt) if rt in bands else None
@@ -1279,7 +1311,12 @@ class BreakerTableParser:
         # Final safety
         picks_were_empty = not any(header_map.get(k) for k in ("trip","poles","ckt","description"))
         fb = self._tp_fallback(W)
+        # Respect combined sides: don't backfill separate bands on that side.
         for k, v in fb.items():
+            if combined_left and k in ("L_TRIP","L_POLES"):
+                continue
+            if combined_right and k in ("R_TRIP","R_POLES"):
+                continue
             cols.setdefault(k, v)
 
         if self.debug:
@@ -1289,6 +1326,8 @@ class BreakerTableParser:
                     print("[SNAP] No header picks available; using _tp_fallback bands (likely misaligned).")
                 else:
                     print(f"[SNAP] Columns snapped from header picks: {dbg_cols}")
+                    if combined_left or combined_right:
+                        print(f"[SNAP] Combined sides -> left={combined_left} right={combined_right} (single-column snap on those sides)")
             except Exception:
                 pass
 
@@ -2018,7 +2057,6 @@ class BreakerTableParser:
             left, right = (x1, m), (m+1, x2)
         return left, right
 
-    # ======= internals (copied from V19_4 parsing half) =======
     def _row_boxes_from_centers(self, shape: Tuple[int,int], centers: List[int],
                                 header_y_abs: Optional[int], footer_y_abs: Optional[int]) -> List[Tuple[int,int,int,int]]:
         H, W = shape
@@ -2052,7 +2090,6 @@ class BreakerTableParser:
                 "R_POLES": frac_to_px(tuple(fb.get("frac_r_poles", (0.655,0.690)))),
                 "R_TRIP":  frac_to_px(tuple(fb.get("frac_r_trip",  (0.695,0.735))))}
 
-    # ==================== Weighted-vote helpers ====================
     def _get_scoring_cfg(self):
         # Configurable weights/thresholds with safe defaults
         cfg = self._cfg.get("poles_voting", {}) if hasattr(self, "_cfg") else {}
@@ -2353,7 +2390,6 @@ class BreakerTableParser:
         }
         return final_digit, debug
 
-    # ---- everything below mirrors your V19_4 scan/ocr helpers (unchanged logic) ----
     def _scrub_hline_noise(self, img: np.ndarray) -> np.ndarray:
         if img is None or img.size == 0:
             return img
@@ -2537,7 +2573,9 @@ class BreakerTableParser:
             ("L_POLES", (0,255,0)),    # green
             ("R_POLES", (0,255,0)),    # green
             ("R_TRIP",  (255,255,0)),  # yellow
-        ]:
+            ("L_COMBO", (255, 0, 255)), # magenta for combined
+            ("R_COMBO", (255, 0, 255)), # magenta for combined
+         ]:
             if name in cols and cols[name] is not None:
                 x1, x2 = map(int, cols[name])
                 cv2.rectangle(vis, (x1, int(header_y)), (x2, int(footer_y)), color, 2)
@@ -2604,7 +2642,6 @@ class BreakerTableParser:
             "ink_ratio": float(ink_ratio), "hx": float(hx), "bottom_peak": float(bottom_peak),
         }
 
-
     def _calibrate_and_filter_blobs(self, blobs: List[Tuple[int,int,int,int,np.ndarray]], base_gray: np.ndarray) -> List[Tuple[int,int,int,int,np.ndarray]]:
         """
         Given merged candidate boxes [(x,y,w,h,bw_mask), ...] and the processed gray image,
@@ -2668,7 +2705,6 @@ class BreakerTableParser:
 
         return keep
 
-    # === main scan (identical outputs/paths) ===
     def _scan_tp_column_strips(
         self,
         gridless_gray: np.ndarray,
