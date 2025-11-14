@@ -1,40 +1,31 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-PanelBoardSearch
-----------------
-Find panel-board tables as 'voids' (holes) inside large whitespace regions
-and save crops. Overlays are saved only if debug=True — EXCEPT the magenta
-perimeter overlay, which is always saved to output_dir/magenta_overlays.
-
-NEW (debug JSON with DPI):
-  When debug=True, writes a JSON file that records, for EVERY saved crop:
-    - which page it came from
-    - table index on that page
-    - crop path + size
-    - bbox (px and fractional)
-    - rasterization metadata, including the *effective DPI* used
-  Path:
-    <output_dir>/search_debug/<basename>_crops_debug.json
-
-Public API:
-    crops = PanelBoardSearch(...).readPdf("/path/to.pdf")
-"""
-
 import os
-import json
-from pathlib import Path
-from typing import List, Tuple, Dict, Any
-
 import cv2
 import numpy as np
-from PIL import Image, ImageFile
+from pathlib import Path
 from pdf2image import convert_from_path
-
+from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+import fitz  # PyMuPDF
 
 
 class PanelBoardSearch:
+    """
+    Find panel-board tables as 'voids' (holes) inside large whitespace regions
+    and save crops. Overlays are saved only if debug=True — EXCEPT the magenta
+    perimeter overlay, which is always saved to output_dir/magenta_overlays.
+
+    Post-processing: ensure each saved PNG has at most one table box; if multiple, split.
+    Public API:
+        crops = PanelBoardSearch(...).readPdf("/path/to.pdf")
+
+    New:
+        After running readPdf(), this class also builds a single vector-only PDF
+        containing the table regions it found, named "<input_basename>_foundtables.pdf"
+        in the same output_dir.
+    """
+
     def __init__(
         self,
         output_dir: str,
@@ -51,7 +42,8 @@ class PanelBoardSearch:
         max_void_w_fr: float = 0.95,
         max_void_h_fr: float = 0.95,
         border_exclude_px: int = 4,
-        # width/height fraction gates to avoid thin strips (fractions of page)
+        # NEW: width/height % gates to avoid thin strips
+        #      (fractions of page size; set bound to None to disable)
         void_w_fr_range: tuple | None = (0.10, 0.60),
         void_h_fr_range: tuple | None = (0.10, 0.60),
         # Cropping + debug
@@ -74,74 +66,77 @@ class PanelBoardSearch:
     ):
         self.output_dir = os.path.expanduser(output_dir)
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
-
         # Always-on magenta overlay directory
         self.magenta_dir = Path(self.output_dir) / "magenta_overlays"
         self.magenta_dir.mkdir(parents=True, exist_ok=True)
 
-        # NEW: search-debug directory + in-memory log (only used if debug=True)
-        self.search_debug_dir = Path(self.output_dir) / "search_debug"
-        self.debug = bool(debug)
-        if self.debug:
-            self.search_debug_dir.mkdir(parents=True, exist_ok=True)
-        self._debug_crops_log: List[Dict[str, Any]] = []
+        self.dpi = dpi
+        self.min_whitespace_area_fr = min_whitespace_area_fr
+        self.margin_shave_px = margin_shave_px
 
-        self.verbose = bool(verbose)
-        self.dpi = int(dpi)
+        self.min_void_area_fr = min_void_area_fr
+        self.min_void_w_px = min_void_w_px
+        self.min_void_h_px = min_void_h_px
 
-        # WS / void selection params
-        self.min_whitespace_area_fr = float(min_whitespace_area_fr)
-        self.margin_shave_px = int(margin_shave_px)
+        self.max_void_area_fr = max_void_area_fr
+        self.max_void_w_fr = max_void_w_fr
+        self.max_void_h_fr = max_void_h_fr
+        self.border_exclude_px = border_exclude_px
 
-        self.min_void_area_fr = float(min_void_area_fr)
-        self.min_void_w_px = int(min_void_w_px)
-        self.min_void_h_px = int(min_void_h_px)
-
-        self.max_void_area_fr = float(max_void_area_fr)
-        self.max_void_w_fr = float(max_void_w_fr)
-        self.max_void_h_fr = float(max_void_h_fr)
-        self.border_exclude_px = int(border_exclude_px)
-
+        # NEW: size % gates
         self.void_w_fr_range = void_w_fr_range
         self.void_h_fr_range = void_h_fr_range
 
-        self.pad = int(pad)
-        self.save_masked_shape_crop = bool(save_masked_shape_crop)
+        self.pad = pad
+        self.debug = debug
+        self.verbose = verbose
+        self.save_masked_shape_crop = save_masked_shape_crop
 
-        # pdf2image conversion controls
-        self.max_megapixels = int(max_megapixels)
-        self.dpi_fallbacks = tuple(dpi_fallbacks)
+        self.max_megapixels = max_megapixels
+        self.dpi_fallbacks = dpi_fallbacks
 
-        # one-box
-        self.enforce_one_box = bool(enforce_one_box)
-        self.replace_multibox = bool(replace_multibox)
-        self.onebox_debug = bool(onebox_debug)
-        self.onebox_pad = int(onebox_pad)
-        self.onebox_min_rel_area = float(onebox_min_rel_area)
-        self.onebox_max_rel_area = float(onebox_max_rel_area)
-        self.onebox_aspect_range = tuple(onebox_aspect_range)
-        self.onebox_min_side_px = int(onebox_min_side_px)
+        # one-box post-process
+        self.enforce_one_box = enforce_one_box
+        self.replace_multibox = replace_multibox
+        self.onebox_debug = onebox_debug
+        self.onebox_pad = onebox_pad
+        self.onebox_min_rel_area = onebox_min_rel_area
+        self.onebox_max_rel_area = onebox_max_rel_area
+        self.onebox_aspect_range = onebox_aspect_range
+        self.onebox_min_side_px = onebox_min_side_px
+
+        # Track normalized panel bboxes per page for vector PDF export
+        # {page_index_1based: [ {"bbox_frac":[x0f,y0f,x1f,y1f], "crop_path":str}, ... ]}
+        self.panel_boxes_by_page: dict[int, list[dict]] = {}
 
     # ----------------- Public API -----------------
-    def readPdf(self, pdf_path: str) -> List[str]:
+    def readPdf(self, pdf_path: str) -> list[str]:
+        """
+        Run the panel finder on the given PDF, write PNG crops and magenta overlays
+        as before, AND also create a single vector-only PDF of the found tables.
+
+        Returns list of crop PNG paths (same behavior as before).
+        """
         pdf_path = os.path.expanduser(pdf_path)
         if not os.path.isfile(pdf_path):
             raise FileNotFoundError(f"PDF not found: {pdf_path}")
         if self.verbose:
             print(f"[INFO] Converting PDF → images @ {self.dpi} DPI")
 
-        # Convert; now returns list of (PIL.Image, meta)
-        page_tuples = self._convert_with_size_cap(pdf_path, self.dpi)
+        # reset tracking for this run
+        self.panel_boxes_by_page = {}
+
+        pages = self._convert_with_size_cap(pdf_path, self.dpi)
         base = os.path.splitext(os.path.basename(pdf_path))[0]
-        all_crops: List[str] = []
+        all_crops = []
 
         if self.verbose:
-            print(f"[INFO] Pages: {len(page_tuples)}")
+            print(f"[INFO] Pages: {len(pages)}")
 
-        for page_idx, (pil_page, page_meta) in enumerate(page_tuples, 1):
+        for page_idx, pil_page in enumerate(pages, 1):
             try:
                 img = self._pil_to_cv(pil_page)
-                page_crops = self._process_page(img, base, page_idx, page_meta)
+                page_crops = self._process_page(img, base, page_idx)
                 if self.enforce_one_box and page_crops:
                     onebox_results = self._enforce_one_box_on_paths(page_crops)
                     all_crops.extend(onebox_results)
@@ -154,84 +149,159 @@ class PanelBoardSearch:
                 if self.verbose:
                     print(f"[WARN] Page {page_idx} failed: {e}")
 
+        # After all pages processed, build the combined vector-only PDF of found tables
+        try:
+            self._build_foundtables_pdf(pdf_path, base)
+        except Exception as e:
+            if self.verbose:
+                print(f"[WARN] Failed to build foundtables PDF: {e}")
+
         if self.verbose:
             print(f"[DONE] Total crops (after 1-box step): {len(all_crops)} → {self.output_dir}")
 
-        # ---- Write debug JSON with DPI per crop ----
-        if self.debug:
-            dbg_path = self.search_debug_dir / f"{base}_crops_debug.json"
-            try:
-                with open(dbg_path, "w", encoding="utf-8") as f:
-                    json.dump(self._debug_crops_log, f, indent=2)
-                if self.verbose:
-                    print(f"[DEBUG] Wrote crop debug JSON → {dbg_path}")
-            except Exception as e:
-                if self.verbose:
-                    print(f"[WARN] Failed writing debug JSON: {e}")
-
         return all_crops
+
+    # --------------- build foundtables.pdf ----------------
+    def _build_foundtables_pdf(self, source_pdf: str, base_name: str):
+        """
+        Create a single PDF containing one page per detected table region,
+        using true PDF vectors (lines) from the source PDF.
+
+        Output path: <output_dir>/<base_name>_foundtables.pdf
+        """
+        if not self.panel_boxes_by_page:
+            if self.verbose:
+                print("[INFO] No panel boxes recorded; skipping foundtables.pdf creation")
+            return
+
+        doc = fitz.open(source_pdf)
+        out = fitz.open()
+
+        if self.verbose:
+            print("[INFO] Building vector-only foundtables PDF from panel regions")
+
+        for page_num in sorted(self.panel_boxes_by_page.keys()):
+            page_index0 = page_num - 1
+            if page_index0 < 0 or page_index0 >= len(doc):
+                if self.verbose:
+                    print(f"[WARN] Page {page_num} out of range in source PDF")
+                continue
+
+            page = doc[page_index0]
+            rect_page = page.rect
+            drawings = page.get_drawings()
+
+            for panel_idx, entry in enumerate(self.panel_boxes_by_page[page_num], start=1):
+                x0f, y0f, x1f, y1f = entry["bbox_frac"]
+
+                # Map normalized fractions -> PDF coordinates (points)
+                x0 = rect_page.x0 + rect_page.width * x0f
+                y0 = rect_page.y0 + rect_page.height * y0f
+                x1 = rect_page.x0 + rect_page.width * x1f
+                y1 = rect_page.y0 + rect_page.height * y1f
+
+                panel_rect = fitz.Rect(x0, y0, x1, y1)
+
+                # New page sized exactly to the panel region
+                new_page = out.new_page(width=panel_rect.width, height=panel_rect.height)
+
+                # Optional: draw a faint border around the panel area
+                try:
+                    new_page.draw_rect(
+                        fitz.Rect(0, 0, panel_rect.width, panel_rect.height),
+                        color=(1, 0, 1),
+                        width=0.3,
+                    )
+                except Exception:
+                    pass
+
+                # Copy line-like vector operations into this new page
+                for obj in drawings:
+                    items = obj.get("items") or []
+                    for draw_op in items:
+                        cmd = draw_op[0]
+                        pts = draw_op[1]
+
+                        # We only consider simple line commands
+                        if cmd != "l":
+                            continue
+
+                        # Expect ((x1,y1),(x2,y2))
+                        if not (isinstance(pts, (tuple, list)) and len(pts) == 2):
+                            continue
+                        p1, p2 = pts
+                        if not (
+                            isinstance(p1, (tuple, list)) and len(p1) == 2 and
+                            isinstance(p2, (tuple, list)) and len(p2) == 2
+                        ):
+                            continue
+
+                        lx1, ly1 = float(p1[0]), float(p1[1])
+                        lx2, ly2 = float(p2[0]), float(p2[1])
+
+                        # Keep lines whose BOTH endpoints lie inside the panel region
+                        if not (
+                            panel_rect.x0 <= lx1 <= panel_rect.x1 and
+                            panel_rect.y0 <= ly1 <= panel_rect.y1 and
+                            panel_rect.x0 <= lx2 <= panel_rect.x1 and
+                            panel_rect.y0 <= ly2 <= panel_rect.y1
+                        ):
+                            continue
+
+                        # Transform into local coordinates for the new page
+                        p1_local = fitz.Point(lx1 - panel_rect.x0, ly1 - panel_rect.y0)
+                        p2_local = fitz.Point(lx2 - panel_rect.x0, ly2 - panel_rect.y0)
+
+                        # Draw the line on the new page
+                        try:
+                            new_page.draw_line(p1_local, p2_local, color=(0, 0, 0), width=0.5)
+                        except Exception:
+                            # Be robust against any weird geometry
+                            continue
+
+        if len(out) > 0:
+            out_path = Path(self.output_dir) / f"{base_name}_foundtables.pdf"
+            out.save(str(out_path))
+            if self.verbose:
+                print(f"[INFO] Wrote foundtables PDF → {out_path}")
+        else:
+            if self.verbose:
+                print("[INFO] No vector lines fell inside panel regions; no foundtables PDF written.")
+
+        out.close()
+        doc.close()
 
     # ----------------- Internals -----------------
     @staticmethod
-    def _pil_to_cv(img_pil) -> np.ndarray:
+    def _pil_to_cv(img_pil: Image.Image) -> np.ndarray:
         return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
-    def _convert_with_size_cap(self, pdf_path: str, dpi: int) -> List[Tuple[Any, Dict[str, Any]]]:
-        """
-        Returns a list of tuples: (PIL.Image, meta)
-        meta = {
-          "mode": "direct" | "size_cap" | "fallback",
-          "requested_dpi": <int>,
-          "effective_dpi": [dx, dy] or <int>,
-          "size_cap_px": <int or None>,
-          "fallback_dpi": <int or None>
-        }
-        """
-        def _wrap(pages, mode, requested_dpi, size_cap_px=None, fallback_dpi=None):
-            out = []
-            for im in pages:
-                eff = im.info.get("dpi", requested_dpi)  # PIL often stores (xdpi, ydpi)
-                out.append((im, {
-                    "mode": mode,
-                    "requested_dpi": requested_dpi,
-                    "effective_dpi": eff,
-                    "size_cap_px": size_cap_px,
-                    "fallback_dpi": fallback_dpi
-                }))
-            return out
-
+    def _convert_with_size_cap(self, pdf_path: str, dpi: int):
         try:
-            pages = convert_from_path(pdf_path, dpi=dpi)
-            return _wrap(pages, mode="direct", requested_dpi=dpi)
+            return convert_from_path(pdf_path, dpi=dpi)
         except Exception as e1:
             if self.verbose:
                 print(f"[convert] initial {dpi} DPI failed: {type(e1).__name__}: {e1}")
-
         longest = int((self.max_megapixels * 1.3) ** 0.5)
         try:
             if self.verbose:
                 print(f"[convert] retry {dpi} DPI with size cap = {longest}px")
-            pages = convert_from_path(pdf_path, dpi=dpi, size=longest)
-            return _wrap(pages, mode="size_cap", requested_dpi=dpi, size_cap_px=longest)
+            return convert_from_path(pdf_path, dpi=dpi, size=longest)
         except Exception as e2:
             if self.verbose:
                 print(f"[convert] size-capped {dpi} DPI failed: {type(e2).__name__}: {e2}")
-
         for step in self.dpi_fallbacks:
             try:
                 if self.verbose:
                     print(f"[convert] trying fallback DPI {step}")
-                pages = convert_from_path(pdf_path, dpi=step)
-                return _wrap(pages, mode="fallback", requested_dpi=dpi, fallback_dpi=step)
+                return convert_from_path(pdf_path, dpi=step)
             except Exception as e3:
                 if self.verbose:
                     print(f"[convert] {step} DPI failed: {type(e3).__name__}: {e3}")
-
         if self.verbose:
             print("[convert] disabling PIL MAX_IMAGE_PIXELS and retrying original DPI")
         Image.MAX_IMAGE_PIXELS = None
-        pages = convert_from_path(pdf_path, dpi=dpi)
-        return _wrap(pages, mode="direct", requested_dpi=dpi)
+        return convert_from_path(pdf_path, dpi=dpi)
 
     @staticmethod
     def _binarize_ink(gray: np.ndarray, close_px: int = 3, dilate_px: int = 3) -> np.ndarray:
@@ -251,7 +321,10 @@ class PanelBoardSearch:
             return mask
         m = mask.copy()
         h, w = m.shape
-        m[:px, :] = 0; m[-px:, :] = 0; m[:, :px] = 0; m[:, -px:] = 0
+        m[:px, :] = 0
+        m[-px:, :] = 0
+        m[:, :px] = 0
+        m[:, -px:] = 0
         return m
 
     @staticmethod
@@ -260,7 +333,7 @@ class PanelBoardSearch:
         return cv2.connectedComponentsWithStats(lab, connectivity=8)
 
     @staticmethod
-    def _selected_ws_mask(labels: np.ndarray, keep_ids: List[int]) -> np.ndarray:
+    def _selected_ws_mask(labels: np.ndarray, keep_ids: list[int]) -> np.ndarray:
         m = np.zeros_like(labels, dtype=np.uint8)
         for cid in keep_ids:
             m[labels == cid] = 255
@@ -279,18 +352,18 @@ class PanelBoardSearch:
         return overlay
 
     # ------------- FULL per-page processing -------------
-    def _process_page(self, img_bgr: np.ndarray, base_name: str, page_idx: int, page_meta: Dict[str, Any]) -> List[str]:
+    def _process_page(self, img_bgr: np.ndarray, base_name: str, page_idx: int) -> list[str]:
         H, W = img_bgr.shape[:2]
         page_area = H * W
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
         # 1) INK / WHITESPACE
-        ink = self._binarize_ink(gray, close_px=3, dilate_px=3)   # 255 ink
-        whitespace = cv2.bitwise_not(ink)                         # 255 bg
+        ink = self._binarize_ink(gray, close_px=3, dilate_px=3)     # 255 ink
+        whitespace = cv2.bitwise_not(ink)                           # 255 bg
         whitespace = self._shave_margin(whitespace, self.margin_shave_px)
 
         num, labels, stats, _ = self._components(whitespace)
-        keep_ids: List[int] = []
+        keep_ids = []
         for cid in range(1, num):
             x, y, w, h, area = stats[cid]
             if area / page_area >= self.min_whitespace_area_fr:
@@ -308,8 +381,12 @@ class PanelBoardSearch:
         # Always-on magenta perimeter overlay (start from original page)
         magenta_canvas = img_bgr.copy()
 
-        saved_paths: List[str] = []
+        saved_paths = []
         saved_idx = 0
+
+        # ensure page key exists
+        if page_idx not in self.panel_boxes_by_page:
+            self.panel_boxes_by_page[page_idx] = []
 
         if hier is not None and len(hier) > 0:
             hier = hier[0]
@@ -337,6 +414,7 @@ class PanelBoardSearch:
                     (y + h) >= (H - self.border_exclude_px)
                 )
 
+                # NEW: width/height fraction gates (avoid thin strips)
                 w_fr = w / float(W)
                 h_fr = h / float(H)
                 w_out_of_range = (
@@ -361,7 +439,7 @@ class PanelBoardSearch:
                 # ALWAYS draw magenta perimeter for accepted voids
                 cv2.drawContours(magenta_canvas, [cnt], -1, (255, 0, 255), 5)
 
-                # Save rectangular crop
+                # Save rectangular crop (always)
                 y0 = max(0, y - self.pad)
                 x0 = max(0, x - self.pad)
                 y1 = min(H, y + h + self.pad)
@@ -372,41 +450,25 @@ class PanelBoardSearch:
                 cv2.imwrite(str(rect_path), rect_crop)
                 saved_paths.append(str(rect_path))
 
+                # record normalized bbox for this panel for later PDF vector export
+                self.panel_boxes_by_page[page_idx].append({
+                    "bbox_frac": [
+                        x0 / float(W),
+                        y0 / float(H),
+                        x1 / float(W),
+                        y1 / float(H),
+                    ],
+                    "crop_path": str(rect_path),
+                })
+
                 if self.save_masked_shape_crop:
                     mask = np.zeros((H, W), dtype=np.uint8)
                     cv2.drawContours(mask, [cnt], -1, 255, -1)
-                    exact = cv2.bitwise_and(img_bgr, img_bgr, mask=mask)[y0:y1, x0:x1]
+                    masked = cv2.bitwise_and(img_bgr, img_bgr, mask=mask)
+                    exact = masked[y0:y1, x0:x1]
                     mask_path = Path(self.output_dir) / f"{base_name}_page{page_idx:03d}_table{saved_idx:02d}_mask.png"
                     cv2.imwrite(str(mask_path), exact)
                     saved_paths.append(str(mask_path))
-
-                # ---- DEBUG LOG ENTRY (with DPI) ----
-                if self.debug:
-                    eff = page_meta.get("effective_dpi", self.dpi)
-                    if isinstance(eff, (list, tuple)) and len(eff) >= 2:
-                        dpi_x, dpi_y = eff[0], eff[1]
-                    else:
-                        dpi_x = dpi_y = eff
-                    self._debug_crops_log.append({
-                        "page": page_idx,
-                        "table_index": saved_idx,
-                        "crop_path": str(rect_path),
-                        "crop_size": {"w": int(rect_crop.shape[1]), "h": int(rect_crop.shape[0])},
-                        "bbox_on_page": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
-                        "bbox_frac": {
-                            "w_fr": round(w_fr, 6),
-                            "h_fr": round(h_fr, 6),
-                            "area_fr": round((w * h) / float(H * W), 6)
-                        },
-                        "rasterization": {
-                            "mode": page_meta.get("mode"),
-                            "requested_dpi": int(page_meta.get("requested_dpi", self.dpi)),
-                            "effective_dpi_x": int(dpi_x) if dpi_x else None,
-                            "effective_dpi_y": int(dpi_y) if dpi_y else None,
-                            "size_cap_px": page_meta.get("size_cap_px"),
-                            "fallback_dpi": page_meta.get("fallback_dpi"),
-                        }
-                    })
 
         # SAVE magenta perimeter overlay for this page (always)
         magenta_path = self.magenta_dir / f"{base_name}_page{page_idx:03d}_void_perimeters.png"
@@ -421,8 +483,8 @@ class PanelBoardSearch:
         return saved_paths
 
     # ------------------ one-box post-processing ------------------
-    def _enforce_one_box_on_paths(self, image_paths: List[str]) -> List[str]:
-        final_paths: List[str] = []
+    def _enforce_one_box_on_paths(self, image_paths: list[str]) -> list[str]:
+        final_paths = []
         for p in image_paths:
             try:
                 img = cv2.imread(p)
