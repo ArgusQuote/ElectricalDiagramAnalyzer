@@ -1,0 +1,54 @@
+from ._anvil_designer import SignupModalTemplate
+from anvil import *
+import anvil.server
+import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+
+class SignupModal(SignupModalTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+    self.source_dd.items = [
+      ("How did you hear about us?", ""),
+      ("Another distributor", "Another distributor"),
+      ("Flyer", "Flyer"),
+      ("Email", "Email"),
+      ("Internal source", "Internal source"),
+      ("Other", "Other")
+    ]
+    self.source_dd.selected_value = ""
+
+  def _email_ok(self, e: str) -> bool:
+    e = (e or "").strip()
+    return "@" in e and "." in e and " " not in e
+
+  def submit_btn_click(self, **event_args):
+    name = (self.name_tb.text or "").strip()
+    company = (self.company_tb.text or "").strip()
+    email = (self.email_tb.text or "").strip().lower()
+    source = self.source_dd.selected_value or "Other"
+  
+    if not name or not company or not email:
+      alert("Please fill out name, company, and email.")
+      return
+    if not self._email_ok(email):
+      alert("Please provide a valid email address.")
+      return
+  
+    self.submit_btn.enabled = False
+    self.submit_btn.text = "Submitting…"
+  
+    try:
+      Notification("Submitting…", timeout=1).show()
+      result = anvil.server.call("record_lead", name, company, email, source)
+      # Optional: surface email failures without blocking success
+      if result and (result.get("errors")):
+        alert("Saved, but email issue:\n" + "\n".join(result["errors"]))
+      Notification("Submitted! Our team will be in touch soon.", timeout=6).show()
+      self.raise_event('x-close-alert')
+    except Exception as e:
+      alert(f"Sign-up failed: {type(e).__name__}: {e}")
+    finally:
+      self.submit_btn.text = "Submit"
+      self.submit_btn.enabled = True

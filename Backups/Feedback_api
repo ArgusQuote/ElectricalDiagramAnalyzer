@@ -1,0 +1,43 @@
+# Server Modules / feedback_api
+import anvil.server
+import anvil.users
+import anvil.email
+from datetime import datetime
+
+# CHANGE THIS if you want a different recipient:
+OWNER_EMAIL = "argusquote@gmail.com"
+
+
+@anvil.server.callable(require_user=True)
+def send_accuracy_feedback(rating: str, job_name: str = "", details: dict = None):
+  """
+  Sends a simple email to OWNER_EMAIL with the rating and context.
+  'rating' is one of: 'perfect' | 'good' | 'bad'
+  """
+  user = anvil.users.get_user()
+  user_email = ""
+  try:
+    user_email = user['email']  # adjust if your Users table uses a different column
+  except Exception:
+    pass
+
+  details = details or {}
+  ts = datetime.utcnow().isoformat() + "Z"
+
+  subject = f"[Argus] CSV feedback: {rating.upper()} — {job_name or '(no job name)'}"
+  body = (
+    f"Time (UTC): {ts}\n"
+    f"Rating: {rating}\n"
+    f"Job Name: {job_name}\n"
+    f"User Email: {user_email}\n"
+    f"Details: {details}\n"
+  )
+
+  # Requires the 'Email' service enabled in Anvil
+  anvil.email.send(
+    to=OWNER_EMAIL,
+    subject=subject,
+    text=body
+  )
+
+  return True

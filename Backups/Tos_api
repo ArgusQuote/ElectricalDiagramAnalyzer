@@ -1,0 +1,18 @@
+# Server Modules / tos_api
+import anvil.server
+import anvil.users
+from datetime import datetime
+
+@anvil.server.callable(require_user=True)
+def tos_record_acceptance(required_version: int):
+  """
+  Minimal, safe server-side write to Users.
+  No Data Files, no external helpers.
+  """
+  user = anvil.users.get_user()
+  if user is None:
+    raise ValueError("Not logged in.")
+  user['tos_accepted'] = True
+  user['tos_accepted_at'] = datetime.utcnow()
+  user['tos_version'] = int(required_version)
+  return True
