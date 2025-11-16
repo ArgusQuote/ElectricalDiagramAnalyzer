@@ -326,7 +326,7 @@ def _first2(t):
     except Exception:
         return None, None
 
-PARSER_VERSION = "V19_4_Parser"
+PARSER_VERSION = "Parser_5"
 PARSER_ORIGIN  = __file__
 
 # --- utility mirrors from original ---

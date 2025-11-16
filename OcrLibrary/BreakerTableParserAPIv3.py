@@ -29,7 +29,7 @@ AMP_MAX = 1200
 # ----- STRICT imports: Analyzer + Header + ALT parser only -----
 from OcrLibrary.BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParserALT import BreakerTableParser, PARSER_VERSION
+from ElectricalDiagramAnalyzer.OcrLibrary.BreakerTableParser5 import BreakerTableParser, PARSER_VERSION
 
 # Sanity check: make absolutely sure we pulled the ALT class
 if "BreakerTableParserALT" not in BreakerTableParser.__module__:
