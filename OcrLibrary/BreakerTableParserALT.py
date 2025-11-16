@@ -536,21 +536,13 @@ class BreakerTableParser:
         H, W = img.shape[:2]
         row_pad_y = max(4, int(0.006 * H))
         col_pad_x = max(3, int(0.003 * W))
-        all_y1 = max(0, min(int(a) for (a, b) in rows_y_spans) - row_pad_y)
-        all_y2 = min(H - 1, max(int(b) for (a, b) in rows_y_spans) + row_pad_y)
-        # Robustly handle row tuples with >2 elements (take first two)
-        def _y1y2(t):
-            try:
-                return int(t[0]), int(t[1])
-            except Exception:
-                # Fallback: treat as empty span
-                return 0, 0
-        ys1 = []
-        ys2 = []
+        # rows may be (y1, y2, x1, x2, ...): use only the first two values
+        ys1, ys2 = [], []
         for t in rows_y_spans:
-            y1i, y2i = _y1y2(t)
-            ys1.append(y1i)
-            ys2.append(y2i)
+            y1i, y2i = _first2(t)
+            if y1i is None or y2i is None:
+                continue
+            ys1.append(int(y1i)); ys2.append(int(y2i))
         if not ys1 or not ys2:
             return
         all_y1 = max(0, min(ys1) - row_pad_y)
@@ -1014,24 +1006,24 @@ class BreakerTableParser:
         # --- COMBO PRECOMPUTE (left/right) using full table row spans (strip scan) ---
         body_row_spans = []
         for t in rows_boxes:
-            try:
-                y1 = int(t[0]); y2 = int(t[1])
-            except Exception:
-                # If the analyzer ever hands us something malformed, keep going
-                y1, y2 = 0, 0
-            body_row_spans.append((y1, y2))
+            y1, y2 = _first2(t)
+            if y1 is None or y2 is None:
+                continue
+            body_row_spans.append((int(y1), int(y2)))
         left_combo  = None
         right_combo = None
 
         if "L_COMBO" in cols_snapped:
             left_combo = self.read_combo_for_rows(
                 work_gray, cols_snapped, body_row_spans, side="L",
-                debug_dir=debug_dir, base_name=base_name
+                debug_dir=debug_dir, base_name=base_name,
+                header_guard_y=int(y2_dbg)
             )
         if "R_COMBO" in cols_snapped:
             right_combo = self.read_combo_for_rows(
                 work_gray, cols_snapped, body_row_spans, side="R",
-                debug_dir=debug_dir, base_name=base_name
+                debug_dir=debug_dir, base_name=base_name,
+                header_guard_y=int(y2_dbg)
             )
         
         # 2) Run the column strip scan (single or chunked like V19_4)
@@ -1645,8 +1637,12 @@ class BreakerTableParser:
         if crop is None or crop.size == 0:
             return ("", []) if return_dets else ""
 
-        up  = cv2.resize(crop, None, fx=1.0, fy=1.0, interpolation=cv2.INTER_CUBIC)  # keep 1.0 so boxes map directly
+        # --- upscale to help tiny numerals like '1/2/3' survive ---
+        SCALE = 2.2  # empirically good for thin fonts
+        up  = cv2.resize(crop, None, fx=SCALE, fy=SCALE, interpolation=cv2.INTER_CUBIC)
         gry = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY) if up.ndim == 3 else up
+        # gentle denoise + contrast
+        gry = cv2.GaussianBlur(gry, (3, 3), 0)
         gry = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gry)
 
         if not _HAS_OCR:
@@ -1661,11 +1657,10 @@ class BreakerTableParser:
 
         def _read(img):
             try:
-                # Keep mag_ratio=1.0 so coordinates match 'img'
                 return reader.readtext(
                     img, detail=1, paragraph=False,
                     allowlist=_COMBO_ALLOWLIST,
-                    text_threshold=0.45, low_text=0.30, mag_ratio=1.0
+                    text_threshold=0.40, low_text=0.28, mag_ratio=1.0
                 )
             except Exception:
                 return []
@@ -1682,7 +1677,16 @@ class BreakerTableParser:
         text = text.replace("--", "-").strip()
         text = re.sub(r"\s+", " ", text)
 
-        return (text, dets) if return_dets else text
+        if not return_dets:
+            return text
+        # downscale boxes back to the ORIGINAL crop coordinate system
+        inv_scale = (1.0 / SCALE)
+        dets_scaled = []
+        for (box, txt, conf) in dets:
+            scaled_box = [ (int(round(x * inv_scale)), int(round(y * inv_scale)))
+                           for (x, y) in box ]
+            dets_scaled.append((scaled_box, txt, conf))
+        return (text, dets_scaled)
 
     def _parse_combo_text(self, s: str) -> dict:
         import re
@@ -1690,11 +1694,19 @@ class BreakerTableParser:
         u = raw.upper()
 
         # Keep only useful symbols
-        u = re.sub(r"[^0-9AP/ -]", " ", u)
+        u = re.sub(r"[^0-9AP/ -IIL]", " ", u)  # keep I and l for normalization below
         u = re.sub(r"\s+", " ", u).strip()
+        u = re.sub(r"[-–—]+", "/", u)   # normalize hyphen/en dash/em dash to slash
+        # Early junk guard: if there are no digits at all, it's header noise (e.g., 'AMP, POLES')
+        if not re.search(r"\d", u):
+            return {"amps": None, "poles": None, "raw": raw, "method": "nodigits"}
 
         # Normalize obvious noise: 'O'→'0' in numeric contexts
         u = re.sub(r"(?<=\d)O(?=\d)", "0", u)
+        u = re.sub(r"\b[IL]\b", "1", u)   # I or l as a standalone pole digit
+        u = re.sub(r"(?<=/)[IL](?=\b)", "1", u)  # e.g., '20/I'
+        u = re.sub(r"(?<=\b)[IL](?=/)", "1", u)  # e.g., 'I/20'
+
 
         # Canonical patterns (order matters)
         pats = [
@@ -1739,7 +1751,7 @@ class BreakerTableParser:
 
         return {"amps": amps, "poles": poles, "raw": raw, "method": "digits"}
 
-    def read_combo_for_rows(self, img, cols, rows_y_spans, side="L", *, debug_dir=None, base_name="page"):
+    def read_combo_for_rows(self, img, cols, rows_y_spans, side="L", *, debug_dir=None, base_name="page", header_guard_y: Optional[int] = None):
         """
         Scan the combined TRIP/POLES column as a vertical strip, one row at a time,
         mirroring the separated-column scanner geometry/padding so crops match.
@@ -1764,18 +1776,18 @@ class BreakerTableParser:
         dbg_lines = []
 
         # Use only the first two elements of each row span (y1, y2)
-        def _y1y2(t):
-            try:
-                return int(t[0]), int(t[1])
-            except Exception:
-                return None, None
         for row_t in rows_y_spans:
-            ry1, ry2 = _y1y2(row_t)
+            ry1, ry2 = _first2(row_t)
             if ry1 is None or ry2 is None:
                 out.append({"amps": None, "poles": None, "raw": "", "method": "empty"})
                 continue
             yy1 = max(0, int(ry1) - row_pad_y)
             yy2 = min(H - 1, int(ry2) + row_pad_y)
+            # --- clamp away header band if provided ---
+            if header_guard_y is not None:
+                guard = int(header_guard_y) + 1
+                if yy1 <= guard:
+                    yy1 = guard
             if yy2 <= yy1 or xx2 <= xx1:
                 out.append({"amps": None, "poles": None, "raw": "", "method": "empty"})
                 continue
@@ -1810,19 +1822,20 @@ class BreakerTableParser:
                 os.makedirs(debug_dir, exist_ok=True)
 
                 # Build a single tall overlay spanning all rows we scanned on this side.
-                ys1 = []
-                ys2 = []
+                ys1, ys2 = [], []
                 for row_t in rows_y_spans:
-                    r1, r2 = _y1y2(row_t)
+                    r1, r2 = _first2(row_t)
                     if r1 is None or r2 is None:
                         continue
-                    ys1.append(r1); ys2.append(r2)
+                    ys1.append(int(r1)); ys2.append(int(r2))
                 if not ys1 or not ys2:
                     return out
                 all_y1 = min(ys1) - row_pad_y
                 all_y2 = max(ys2) + row_pad_y
                 all_y1 = max(0, all_y1)
                 all_y2 = min(H - 1, all_y2)
+                if header_guard_y is not None and all_y1 <= int(header_guard_y):
+                    all_y1 = int(header_guard_y) + 1
                 strip = img[all_y1:all_y2, xx1:xx2].copy()
                 if strip.ndim == 2:
                     strip_bgr = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
@@ -1835,7 +1848,7 @@ class BreakerTableParser:
                 WHITE  = (255, 255, 255)
 
                 for row_t in rows_y_spans:
-                    r1, r2 = _y1y2(row_t)
+                    r1, r2 = _first2(row_t)
                     if r1 is None or r2 is None:
                         continue
                     yy1 = max(0, int(r1) - row_pad_y)
@@ -1870,7 +1883,6 @@ class BreakerTableParser:
             pass
 
         return out
-
 
 
     @staticmethod
