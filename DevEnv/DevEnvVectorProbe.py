@@ -15,11 +15,11 @@ from VisualDetectionToolLibrary.PanelSearchToolV12 import PanelBoardSearch
 
 # =============== USER CONFIG =================
 PDF_PATH = Path(
-    "~/Documents/Diagrams/PdfOuput/Last5_LetterLandscape_VECTOR.pdf"
+    "~/Documents/Diagrams/generic3.pdf"
 ).expanduser()
 
 OUTPUT_DIR = Path(
-    "~/Documents/Diagrams/CaseStudy_PanelVectorCrops"
+    "~/Documents/Diagrams/CaseStudy_PanelVectorCrops2"
 ).expanduser()
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # =============================================
