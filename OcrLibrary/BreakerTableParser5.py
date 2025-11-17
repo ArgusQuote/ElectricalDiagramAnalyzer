@@ -13,16 +13,19 @@ except Exception:
 _HEADER_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./ -"
 _COMBO_ALLOWLIST = "0123456789AP/ -"
 
+# Global OCR confidence floor for any token to participate
+_MIN_OCR_CONF = 0.20
+
 # --- header OCR tuning (vertical pad + upscale) ---
-_HDR_BAND_H      = 84     # was effectively ~80 via default arg; give a bit more room
-_HDR_PAD_PX      = 8     # was 6; small bump to catch ascenders/descenders
-_HDR_OCR_SCALE   = 2.0    # was 1.6; higher mag improves character separation
+_HDR_BAND_H      = 84
+_HDR_PAD_PX      = 8
+_HDR_OCR_SCALE   = 2.0
 
 # === Top-row OCR span controls (this is what sizes the real header OCR band) ===
 # How much of the median row gap each tight row span should cover.
-_HDR_ROW_SPAN_FRAC = 0.70   # was ~0.90; smaller = tighter band
+_HDR_ROW_SPAN_FRAC = 0.70
 # Fallback band height (when no centers) as a multiple of med_gap.
-_HDR_FALLBACK_MULT = 1.40   # was ~2.20; reduce overscan under header
+_HDR_FALLBACK_MULT = 1.40 
 # Optional final trim after we union spans into [band_y1, band_y2]
 _HDR_TRIM_TOP_PX   = 2
 _HDR_TRIM_BOT_PX   = 6
@@ -323,7 +326,7 @@ def _first2(t):
     except Exception:
         return None, None
 
-PARSER_VERSION = "V19_4_Parser"
+PARSER_VERSION = "Parser_5"
 PARSER_ORIGIN  = __file__
 
 # --- utility mirrors from original ---
@@ -564,7 +567,7 @@ class BreakerTableParser:
                 pass
 
     def _group_text_by_xcenters(self, items, y_band, *,
-                                min_conf=0.10, pad_frac=0.20, pad_min=6,
+                                min_conf=_MIN_OCR_CONF, pad_frac=0.20, pad_min=6,
                                 bands: Optional[List[Tuple[int,int]]] = None,
                                 band_eps: int = 3,
                                 split_large_gaps: bool = True,
@@ -806,7 +809,9 @@ class BreakerTableParser:
 
         # === OCR THE FULL PADDED HEADER-BAND CROP (no extra sub-cropping) ===
         dump_all, hb_overlay = self._ocr_header_band_only(work_gray, y1_dbg, y2_dbg)
-        dump = [d for d in dump_all if not _is_numeric_or_phaseish(d.get("text",""))]
+        dump = [d for d in dump_all
+        if float(d.get("conf", 0.0)) >= _MIN_OCR_CONF
+        and not _is_numeric_or_phaseish(d.get("text",""))]
  
         # Skip header classification for now (we only want raw OCR of the band)
         header_map, header_dbg = {}, {}
@@ -891,12 +896,13 @@ class BreakerTableParser:
         except Exception:
             pass
 
-            spans_dbg_path = os.path.join(debug_dir, f"{base_name}_toprows_spans.json")
-            try:
-                self._write_json(spans_dbg_path, {"row_spans": [[int(y1_dbg), int(y2_dbg)]]})
-            except Exception as e:
-                print(f"[PARSER] Failed to write row spans: {e}")
-
+        # Always write the top-rows span debug file (not only when the print block errors)
+        spans_dbg_path = os.path.join(debug_dir, f"{base_name}_toprows_spans.json")
+        try:
+            self._write_json(spans_dbg_path, {"row_spans": [[int(y1_dbg), int(y2_dbg)]]})
+        except Exception as e:
+            print(f"[PARSER] Failed to write row spans: {e}")
+ 
         # === from header_map -> SNAP columns -> crop/OCR -> outputs ===
         rows_boxes = self._row_boxes_from_centers(work_gray.shape, centers, header_y, footer_y)
         n_rows = len(centers or [])
@@ -1016,14 +1022,12 @@ class BreakerTableParser:
         if "L_COMBO" in cols_snapped:
             left_combo = self.read_combo_for_rows(
                 work_gray, cols_snapped, body_row_spans, side="L",
-                debug_dir=debug_dir, base_name=base_name,
-                header_guard_y=int(y2_dbg)
+                debug_dir=debug_dir, base_name=base_name
             )
         if "R_COMBO" in cols_snapped:
             right_combo = self.read_combo_for_rows(
                 work_gray, cols_snapped, body_row_spans, side="R",
-                debug_dir=debug_dir, base_name=base_name,
-                header_guard_y=int(y2_dbg)
+                debug_dir=debug_dir, base_name=base_name
             )
         
         # 2) Run the column strip scan (single or chunked like V19_4)
@@ -1489,6 +1493,8 @@ class BreakerTableParser:
         for box, txt, conf in dets:
             if not txt:
                 continue
+            if float(conf or 0.0) < _MIN_OCR_CONF:
+                continue
             xs = [int(p[0]) for p in box]
             ys = [int(p[1]) for p in box]
             x1 = max(0, min(xs)); x2 = min(W - 1, max(xs))
@@ -1575,7 +1581,7 @@ class BreakerTableParser:
             raw = tag
             if "text_norm" in c:
                 raw = f"{tag}: {str(c['text_norm'])[:18]}"
-            cv2.putText(overlay, raw, (x1b, max(14, y1b-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, WHITE, 3, cv2.LINE_AA)
+            cv2.putText(overlay, raw, (x1b, max(14, y1b-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, RED, 3, cv2.LINE_AA)
             cv2.putText(overlay, raw, (x1b, max(14, y1b-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1, cv2.LINE_AA)
 
         for c in header_map.get("poles", []):        draw_pick(c, GREEN, "POLES")
@@ -1637,6 +1643,13 @@ class BreakerTableParser:
         if crop is None or crop.size == 0:
             return ("", []) if return_dets else ""
 
+        # --- erase header-ish labels at the very top of the crop, then upscale ---
+        try:
+            # Wipe common header words (AMP/POLES/TRIP) only in the top band
+            crop, _ = self._erase_top_labels(crop)
+        except Exception:
+            pass
+
         # --- upscale to help tiny numerals like '1/2/3' survive ---
         SCALE = 2.2  # empirically good for thin fonts
         up  = cv2.resize(crop, None, fx=SCALE, fy=SCALE, interpolation=cv2.INTER_CUBIC)
@@ -1669,6 +1682,7 @@ class BreakerTableParser:
         dets_gry = _read(gry)
         dets_inv = _read(inv)
         dets = dets_gry + dets_inv
+        dets = [r for r in dets if float((r[2] or 0.0)) >= _MIN_OCR_CONF]
         if not dets:
             return ("", []) if return_dets else ""
 
@@ -1783,11 +1797,6 @@ class BreakerTableParser:
                 continue
             yy1 = max(0, int(ry1) - row_pad_y)
             yy2 = min(H - 1, int(ry2) + row_pad_y)
-            # --- clamp away header band if provided ---
-            if header_guard_y is not None:
-                guard = int(header_guard_y) + 1
-                if yy1 <= guard:
-                    yy1 = guard
             if yy2 <= yy1 or xx2 <= xx1:
                 out.append({"amps": None, "poles": None, "raw": "", "method": "empty"})
                 continue
@@ -1834,8 +1843,6 @@ class BreakerTableParser:
                 all_y2 = max(ys2) + row_pad_y
                 all_y1 = max(0, all_y1)
                 all_y2 = min(H - 1, all_y2)
-                if header_guard_y is not None and all_y1 <= int(header_guard_y):
-                    all_y1 = int(header_guard_y) + 1
                 strip = img[all_y1:all_y2, xx1:xx2].copy()
                 if strip.ndim == 2:
                     strip_bgr = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
@@ -1873,7 +1880,9 @@ class BreakerTableParser:
                         cv2.rectangle(strip_bgr, (x1b, y1b), (x2b, y2b), YELLOW, 2)
                         label = f'{str(txt)[:18]} ({float(conf):.2f})'
                         cv2.putText(strip_bgr, label, (x1b, max(12, y1b - 4)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 2, cv2.LINE_AA)
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
+                        cv2.putText(strip_bgr, label, (x1b, max(12, y1b - 4)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1, cv2.LINE_AA)
 
                 out_name = f"{base_name.lower()}_{side.lower()}_combo_overlay.png"
                 out_path = os.path.join(debug_dir, out_name)
@@ -2254,6 +2263,8 @@ class BreakerTableParser:
             for box, txt, conf in dets:
                 if not txt:
                     continue
+                if float(conf or 0.0) < _MIN_OCR_CONF:
+                    continue
                 xs = [int(p[0]) for p in box]
                 ys = [int(p[1]) for p in box]
                 x1 = max(0, min(xs)); x2 = min(W - 1, max(xs))
@@ -2331,6 +2342,8 @@ class BreakerTableParser:
         items: List[dict] = []
         for box, txt, conf in dets:
             if not txt:
+                continue
+            if float(conf or 0.0) < _MIN_OCR_CONF:
                 continue
             xs = [int(p[0]) for p in box]
             ys = [int(p[1]) for p in box]
@@ -2783,7 +2796,7 @@ class BreakerTableParser:
     def _erase_top_labels(self, crop: np.ndarray) -> Tuple[np.ndarray, List[Tuple[int,int,int,int]]]:
         erased = []
         img = crop.copy()
-        if self.reader is None or img.size == 0:
+        if img is None or img.size == 0:
             return img, erased
         H, W = img.shape[:2]
         band_h = max(8, int(0.18 * H))
@@ -2797,17 +2810,60 @@ class BreakerTableParser:
             )
         except Exception:
             dets = []
-        KEYS = {"AMP", "AMPS", "TRIP", "POLE", "POLES"}
+
+        KEYS = {"AMP", "AMPS", "TRIP", "POLE", "POLES", "AMPPOLES"}
         for box, txt, _ in dets:
             s = re.sub(r"[^A-Z]", "", (txt or "").upper())
             if s in KEYS:
                 xs = [int(p[0]) for p in box]
                 ys = [int(p[1]) for p in box]
-                x1, x2 = max(0, min(xs)-2), min(W-1, max(xs)+2)
-                y1, y2 = max(0, min(ys)-2), min(band_h-1, max(ys)+2)
-                cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 255), -1)
-                erased.append((x1, y1, x2, y2))
+                x1 = max(0, min(xs)); x2 = min(W - 1, max(xs))
+                y1 = max(0, min(ys)); y2 = min(band_h - 1, max(ys))
+                if x2 > x1 and y2 > y1:
+                    # paint white over the header label region in the top band
+                    img[y1:y2+1, x1:x2+1] = 255 if img.ndim == 2 else (255, 255, 255)
+                    erased.append((x1, y1, x2, y2))
         return img, erased
+
+    def _mask_header_band(self, img, cols_snapped, *, side: str, header_bottom_y: int, pad_px: int = 6):
+        """
+        Paint out the header band within the combo column only.
+        - img: grayscale np.ndarray (modified in place)
+        - side: "L" or "R"
+        - header_bottom_y: page-space y where header ends
+        - pad_px: small vertical buffer below header
+        """
+        import cv2
+        key = f"{side}_COMBO"
+        if key not in cols_snapped:
+            return
+        col = cols_snapped[key]
+        x1 = x2 = None
+        # (a) tuple/list like (x1, x2)
+        if isinstance(col, (tuple, list)) and len(col) >= 2 and all(isinstance(v, (int, float)) for v in col[:2]):
+            x1, x2 = int(col[0]), int(col[1])
+        # (b) dict with 'x1','x2' or 'bounds'
+        if x1 is None or x2 is None:
+            if isinstance(col, dict):
+                if "x1" in col and "x2" in col:
+                    x1, x2 = int(col["x1"]), int(col["x2"])
+                elif "bounds" in col and len(col["bounds"]) >= 2:
+                    x1, x2 = int(col["bounds"][0]), int(col["bounds"][1])
+        if x1 is None or x2 is None:
+            return
+
+        y1 = 0
+        y2 = max(0, int(header_bottom_y) + int(pad_px))
+        h, w = img.shape[:2]
+        x1 = max(0, min(w - 1, x1))
+        x2 = max(0, min(w - 1, x2))
+        y1 = max(0, min(h - 1, y1))
+        y2 = max(0, min(h - 1, y2))
+        if x2 <= x1 or y2 <= y1:
+            return
+
+        # Paint white to remove OCR signal from the header region in this column
+        cv2.rectangle(img, (x1, y1), (x2, y2), color=255, thickness=-1)
 
     def _remove_dashes_strict(self, img: np.ndarray) -> Tuple[np.ndarray, List[Tuple[int,int,int,int]]]:
         """

@@ -19,7 +19,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic3.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -54,7 +54,7 @@ def main():
     print("\n[PageFilter] starting…")
     FILTER = PageFilter(
         output_dir=str(FILTER_OUT_DIR),   # filtered PDF will be written here
-        dpi=350,                          # raster DPI used only for undecided pages
+        dpi=400,                          # raster DPI used only for undecided pages
         longest_cap_px=9000,
         proc_scale=0.5,
         use_ocr=True,
