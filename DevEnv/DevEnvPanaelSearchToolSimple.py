@@ -10,24 +10,30 @@ from VisualDetectionToolLibrary.PanelSearchToolV13 import PanelBoardSearch
 
 # ---- Inputs/Outputs ----
 INPUT_PDF = Path("~/Documents/Diagrams/generic3.pdf").expanduser()
-FINDER_OUT_DIR = Path("~/Documents/Diagrams/CaseStudyPdfTextSearch3").expanduser()
+FINDER_OUT_DIR = Path("~/Documents/Diagrams/CaseStudyPdfTextSearch4").expanduser()
 FINDER_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 FINDER = PanelBoardSearch(
     output_dir=str(FINDER_OUT_DIR),
-    dpi=600,
+    dpi=400,
     min_void_area_fr=0.004,
     min_void_w_px=90,
     min_void_h_px=90,
-    max_void_area_fr=0.30,
-    void_w_fr_range=(0.20, 0.60),
-    void_h_fr_range=(0.20, 0.55),
+    # ↓ tighten these three to kill giant/near-page blobs
+    max_void_area_fr=0.30,          # was 0.30
+    void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
+    void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
     min_whitespace_area_fr=0.01,
     margin_shave_px=6,
     pad=6,
     debug=False,
     verbose=True,
     save_masked_shape_crop=False,
+    replace_multibox=True,
+    render_dpi=1400,         # <- high-fidelity crop render
+    aa_level=8,              # <- strongest anti-aliasing
+    render_colorspace="gray",# or "rgb"
+    downsample_max_w=3200,   # optional; remove/None to keep full size    
 )
 
 crops = FINDER.readPdf(str(INPUT_PDF))
