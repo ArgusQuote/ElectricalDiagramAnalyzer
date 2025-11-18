@@ -26,14 +26,10 @@ VALID_VOLTAGES = {120, 208, 240, 480, 600}
 AMP_MIN = 100
 AMP_MAX = 1200
 
-# ----- STRICT imports: Analyzer + Header + ALT parser only -----
+# ----- STRICT imports: Analyzer + Header + Parser5 only -----
 from OcrLibrary.BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
-from ElectricalDiagramAnalyzer.OcrLibrary.BreakerTableParser5 import BreakerTableParser, PARSER_VERSION
-
-# Sanity check: make absolutely sure we pulled the ALT class
-if "BreakerTableParserALT" not in BreakerTableParser.__module__:
-    raise ImportError(f"Expected ALT parser, got {BreakerTableParser.__module__}")
+from OcrLibrary.BreakerTableParser5   import BreakerTableParser, PARSER_VERSION
 
 class BreakerTablePipeline:
     """

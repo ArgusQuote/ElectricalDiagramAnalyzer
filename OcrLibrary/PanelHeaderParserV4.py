@@ -99,7 +99,35 @@ class PanelParser:
 
         self.last_main_type = None
 
-    # ======= public =======
+    def _trim_voltage_to_allowed(self, txt: str | None) -> int | None:
+        """
+        After we've selected a voltage string (e.g., '120/208/3', '120208/3', '2083'),
+        return ONLY one of {120, 208, 240, 480, 600} if present. Prefer the higher
+        system voltage when multiple are present (e.g., 120/208 -> 208).
+        """
+        if not txt:
+            return None
+        import re
+        s = self._normalize_digits(str(txt).upper())
+
+        # Look for any of the allowed tokens, including when glued into runs (e.g. '120208/3', '2083').
+        allowed_strs = ("600", "480", "240", "208", "120")
+
+        hits = set()
+        for v in allowed_strs:
+            # First try clean numeric boundaries
+            if re.search(rf'(?<!\d){v}(?!\d)', s):
+                hits.add(int(v))
+            # If not found with boundaries, allow substring match to catch glued OCR (e.g., '120208/3')
+            elif v in s:
+                hits.add(int(v))
+
+        if not hits:
+            return None
+
+        # If multiple found (e.g., 120 and 208), keep the higher L-L system voltage.
+        return max(hits)
+
     def parse_panel(
         self,
         image_path: str,
@@ -377,35 +405,24 @@ class PanelParser:
         name = (chosen_map["NAME"]["text"] if chosen_map["NAME"] else "") or ""
         name = self._normalize_name_output(name)
 
-        # VOLTAGE
+        # VOLTAGE: we already have a chosen candidate; now trim any junk.
         voltage_val = None
         if chosen_map["VOLTAGE"]:
-            txtU0 = chosen_map["VOLTAGE"]["text"].upper()
-            txtU  = self._normalize_digits(txtU0)
-            txtN  = self._normalize_voltage_text(txtU)
+            raw_v = chosen_map["VOLTAGE"]["text"]
+            voltage_val = self._trim_voltage_to_allowed(raw_v)
 
-            # 1) Try proper pair first: 480Y/277, 277/480V, 208/120, etc.
-            m = re.search(r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b', txtN)
-            if m:
-                a, b = int(m.group(1)), int(m.group(2))
-                voltage_val = 120 if (120 in (a, b) and 240 in (a, b)) else max(a, b)
-            else:
-                # 2) Single number fallback
-                m2 = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
-                if m2:
-                    n = int(m2.group(1))
-                    # Special rule: if the only thing we caught is 277, assume standard 480/277 → 480
-                    if n == 277:
-                        voltage_val = 480
-                    else:
-                        voltage_val = n
 
-        # BUS
+        # BUS (accept with or without unit)
         bus_amp = None
         if chosen_map["BUS"]:
-            tU = self._normalize_digits(chosen_map["BUS"]["text"].upper())  # CHG
-            m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", tU)
-            if m: bus_amp = _to_int(m.group(1))
+            tU = self._normalize_digits(chosen_map["BUS"]["text"].upper())
+            m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(?:A|AMPS?)\b", tU)
+            if m:
+                bus_amp = _to_int(m.group(1))
+            else:
+                m2 = re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', tU)
+                if m2:
+                    bus_amp = _to_int(m2.group(1))
 
         # MAIN
         main_amp = None
@@ -413,8 +430,13 @@ class PanelParser:
         if chosen_map["MAIN"]:
             txtU0 = chosen_map["MAIN"]["text"].upper()
             txtU  = self._normalize_digits(txtU0)  # CHG
-            m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", txtU)
-            if m: main_amp = _to_int(m.group(1))
+            m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(?:A|AMPS?)\b", txtU)
+            if m:
+                main_amp = _to_int(m.group(1))
+            else:
+                m2 = re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', txtU)
+                if m2:
+                    main_amp = _to_int(m2.group(1))
             if re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txtU): self.last_main_type = "MLO"
             elif re.search(r"\b(MCB|MAIN\s*BREAKER)\b", txtU): self.last_main_type = "MCB"
 
@@ -636,12 +658,16 @@ class PanelParser:
     def _simple_name_from_top(self, lines) -> Optional[dict]:
         """
         Robust name extraction:
+        0) NEW: big + centered + name-shaped token wins immediately
         1) Handle SINGLE-TOKEN '...Panel: NAME' (colon inside same token)
         2) Handle MULTI-TOKEN '... Panel : NAME ...' (window to the right)
         3) Fallbacks (label-without-colon, short ID)
         Prefers names that contain at least one letter to avoid picking bare numbers like '3'.
+        Also guards against header words like 'SCHEDULE'/'DESIGNATION' (and OCR-typo variants).
         """
         import re
+        import difflib
+
         if not lines:
             return None
 
@@ -658,42 +684,129 @@ class PanelParser:
 
         def _mk_val_by_rects(rects, texts, confs, conf_hint=None, shape=0.98, ctx=0.38):
             r1, r2 = rects[0], rects[-1]
-            x1,y1 = min(r1[0], r2[0]), min(r1[1], r2[1])
-            x2,y2 = max(r1[2], r2[2]), max(r1[3], r2[3])
-            text  = re.sub(r"\s+", " ", " ".join((t or "").strip() for t in texts)).strip()
-            conf  = float(conf_hint if conf_hint is not None else (sum(confs)/max(1,len(confs))))
-            return {"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":0.5*(x1+x2),"yc":0.5*(y1+y2),
-                    "conf":conf,"text":text,"shape":shape,"ctx":ctx}
+            x1, y1 = min(r1[0], r2[0]), min(r1[1], r2[1])
+            x2, y2 = max(r1[2], r2[2]), max(r1[3], r2[3])
+            text = re.sub(r"\s+", " ", " ".join((t or "").strip() for t in texts)).strip()
+            conf = float(conf_hint if conf_hint is not None else (sum(confs) / max(1, len(confs))))
+            return {
+                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                "xc": 0.5 * (x1 + x2), "yc": 0.5 * (y1 + y2),
+                "conf": conf, "text": text,
+                "shape": shape, "ctx": ctx,
+            }
 
         def _has_letter(s: str) -> bool:
-            return any(ch.isalpha() for ch in s or "")
+            return any(ch.isalpha() for ch in (s or ""))
+
+        def _median(vals):
+            if not vals:
+                return 0.0
+            vals = sorted(vals)
+            n = len(vals)
+            mid = n // 2
+            if n % 2:
+                return float(vals[mid])
+            return 0.5 * (vals[mid - 1] + vals[mid])
+
+        def _looks_like_header_word(up: str) -> bool:
+            """
+            Treat OCR-near-misses of words like SCHEDULE/DESIGNATION/PANELBOARD as 'header words',
+            not as names. Examples: 'scheduie', 'desicnation', etc.
+            """
+            base = re.sub(r'[^A-Z]', '', (up or "").upper())
+            if not base:
+                return False
+            bad_words = ["SCHEDULE", "DESIGNATION", "DESIGN", "PANELBOARD", "PANEL"]
+            for w in bad_words:
+                ratio = difflib.SequenceMatcher(a=base, b=w).ratio()
+                if ratio >= 0.74:  # fairly forgiving; 1–2 OCR mistakes still match
+                    return True
+            return False
 
         top = lines[: min(3, len(lines))]
 
-        # PASS 0: SINGLE-TOKEN "…Panel: NAME" → split inside the token itself
+        # ===== PASS -1: big + centered + name-shaped token =====
+        # We look at the top 2–3 lines, find tokens that are much taller than the rest
+        # and roughly centered horizontally. These are treated as "designation" style IDs
+        # like C2B, LP-1, etc.
+        all_h = []
         for ln in top:
-            for (r,t,c) in ln["tokens"]:
+            for (r, t, c) in ln["tokens"]:
+                all_h.append(max(1, r[3] - r[1]))
+        med_h = _median(all_h) or 1.0
+
+        big_center_candidates = []
+        full_W = getattr(self, "_last_full_W", None)
+
+        if full_W and med_h > 0:
+            for ln in top:
+                for (r, t, c) in ln["tokens"]:
+                    h = max(1, r[3] - r[1])
+                    # "Big": taller than ~1.6x median line height
+                    if h < 1.6 * med_h:
+                        continue
+                    raw = (t or "").strip()
+                    up = raw.upper().strip(":")
+                    if not up:
+                        continue
+                    if up in self._NAME_STOPWORDS:
+                        continue
+                    if _looks_like_header_word(up):
+                        continue
+                    if VOLT_RE.search(up) or AMPS_RE.search(up):
+                        continue
+                    if not _has_letter(up):
+                        continue
+                    # fairly short ID-like token: C2B, LP-1, etc.
+                    if not re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,10}", up):
+                        continue
+
+                    # "Centered": horizontal center between ~25% and 75% of page width
+                    cx = 0.5 * (r[0] + r[2])
+                    if not (0.25 * full_W <= cx <= 0.75 * full_W):
+                        continue
+
+                    score = (h / med_h) * float(c or 0.7)
+                    big_center_candidates.append((score, r, raw, c))
+
+            if big_center_candidates:
+                # Pick the strongest "big centered" candidate and return immediately
+                big_center_candidates.sort(key=lambda z: -z[0])
+                _, rect, text, conf = big_center_candidates[0]
+                return _mk_val_by_rects([rect], [text], [conf],
+                                        conf_hint=float(conf or 0.8),
+                                        shape=0.99, ctx=0.45)
+
+        # ===== PASS 0: SINGLE-TOKEN "…Panel: NAME" =====
+        for ln in top:
+            for (r, t, c) in ln["tokens"]:
                 raw = (t or "").strip()
-                up  = raw.upper()
+                up = raw.upper()
                 if ":" in up:
-                    # Find a PANEL-ish word before the colon within the same token
                     parts = up.split(":", 1)
                     left, right = parts[0], parts[1]
                     if any(lbl in left.split() for lbl in LABEL_WORDS):
-                        # Clean right part; allow spaces and keep inner 'PANEL'
                         right_clean = re.sub(r"[^A-Za-z0-9._\-/\s]", "", right).strip()
-                        if right_clean and _has_letter(right_clean) and not VOLT_RE.search(right_clean) and not AMPS_RE.search(right_clean):
-                            return _mk_val_by_rects([r], [right_clean], [c], conf_hint=float(c or 0.75), shape=0.98, ctx=0.40)
+                        if (right_clean and _has_letter(right_clean)
+                                and not VOLT_RE.search(right_clean)
+                                and not AMPS_RE.search(right_clean)):
+                            if _looks_like_header_word(right_clean.upper()):
+                                continue
+                            return _mk_val_by_rects(
+                                [r], [right_clean], [c],
+                                conf_hint=float(c or 0.75),
+                                shape=0.98, ctx=0.40
+                            )
 
-        # PASS 1: MULTI-TOKEN colon window to the right of a PANEL label token
+        # ===== PASS 1: MULTI-TOKEN "… Panel : NAME …" =====
         for ln in top:
             toks = ln["tokens"]
             colon_idx = None
-            for i,(r,t,c) in enumerate(toks):
+            for i, (r, t, c) in enumerate(toks):
                 if ":" in (t or ""):
                     has_panel_left = any(
                         ((tt or "").strip().upper().strip(":") in LABEL_WORDS)
-                        for (_,tt,_) in toks[max(0, i-4):i+1]
+                        for (_, tt, _) in toks[max(0, i - 4): i + 1]
                     )
                     if has_panel_left:
                         colon_idx = i
@@ -704,16 +817,23 @@ class PanelParser:
             picked_rects, picked_texts, picked_confs = [], [], []
             MAX_TOKENS = 6
             for j in range(colon_idx + 1, len(toks)):
-                (r,t,c) = toks[j]
+                (r, t, c) = toks[j]
                 raw = (t or "").strip()
-                up  = raw.upper().strip()
-                if ":" in raw: break
-                if up in HARD_STOPS: break
-                if VOLT_RE.search(up) or AMPS_RE.search(up): break
+                up = raw.upper().strip()
+                if ":" in raw:
+                    break
+                if up in HARD_STOPS:
+                    break
+                if VOLT_RE.search(up) or AMPS_RE.search(up):
+                    break
                 if up and up not in self._NAME_STOPWORDS:
-                    # keep fairly short tokens; allow multi-word names; must contain a letter
-                    if (_has_letter(up) and (re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,24}", up) or len(up) <= 16)):
-                        picked_rects.append(r); picked_texts.append(raw); picked_confs.append(float(c or 0.7))
+                    if _looks_like_header_word(up):
+                        continue
+                    if (_has_letter(up)
+                            and (re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,24}", up) or len(up) <= 16)):
+                        picked_rects.append(r)
+                        picked_texts.append(raw)
+                        picked_confs.append(float(c or 0.7))
                 if len(picked_rects) >= MAX_TOKENS:
                     break
             if picked_rects:
@@ -721,29 +841,50 @@ class PanelParser:
 
             # Fallback on this line: first short ID after colon that has a letter
             for j in range(colon_idx + 1, len(toks)):
-                (r,t,c) = toks[j]
+                (r, t, c) = toks[j]
                 up = (t or "").strip().upper().strip(":")
-                if up and _has_letter(up) and up not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,12}", up):
-                    return _mk_val_by_rects([r],[t],[c], conf_hint=float(c or 0.7), shape=0.96, ctx=0.35)
+                if (up and _has_letter(up)
+                        and up not in self._NAME_STOPWORDS
+                        and not _looks_like_header_word(up)
+                        and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,12}", up)):
+                    return _mk_val_by_rects(
+                        [r], [t], [c],
+                        conf_hint=float(c or 0.7),
+                        shape=0.96, ctx=0.35
+                    )
 
-        # PASS 2: Label present but no colon → first short ID to its right (must have a letter)
+        # ===== PASS 2: Label present but no colon → first short ID to its right =====
         for ln in top:
             toks = ln["tokens"]
-            for i,(r,t,c) in enumerate(toks):
+            for i, (r, t, c) in enumerate(toks):
                 up = (t or "").strip().upper().strip(":")
                 if up in LABEL_WORDS:
-                    for j in range(i+1, len(toks)):
-                        (r2,t2,c2) = toks[j]
+                    for j in range(i + 1, len(toks)):
+                        (r2, t2, c2) = toks[j]
                         up2 = (t2 or "").strip().upper().strip(":")
-                        if up2 and _has_letter(up2) and up2 not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,12}", up2):
-                            return _mk_val_by_rects([r2],[t2],[c2], conf_hint=float(c2 or 0.7), shape=0.96, ctx=0.35)
+                        if (up2 and _has_letter(up2)
+                                and up2 not in self._NAME_STOPWORDS
+                                and not _looks_like_header_word(up2)
+                                and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,12}", up2)):
+                            return _mk_val_by_rects(
+                                [r2], [t2], [c2],
+                                conf_hint=float(c2 or 0.7),
+                                shape=0.96, ctx=0.35
+                            )
 
-        # PASS 3: Last resort: first short token on top lines that has a letter
+        # ===== PASS 3: Last resort: first short token on top lines that has a letter =====
         for ln in top:
-            for (r,t,conf) in ln["tokens"]:
+            for (r, t, conf) in ln["tokens"]:
                 up = (t or "").strip().upper().strip(":")
-                if up and _has_letter(up) and up not in self._NAME_STOPWORDS and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,12}", up):
-                    return _mk_val_by_rects([r],[t],[conf], conf_hint=float(conf or 0.6), shape=0.92, ctx=0.20)
+                if (up and _has_letter(up)
+                        and up not in self._NAME_STOPWORDS
+                        and not _looks_like_header_word(up)
+                        and re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,12}", up)):
+                    return _mk_val_by_rects(
+                        [r], [t], [conf],
+                        conf_hint=float(conf or 0.6),
+                        shape=0.92, ctx=0.20
+                    )
 
         return None
 
