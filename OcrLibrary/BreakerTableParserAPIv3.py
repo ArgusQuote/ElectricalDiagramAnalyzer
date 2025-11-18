@@ -26,6 +26,23 @@ VALID_VOLTAGES = {120, 208, 240, 480, 600}
 AMP_MIN = 100
 AMP_MAX = 1200
 
+# --- Panel name de-duper (module-scope; persists for this process/job) ---
+_NAME_COUNTS = {}
+
+def _norm_name(s):
+    return str(s or "").strip().upper()
+
+def _dedupe_name(raw_name: str | None) -> str:
+    base = (str(raw_name or "").strip()) or "(unnamed)"
+    key = _norm_name(base)
+    cnt = _NAME_COUNTS.get(key, 0) + 1
+    _NAME_COUNTS[key] = cnt
+    return base if cnt == 1 else f"{base} ({cnt})"
+
+# Optional: call from tests to reset between runs in the same process
+def reset_name_deduper():
+    _NAME_COUNTS.clear()
+
 # ----- STRICT imports: Analyzer + Header + Parser5 only -----
 from OcrLibrary.BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
@@ -203,19 +220,34 @@ class BreakerTablePipeline:
                 if self.debug:
                     print(f"[WARN] Header parser failed: {e}")
 
+        # --- 2b) Apply de-duped display name as early as possible ---
+        try:
+            base_name, _v, _b, _m, _ = self._extract_panel_keys(analyzer_result, header_result, None)
+        except Exception:
+            base_name = None
+        dedup_name = _dedupe_name(base_name)
+        if isinstance(header_result, dict):
+            header_result["name"] = dedup_name
+        try:
+            nh = (analyzer_result or {}).get("normalized_header")
+            if isinstance(nh, dict):
+                nh["name"] = dedup_name
+        except Exception:
+            pass
+
         # --- 3) Header validity check (but DO NOT skip the table parser) ---
         should_run_parser = run_parser
         panel_status = None
         try:
-            detected_name, volts, bus_amps, main_amps, _spaces_unused = self._extract_panel_keys(analyzer_result, header_result, None)
+            _dn, volts, bus_amps, main_amps, _spaces_unused = self._extract_panel_keys(analyzer_result, header_result, None)
             volts_i = self._parse_voltage(volts)
             volts_invalid = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
             bus_invalid   = not self._is_valid_amp(bus_amps)                          # REQUIRED
             main_invalid  = (main_amps is not None) and (not self._is_valid_amp(main_amps))  # OPTIONAL
 
             if volts_invalid or bus_invalid or main_invalid:
-                panel_status = f"unable to detect key information on panel ({detected_name})"
-                header_result = self._mask_header_non_name(header_result, detected_name=detected_name)
+                panel_status = f"unable to detect key information on panel ({dedup_name})"
+                header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
                 # NOTE: we still run the ALT table parser; just change the message:
                 if self.debug:
                     miss = []
@@ -223,7 +255,7 @@ class BreakerTablePipeline:
                     if bus_invalid:   miss.append(f"bus_amps={bus_amps!r}")
                     if main_invalid:  miss.append(f"main_amps={main_amps!r}")
                     print("[INFO] Header invalid; proceeding to TABLE PARSER anyway "
-                          f"(name={detected_name!r}; {', '.join(miss)})")
+                          f"(name={dedup_name!r}; {', '.join(miss)})")
         except Exception as e:
             if self.debug:
                 print(f"[WARN] Header pre-parse validation failed: {e}")
@@ -241,6 +273,9 @@ class BreakerTablePipeline:
                 parser_result = None
                 if self.debug:
                     print(f"[WARN] Parser failed: {e}")
+        # Ensure the table parser result advertises the deduped name for the UI
+        if isinstance(parser_result, dict):
+            parser_result["name"] = dedup_name
 
         # --- optional legacy prints (only if table parser ran) ---
         if self.debug and parser_result is not None:
@@ -254,7 +289,7 @@ class BreakerTablePipeline:
         # --- 4) Panel validity & masking logic (spaces + header recheck) ---
         try:
             if panel_status is None:
-                detected_name, volts, bus_amps, main_amps, spaces = self._extract_panel_keys(analyzer_result, header_result, parser_result)
+                _dn2, volts, bus_amps, main_amps, spaces = self._extract_panel_keys(analyzer_result, header_result, parser_result)
                 volts_i = self._parse_voltage(volts)
                 volts_invalid  = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
                 bus_invalid    = not self._is_valid_amp(bus_amps)
@@ -266,9 +301,9 @@ class BreakerTablePipeline:
                     spaces_invalid = True
 
                 if spaces_invalid or volts_invalid or bus_invalid or main_invalid:
-                    panel_status = f"unable to detect key information on panel ({detected_name})"
-                    header_result = self._mask_header_non_name(header_result, detected_name=detected_name)
-                    parser_result = self._mask_parser_non_name(parser_result,  detected_name=detected_name)
+                    panel_status = f"unable to detect key information on panel ({dedup_name})"
+                    header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
+                    parser_result = self._mask_parser_non_name(parser_result,  detected_name=dedup_name)
         except Exception as e:
             if self.debug:
                 print(f"[WARN] Panel validation/masking failed: {e}")
