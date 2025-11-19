@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableAnalyzer4.py
+# OcrLibrary/BreakerTableAnalyzer5.py
 from __future__ import annotations
 import os, re, json, difflib, cv2, numpy as np
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ except Exception:
     _HAS_OCR = False
 
 # Version: TP band location removed. Hybrid footer logic (Total Load/Load + structural).
-ANALYZER_VERSION = "V19_4_Analyzer_NoTP_HybridFooter/Header_v4"
+ANALYZER_VERSION = "Analyzer5"
 ANALYZER_ORIGIN  = __file__
 
 @dataclass
@@ -181,17 +181,18 @@ class BreakerTableAnalyzer:
             if band.size == 0: return False
             g = cv2.GaussianBlur(band, (3,3), 0)
             bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                       cv2.THRESH_BINARY_INV, 21, 10)
+                                    cv2.THRESH_BINARY_INV, 21, 10)
             klen = max(70, int(W * 0.22))
             K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
             lines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
             return lines.sum() > 0
 
-        def scan_roi(y1f, y2f, x2f) -> Optional[int]:
+        # return **all** valid CCT/CKT y-candidates found in a region
+        def scan_roi(y1f, y2f, x2f) -> List[int]:
             y1, y2 = int(H*y1f), int(H*y2f)
             x1, x2 = 0, int(W*x2f)
             roi = gray[y1:y2, x1:x2]
-            if roi.size == 0: return None
+            if roi.size == 0: return []
             self._ocr_dbg_rois.append((x1, y1, x2, y2))
 
             def pass_once(mag: float):
@@ -215,6 +216,7 @@ class BreakerTableAnalyzer:
                     "x2": int(max(xs)), "y2": int(max(ys)),
                 })
 
+            # group rough lines
             lines = {}
             for box, txt, _ in det:
                 if not txt: continue
@@ -223,6 +225,8 @@ class BreakerTableAnalyzer:
                 lines.setdefault(key, []).append((box, txt))
 
             cands = []
+
+            # direct token hits
             for box, txt, _ in det:
                 t = norm(txt)
                 if t in ("CCT", "CKT"):
@@ -230,38 +234,35 @@ class BreakerTableAnalyzer:
                     if has_long_line_below(y_abs):
                         cands.append(y_abs)
 
+            # line-level hits
             for _, items in lines.items():
                 raw = " ".join(t for _, t in items)
                 if "HEADER" in raw.upper():
                     continue
-                if "CCT" in norm(raw) or "CKT" in norm(raw):
+                if ("CCT" in norm(raw)) or ("CKT" in norm(raw)):
                     y_abs = y1 + min(int(min(p[1] for p in b)) for b,_ in items)
                     if has_long_line_below(y_abs):
                         cands.append(y_abs)
 
-            if not cands: return None
-            return int(min(cands))
+            # return all valid hits from this ROI
+            return sorted(set(int(y) for y in cands))
 
-        candidates = [(0.08, 0.48, 0.28),(0.10, 0.50, 0.32),(0.08, 0.52, 0.40),(0.12, 0.58, 0.45)]
-        for y1f, y2f, x2f in candidates:
-            y = scan_roi(y1f, y2f, x2f)
-            if y is not None and y <= int(0.62 * H):
-                return y
+        # collect all candidates across **all** scan windows
+        all_hits: List[int] = []
 
-        fallback_candidates = [
-            (0.08, 0.52, 0.65),
-            (0.10, 0.56, 0.80),
-            (0.08, 0.60, 1.00),
-        ]
+        primary_windows = [(0.08, 0.48, 0.28),(0.10, 0.50, 0.32),(0.08, 0.52, 0.40),(0.12, 0.58, 0.45)]
+        for y1f, y2f, x2f in primary_windows:
+            all_hits += scan_roi(y1f, y2f, x2f)
+
+        fallback_candidates = [(0.08, 0.52, 0.65),(0.10, 0.56, 0.80),(0.08, 0.60, 1.00)]
         for y1f, y2f, x2f in fallback_candidates:
-            y = scan_roi(y1f, y2f, x2f)
-            if y is not None and y <= int(0.65 * H):
-                return y
+            all_hits += scan_roi(y1f, y2f, x2f)
 
+        # final wide-left sweep
         x1, x2 = 0, int(0.48 * W)
         y1, y2 = int(0.08 * H), int(0.68 * H)
         roi = gray[y1:y2, x1:x2]
-        if roi.size > 0:
+        if roi.size > 0 and self.reader is not None:
             det = self.reader.readtext(
                 roi, detail=1, paragraph=False,
                 allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -",
@@ -273,11 +274,15 @@ class BreakerTableAnalyzer:
                 t = re.sub(r"[^A-Z]", "", (txt or "").upper().replace("1","I"))
                 if t in ("CCT","CKT"):
                     cands.append(y1 + int(min(p[1] for p in box)))
-            if cands:
-                y = int(min(cands))
-                if y <= int(0.65 * H):
-                    return y
-        return None
+            all_hits += cands
+
+        # keep only “reasonable height” hits, then pick the **topmost**
+        cap = int(0.65 * H)  # relaxed cap matching prior logic
+        all_hits = [y for y in all_hits if y <= cap]
+
+        if not all_hits:
+            return None
+        return int(min(all_hits))
 
     def _find_header_by_tokens(self, gray: np.ndarray) -> Optional[int]:
         """

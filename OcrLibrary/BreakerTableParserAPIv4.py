@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParserAPIv3.py
+# OcrLibrary/BreakerTableParserAPIv4.py
 import sys, os, inspect
 
 # ----- ensure repo root on sys.path -----
@@ -8,7 +8,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "ALT"
+API_VERSION = "API_4"
 API_ORIGIN  = __file__
 
 # Panel validation snap map for spaces normalization
