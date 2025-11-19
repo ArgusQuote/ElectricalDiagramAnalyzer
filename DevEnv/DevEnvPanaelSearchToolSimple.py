@@ -1,40 +1,36 @@
-import sys 
-import os 
+#!/usr/bin/env python3
+import sys, os
 from pathlib import Path
-# Path setup 
-script_dir = os.path.dirname(os.path.abspath(__file__)) 
-project_root = os.path.dirname(script_dir) 
-if project_root not in sys.path: sys.path.append(project_root) 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
-from VisualDetectionToolLibrary.PanelSearchToolV13 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV14 import PanelBoardSearch
 
-# ---- Inputs/Outputs ----
-INPUT_PDF = Path("~/Documents/Diagrams/generic3.pdf").expanduser()
-FINDER_OUT_DIR = Path("~/Documents/Diagrams/CaseStudyPdfTextSearch4").expanduser()
-FINDER_OUT_DIR.mkdir(parents=True, exist_ok=True)
+INPUT_PDF = Path("~/Documents/Diagrams/makayla2.pdf").expanduser()
+OUT_DIR   = Path("~/Documents/Diagrams/CaseStudy_VectorCrop_Run").expanduser()
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-FINDER = PanelBoardSearch(
-    output_dir=str(FINDER_OUT_DIR),
+finder = PanelBoardSearch(
+    output_dir=OUT_DIR,
     dpi=400,
+    render_dpi=1400,
+    aa_level=8,                # used for the final render; detection forces AA=0
+    render_colorspace="gray",
+
     min_void_area_fr=0.004,
     min_void_w_px=90,
     min_void_h_px=90,
-    # ↓ tighten these three to kill giant/near-page blobs
-    max_void_area_fr=0.30,          # was 0.30
-    void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
-    void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
+    max_void_area_fr=0.30,
+    void_w_fr_range=(0.20, 0.60),
+    void_h_fr_range=(0.20, 0.55),
     min_whitespace_area_fr=0.01,
     margin_shave_px=6,
     pad=6,
-    debug=False,
     verbose=True,
-    save_masked_shape_crop=False,
-    replace_multibox=True,
-    render_dpi=1400,         # <- high-fidelity crop render
-    aa_level=8,              # <- strongest anti-aliasing
-    render_colorspace="gray",# or "rgb"
-    downsample_max_w=3200,   # optional; remove/None to keep full size    
 )
 
-crops = FINDER.readPdf(str(INPUT_PDF))
-print(f"[PanelFinder] wrote {len(crops)} crop(s) to {FINDER_OUT_DIR}")
+pngs = finder.readPdf(str(INPUT_PDF))
+print(f"\nWrote {len(pngs)} PNGs to {OUT_DIR}")
+print(f"Vector crops → {OUT_DIR/'cropped_tables_pdf'}")

@@ -11,7 +11,7 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from VisualDetectionToolLibrary.PanelSearchToolV13 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV14 import PanelBoardSearch
 
 # =============== USER CONFIG =================
 PDF_PATH = Path(
