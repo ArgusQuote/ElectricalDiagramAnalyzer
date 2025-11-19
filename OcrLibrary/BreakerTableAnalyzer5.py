@@ -594,11 +594,11 @@ class BreakerTableAnalyzer:
             for y in ys[1:]:
                 if y-borders[-1] > 3: borders.append(y)
 
-        # Header detection
-        header_y_abs = self._find_cct_header_y(gray)
+        # Header detection (token-based first, then CCT/CKT as fallback)
+        header_y_abs = self._find_header_by_tokens(gray)
         if header_y_abs is None:
-            # fallback to token-based finder
-            header_y_abs = self._find_header_by_tokens(gray)
+            header_y_abs = self._find_cct_header_y(gray)
+
 
         # safety cap (ignore anything too low)
         if header_y_abs is not None and header_y_abs > int(0.62 * H):

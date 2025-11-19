@@ -44,7 +44,7 @@ def reset_name_deduper():
     _NAME_COUNTS.clear()
 
 # ----- STRICT imports: Analyzer + Header + Parser5 only -----
-from OcrLibrary.BreakerTableAnalyzer4 import BreakerTableAnalyzer, ANALYZER_VERSION
+from OcrLibrary.BreakerTableAnalyzer5 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser5   import BreakerTableParser, PARSER_VERSION
 
