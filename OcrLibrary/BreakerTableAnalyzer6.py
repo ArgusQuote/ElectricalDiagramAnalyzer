@@ -12,7 +12,7 @@ except Exception:
     _HAS_OCR = False
 
 # Version: TP band location removed. Hybrid footer logic (Total Load/Load + structural).
-ANALYZER_VERSION = "Analyzer5"
+ANALYZER_VERSION = "Analyzer6"
 ANALYZER_ORIGIN  = __file__
 
 @dataclass
@@ -413,13 +413,16 @@ class BreakerTableAnalyzer:
                                     header_y_abs: Optional[int],
                                     last_center: Optional[int],
                                     med_row_h: float) -> Optional[int]:
+
         """
-        Locate the totals/footer line by OCR:
-        1) Prefer 'TOTAL LOAD' (fuzzy), else guarded 'LOAD' (but not 'LOAD CLASSIFICATION').
-        2) Choose the TOPMOST valid hit (closest to table body).
-        3) Snap to the strongest horizontal rule just ABOVE that hit, in a local window.
-        4) If no rule is found, use the text baseline (y_hit - 2).
-        5) NEVER return a footer at/above the header line; clamp below header.
+        Locate the totals/footer line by OCR, but ONLY in a band around the
+        structural footer:
+
+        - We scan the lower half of the page, then keep only 'TOTAL LOAD' hits
+          that fall within ~±2 row-heights of footer_struct_y.
+        - For those hits, we snap to the strongest horizontal rule just ABOVE
+          the text and return that Y as the refined footer candidate.
+
         Returns absolute Y (int) or None.
         """
         if self.reader is None:
@@ -429,7 +432,7 @@ class BreakerTableAnalyzer:
         if not med_row_h or med_row_h <= 0:
             med_row_h = 18.0
 
-        # Scan area: start safely below header; also don't search too high in the page
+        # Scan area: start safely below header; don't search too high
         y0 = int(max(0.45 * H, (header_y_abs or int(0.30 * H)) + 40))
         y1 = int(0.95 * H)
         x1, x2 = 0, int(0.92 * W)
@@ -458,8 +461,8 @@ class BreakerTableAnalyzer:
             # normalize; make OCR robust to 0/O and 1/I noise
             return re.sub(r"[^A-Z]", "", (s or "").upper().replace("1", "I").replace("0", "O"))
 
+        # ONLY use TOTAL LOAD – ignore plain LOAD hits entirely
         total_hits = []
-        load_hits  = []
         for box, txt, _ in dets:
             n = N(txt)
             if not n:
@@ -472,27 +475,21 @@ class BreakerTableAnalyzer:
             if is_total:
                 total_hits.append(y_abs)
                 self._ocr_footer_marks.append((y_abs, "TOTAL_LOAD_HIT"))
-                continue
 
-            # 'LOAD' alone but not 'LOAD CLASSIFICATION'
-            if ("LOAD" in n) and ("CLASS" not in n):
-                load_hits.append(y_abs)
-                self._ocr_footer_marks.append((y_abs, "LOAD_HIT"))
-
-        # Priority: TOTAL LOAD > LOAD
-        hits = total_hits if total_hits else load_hits
+        hits = total_hits
         if not hits:
             return None
 
-        # Optional proximity window to last row center (keeps us near the table body)
-        if last_center is not None:
-            lo  = last_center + 0.6 * med_row_h
-            hi  = last_center + 3.0 * med_row_h
-            near = [h for h in hits if lo <= h <= hi]
-            if near:
-                hits = near
+        # Restrict to a band of ~±2 row-heights around the structural footer
+        footer_struct_y = getattr(self, "_footer_struct_y", None)
+        if footer_struct_y is not None and med_row_h > 0:
+            band_lo = footer_struct_y - 2.2 * med_row_h
+            band_hi = footer_struct_y + 2.2 * med_row_h
+            hits = [h for h in hits if band_lo <= h <= band_hi]
+            if not hits:
+                return None
 
-        # Choose the TOPMOST hit (closest to table body)
+        # Choose the TOPMOST hit in that band (closest to table body)
         y_hit = int(min(hits))
         self._ocr_footer_marks.append((y_hit, "OCR_PICK"))
 
@@ -505,7 +502,7 @@ class BreakerTableAnalyzer:
         if band.size > 0:
             b = cv2.GaussianBlur(band, (3,3), 0)
             bw = cv2.adaptiveThreshold(b, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
-                                    cv2.THRESH_BINARY_INV, 21, 10)
+                                       cv2.THRESH_BINARY_INV, 21, 10)
             klen = int(max(70, min(W * 0.30, 320)))
             K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
             lines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
@@ -514,7 +511,7 @@ class BreakerTableAnalyzer:
             if proj.size > 0 and proj.max() > 0:
                 ys = np.where(proj >= 0.35 * proj.max())[0]
                 if ys.size:
-                    y_rule = int(ys[-1])                 # last (closest to y_hit) rule above
+                    y_rule = int(ys[-1])  # last (closest to y_hit) rule above
                     y_final = band_top + y_rule
                     self._ocr_footer_marks.append((y_final, "OCR_RULE"))
 
@@ -768,49 +765,30 @@ class BreakerTableAnalyzer:
         med_row_h = float(np.median(gaps_abs)) if gaps_abs.size else 18.0
         last_center = out[-1] if out else None
 
-        # Optional OCR footer cue (kept if you were using it)
-        self._footer_ocr_y = None  # (keep or call your OCR finder here if needed)
+        # OCR footer candidate from 'TOTAL LOAD'
+        footer_ocr_y = self._find_totals_footer_from_load(gray, header_y_abs, last_center, med_row_h)
+        self._footer_ocr_y = footer_ocr_y
 
-        # Final footer starts as structural
-        final_footer = footer_struct_y
+        # ---- HYBRID ARBITRATION: prefer explicit TOTAL LOAD OCR, else structural ----
+        if footer_ocr_y is not None:
+            # We found an explicit 'TOTAL LOAD' line; trust it and use the snapped
+            # rule above as the footer.
+            final_footer = footer_ocr_y
+            self._snap_note = f"FOOTER via TOTAL LOAD OCR (struct={footer_struct_y}, ocr={footer_ocr_y})"
+        else:
+            # No TOTAL LOAD found -> fall back to structural footer
+            final_footer = footer_struct_y
+            self._snap_note = None
 
-        # Guard: footer must be below header
+        # Final guard: footer must be below header
         if (final_footer is not None) and (header_y_abs is not None) and (final_footer <= header_y_abs + 6):
             final_footer = None
 
-        # ---- SNAP LOGIC (correct spaces + shift footer to match) ----
+        # ---- SPACE COUNTS (no snapping) ----
         detected_spaces = len(out) * 2
         self._spaces_detected = detected_spaces
         self._spaces_corrected = detected_spaces
         self._footer_snapped = False
-        self._snap_note = None
-
-        snap_map = {
-            16: 18, 20: 18,
-            28: 30, 32: 30,
-            40: 42, 44: 42,
-            52: 54, 56: 54,
-            64: 66, 68: 66,
-            70: 72, 74: 72,
-            82: 84, 86: 84,
-        }
-
-        if (final_footer is not None) and (detected_spaces in snap_map) and (med_row_h > 0):
-            target_spaces = snap_map[detected_spaces]
-            delta_rows = int((target_spaces - detected_spaces) // 2)  # usually ±1
-            if delta_rows != 0:
-                shift = int(round(delta_rows * med_row_h))
-                # respect header and a small floor margin
-                lo = int((header_y_abs + 8) if header_y_abs is not None else 0)
-                hi = H - 5
-                snapped = int(np.clip(final_footer + shift, lo, hi))
-                # keep at least half a row under the last data row
-                if (last_center is not None) and (snapped < last_center + 0.5 * med_row_h):
-                    snapped = int(last_center + 0.5 * med_row_h)
-                self._footer_snapped = True
-                self._spaces_corrected = target_spaces
-                self._snap_note = f"SNAP spaces {detected_spaces}→{target_spaces}; footer {final_footer}→{snapped}"
-                final_footer = snapped
 
         # Commit final footer
         self._last_footer_y = int(final_footer) if final_footer is not None else None
@@ -875,12 +853,12 @@ class BreakerTableAnalyzer:
             cv2.putText(vis, "CCT HEADER", (12, max(16, y - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2, cv2.LINE_AA)
 
-        # structural footer (if different from final, show in dark blue)
-        if self._footer_struct_y is not None and footer_y_abs is not None and abs(self._footer_struct_y - footer_y_abs) > 2:
-            ys = int(self._footer_struct_y)
-            cv2.line(vis, (0, ys), (W - 1, ys), (180, 0, 0), 2)
-            cv2.putText(vis, "FOOTER_STRUCT", (12, max(16, ys - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 0, 0), 1, cv2.LINE_AA)
+        # OCR footer candidate (from TOTAL LOAD / LOAD)
+        if self._footer_ocr_y is not None:
+            yo = int(self._footer_ocr_y)
+            cv2.line(vis, (0, yo), (W - 1, yo), (200, 0, 200), 1)
+            cv2.putText(vis, "FOOTER_OCR", (12, max(16, yo + 18)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1, cv2.LINE_AA)
 
         # final footer
         if footer_y_abs is not None:
