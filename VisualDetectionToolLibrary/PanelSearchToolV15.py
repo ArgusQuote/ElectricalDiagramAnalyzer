@@ -118,11 +118,11 @@ class PanelBoardSearch:
             print(f"[INFO] Detecting with fitz @ {self.dpi} DPI")
             print(f"[INFO] Pages: {len(doc)}")
 
-        det_mat   = fitz.Matrix(self.dpi / 72.0, self.dpi / 72.0)
-        rend_mat  = fitz.Matrix(self.render_dpi / 72.0, self.render_dpi / 72.0)
-        cs        = fitz.csGRAY if self.render_colorspace == "gray" else fitz.csRGB
+        det_mat  = fitz.Matrix(self.dpi / 72.0, self.dpi / 72.0)
+        rend_mat = fitz.Matrix(self.render_dpi / 72.0, self.render_dpi / 72.0)
+        cs       = fitz.csGRAY if self.render_colorspace == "gray" else fitz.csRGB
 
-        # --- IMPORTANT: turn AA OFF for detection so lines are crisp ---
+        # Turn AA OFF for detection so lines are crisp (prevents “hole” fill-in)
         try:
             fitz.TOOLS.set_aa_level(0)
         except Exception:
@@ -131,21 +131,23 @@ class PanelBoardSearch:
         for pidx in range(len(doc)):
             page = doc[pidx]
 
-            # 1) detection bitmap (AA=0 so outlines are sharp)
+            # 1) Detection bitmap (AA=0)
             pix = page.get_pixmap(matrix=det_mat, alpha=False)
             det_bgr = self._pix_to_bgr(pix)
             H, W = det_bgr.shape[:2]
             page_area = H * W
 
             gray = cv2.cvtColor(det_bgr, cv2.COLOR_BGR2GRAY)
-            # slightly gentler morphology than before; preserves thin frames
+            # Gentle morphology preserves thin frames; adjust if needed
             ink = self._binarize_ink(gray, close_px=0, dilate_px=1)
             whitespace = cv2.bitwise_not(ink)
             whitespace = self._shave_margin(whitespace, self.margin_shave_px)
 
             num, labels, stats, _ = self._components(whitespace)
-            keep_ids = [cid for cid in range(1, num)
-                        if stats[cid][4] / page_area >= max(0.006, self.min_whitespace_area_fr)]  # loosened
+            keep_ids = [
+                cid for cid in range(1, num)
+                if stats[cid][4] / page_area >= max(0.006, self.min_whitespace_area_fr)
+            ]
 
             sel_ws = self._selected_ws_mask(labels, keep_ids)
             contours, hier = cv2.findContours(sel_ws, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
@@ -156,7 +158,7 @@ class PanelBoardSearch:
 
             def _box_passes(x, y, w, h):
                 area = w * h
-                if area / page_area < max(0.0025, self.min_void_area_fr):  # loosened
+                if area / page_area < max(0.0025, self.min_void_area_fr):
                     return False
                 if w < max(60, self.min_void_w_px) or h < max(60, self.min_void_h_px):
                     return False
@@ -180,18 +182,19 @@ class PanelBoardSearch:
                         return False
                 return True
 
-            # ---- primary: holes inside whitespace comps ----
+            # ---- Primary: holes inside whitespace comps ----
             if hier is not None and len(hier) > 0:
                 hier = hier[0]
                 for ci, cnt in enumerate(contours):
                     if hier[ci][3] == -1:
-                        continue  # holes only
+                        continue  # only holes are voids
                     x, y, w, h = cv2.boundingRect(cnt)
                     if not _box_passes(x, y, w, h):
                         continue
+
                     cv2.drawContours(magenta, [cnt], -1, (255, 0, 255), 5)
 
-                    # pad and convert to PDF clip
+                    # pad & map detection bbox → PDF clip
                     y0 = max(0, y - self.pad); x0 = max(0, x - self.pad)
                     y1 = min(H, y + h + self.pad); x1 = min(W, x + w + self.pad)
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
@@ -204,7 +207,7 @@ class PanelBoardSearch:
                     )
                     candidates.append(clip)
 
-            # ---- fallback: if nothing passed, propose by grid lines (no 'holes' assumption) ----
+            # ---- Fallback: grid proposals if nothing passed ----
             if not candidates:
                 for (x0, y0, x1, y1) in self._grid_proposals_fallback(det_bgr):
                     w, h = x1 - x0, y1 - y0
@@ -221,11 +224,11 @@ class PanelBoardSearch:
                     )
                     candidates.append(clip)
 
-            # ---- export vector PDF + hi-DPI PNG for every candidate ----
+            # ---- Export vector PDF + hi-DPI PNG for each candidate ----
             for clip in candidates:
                 saved_idx += 1
 
-                # vector crop PDF
+                # Vector crop PDF (lossless vectors)
                 out_pdf = fitz.open()
                 new_page = out_pdf.new_page(width=clip.width, height=clip.height)
                 new_page.show_pdf_page(new_page.rect, doc, pidx, clip=clip)
@@ -233,7 +236,7 @@ class PanelBoardSearch:
                 out_pdf.save(str(pdf_path))
                 out_pdf.close()
 
-                # high-DPI PNG
+                # High-DPI PNG from the same clip (lossless PNG write)
                 pixc = page.get_pixmap(matrix=rend_mat, clip=clip, alpha=False, colorspace=cs)
                 png = self._pix_to_bgr(pixc)
                 if self.downsample_max_w and png.shape[1] > self.downsample_max_w:
@@ -244,7 +247,7 @@ class PanelBoardSearch:
                 cv2.imwrite(str(png_path), png)
                 all_pngs.append(str(png_path))
 
-            # overlay per page
+            # Per-page overlay
             ov_path = self.magenta_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
             cv2.imwrite(str(ov_path), magenta)
 
@@ -253,11 +256,15 @@ class PanelBoardSearch:
 
         doc.close()
 
-        # restore AA for anything else that uses fitz later (optional)
+        # Restore configured AA for any later fitz use
         try:
             fitz.TOOLS.set_aa_level(self.aa_level)
         except Exception:
             pass
+
+        # --- post-pass: enforce one table per PNG (lossless) ---
+        if self.enforce_one_box and all_pngs:
+            all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
@@ -344,4 +351,136 @@ class PanelBoardSearch:
             m[labels == cid] = 255
         return m
 
-    # (Optional) one-box logic can be copied back in if you still want it.
+    # One box logic
+    def _enforce_one_box_on_paths(self, image_paths: list[str]) -> list[str]:
+        final_paths = []
+        for p in image_paths:
+            try:
+                img = cv2.imread(p)
+                if img is None:
+                    if self.verbose:
+                        print(f"[WARN] Could not read {p}")
+                    continue
+
+                boxes = self._find_table_boxes(
+                    img,
+                    min_rel_area=self.onebox_min_rel_area,
+                    max_rel_area=self.onebox_max_rel_area,
+                    aspect_range=self.onebox_aspect_range,
+                    min_side_px=self.onebox_min_side_px,
+                )
+
+                base = Path(p).stem
+                out_dir = Path(self.output_dir)
+                H, W = img.shape[:2]
+
+                # If 0 or 1 table box -> keep as-is
+                if len(boxes) <= 1:
+                    final_paths.append(p)
+                    if self.onebox_debug:
+                        dbg = img.copy()
+                        for (x1, y1, x2, y2) in boxes:
+                            cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.imwrite(str(out_dir / f"{base}__debug_single_box.png"), dbg)
+                    continue
+
+                # Split into multiple
+                saved = []
+                for i, (x1, y1, x2, y2) in enumerate(boxes, 1):
+                    x1p, y1p = max(0, x1 - self.onebox_pad), max(0, y1 - self.onebox_pad)
+                    x2p, y2p = min(W, x2 + self.onebox_pad), min(H, y2 + self.onebox_pad)
+                    crop = img[y1p:y2p, x1p:x2p]
+                    out_path = out_dir / f"{base}__tbl{i:02d}.png"
+                    cv2.imwrite(str(out_path), crop)
+                    saved.append(str(out_path))
+
+                if self.onebox_debug:
+                    dbg = img.copy()
+                    for (x1, y1, x2, y2) in boxes:
+                        cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                    cv2.imwrite(str(out_dir / f"{base}__debug_boxes.png"), dbg)
+
+                if self.replace_multibox:
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+
+                final_paths.extend(saved)
+
+            except Exception as e:
+                if self.verbose:
+                    print(f"[WARN] one-box step failed for {p}: {e}")
+                final_paths.append(p)
+
+        return final_paths
+
+
+    def _find_table_boxes(self, img_bgr,
+                        min_rel_area=0.02,
+                        max_rel_area=0.75,
+                        aspect_range=(0.4, 3.0),
+                        min_side_px=80):
+        H, W = img_bgr.shape[:2]
+        page_area = H * W
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        thr = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 10
+        )
+        hk = max(W // 80, 5)
+        vk = max(H // 80, 5)
+        kh = cv2.getStructuringElement(cv2.MORPH_RECT, (hk, 1))
+        kv = cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk))
+        lh = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kh)
+        lv = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kv)
+        lines = cv2.bitwise_or(lh, lv)
+        lines = cv2.dilate(lines, None, iterations=1)
+        lines = cv2.erode(lines, None, iterations=1)
+        cnts, _ = cv2.findContours(lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        boxes = []
+        for c in cnts:
+            x, y, w, h = cv2.boundingRect(c)
+            if w < min_side_px or h < min_side_px:
+                continue
+            area = w * h
+            rel = area / page_area
+            if rel < min_rel_area or rel > max_rel_area:
+                continue
+            aspect = w / float(h)
+            if aspect < aspect_range[0] or aspect > aspect_range[1]:
+                continue
+            boxes.append((x, y, x + w, y + h))
+
+        if not boxes:
+            return []
+        boxes = self._nms_keep_larger(boxes, iou_thr=0.5)
+        boxes.sort(key=lambda b: (b[1], b[0]))
+        return boxes
+
+
+    @staticmethod
+    def _nms_keep_larger(boxes, iou_thr=0.5):
+        if len(boxes) <= 1:
+            return boxes
+        boxes = sorted(boxes, key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
+        keep = []
+        for box in boxes:
+            if all(PanelBoardSearch._iou(box, k) <= iou_thr for k in keep):
+                keep.append(box)
+        return keep
+
+
+    @staticmethod
+    def _iou(a, b):
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
+        inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
+        if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+            return 0.0
+        inter = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+        area_a = (ax2-ax1) * (ay2-ay1)
+        area_b = (bx2-bx1) * (by2-by1)
+        denom = (area_a + area_b - inter)
+        return inter / float(denom) if denom > 0 else 0.0

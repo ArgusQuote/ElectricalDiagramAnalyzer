@@ -5,7 +5,6 @@ import numpy as np
 import cv2
 import fitz  # PyMuPDF
 
-
 class PanelBoardSearch:
     """
     Detect panel-board 'voids' on a detection bitmap rendered by PyMuPDF
@@ -29,7 +28,7 @@ class PanelBoardSearch:
         render_colorspace: str = "gray",  # "gray" or "rgb"
         downsample_max_w: int | None = None,  # optional max width for PNGs
 
-        # whitespace / void heuristics (same semantics as before)
+        # whitespace / void heuristics
         min_whitespace_area_fr: float = 0.01,
         margin_shave_px: int = 6,
         min_void_area_fr: float = 0.004,
@@ -47,7 +46,7 @@ class PanelBoardSearch:
         debug: bool = False,
         verbose: bool = True,
 
-        # one-box post-process (unchanged, operates on produced PNGs)
+        # one-box post-process (operates on produced PNGs)
         enforce_one_box: bool = True,
         replace_multibox: bool = True,
         onebox_debug: bool = False,
@@ -118,11 +117,11 @@ class PanelBoardSearch:
             print(f"[INFO] Detecting with fitz @ {self.dpi} DPI")
             print(f"[INFO] Pages: {len(doc)}")
 
-        det_mat   = fitz.Matrix(self.dpi / 72.0, self.dpi / 72.0)
-        rend_mat  = fitz.Matrix(self.render_dpi / 72.0, self.render_dpi / 72.0)
-        cs        = fitz.csGRAY if self.render_colorspace == "gray" else fitz.csRGB
+        det_mat  = fitz.Matrix(self.dpi / 72.0, self.dpi / 72.0)
+        rend_mat = fitz.Matrix(self.render_dpi / 72.0, self.render_dpi / 72.0)
+        cs       = fitz.csGRAY if self.render_colorspace == "gray" else fitz.csRGB
 
-        # --- IMPORTANT: turn AA OFF for detection so lines are crisp ---
+        # Turn AA OFF for detection so lines are crisp (prevents “hole” fill-in)
         try:
             fitz.TOOLS.set_aa_level(0)
         except Exception:
@@ -131,21 +130,23 @@ class PanelBoardSearch:
         for pidx in range(len(doc)):
             page = doc[pidx]
 
-            # 1) detection bitmap (AA=0 so outlines are sharp)
+            # 1) Detection bitmap (AA=0)
             pix = page.get_pixmap(matrix=det_mat, alpha=False)
             det_bgr = self._pix_to_bgr(pix)
             H, W = det_bgr.shape[:2]
             page_area = H * W
 
             gray = cv2.cvtColor(det_bgr, cv2.COLOR_BGR2GRAY)
-            # slightly gentler morphology than before; preserves thin frames
+            # Gentle morphology preserves thin frames; adjust if needed
             ink = self._binarize_ink(gray, close_px=0, dilate_px=1)
             whitespace = cv2.bitwise_not(ink)
             whitespace = self._shave_margin(whitespace, self.margin_shave_px)
 
             num, labels, stats, _ = self._components(whitespace)
-            keep_ids = [cid for cid in range(1, num)
-                        if stats[cid][4] / page_area >= max(0.006, self.min_whitespace_area_fr)]  # loosened
+            keep_ids = [
+                cid for cid in range(1, num)
+                if stats[cid][4] / page_area >= max(0.006, self.min_whitespace_area_fr)
+            ]
 
             sel_ws = self._selected_ws_mask(labels, keep_ids)
             contours, hier = cv2.findContours(sel_ws, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
@@ -156,7 +157,7 @@ class PanelBoardSearch:
 
             def _box_passes(x, y, w, h):
                 area = w * h
-                if area / page_area < max(0.0025, self.min_void_area_fr):  # loosened
+                if area / page_area < max(0.0025, self.min_void_area_fr):
                     return False
                 if w < max(60, self.min_void_w_px) or h < max(60, self.min_void_h_px):
                     return False
@@ -180,18 +181,19 @@ class PanelBoardSearch:
                         return False
                 return True
 
-            # ---- primary: holes inside whitespace comps ----
+            # ---- Primary: holes inside whitespace comps ----
             if hier is not None and len(hier) > 0:
                 hier = hier[0]
                 for ci, cnt in enumerate(contours):
                     if hier[ci][3] == -1:
-                        continue  # holes only
+                        continue  # only holes are voids
                     x, y, w, h = cv2.boundingRect(cnt)
                     if not _box_passes(x, y, w, h):
                         continue
+
                     cv2.drawContours(magenta, [cnt], -1, (255, 0, 255), 5)
 
-                    # pad and convert to PDF clip
+                    # pad & map detection bbox → PDF clip
                     y0 = max(0, y - self.pad); x0 = max(0, x - self.pad)
                     y1 = min(H, y + h + self.pad); x1 = min(W, x + w + self.pad)
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
@@ -204,7 +206,7 @@ class PanelBoardSearch:
                     )
                     candidates.append(clip)
 
-            # ---- fallback: if nothing passed, propose by grid lines (no 'holes' assumption) ----
+            # ---- Fallback: grid proposals if nothing passed ----
             if not candidates:
                 for (x0, y0, x1, y1) in self._grid_proposals_fallback(det_bgr):
                     w, h = x1 - x0, y1 - y0
@@ -221,11 +223,11 @@ class PanelBoardSearch:
                     )
                     candidates.append(clip)
 
-            # ---- export vector PDF + hi-DPI PNG for every candidate ----
+            # ---- Export vector PDF + hi-DPI PNG for each candidate ----
             for clip in candidates:
                 saved_idx += 1
 
-                # vector crop PDF
+                # Vector crop PDF (lossless vectors)
                 out_pdf = fitz.open()
                 new_page = out_pdf.new_page(width=clip.width, height=clip.height)
                 new_page.show_pdf_page(new_page.rect, doc, pidx, clip=clip)
@@ -233,7 +235,7 @@ class PanelBoardSearch:
                 out_pdf.save(str(pdf_path))
                 out_pdf.close()
 
-                # high-DPI PNG
+                # High-DPI PNG from the same clip (lossless PNG write)
                 pixc = page.get_pixmap(matrix=rend_mat, clip=clip, alpha=False, colorspace=cs)
                 png = self._pix_to_bgr(pixc)
                 if self.downsample_max_w and png.shape[1] > self.downsample_max_w:
@@ -244,7 +246,7 @@ class PanelBoardSearch:
                 cv2.imwrite(str(png_path), png)
                 all_pngs.append(str(png_path))
 
-            # overlay per page
+            # Per-page overlay
             ov_path = self.magenta_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
             cv2.imwrite(str(ov_path), magenta)
 
@@ -253,11 +255,15 @@ class PanelBoardSearch:
 
         doc.close()
 
-        # restore AA for anything else that uses fitz later (optional)
+        # Restore configured AA for any later fitz use
         try:
             fitz.TOOLS.set_aa_level(self.aa_level)
         except Exception:
             pass
+
+        # --- post-pass: enforce one table per PNG (lossless) ---
+        if self.enforce_one_box and all_pngs:
+            all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
@@ -294,7 +300,6 @@ class PanelBoardSearch:
         props = []
         for c in cnts:
             x, y, w, h = cv2.boundingRect(c)
-            # prefer table-like rectangles (reasonably big, not micro)
             if w < 120 or h < 90:
                 continue
             props.append((x, y, x + w, y + h))
@@ -302,7 +307,7 @@ class PanelBoardSearch:
         props.sort(key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
         return props
 
-    # ---------------- helpers (unchanged semantics) ----------------
+    # ---------------- helpers ----------------
     @staticmethod
     def _pix_to_bgr(pix: fitz.Pixmap) -> np.ndarray:
         H, W, C = pix.height, pix.width, pix.n
@@ -344,4 +349,246 @@ class PanelBoardSearch:
             m[labels == cid] = 255
         return m
 
-    # (Optional) one-box logic can be copied back in if you still want it.
+    # ---------------- one-box post-processing ----------------
+    def _enforce_one_box_on_paths(self, image_paths: list[str]) -> list[str]:
+        final_paths = []
+        for p in image_paths:
+            try:
+                img = cv2.imread(p)
+                if img is None:
+                    if self.verbose:
+                        print(f"[WARN] Could not read {p}")
+                    continue
+
+                # Only split if the whole crop really looks like a table grid.
+                if not self._looks_like_panel(img):
+                    final_paths.append(p)
+                    continue
+
+                boxes = self._find_table_boxes(
+                    img,
+                    min_rel_area=self.onebox_min_rel_area,
+                    max_rel_area=self.onebox_max_rel_area,
+                    aspect_range=self.onebox_aspect_range,
+                    min_side_px=self.onebox_min_side_px,
+                )
+
+                base = Path(p).stem
+                out_dir = Path(self.output_dir)
+                H, W = img.shape[:2]
+
+                if len(boxes) <= 1:
+                    final_paths.append(p)
+                    if self.onebox_debug:
+                        dbg = img.copy()
+                        for (x1, y1, x2, y2) in boxes:
+                            cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.imwrite(str(out_dir / f"{base}__debug_single_box.png"), dbg)
+                    continue
+
+                saved = []
+                max_boxes = 4  # cap runaway splits
+                for i, (x1, y1, x2, y2) in enumerate(boxes[:max_boxes], 1):
+                    x1p, y1p = max(0, x1 - self.onebox_pad), max(0, y1 - self.onebox_pad)
+                    x2p, y2p = min(W, x2 + self.onebox_pad), min(H, y2 + self.onebox_pad)
+                    crop = img[y1p:y2p, x1p:x2p]
+
+                    # Keep only subcrops that also look like grids.
+                    if not self._looks_like_panel(crop):
+                        continue
+
+                    out_path = out_dir / f"{base}__tbl{i:02d}.png"
+                    cv2.imwrite(str(out_path), crop)  # PNG = lossless
+                    saved.append(str(out_path))
+
+                if not saved:
+                    final_paths.append(p)
+                    continue
+
+                if self.onebox_debug:
+                    dbg = img.copy()
+                    for (x1, y1, x2, y2) in boxes[:max_boxes]:
+                        cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                    cv2.imwrite(str(out_dir / f"{base}__debug_boxes.png"), dbg)
+
+                if self.replace_multibox:
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+
+                final_paths.extend(saved)
+
+            except Exception as e:
+                if self.verbose:
+                    print(f"[WARN] one-box step failed for {p}: {e}")
+                final_paths.append(p)
+
+        return final_paths
+
+    def _find_table_boxes(self, img_bgr,
+                        min_rel_area=0.02,
+                        max_rel_area=0.75,
+                        aspect_range=(0.4, 3.0),
+                        min_side_px=80):
+        H, W = img_bgr.shape[:2]
+        page_area = H * W
+
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        thr  = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 31, 10
+        )
+
+        # --- gentler line extraction to avoid fusing adjacent grids ---
+        # use smaller kernels at high DPI
+        hk = max(W // 160, 3)
+        vk = max(H // 160, 3)
+        kh = cv2.getStructuringElement(cv2.MORPH_RECT, (hk, 1))
+        kv = cv2.getStructuringElement(cv2.MORPH_RECT, (1, vk))
+        lh = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kh)
+        lv = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kv)
+        lines = cv2.bitwise_or(lh, lv)
+
+        # IMPORTANT: do NOT dilate here; a light open helps keep gutters
+        lines = cv2.morphologyEx(lines, cv2.MORPH_OPEN, np.ones((3,3), np.uint8), iterations=1)
+
+        cnts, _ = cv2.findContours(lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        boxes = []
+        for c in cnts:
+            x, y, w, h = cv2.boundingRect(c)
+            if w < min_side_px or h < min_side_px:
+                continue
+            area = w * h
+            rel = area / page_area
+            if rel < min_rel_area or rel > max_rel_area:
+                continue
+            aspect = w / float(h)
+            if aspect < aspect_range[0] or aspect > aspect_range[1]:
+                continue
+            boxes.append((x, y, x + w, y + h))
+
+        if not boxes:
+            return []
+
+        # Keep larger non-overlapping boxes
+        boxes = self._nms_keep_larger(boxes, iou_thr=0.5)
+        boxes.sort(key=lambda b: (b[1], b[0]))
+
+        # --- gutter-based split when we still have just one big fused box ---
+        if len(boxes) == 1:
+            x1, y1, x2, y2 = boxes[0]
+            roi = lines[y1:y2, x1:x2]  # 255 where lines are
+            if roi.size > 0:
+                # invert for "ink" histogram (treat table ink as 1)
+                ink = (roi > 0).astype(np.uint8)
+
+                # column-wise sum: gutters are near-zero columns
+                col_sum = ink.sum(axis=0)
+                # threshold: very low ink across full column → candidate split
+                # scale with height to be DPI-robust
+                gut_thr = max(2, int(0.01 * (y2 - y1)))  # ~1% of height
+                low = (col_sum <= gut_thr).astype(np.uint8)
+
+                # find wide low-ink runs (gutter width >= few pixels at high DPI)
+                runs = []
+                in_run = False
+                start = 0
+                for i, v in enumerate(low):
+                    if v and not in_run:
+                        in_run = True
+                        start = i
+                    elif not v and in_run:
+                        runs.append((start, i - 1))
+                        in_run = False
+                if in_run:
+                    runs.append((start, len(low) - 1))
+
+                # choose gutters that are reasonably wide
+                min_gutter_px = max(6, (x2 - x1) // 200)  # ~0.5% of width
+                split_cols = [int((a + b) / 2) for (a, b) in runs if (b - a + 1) >= min_gutter_px]
+
+                if split_cols:
+                    parts = []
+                    prev = 0
+                    for sc in split_cols:
+                        if sc - prev >= min_side_px:
+                            parts.append((x1 + prev, y1, x1 + sc, y2))
+                        prev = sc + 1
+                    if (x2 - (x1 + prev)) >= min_side_px:
+                        parts.append((x1 + prev, y1, x2, y2))
+
+                    # Only accept if we actually made multiple reasonable parts
+                    valid = []
+                    for (px1, py1, px2, py2) in parts:
+                        w = px2 - px1
+                        h = py2 - py1
+                        if w < min_side_px or h < min_side_px:
+                            continue
+                        rel = (w * h) / page_area
+                        if rel < min_rel_area:
+                            continue
+                        valid.append((px1, py1, px2, py2))
+
+                    if len(valid) >= 2:
+                        return valid  # replace the single fused box
+
+        return boxes
+
+    @staticmethod
+    def _nms_keep_larger(boxes, iou_thr=0.5):
+        if len(boxes) <= 1:
+            return boxes
+        boxes = sorted(boxes, key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
+        keep = []
+        for box in boxes:
+            if all(PanelBoardSearch._iou(box, k) <= iou_thr for k in keep):
+                keep.append(box)
+        return keep
+
+    @staticmethod
+    def _iou(a, b):
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
+        inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
+        if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+            return 0.0
+        inter = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+        area_a = (ax2-ax1) * (ay2-ay1)
+        area_b = (bx2-bx1) * (by2-by1)
+        denom = (area_a + area_b - inter)
+        return inter / float(denom) if denom > 0 else 0.0
+
+    # ---------- grid sanity check (single definitions) ----------
+    def _gridline_score(self, img_bgr):
+        """Return (num_horiz, num_vert, density_per_Mpx) for long straight lines."""
+        H, W = img_bgr.shape[:2]
+        if H < 60 or W < 60:
+            return 0, 0, 0.0
+        gray  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        gray  = cv2.bilateralFilter(gray, d=5, sigmaColor=20, sigmaSpace=20)
+        edges = cv2.Canny(gray, 60, 180, L2gradient=True)
+
+        min_len = int(max(W * 0.08, H * 0.08, 30))
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=90,
+                                minLineLength=min_len, maxLineGap=4)
+
+        horiz = vert = 0
+        if lines is not None:
+            tol_h = max(2, int(0.05 * H))  # |dy| small → horizontal
+            tol_v = max(2, int(0.05 * W))  # |dx| small → vertical
+            for x1, y1, x2, y2 in lines[:, 0, :]:
+                dx, dy = abs(x2 - x1), abs(y2 - y1)
+                if dy <= tol_h and dx >= min_len:
+                    horiz += 1
+                elif dx <= tol_v and dy >= min_len:
+                    vert += 1
+
+        dens = (horiz + vert) / max(1.0, (W * H) / 1e6)  # per megapixel
+        return horiz, vert, dens
+
+    def _looks_like_panel(self, img_bgr, min_h=12, min_v=8, min_dens=12.0):
+        """Lightweight sanity check: only ‘true’ grids pass."""
+        h, v, d = self._gridline_score(img_bgr)
+        return (h >= min_h) and (v >= min_v) and (d >= min_dens)
