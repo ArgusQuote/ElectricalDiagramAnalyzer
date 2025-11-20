@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 import sys, os
 from pathlib import Path
+
+# Path setup
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from VisualDetectionToolLibrary.PanelSearchToolV14 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV15 import PanelBoardSearch
 
-INPUT_PDF = Path("~/Documents/Diagrams/makayla2.pdf").expanduser()
-OUT_DIR   = Path("~/Documents/Diagrams/CaseStudy_VectorCrop_Run").expanduser()
+# Inputs/Outputs
+INPUT_PDF = Path("~/Documents/Diagrams/generic3.pdf").expanduser()
+OUT_DIR   = Path("~/Documents/Diagrams/CaseStudy_VectorCrop_Run3").expanduser()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 finder = PanelBoardSearch(
     output_dir=OUT_DIR,
     dpi=400,
     render_dpi=1400,
-    aa_level=8,                # used for the final render; detection forces AA=0
+    aa_level=8,
     render_colorspace="gray",
-
     min_void_area_fr=0.004,
     min_void_w_px=90,
     min_void_h_px=90,
@@ -29,7 +31,11 @@ finder = PanelBoardSearch(
     margin_shave_px=6,
     pad=6,
     verbose=True,
+    # one-box settings (defaults are fine, but you can loosen slightly if needed):
+    # onebox_min_rel_area=0.02, onebox_max_rel_area=0.75,
+    # onebox_aspect_range=(0.4, 3.0), onebox_min_side_px=80,
 )
+
 
 pngs = finder.readPdf(str(INPUT_PDF))
 print(f"\nWrote {len(pngs)} PNGs to {OUT_DIR}")
