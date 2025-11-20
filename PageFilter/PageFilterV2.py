@@ -10,6 +10,9 @@ import numpy as np
 import fitz  # PyMuPDF
 import cv2
 
+import subprocess, shutil, tempfile
+from pathlib import Path
+
 # ---- EasyOCR (optional) ----
 try:
     import easyocr
@@ -78,6 +81,10 @@ class PageFilter:
         debug: bool = False,
         save_crop_pngs: bool = True,
         out_pdf_suffix: str = "_electrical_filtered.pdf",
+        use_ghostscript_letter: bool = True,
+        letter_orientation: str = "portrait",   # or "landscape"
+        gs_use_cropbox: bool = True,
+        gs_compat: str = "1.7",       
         # Back-compat sink: accept legacy kwargs without error
         **deprecated_kwargs: Any,
     ):
@@ -195,6 +202,12 @@ class PageFilter:
         self.verbose = bool(verbose)
         self.out_pdf_suffix = out_pdf_suffix
 
+        # GS post-process config
+        self.use_ghostscript_letter = bool(use_ghostscript_letter)
+        self.letter_orientation = "landscape" if str(letter_orientation).lower().startswith("land") else "portrait"
+        self.gs_use_cropbox = bool(gs_use_cropbox)
+        self.gs_compat = str(gs_compat)
+
         if self.use_ocr and not OCR_AVAILABLE and self.verbose:
             print("[WARN] easyocr not available; proceeding without OCR (footprint fallback only)")
 
@@ -202,10 +215,13 @@ class PageFilter:
     def readPdf(self, pdf_path: str) -> Tuple[List[int], List[int], Optional[str], Optional[str]]:
         """
         Single-crop flow:
-          - Pass A: OCR taller/wider corner crop → detect E-sheets.
-          - Pass B: REUSE OCR text to score labels (panel schedules has priority over generic schedules).
-          - No gold? Keep all E-sheets.
-          - No E-sheets? Use undecided→footprints path.
+        - Pass A: OCR taller/wider corner crop → detect E-sheets.
+        - Pass B: REUSE OCR text to score labels (panel schedules has priority over generic schedules).
+        - No gold? Keep all E-sheets.
+        - No E-sheets? Use undecided→footprints path.
+
+        Output PDF pages are normalized to **Letter** size (612×792 pt) via Ghostscript
+        unless self.use_ghostscript_letter=False.
         """
         pdf_path = os.path.expanduser(pdf_path)
         if not os.path.isfile(pdf_path):
@@ -213,22 +229,23 @@ class PageFilter:
 
         doc = fitz.open(pdf_path)
         out = fitz.open()
+        letter_rect = fitz.paper_rect("letter")
+
         base = os.path.splitext(os.path.basename(pdf_path))[0]
         out_pdf = os.path.join(self.output_dir, base + self.out_pdf_suffix)
 
-        # debug log path (only used if self.debug)
         log_path = os.path.join(self.debug_dir, f"{base}_filter_log.json") if self.debug else None
 
         if self.use_ocr and self.reader is None:
             self._init_ocr()
 
         kept, dropped = [], []
-        logs: List[Dict[str, Any]] = []  # only populated if debug=True
+        logs: List[Dict[str, Any]] = []
 
         if self.verbose:
             print(f"[INFO] Scanning {len(doc)} page(s): TallCorner OCR → Label Score (reuse) → Fallback Footprints...")
 
-        # ----------------- Pass A: detect E-sheets via ONE taller/wider corner OCR -----------------
+        # -------- Pass A: detect E-sheets via one taller/wider corner OCR --------
         e_pages: List[int] = []
         undecided_pages: List[int] = []
         passA_hits: Dict[int, Dict[str, Any]] = {}
@@ -239,7 +256,6 @@ class PageFilter:
             e_hits = [h for h in ocr_hits if self._looks_like_e_sheet(h["text"])]
             non_e_hits = [h for h in ocr_hits if h["conf"] >= self.non_e_conf_min and self._looks_like_non_e_sheet(h["text"])]
 
-            # console print — tall-corner summary
             if self.verbose:
                 norm_hits = [self._normalize_token(h["text"]) for h in ocr_hits]
                 print(f"  [TallCorner] Page {page_no:03d}: hits={norm_hits}  e={bool(e_hits)}  nonE={(len(non_e_hits)>0)}")
@@ -253,7 +269,7 @@ class PageFilter:
                 undecided_pages.append(i)
                 passA_hits[i] = {"page": page_no, "corner_hits": ocr_hits, "decision_passA": "undecided"}
 
-        # ----------------- Pass B: for E-pages only, REUSE the same OCR to score labels -----------------
+        # -------- Pass B: reuse same OCR to score labels for E-pages --------
         selected_indexes: List[int] = []
         gold_found = False
         label_scores: Dict[int, float] = {}
@@ -261,30 +277,19 @@ class PageFilter:
 
         if e_pages and self.use_ocr and self.reader:
             for i in e_pages:
-                page = doc[i]
                 spans = [{"text": (h.get("text") or ""), "conf": float(h.get("conf", 0.9))} for h in passA_hits[i]["corner_hits"]]
                 score, tags = (0.0, [])
                 if spans:
-                    score, tags = self._score_label_spans(page.rect, spans)
-
+                    score, tags = self._score_label_spans(doc[i].rect, spans)
                 label_scores[i], label_tags[i] = score, tags
                 if self.verbose:
                     print(f"  [Labels:reuse] E-page {i+1:03d}: tallx{int(self.label_tall_factor)} score={score:.2f} tags={tags}")
 
-            # Priority: if any panel_schedules tags exist, keep ONLY those pages.
             panel_pages = [i for i, tags in label_tags.items() if "panel_schedules" in tags]
             sched_pages = [i for i, tags in label_tags.items() if ("panel_schedules" not in tags and "schedules_generic" in tags)]
-
-            # --- Selection logic (schedules priority applies ONLY within schedules) ---
-            panel_pages = [i for i, tags in label_tags.items() if "panel_schedules" in tags]
-            sched_pages = [i for i, tags in label_tags.items()
-                           if ("panel_schedules" not in tags and "schedules_generic" in tags)]
-
-            # Non-schedule hits we always keep alongside any schedules found
             other_hits = [i for i, tags in label_tags.items()
-                          if ("single_one_line" in tags) or ("riser" in tags) or ("diagram_generic" in tags)]
+                        if ("single_one_line" in tags) or ("riser" in tags) or ("diagram_generic" in tags)]
 
-            # First, pick schedule pages using hierarchy: panel > generic
             if panel_pages:
                 schedule_selection = sorted(panel_pages)
                 if self.verbose:
@@ -296,10 +301,8 @@ class PageFilter:
             else:
                 schedule_selection = []
 
-            # Union in non-schedule hits (single-line / riser / diagram) regardless of schedules presence
             selected_indexes = sorted(set(schedule_selection).union(other_hits))
 
-            # If still nothing selected, fall back to threshold logic (hard/soft); else, proceed with selected
             if not selected_indexes:
                 hard = [i for i, s in label_scores.items() if s >= self.HARD_HIT_SCORE]
                 soft = [i for i, s in label_scores.items() if self.MIN_HIT_SCORE <= s < self.HARD_HIT_SCORE]
@@ -317,19 +320,25 @@ class PageFilter:
                     if self.verbose:
                         print(f"[INFO] No label hits → keeping all E-pages: {[idx+1 for idx in selected_indexes]}")
 
-            # Apply selection immediately (skip footprints if we have any E-pages)
+            # ---- Write selected pages ----
             for i in range(len(doc)):
                 page_no = i + 1
                 if i in selected_indexes:
-                    out.insert_pdf(doc, from_page=i, to_page=i)
+                    # ✅ FIXED: Only GS does resize/orientation
+                    if self.use_ghostscript_letter:
+                        out.insert_pdf(doc, from_page=i, to_page=i)
+                    else:
+                        new_page = out.new_page(width=letter_rect.width, height=letter_rect.height)
+                        new_page.show_pdf_page(letter_rect, doc, i, keep_proportion=True)
                     kept.append(page_no)
+
                     if self.debug:
                         logs.append({
                             "page": page_no,
                             "decision": "KEEP",
                             "reason": "panel schedules priority" if i in panel_pages else
-                                      ("generic schedules fallback" if i in sched_pages else
-                                       ("E-page labels (gold)" if gold_found else "E-page labels (fallback E-pages)")),
+                                    ("generic schedules fallback" if i in sched_pages else
+                                    ("E-page labels (gold)" if gold_found else "E-page labels (fallback E-pages)")),
                             "label_score": label_scores.get(i, 0.0),
                             "label_tags": label_tags.get(i, []),
                             "passA": passA_hits.get(i, {}),
@@ -350,7 +359,7 @@ class PageFilter:
 
             return self._finalize_output(doc, out, kept, dropped, out_pdf, log_path, logs)
 
-        # ----------------- No E-pages found: revert to undecided→footprints -----------------
+        # -------- No E-pages found: fallback undecided→footprints --------
         if self.verbose:
             print("[INFO] No E-sheets detected in Pass A. Running original undecided→footprints flow.")
 
@@ -366,7 +375,6 @@ class PageFilter:
             elif passA_hits.get(i, {}).get("decision_passA") == "E":
                 decision, reason = "KEEP", "OCR corner: E match"
             else:
-                # undecided → footprints
                 bgr = self._render_page_bgr(page)
                 fp_ok, fp_count, fp_boxes = self._has_rectangular_footprints(bgr)
                 fp_summary = {
@@ -380,7 +388,12 @@ class PageFilter:
                     decision, reason = "DROP", "No qualifying footprints"
 
             if decision == "KEEP":
-                out.insert_pdf(doc, from_page=i, to_page=i)
+                # ✅ FIXED: Only GS does resizing/orientation
+                if self.use_ghostscript_letter:
+                    out.insert_pdf(doc, from_page=i, to_page=i)
+                else:
+                    new_page = out.new_page(width=letter_rect.width, height=letter_rect.height)
+                    new_page.show_pdf_page(letter_rect, doc, i, keep_proportion=True)
                 kept.append(page_no)
             else:
                 dropped.append(page_no)
@@ -412,6 +425,50 @@ class PageFilter:
             self.use_ocr = False
             if self.verbose:
                 print(f"[WARN] EasyOCR init failed: {e}. Continuing without OCR.")
+
+    def _gs_fit_to_letter(self, in_pdf: str, out_pdf: str) -> str:
+        """
+        Use Ghostscript to rewrite 'in_pdf' so each page is scaled to US Letter,
+        preserving vectors and avoiding clipping. Returns output file path.
+        """
+        src = Path(in_pdf).expanduser().resolve()
+        dst = Path(out_pdf).expanduser().resolve()
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
+        gs = shutil.which("gs")
+        if not gs:
+            raise RuntimeError("Ghostscript not found. Install with: sudo apt-get install -y ghostscript")
+
+        # US Letter points (portrait or landscape)
+        if self.letter_orientation == "landscape":
+            w_pt, h_pt = 792, 612
+        else:
+            w_pt, h_pt = 612, 792
+
+        args = [
+            gs, "-q", "-dBATCH", "-dNOPAUSE",
+            "-sDEVICE=pdfwrite",
+            f"-dCompatibilityLevel={self.gs_compat}",
+            "-dFIXEDMEDIA", "-dPDFFitPage",
+            "-dAutoRotatePages=/None",
+            "-dDEVICEWIDTHPOINTS=" + str(w_pt),
+            "-dDEVICEHEIGHTPOINTS=" + str(h_pt),
+        ]
+
+        # respect CropBox if requested
+        if self.gs_use_cropbox:
+            args.append("-dUseCropBox")
+
+        # write to temp, then replace
+        tmp_out = Path(tempfile.gettempdir()) / (dst.name + ".tmp")
+        args.extend(["-sOutputFile=" + str(tmp_out), str(src)])
+
+        cp = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if cp.returncode != 0:
+            raise RuntimeError(f"Ghostscript failed ({cp.returncode}). Stderr:\n{cp.stderr.strip()}")
+
+        tmp_out.replace(dst)
+        return str(dst)
 
     @staticmethod
     def _clip_from_frac(page: fitz.Page, frac: Tuple[float, float, float, float]) -> fitz.Rect:
@@ -762,22 +819,77 @@ class PageFilter:
 
     # ----------------- Finalize -----------------
     def _finalize_output(self, doc, out, kept, dropped, out_pdf, log_path, logs):
-        out_pdf_path = None
-        if len(out) > 0:
-            out.save(out_pdf)
-            out_pdf_path = out_pdf
-            if self.verbose:
-                print(f"[OK] Saved filtered PDF → {out_pdf_path}  (kept {len(kept)}/{len(doc)})")
-        else:
+        """
+        Save filtered pages. If Ghostscript is enabled:
+        - write an intermediate "<base>_raw.pdf"
+        - GS writes the final "<base>.pdf" (no _gs)
+        - keep _raw only when debug=True
+        If Ghostscript is disabled:
+        - write final directly to "<base>.pdf"
+        """
+        # Nothing to save?
+        if len(out) == 0:
             if self.verbose:
                 print("[WARN] No pages kept — nothing saved")
+            try:
+                doc.close()
+            except Exception:
+                pass
+            return kept, dropped, None, None
 
+        base_noext = os.path.splitext(os.path.basename(out_pdf))[0]  # e.g. "<input>_electrical_filtered"
+        out_dir = os.path.dirname(out_pdf)
+        raw_pdf = os.path.join(out_dir, f"{base_noext}_raw.pdf")     # intermediate when GS is on
+        final_pdf = out_pdf                                          # desired final name (no _gs)
+
+        # ----- Save intermediate / final depending on GS -----
+        if self.use_ghostscript_letter:
+            # 1) Write raw (vector-preserving, no resize)
+            out.save(raw_pdf)
+            out.close()
+            if self.verbose:
+                print(f"[OK] Saved intermediate (raw) → {raw_pdf}  (kept {len(kept)}/{len(doc)})")
+
+            # 2) Ghostscript → final (no '_gs' in name)
+            try:
+                final_pdf = self._gs_fit_to_letter(raw_pdf, final_pdf)
+                if self.verbose:
+                    orient = self.letter_orientation
+                    print(f"[OK] Ghostscript Letter ({orient}) → {final_pdf}")
+                # 3) Remove raw unless debugging
+                if not self.debug:
+                    try:
+                        os.remove(raw_pdf)
+                    except Exception:
+                        pass
+            except Exception as e:
+                # On GS failure, fall back to raw as the output
+                if self.verbose:
+                    print(f"[WARN] Ghostscript Letter-fit failed: {e}. Using raw output.")
+                final_pdf = raw_pdf
+        else:
+            # GS disabled → write directly to the final path
+            out.save(final_pdf)
+            out.close()
+            if self.verbose:
+                print(f"[OK] Saved filtered PDF → {final_pdf}  (kept {len(kept)}/{len(doc)})")
+
+        # ----- Debug log -----
         log_json_path = None
         if self.debug:
-            with open(log_path, "w", encoding="utf-8") as f:
-                json.dump(logs, f, indent=2)
-            log_json_path = log_path
-            if self.verbose:
-                print(f"[DEBUG] Wrote log JSON → {log_json_path}")
+            try:
+                with open(log_path, "w", encoding="utf-8") as f:
+                    json.dump(logs, f, indent=2)
+                log_json_path = log_path
+                if self.verbose:
+                    print(f"[DEBUG] Wrote log JSON → {log_json_path}")
+            except Exception:
+                pass
 
-        return kept, dropped, out_pdf_path, log_json_path
+        # Close source doc
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+        return kept, dropped, final_pdf, log_json_path

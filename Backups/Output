@@ -4,6 +4,7 @@ from anvil import BlobMedia
 import anvil.server
 import anvil.users
 import json
+from ..FeedbackDialog import FeedbackDialog
 
 # ---------- CSV inclusion policy ----------
 ALWAYS_INCLUDE = {
@@ -25,15 +26,15 @@ class output(outputTemplate):
     if not anvil.users.get_user():
       open_form('login'); return
     self._panel_order = []
-    
+
     if hasattr(self, "btn_show_raw"):
       self.btn_show_raw.set_event_handler('click', self.btn_show_raw_click)
     if hasattr(self, "download_btn"):
-      self.download_btn.set_event_handler('click', lambda **e: self._export_csv())
+      self.download_btn.set_event_handler('click', self._download_and_feedback_click)
 
     # cache of the flattened rows we show in the main grid
     self._flat_rows = []
-    
+
     # Where the VM payload lives
     self.result = result or {}
     self.job_name = (job_name or "").strip()
@@ -46,13 +47,320 @@ class output(outputTemplate):
                                role="headline"), slot=None)
 
     self._set_ttp_label()
-    
+
     if not hasattr(self, "content_panel"):
       self.content_panel = ColumnPanel()
       self.add_component(self.content_panel)
-    
+
     self._render_panel_table()  # Detected Panels (top grid, no checkboxes)
     self._render()              # BOM grid
+
+  # ---------- Card helpers ----------
+  def _panel_source(self, designation: str):
+    """Return (source_path, display_name) for this designation, or (None, name)."""
+    des_n = self._norm(designation)
+    for row in (self._extract_panels() or []):
+      if self._norm(row.get("name")) == des_n:
+        return (row.get("source") or "").strip(), (row.get("name") or "").strip()
+    return None, designation
+
+  def _panel_quick_attrs(self, designation: str) -> dict:
+    """Return quick attributes for a designation from components/attrs, with safe defaults."""
+    amap = self._panel_attrs_map() or {}
+    a = amap.get(self._norm(designation), {}) or {}
+    # Try to backfill from the top-panel table rows if attrs empty
+    if not a:
+      for row in (self._extract_panels() or []):
+        if self._norm(row.get("name")) == self._norm(designation):
+          a = {
+            "amperage": row.get("amperage"),
+            "voltage": row.get("voltage"),
+            "intRating": row.get("int_rating"),
+            "spaces": row.get("spaces"),
+            "mainBreakerAmperage": row.get("main_brk_amps"),
+          }
+          break
+    return a
+
+  def _fmt_attr_chip(self, label: str, value) -> Component:
+    """Single-line chip: 'Label: value' (no stacked text)."""
+    txt = "NONE" if value in (None, "", "NONE") else str(value)
+    lab = Label(text=f"{label}: {txt}", foreground="theme:Background")
+    lab.width = "18%"      # helps distribute across the bar
+    return lab
+
+  def _make_item_row(self, row_dict: dict) -> Component:
+    """
+    Build a single BOM item row for a card.
+    Columns: Item Type | Product | Description | Qty | Include
+    """
+    row = FlowPanel(spacing='small')
+    row.role = None
+
+    def L(text, w=None, align=None, bold=False):
+      lab = Label(text=text, bold=bold, align=align)
+      if w: lab.width = w
+      return lab
+
+    # Compute description (like your DataGrid path)
+    try:
+      row_dict["description"] = self._describe_row(row_dict)
+    except Exception:
+      row_dict["description"] = ""
+
+    # Columns (use fixed-ish widths for quick readability in cards)
+    row.add_component(L(str(row_dict.get("item_type","")),   w="12%"))
+    row.add_component(L(str(row_dict.get("product","")),     w="28%"))
+    row.add_component(L(str(row_dict.get("description","")), w="34%"))
+    row.add_component(L(str(row_dict.get("qty","")),         w="8%", align="center"))
+
+    itype = (row_dict.get("item_type") or "").strip()
+    show_cb = itype not in ("Note", "Skipped")
+    if show_cb:
+      cb = CheckBox()
+      cb.checked = bool(row_dict.get("csv_include", False))
+      cb.enabled = bool(row_dict.get("csv_selectable", False))
+      cb.tooltip = "Include this row in CSV"
+      def _on_change(sender=cb, r=row_dict, **e):
+        r["csv_include"] = bool(sender.checked)
+      cb.set_event_handler('change', _on_change)
+      row.add_component(cb)
+    else:
+      row.add_component(L("", w="8%"))
+
+    return row
+
+  def _get_cards_host(self):
+    """
+    Return the container to render cards into.
+    Prefer a design-time LinearPanel named 'linear_panel_1' if present,
+    otherwise fall back to content_panel.
+    """
+    host = getattr(self, "linear_panel_1", None)
+    if isinstance(host, (ColumnPanel, FlowPanel, LinearPanel, GridPanel, XYPanel, DataGrid)):
+      return host
+    return self.content_panel
+
+  def _make_items_grid(self, rows: list) -> DataGrid:
+    """
+    Build a DataGrid for panel items with:
+      Item Type | Product | Description | Qty | Include
+    Checkboxes update r['csv_include'] in-place so CSV export works.
+    """
+    dg = DataGrid()
+    dg.width = "100%"
+    dg.show_header = True
+    dg.show_page_controls = False
+    dg.rows_per_page = 1000
+    dg.role = "bom-grid"
+    dg.columns = [
+      {"id":"item",    "title":"Item",         "data_key":"item"},
+      {"id":"pn",      "title":"Part Number",  "data_key":"pn"},
+      {"id":"details", "title":"Details",      "data_key":"details"},
+      {"id":"qty",     "title":"Qty",          "data_key":"qty", "width":70},
+      {"id":"include", "title":"Include",      "data_key":"include", "width":90},
+    ]
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.add_component(Label(text="Item", bold=True), column="item")
+    hdr.add_component(Label(text="Part Number", bold=True), column="pn")
+    hdr.add_component(Label(text="Details", bold=True), column="details")
+    hdr.add_component(Label(text="Qty", bold=True, align="center"), column="qty")
+    hdr.add_component(Label(text="Include", bold=True, align="center"), column="include")
+    dg.add_component(hdr, slot="header")
+    # Let the card color show through and use card's text color
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+
+    # Clear rows just in case (do this first)
+    for c in list(dg.get_components()):
+      try: c.remove_from_parent()
+      except Exception: pass
+    
+    # Header row (add AFTER clearing)
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.add_component(Label(text="Item",         bold=True), column="item")
+    hdr.add_component(Label(text="Part Number",  bold=True), column="pn")
+    hdr.add_component(Label(text="Details",      bold=True), column="details")
+    hdr.add_component(Label(text="Qty",          bold=True, align="center"), column="qty")
+    hdr.add_component(Label(text="Include",      bold=True, align="center"), column="include")
+    dg.add_component(hdr, slot="header")
+
+    # Add each row as a DataRowPanel so we can place a checkbox in the 'Include' column
+    for i, r in enumerate(rows):
+      try:
+        r["description"] = self._describe_row(r)
+      except Exception:
+        r["description"] = ""
+
+      role = "zebra-even" if (i % 2 == 0) else "zebra-odd"
+      row = DataRowPanel(role=role)
+      row.add_component(Label(text=str(r.get("item_type",""))),   column="item")
+      row.add_component(Label(text=str(r.get("product",""))),     column="pn")
+      row.add_component(Label(text=str(r.get("description",""))), column="details")
+      row.add_component(Label(text=str(r.get("qty","")), align="center"), column="qty")
+
+      itype = (r.get("item_type") or "").strip()
+      if itype not in ("Note","Skipped"):
+        cb = CheckBox()
+        cb.checked = bool(r.get("csv_include", False))
+        cb.enabled = bool(r.get("csv_selectable", False))
+        cb.tooltip = "Include this row in CSV"
+        def _on_change(sender=cb, rr=r, **e):
+          rr["csv_include"] = bool(sender.checked)
+        cb.set_event_handler('change', _on_change)
+        row.add_component(cb, column="include")
+      else:
+        row.add_component(Label(text=""), column="include")
+
+      dg.add_component(row)
+
+    return dg
+
+  def _make_attr_grid(self, designation: str) -> DataGrid:
+    """One-row grid with inline 'Label: value' cells for Bus/Volts/IR/Spaces/Main."""
+    attrs = self._panel_quick_attrs(designation) or {}
+    def _i(v):
+      try: return int(str(v).strip())
+      except: return None
+    def _ka(v):
+      try:
+        if v is None or str(v).strip().upper() == "NONE": return "NONE"
+        return f"{int(str(v).strip())}K"
+      except: return "NONE"
+  
+    cells = [
+      f"Bus: {(_i(attrs.get('amperage')) or 'NONE')}A",
+      f"Volts: {(_i(attrs.get('voltage')) or 'NONE')}V",
+      f"IR: {_ka(attrs.get('intRating'))}",
+      f"Spaces: {(_i(attrs.get('spaces')) or 'NONE')}ckt",
+      f"Main: {(_i(attrs.get('mainBreakerAmperage')) or 'NONE') if _i(attrs.get('mainBreakerAmperage')) else 'NONE'}",
+    ]
+  
+    dg = DataGrid()
+    dg.width = "100%"
+    dg.show_header = False
+    dg.show_page_controls = False
+    dg.rows_per_page = 1
+    dg.role = "attr-grid"            # <<< not 'bom-grid' so we avoid zebra/borders
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+    dg.columns = [
+      {"id":"c1","title":"","data_key":"c1"},
+      {"id":"c2","title":"","data_key":"c2"},
+      {"id":"c3","title":"","data_key":"c3"},
+      {"id":"c4","title":"","data_key":"c4"},
+      {"id":"c5","title":"","data_key":"c5"},
+    ]
+  
+    row = DataRowPanel()  # no zebra role
+    for i, text in enumerate(cells, start=1):
+      lab = Label(text=text, bold=True, foreground="theme:Background")
+      lab.font_size = 16
+      row.add_component(lab, column=f"c{i}")
+    dg.add_component(row)
+    return dg
+
+  def _panel_attrs_all_none(self, designation: str) -> bool:
+    def _missing(v):
+      if v is None: return True
+      s = str(v).strip().upper()
+      return (s == "" or s == "NONE" or s == "X")
+    attrs = self._panel_quick_attrs(designation) or {}
+    keys = ("amperage", "voltage", "intRating", "spaces", "mainBreakerAmperage")
+    return all(_missing(attrs.get(k)) for k in keys)
+
+  def _rows_have_real_items(self, rows: list) -> bool:
+  # real = anything the user could include in CSV (we set csv_selectable=True in _normalize_rules)
+    return any(bool(r.get("csv_selectable")) for r in (rows or []))
+
+  def _render_cards_bom(self, rows_by_des: dict):
+    """
+    One 'elevated-card' per designation, stacked vertically inside linear_panel_1.
+    Header: Name (left) + Attr chips (right, same line).
+    Body: DataGrid of items.
+    """
+    # Hide old DataGrid if present
+    dg_legacy = getattr(self, "data_grid_1", None)
+    if isinstance(dg_legacy, DataGrid):
+      try: dg_legacy.visible = False
+      except Exception: pass
+
+    host = self._get_cards_host()
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+
+    # Build cards in visual order
+    for des in self._iter_designations_in_panel_order(rows_by_des):
+      rows = rows_by_des.get(des) or []
+    
+      # Skip if:
+      #  1) header attrs are effectively empty (None/"NONE"/"x"), OR
+      #  2) there are no real CSV-selectable items (only Notes/Skipped)
+      try:
+        attrs_empty = self._panel_attrs_all_none(des)
+      except Exception:
+        attrs_empty = False
+    
+      if attrs_empty or (not self._rows_have_real_items(rows)):
+        continue
+
+      # ----- Card container -----
+      card = ColumnPanel(role="elevated-card")
+      card.width = "100%"
+      card.padding = "18px"
+      card.spacing = "medium"
+      card.background = "theme:Text Primary"
+      card.foreground = "theme:Background"
+
+      # ----- Header row: title left, "View" button right -----
+      header = FlowPanel(spacing='none')
+      header.width = "100%"
+      
+      title = Label(text=str(des or "(unnamed)"), bold=True, foreground="theme:Background")
+      title.font_size = 21
+      header.add_component(title)
+      
+      # Push the button to the right
+      header.add_component(Spacer(width="100%"))
+      
+      # Build a "View" button like the one in the top grid
+      src, disp_name = self._panel_source(des)
+      btn_view = Button(
+        text="View",
+        foreground="#117BC3",
+        background="transparent",
+        bold=True,
+        role=None,
+        underline=True
+      )
+      btn_view.enabled = bool(src)
+      btn_view.tag = {
+        "source": src or "",
+        "name":   disp_name or (des or "(panel)"),
+        "job_id": (self.result.get("job_id") or "").strip()
+      }
+      btn_view.tooltip = "Preview detected crop" if btn_view.enabled else "No image available"
+      btn_view.set_event_handler('click', self._preview_click)
+      
+      header.add_component(btn_view)
+      
+      # Add the header row to the card
+      card.add_component(header)
+
+      # ----- Inline attribute grid (Bus/Volts/IR/Spaces/Main) -----
+      card.add_component(self._make_attr_grid(des))
+
+      # ----- Items grid inside the card -----
+      items_grid = self._make_items_grid(rows)
+      card.add_component(items_grid)
+
+      # Add card and a small spacer for breathing room
+      host.add_component(card)
+      host.add_component(Spacer(height=10))
 
   # ---------- Rendering ----------
   def _render(self):
@@ -65,9 +373,9 @@ class output(outputTemplate):
       btn_raw.set_event_handler('click', self._top_click)
       btn_bar.add_component(btn_raw)
       return
-  
+
     rows_by_des = self._normalize_rules(rules)
-  
+
     flat_rows = []
     for desig in self._iter_designations_in_panel_order(rows_by_des):
       rows = rows_by_des[desig]
@@ -75,7 +383,7 @@ class output(outputTemplate):
       for r in rows:
         r.pop("_order", None)
       flat_rows.extend(rows)
-  
+
     if not flat_rows:
       flat_rows = [{
         "designation": "(none)",
@@ -86,56 +394,17 @@ class output(outputTemplate):
         "csv_selectable": False,
         "csv_include": False,
       }]
-  
+
     self._flat_rows = flat_rows
-  
-    if hasattr(self, "data_grid_1"):
-      self.data_grid_1.columns = [
-        {"id":"item_type","title":"Item Type","data_key":"item_type"},
-        {"id":"product",  "title":"Product",  "data_key":"product"},
-        {"id":"designation","title":"Designation","data_key":"designation"},
-        {"id":"qty",      "title":"Quantity", "data_key":"qty", "width":80},
-        {"id":"include",  "title":"Include",  "data_key":"include", "width":90},
-      ]
-      try:
-        self.data_grid_1.show_header = False
-      except Exception:
-        self.data_grid_1.auto_header = False
-      try:
-        self.data_grid_1.show_page_controls = False
-      except Exception:
-        pass
-      self.data_grid_1.rows_per_page = 1000
-      self.data_grid_1.role = "bom-grid"
-  
-      rp = getattr(self, "repeating_panel_1", None)
-      if rp:
-        try: rp.remove_from_parent()
-        except Exception: pass
-  
-      for c in list(self.data_grid_1.get_components()):
-        if isinstance(c, DataRowPanel):
-          c.remove_from_parent()
-  
-      hdr = DataRowPanel(role="custom-grid-header")
-      hdr.add_component(Label(text="Item Type",   bold=True), column="item_type")
-      hdr.add_component(Label(text="Product",     bold=True), column="product")
-      hdr.add_component(Label(text="Designation", bold=True), column="designation")
-      hdr.add_component(Label(text="Quantity",    bold=True), column="qty")
-      hdr.add_component(Label(text="Include",     bold=True, align="center"), column="include")
-      self.data_grid_1.add_component(hdr, slot="header")
-  
-      # ----- rows with spacer between designations
-      last_des = None
-      for i, row in enumerate(self._flat_rows):
-        des = (row.get("designation") or "").strip()
-        if last_des is not None and des != last_des:
-          self._add_spacer_row()
-        self._add_row_to_grid(row, idx=i)
-        last_des = des
-  
-    btn_bar = FlowPanel()
-    self.content_panel.add_component(btn_bar)
+
+    # Render vertically-stacked cards into linear_panel_1 (preferred) or content_panel
+    self._render_cards_bom(rows_by_des)
+
+    # If you want a button bar below the cards, attach it to the same host:
+    host = self._get_cards_host()
+    btn_bar = FlowPanel(spacing='small', align='right')
+    btn_bar.width = "100%"
+    btn_bar.foreground = "theme:Background"
 
   def _format_duration_ms(self, ms: int) -> str:
     try:
@@ -152,28 +421,142 @@ class output(outputTemplate):
     if mins:
       return f"{min_}m {sec}.{msec:03d}s"
     return f"{sec}.{msec:03d}s"
-  
+
+  # ---------- Description Helpers ----------
+  def _norm(self, s):
+    return str(s or "").strip().upper()
+
+  def _panel_attrs_map(self):
+    """
+    Build { NORM_NAME -> attrs_dict } from self.result['components'].
+    """
+    if hasattr(self, "_attrs_map_cache"):
+      return self._attrs_map_cache
+    amap = {}
+    comps = (self.result or {}).get("components") or []
+    for c in comps:
+      if not isinstance(c, dict): continue
+      if (c.get("type") or "").lower() != "panelboard": continue
+      name = self._norm(c.get("name") or "")
+      attrs = c.get("attrs") or {}
+      if name and isinstance(attrs, dict):
+        amap[name] = attrs
+    self._attrs_map_cache = amap
+    return amap
+
+  def _fmt_ka(self, val):
+    try:
+      if val is None or str(val).strip().upper() == "NONE":
+        return ""
+      i = int(str(val).strip())
+      return f"{i}K"
+    except Exception:
+      return ""
+
+  def _fmt_int(self, val):
+    try:
+      return int(str(val).strip())
+    except Exception:
+      return None
+
+  def _interior_description(self, designation):
+    """
+    Interior → '250A Bus, 208V, 22K, 84ckt' (+ ', 225A MB' if present)
+    Uses components.attrs matched by designation/panel name.
+    """
+    attrs = self._panel_attrs_map().get(self._norm(designation), {}) or {}
+    bus_amps  = self._fmt_int(attrs.get("amperage"))
+    main_amps = self._fmt_int(attrs.get("mainBreakerAmperage"))
+    volts     = self._fmt_int(attrs.get("voltage"))
+    ir_ka     = self._fmt_ka(attrs.get("intRating"))
+    spaces    = self._fmt_int(attrs.get("spaces"))
+    parts = []
+    if bus_amps: parts.append(f"{bus_amps}A Bus")
+    if volts:    parts.append(f"{volts}V")
+    if ir_ka:    parts.append(ir_ka)
+    if spaces:   parts.append(f"{spaces}ckt")
+    if main_amps:
+      parts.append(f"{main_amps}A MB")
+    return ", ".join(parts)
+
+  def _trim_description(self, product):
+    """
+    Trim → 'Flush' / 'Surface' / '3R'
+    Prefers UI overrides; falls back to PN suffix F/S if needed.
+    """
+    ui = (self.result or {}).get("ui_overrides", {}) or {}
+    pb = ui.get("panelboards", {}) or {}
+    enclosure = (pb.get("enclosure") or "").upper()
+    if enclosure == "NEMA3R":
+      return "3R"
+    style = (pb.get("default_trim_style") or "").upper()
+    if style in ("FLUSH", "SURFACE"):
+      return style.capitalize()
+    pn = str(product or "").upper()
+    if pn.endswith("F"):
+      return "Flush"
+    if pn.endswith("S"):
+      return "Surface"
+    return ""
+
+  def _breaker_description_from_pn(self, pn):
+    """
+    Breaker PN like EDB14020 / EJB24020 -> '<Amps>A <Poles>P'
+    """
+    import re
+    s = str(pn or "").upper()
+    m = re.match(r"^[A-Z]+(\d)[A-Z0-9]*?(\d{2,3})$", s)
+    if not m:
+      return ""
+    poles_str, amps_str = m.group(1), m.group(2)
+    try:
+      poles = int(poles_str)
+      amps = int(amps_str.lstrip("0") or "0")
+      if poles >= 1 and amps >= 1:
+        return f"{amps}A {poles}P"
+    except Exception:
+      pass
+    return ""
+
+  def _describe_row(self, row_dict: dict):
+    """
+    Compute description string for a row based on item_type/product.
+    """
+    itype = (row_dict.get("item_type") or "").strip()
+    prod  = (row_dict.get("product") or "").strip()
+    des   = (row_dict.get("designation") or "").strip()
+    if itype in ("Interior", "Interior/Box"):
+      return self._interior_description(des)
+    if itype in ("Trim", "Trim/Cover", "Cover"):
+      return self._trim_description(prod)
+    if itype == "Breaker":
+      return self._breaker_description_from_pn(prod)
+    if itype in ("Box", "Feed-Thru Lugs", "Ground Bar Kit",
+                 "Neutral", "Neutral (100%)", "Neutral (200%)"):
+      return ""
+    return ""
+
   def _set_ttp_label(self):
     lbl = getattr(self, "label_ttp", None)
     if not isinstance(lbl, Label):
       return
-  
+
     s = (self.result.get("cycle_time_str") or "").strip()
     if s:
       lbl.text = f"Processed in {s}"
       return
-  
+
     start_ms = self.result.get("noticed_ts_ms")
     end_ms   = self.result.get("parse_done_ts_ms")
     if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)):
       lbl.text = f"Processed in {self._format_duration_ms(int(end_ms - start_ms))}"
       return
-  
+
     ct = self.result.get("cycle_time_ms")
     if isinstance(ct, (int, float)):
       lbl.text = f"Processed in {self._format_duration_ms(int(ct))}"
       return
-  
+
     lbl.text = ""
 
   def _extract_panels(self) -> list:
@@ -199,6 +582,7 @@ class output(outputTemplate):
         "main_brk_amps":       attrs.get("mainBreakerAmperage", "NONE"),
         "int_rating":          attrs.get("intRating", "NONE"),
         "spaces":              attrs.get("spaces", "NONE"),
+        "source":              it.get("source") or ""
       })
 
     if out:
@@ -277,6 +661,7 @@ class output(outputTemplate):
           {"id": "main_brk_amps", "title": "Main Breaker Amps",   "data_key": "main_brk_amps"},
           {"id": "int_rating",    "title": "Interrupting Rating", "data_key": "int_rating"},
           {"id": "spaces",        "title": "Spaces",              "data_key": "spaces"},
+          {"id": "preview",       "title": "View Item",                "data_key": "preview"}
       ]
   
       # Clear previous rows
@@ -291,6 +676,7 @@ class output(outputTemplate):
       hdr.add_component(Label(text="Main Breaker Amps",   bold=True, align="center"), column="main_brk_amps")
       hdr.add_component(Label(text="Interrupting Rating", bold=True, align="center"), column="int_rating")
       hdr.add_component(Label(text="Spaces",              bold=True, align="center"), column="spaces")
+      hdr.add_component(Label(text="View Item",           bold=True, align="center"), column="preview")
       dg.add_component(hdr, slot="header")
   
       def _fmt(v):
@@ -315,13 +701,50 @@ class output(outputTemplate):
           dr.add_component(C(r.get("main_brk_amps")), column="main_brk_amps")
           dr.add_component(C(r.get("int_rating")),    column="int_rating")
           dr.add_component(C(r.get("spaces")),        column="spaces")
+          # Preview button for the cropped image
+          btn = Button(
+                  text="View",
+                  foreground="#117BC3",   # text color
+                  background="transparent",
+                  bold=True,
+                  role=None,
+                  underline=True
+              )
+          btn.enabled = bool(r.get("source"))
+          btn.tag = {
+              "source": r.get("source"),
+              "name":   r.get("name"),
+              "job_id": self.result.get("job_id") or ""
+          }
+          btn.tooltip = "Preview detected crop" if btn.enabled else "No image available"
+          btn.set_event_handler('click', self._preview_click)
+          dr.add_component(btn, column="preview")
           dg.add_component(dr)
+
+  def _preview_click(self, sender, **event_args):
+    try:
+      tag = getattr(sender, "tag", {}) or {}
+      job_id = (tag.get("job_id") or "").strip()
+      src    = (tag.get("source") or "").strip()
+      name   = tag.get("name") or "(panel)"
+
+      if not job_id or not src:
+        alert("No image available for this row."); return
+
+      media = anvil.server.call('vm_fetch_image', job_id, src)
+      # Show image in a dialog; make it big enough to be useful.
+      img = Image(source=media, width="100%", height=600,
+                 display_mode='shrink_to_fit', tooltip=src)
+      alert(img, title=f"Preview — {name}", large=True, buttons=[("Close", True)])
+    except Exception as e:
+      alert(f"Could not load preview:\n{e}")
 
   def _add_spacer_row(self):
     """Insert a blank-looking row to visually separate designations."""
     dr = DataRowPanel(role="spacer-row")
     dr.add_component(Label(text=" "), column="item_type")
     dr.add_component(Label(text=" "), column="product")
+    dr.add_component(Label(text=" "), column="description")
     dr.add_component(Label(text=" "), column="designation")
     dr.add_component(Label(text=" "), column="qty")
     dr.add_component(Label(text=" "), column="include")
@@ -331,9 +754,14 @@ class output(outputTemplate):
   def _add_row_to_grid(self, row_dict: dict, idx: int = None):
     role = "zebra-even" if (isinstance(idx, int) and idx % 2 == 0) else "zebra-odd"
     dr = DataRowPanel(role=role)
-  
+    # Compute and store description so the grid can read it directly
+    try:
+      row_dict["description"] = self._describe_row(row_dict)
+    except Exception:
+      row_dict["description"] = ""
     dr.add_component(Label(text=str(row_dict.get("item_type",""))),   column="item_type")
     dr.add_component(Label(text=str(row_dict.get("product",""))),     column="product")
+    dr.add_component(Label(text=str(row_dict.get("description",""))), column="description")
     dr.add_component(Label(text=str(row_dict.get("designation",""))), column="designation")
     dr.add_component(Label(text=str(row_dict.get("qty",""))),         column="qty")
   
@@ -549,14 +977,81 @@ class output(outputTemplate):
     except Exception as ex:
       alert(f"Could not export CSV:\n{ex}")
 
+  def _download_and_feedback_click(self, **event_args):
+    # 1) Export the real BOM CSV immediately
+    try:
+      self._export_csv()
+    except Exception as ex:
+      alert(f"Could not export CSV:\n{ex}")
+      return
+  
+    # 2) Show the same nice feedback dialog you used on login
+    try:
+      dlg = FeedbackDialog()
+      alert(content=dlg, title="Quick feedback", large=False, buttons=None, dismissible=True)
+      rating = dlg.rating
+      if rating is None:
+        return
+    except Exception as ex:
+      Notification(f"Could not show feedback dialog: {ex}", style="warning", timeout=3).show()
+      return
+  
+    # 3) Send to you, then thank the user
+    try:
+      info = {
+        "source": "output_download",
+        "job_name": self.job_name or "",
+        "row_count": len(self._flat_rows or []),
+      }
+      anvil.server.call('send_accuracy_feedback', rating, info["job_name"], info)
+      Notification("Thanks for your feedback!", timeout=2).show()
+    except Exception as e:
+      Notification(f"Could not send feedback: {e}", style="warning", timeout=3).show()
+
   # -------- Buttons --------
   def btn_show_raw_click(self, **event_args):
     try:
-      raw = json.dumps(self.result, indent=2, default=str)
-      alert(TextArea(text=raw, height=400, width="100%"),
-            title="Raw payload", large=True, buttons=[("Close", True)])
+      job_id = (self.result.get("job_id") or "").strip()
+      if not job_id:
+        alert("No job id found."); return
+  
+      # Ask VM for the overlay PNG paths (0..N)
+      paths = anvil.server.call('vm_list_overlay_images', job_id) or []
+      if not paths:
+        alert("No detected-item overlays found for this job."); return
+  
+      # FlowPanel will wrap tiles automatically
+      grid = FlowPanel(spacing='large', align='center')
+  
+      # Optional: cache for repeat opens
+      if not hasattr(self, "_overlay_cache"):
+        self._overlay_cache = {}  # (job_id, path) -> BlobMedia
+  
+      for p in paths:
+        key = (job_id, p)
+        media = self._overlay_cache.get(key)
+        if media is None:
+          media = anvil.server.call('vm_fetch_image', job_id, p)
+          self._overlay_cache[key] = media
+  
+        # Match individual panel view size (800×600)
+        tile = ColumnPanel(width=800)
+        img  = Image(
+          source=media,
+          width="100%",
+          height=600,
+          display_mode='shrink_to_fit',
+          tooltip=p
+        )
+        cap = Label(text=p.split("/")[-1], align="center", bold=True)
+        tile.add_component(img)
+        tile.add_component(cap)
+        grid.add_component(tile)
+  
+      alert(grid, title="Detected Items", large=True, buttons=[("Close", True)])
+  
     except Exception as e:
-      alert(f"No raw data to display.\n{e}")
+      alert(f"Could not load detected items:\n{e}")
 
   def new_job_btn_click(self, **event_args):
     open_form('upload')

@@ -1,0 +1,23 @@
+from ._anvil_designer import instructionsTemplate
+from anvil import *
+import anvil.server
+import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+
+
+class instructions(instructionsTemplate):
+  def __init__(self, **properties):
+    # Set Form properties and Data Bindings.
+    self.init_components(**properties)
+
+    # Any code you write here will run before the form opens.
+
+  def back_btn_click(self, **event_args):
+    open_form('upload')
+
+  def logout_btn_click(self, **event_args):
+    anvil.users.logout()
+    Notification("Logged out", timeout=1.5).show()
+    open_form('login')

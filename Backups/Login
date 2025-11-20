@@ -5,8 +5,13 @@ import anvil.users
 import anvil.tables as tables
 import anvil.tables.query as q
 from anvil.tables import app_tables
+from anvil import alert
+from ..SignupModal import SignupModal
+from ..TOSDialog import TOSDialog
 
-TOS_MD = """
+CURRENT_TOS_VERSION = 1
+
+TOS_LONG_MD = """
 Effective Date: September 29, 2025
 1. Introduction
 These Terms of Service (“Terms”) govern your use of the Argus Quoting Platform, provided by Argus
@@ -117,6 +122,40 @@ If you have questions about this Privacy Policy or want to request data changes 
 contact us at:
 argusquote@gmail.com
 """
+TOS_MD ="""
+Argus Pilot Terms (condensed)
+
+Welcome to the Argus Industrial Solutions pilot program!
+
+By continuing, you acknowledge and agree to the following:
+
+1. **Free 30-Day Pilot:**  
+   This account is part of a limited 30-day evaluation of the Argus Quoting Platform, provided at no cost.
+
+2. **Usage:**  
+   You may use Argus internally to test quoting automation for switchgear projects.  
+   You may not reverse engineer, redistribute, copy, or share this software in whole or in part.
+
+3. **Data & Privacy:**  
+   Uploaded drawings and project data remain confidential and are stored securely.  
+   Argus may use anonymized results and feedback to improve the product.
+
+4. **Ownership:**  
+   Argus retains full ownership of its software, logic, and data models.  
+   Participation does not grant any joint ownership or IP rights.
+
+5. **Feedback:**  
+   Your input may be used anonymously in product development or marketing materials.  
+   Identifying details will never be shared without permission.
+   We will ask that you provide feedback in the form of a brief survey or another form 
+   of collecting feedback after the pilot has ended.
+
+6. **Disclaimer:**  
+   This pilot is pre-commercial and provided *as-is*, without warranties or guarantees of accuracy.  
+   Argus reserves the right to terminate pilot access at any time for any reason.
+
+By checking the box below you are confirming that you have read and understand the terms and conditions:
+"""
 
 class login(loginTemplate):
   def __init__(self, **properties):
@@ -127,13 +166,34 @@ class login(loginTemplate):
       self.tos_btn.set_event_handler('click', self.tos_btn_click)
     if hasattr(self, "priv_pol_btn"):
       self.priv_pol_btn.set_event_handler('click', self.priv_pol_btn_click)
+    if hasattr(self, "sign_up_btn"):
+      self.sign_up_btn.set_event_handler('click', self.sign_up_btn_click)
       
   def login_btn_click(self, **event_args):
     user = anvil.users.login_with_form(allow_cancel=False)
-    if user:
-      user = anvil.users.get_user()  # gets the row object
-      open_form('upload')
+    if not user:
+      return
   
+    user = anvil.users.get_user()
+  
+    try:
+      TOSDialog.show_and_record_if_needed(user, TOS_MD, required_version=CURRENT_TOS_VERSION)
+    except Exception as e:
+      alert(f"TOS error: {e}")   # TEMP: shows exact error
+      anvil.users.logout()
+      return
+  
+    open_form('upload')
+
+  def sign_up_btn_click(self, **event_args):
+      alert(
+      SignupModal(),
+      title="Sign up today!",
+      large=False,
+      buttons=None,
+      dismissible=True
+    )
+    
   def _show_markdown_modal(self, title: str, markdown_text: str):
     container = ColumnPanel()
     container.add_component(Label(text=title, bold=True))
@@ -141,7 +201,10 @@ class login(loginTemplate):
     alert(content=container, large=True, buttons=[("Close", True)])
   
   def tos_btn_click(self, **event_args):
-    self._show_markdown_modal("Terms of Service", TOS_MD)
+    self._show_markdown_modal("Terms of Service", TOS_LONG_MD)
   
   def priv_pol_btn_click(self, **event_args):
     self._show_markdown_modal("Privacy Policy", PRIV_MD)
+
+  def about_btn_click(self, **event_args):
+    open_form('about')

@@ -1,0 +1,98 @@
+from ._anvil_designer import TOSDialogTemplate
+from anvil import *
+import anvil
+import anvil.server
+from datetime import datetime
+
+CURRENT_TOS_VERSION = 1
+
+
+def _col(row, name, default=None):
+  """Safely read a Users table column from a LiveObjectProxy row."""
+  try:
+    val = row[name]
+    return default if val is None else val
+  except KeyError:
+    return default
+
+
+class TOSDialog(TOSDialogTemplate):
+  def __init__(self, agreement_markdown: str, required_version: int = CURRENT_TOS_VERSION, **properties):
+    self.init_components(**properties)
+    self.required_version = required_version
+
+    # --- Layout (programmatic) ---
+    root = ColumnPanel()
+    self.add_component(root)
+
+    # Title
+    root.add_component(Label(text="User Agreement", role="headline"))
+
+    # Agreement body
+    self.agreement = RichText(content=agreement_markdown, format="markdown")
+    self.agreement.height = 260
+    self.agreement.scroll = True
+    root.add_component(self.agreement)
+
+    # Checkbox
+    self.chk = CheckBox(text="I have read and agree to the User Agreement.", checked=False)
+    self.chk.set_event_handler('change', self._on_check_change)
+    root.add_component(self.chk)
+
+    # Buttons
+    btn_row = FlowPanel()
+    root.add_component(btn_row)
+
+    self.cancel_btn = Button(text="Cancel", role="outlined-button")
+    self.cancel_btn.set_event_handler('click', self._on_cancel)
+    btn_row.add_component(self.cancel_btn)
+
+    self.accept_btn = Button(text="Accept", role="primary-color", enabled=False)
+    self.accept_btn.set_event_handler('click', self._on_accept)
+    btn_row.add_component(self.accept_btn)
+
+    # Track acceptance
+    self.accepted = False
+
+  # --- Event Handlers ---
+  def _on_check_change(self, **e):
+    self.accept_btn.enabled = bool(self.chk.checked)
+
+  def _on_cancel(self, **e):
+    self.accepted = False
+    self.raise_event('x-close-alert')
+
+  def _on_accept(self, **e):
+    self.accepted = True
+    self.raise_event('x-close-alert')
+
+  # --- Core Logic ---
+  @staticmethod
+  def show_and_record_if_needed(user, agreement_markdown: str, required_version: int = CURRENT_TOS_VERSION):
+    """
+    Display ToS dialog if not yet accepted or version changed.
+    """
+    if not user:
+      return
+
+    tos_accepted = bool(_col(user, 'tos_accepted', False))
+    tos_version = int(_col(user, 'tos_version', 0) or 0)
+
+    if tos_accepted and tos_version >= required_version:
+      return
+
+    # Force the dialog until accepted
+    while True:
+      dlg = TOSDialog(agreement_markdown=agreement_markdown, required_version=required_version)
+      alert(
+        content=dlg,
+        title="User Agreement",
+        large=True,
+        buttons=None,
+        dismissible=False
+      )
+      if dlg.accepted:
+        anvil.server.call('tos_record_acceptance', required_version)
+        break
+
+        
