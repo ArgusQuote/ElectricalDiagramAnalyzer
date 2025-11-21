@@ -69,6 +69,7 @@ class BreakerTableAnalyzer:
         self._last_gridless_path: Optional[str] = None
         # overlay annotations for OCR footer cues: list of (y_abs, label)
         self._ocr_footer_marks: List[Tuple[int, str]] = []
+        self._v_grid_xs: List[int] = []
 
         cfg_path = _abs_repo_cfg(config_path)
         self._cfg = _load_jsonc(cfg_path) or {}
@@ -111,11 +112,7 @@ class BreakerTableAnalyzer:
 
         # overlay (before early-exit)
         page_overlay_path = None
-        if self.debug:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base = os.path.splitext(os.path.basename(src_path))[0]
-            page_overlay_path = os.path.join(debug_dir, f"{base}_page_overlay_{ts}.png")
-            self._save_debug(gray, centers, dbg.lines, page_overlay_path, header_y, footer_y)
+        column_overlay_path = None
 
         if not centers or header_y is None or footer_y is None:
             if self.debug:
@@ -130,9 +127,21 @@ class BreakerTableAnalyzer:
                 "spaces_corrected": spaces_corrected,
                 "footer_snapped": getattr(self, "_footer_snapped", False),
                 "snap_note": getattr(self, "_snap_note", None),
+                "v_grid_xs": getattr(self, "_v_grid_xs", []),
+                "column_overlay_path": column_overlay_path,
             }
 
         gridless_gray, gridless_path = self._remove_grids_and_save(gray, header_y, footer_y, src_path)
+        if self.debug:
+            # Existing page overlay (rows/header/footer/etc.)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = os.path.splitext(os.path.basename(src_path))[0]
+            page_overlay_path = os.path.join(debug_dir, f"{base}_page_overlay_{ts}.png")
+            self._save_debug(gray, centers, dbg.lines, page_overlay_path, header_y, footer_y)
+
+            # NEW: columns-only overlay
+            column_overlay_path = os.path.join(debug_dir, f"{base}_columns_{ts}.png")
+            self._save_column_overlay(gray, column_overlay_path)
 
         if self.debug:
             print(f"[ANALYZER] Row count: {len(centers)} | Spaces: {spaces}")
@@ -148,11 +157,14 @@ class BreakerTableAnalyzer:
             "gray": gray, "centers": centers, "row_count": len(centers), "spaces": spaces,
             "header_y": header_y, "footer_y": footer_y,
             "tp_cols": {}, "tp_combined": {"left": False, "right": False},
-            "gridless_gray": gridless_gray, "gridless_path": gridless_path, "page_overlay_path": page_overlay_path,
+            "gridless_gray": gridless_gray, "gridless_path": gridless_path, 
+            "page_overlay_path": page_overlay_path,
             "spaces_detected": spaces_detected,
             "spaces_corrected": spaces_corrected,
             "footer_snapped": getattr(self, "_footer_snapped", False),
             "snap_note": getattr(self, "_snap_note", None),
+            "v_grid_xs": getattr(self, "_v_grid_xs", []),
+            "column_overlay_path": column_overlay_path,
         }
 
     # ============== internals ==============
@@ -834,6 +846,8 @@ class BreakerTableAnalyzer:
         """
         H, W = gray.shape
         work = gray.copy()
+        # reset vertical grid cache for this run
+        self._v_grid_xs = []
 
         # Safety guard: if header/footer are weird, just skip degridding
         if header_y is None or footer_y is None or footer_y <= header_y + 10:
@@ -888,6 +902,8 @@ class BreakerTableAnalyzer:
 
         # Vertical line mask
         v_mask = np.zeros_like(v_candidates, dtype=np.uint8)
+        v_x_centers: List[int] = []  # <-- define the accumulator
+
         num_v, labels_v, stats_v, _ = cv2.connectedComponentsWithStats(v_candidates, connectivity=8)
         if num_v > 1:
             min_vert_len = int(0.40 * roi_h)  # at least 40% the table height
@@ -896,6 +912,20 @@ class BreakerTableAnalyzer:
                 x, y, w, h, area = stats_v[i]
                 if h >= min_vert_len and w <= max_vert_thick and area > 0:
                     v_mask[labels_v == i] = 255
+                    # Track the center X of this vertical grid line for column finding later
+                    x_center = x + w // 2
+                    v_x_centers.append(int(x_center))
+
+        # Collapse near-duplicate X’s into one per column
+        if v_x_centers:
+            xs = sorted(v_x_centers)
+            collapsed = []
+            for x in xs:
+                if not collapsed or abs(x - collapsed[-1]) > 4:  # 4px merge window
+                    collapsed.append(x)
+            self._v_grid_xs = collapsed
+        else:
+            self._v_grid_xs = []
 
         # Horizontal line mask
         h_mask = np.zeros_like(h_candidates, dtype=np.uint8)
@@ -950,6 +980,26 @@ class BreakerTableAnalyzer:
 
         self._last_gridless_path = gridless_path
         return work, gridless_path
+
+    def _save_column_overlay(self, gray: np.ndarray, out_path: str):
+        """
+        Debug overlay that ONLY shows inferred column grid lines (v_grid_xs).
+        """
+        vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        H, W = gray.shape
+
+        v_xs = getattr(self, "_v_grid_xs", [])
+        for x in v_xs:
+            xi = int(x)
+            cv2.line(vis, (xi, 0), (xi, H - 1), (255, 0, 255), 1)
+            cv2.putText(vis, "COL", (xi + 2, 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1, cv2.LINE_AA)
+
+        try:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            cv2.imwrite(out_path, vis)
+        except Exception:
+            pass
 
     def _save_debug(self, gray: np.ndarray, centers: List[int], borders: List[int],
                     out_path: str, header_y_abs: Optional[int], footer_y_abs: Optional[int]):
