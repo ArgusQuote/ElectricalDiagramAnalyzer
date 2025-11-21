@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableAnalyzer5.py
+# OcrLibrary/BreakerTableAnalyzer6.py
 from __future__ import annotations
 import os, re, json, difflib, cv2, numpy as np
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ except Exception:
     _HAS_OCR = False
 
 # Version: TP band location removed. Hybrid footer logic (Total Load/Load + structural).
-ANALYZER_VERSION = "Analyzer5"
+ANALYZER_VERSION = "Analyzer6"
 ANALYZER_ORIGIN  = __file__
 
 @dataclass
