@@ -41,7 +41,6 @@ def _norm_token(s: str) -> str:
 def _str_sim(a: str, b: str) -> float:
     return difflib.SequenceMatcher(a=_norm_token(a), b=_norm_token(b)).ratio()
 
-
 class BreakerTableAnalyzer:
     """
     Stage 1 analyzer (TP bands removed):

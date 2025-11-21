@@ -49,14 +49,6 @@ from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser6   import BreakerTableParser, PARSER_VERSION
 
 class BreakerTablePipeline:
-    """
-    Class-based, single point of entry that runs:
-      1) BreakerTableAnalyzer4.analyze()
-      2) PanelHeaderParserV4.PanelParser.parse_panel()
-      3) BreakerTableParserALT.parse_from_analyzer()
-
-    No fallbacks. Always ALT.
-    """
 
     def __init__(self, *, debug: bool = True):
         self.debug = bool(debug)
