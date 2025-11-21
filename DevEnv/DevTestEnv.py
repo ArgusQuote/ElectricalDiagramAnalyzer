@@ -14,12 +14,12 @@ if project_root not in sys.path:
 
 # ---------- IMPORTS ----------
 from PageFilter.PageFilter import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV15 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
-from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv4 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic2.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/Panels_Example.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -78,9 +78,9 @@ def main():
     FINDER = PanelBoardSearch(
         output_dir=str(FINDER_OUT_DIR),
         dpi=400,
-        render_dpi=1400,
-        aa_level=8,
-        render_colorspace="gray",
+        #render_dpi=1400, ------------------ commented out for v11 to run
+        #aa_level=8, ------------------ commented out for v11 to run
+        #render_colorspace="gray", ------------------ commented out for v11 to run
         min_void_area_fr=0.004,
         min_void_w_px=90,
         min_void_h_px=90,
