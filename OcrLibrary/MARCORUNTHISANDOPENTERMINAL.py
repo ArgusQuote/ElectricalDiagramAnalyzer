@@ -11,7 +11,6 @@ def _build_centered_line(width: int, codes):
 def _build_banner():
     width = 40
 
-    # "L I M P   B I Z K I T" encoded as ASCII codes
     title_codes = [
         76, 32, 73, 32, 77, 32, 80, 32, 32, 32,
         66, 32, 73, 32, 90, 32, 75, 32, 73, 32, 84
@@ -24,19 +23,17 @@ def _build_banner():
 
 
 def _build_rock_hand_block():
-    # \m/
     hand_codes = [92, 109, 47]
-    # |
-    #  \
+
+
     wrist_codes = [124, 92]
-    # / \
+
     arm_codes = [47, 32, 92]
 
     hand = "".join(chr(c) for c in hand_codes)
     wrist = "".join(chr(c) for c in wrist_codes)
     arm = "".join(chr(c) for c in arm_codes)
 
-    # ⚡ (lightning) = 9889
     lightning = "".join(chr(c) for c in [9889, 32, 9889])
 
     lines = []
