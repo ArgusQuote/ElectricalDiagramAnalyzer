@@ -19,7 +19,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv4 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/makayla2.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/NoAmps.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -78,20 +78,22 @@ def main():
     FINDER = PanelBoardSearch(
         output_dir=str(FINDER_OUT_DIR),
         dpi=400,
+        #render_dpi=1400, ------------------ commented out for v11 to run
+        #aa_level=8, ------------------ commented out for v11 to run
+        #render_colorspace="gray", ------------------ commented out for v11 to run
         min_void_area_fr=0.004,
         min_void_w_px=90,
         min_void_h_px=90,
-        # ↓ tighten these three to kill giant/near-page blobs
-        max_void_area_fr=0.30,          # was 0.30
-        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
-        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
+        max_void_area_fr=0.30,
+        void_w_fr_range=(0.20, 0.60),
+        void_h_fr_range=(0.20, 0.55),
         min_whitespace_area_fr=0.01,
         margin_shave_px=6,
         pad=6,
-        debug=False,
         verbose=True,
-        save_masked_shape_crop=False,
-        replace_multibox=True,
+        # one-box settings (defaults are fine, but you can loosen slightly if needed):
+        # onebox_min_rel_area=0.02, onebox_max_rel_area=0.75,
+        # onebox_aspect_range=(0.4, 3.0), onebox_min_side_px=80,
     )
     crops = FINDER.readPdf(str(pdf_for_finder))
     print(f"[PanelFinder] wrote {len(crops)} crop(s) to {FINDER_OUT_DIR}")

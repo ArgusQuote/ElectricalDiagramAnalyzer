@@ -12,7 +12,7 @@ except Exception:
     _HAS_OCR = False
 
 # Version: TP band location removed. Hybrid footer logic (Total Load/Load + structural).
-ANALYZER_VERSION = "Analyzer5"
+ANALYZER_VERSION = "Analyzer6"
 ANALYZER_ORIGIN  = __file__
 
 @dataclass
@@ -69,6 +69,7 @@ class BreakerTableAnalyzer:
         self._last_gridless_path: Optional[str] = None
         # overlay annotations for OCR footer cues: list of (y_abs, label)
         self._ocr_footer_marks: List[Tuple[int, str]] = []
+        self._v_grid_xs: List[int] = []
 
         cfg_path = _abs_repo_cfg(config_path)
         self._cfg = _load_jsonc(cfg_path) or {}
@@ -111,11 +112,7 @@ class BreakerTableAnalyzer:
 
         # overlay (before early-exit)
         page_overlay_path = None
-        if self.debug:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base = os.path.splitext(os.path.basename(src_path))[0]
-            page_overlay_path = os.path.join(debug_dir, f"{base}_page_overlay_{ts}.png")
-            self._save_debug(gray, centers, dbg.lines, page_overlay_path, header_y, footer_y)
+        column_overlay_path = None
 
         if not centers or header_y is None or footer_y is None:
             if self.debug:
@@ -130,9 +127,21 @@ class BreakerTableAnalyzer:
                 "spaces_corrected": spaces_corrected,
                 "footer_snapped": getattr(self, "_footer_snapped", False),
                 "snap_note": getattr(self, "_snap_note", None),
+                "v_grid_xs": getattr(self, "_v_grid_xs", []),
+                "column_overlay_path": column_overlay_path,
             }
 
         gridless_gray, gridless_path = self._remove_grids_and_save(gray, header_y, footer_y, src_path)
+        if self.debug:
+            # Existing page overlay (rows/header/footer/etc.)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = os.path.splitext(os.path.basename(src_path))[0]
+            page_overlay_path = os.path.join(debug_dir, f"{base}_page_overlay_{ts}.png")
+            self._save_debug(gray, centers, dbg.lines, page_overlay_path, header_y, footer_y)
+
+            # NEW: columns-only overlay
+            column_overlay_path = os.path.join(debug_dir, f"{base}_columns_{ts}.png")
+            self._save_column_overlay(gray, column_overlay_path)
 
         if self.debug:
             print(f"[ANALYZER] Row count: {len(centers)} | Spaces: {spaces}")
@@ -148,11 +157,14 @@ class BreakerTableAnalyzer:
             "gray": gray, "centers": centers, "row_count": len(centers), "spaces": spaces,
             "header_y": header_y, "footer_y": footer_y,
             "tp_cols": {}, "tp_combined": {"left": False, "right": False},
-            "gridless_gray": gridless_gray, "gridless_path": gridless_path, "page_overlay_path": page_overlay_path,
+            "gridless_gray": gridless_gray, "gridless_path": gridless_path, 
+            "page_overlay_path": page_overlay_path,
             "spaces_detected": spaces_detected,
             "spaces_corrected": spaces_corrected,
             "footer_snapped": getattr(self, "_footer_snapped", False),
             "snap_note": getattr(self, "_snap_note", None),
+            "v_grid_xs": getattr(self, "_v_grid_xs", []),
+            "column_overlay_path": column_overlay_path,
         }
 
     # ============== internals ==============
@@ -822,28 +834,140 @@ class BreakerTableAnalyzer:
         return out, dbg, header_y_abs
 
     def _remove_grids_and_save(self, gray: np.ndarray, header_y: int, footer_y: int, image_path: str):
+        """
+        Remove only the long structural table lines (horizontal and vertical),
+        leaving smaller strokes and character edges intact.
+
+        - Work only between header_y and footer_y (with a small margin).
+        - Detect candidate lines with morphology.
+        - Run connected-components on those candidates.
+        - Keep only components that are long and skinny (true grid lines).
+        - Build a thin inpaint mask from those components and inpaint.
+        """
         H, W = gray.shape
         work = gray.copy()
-        y1 = max(0, header_y - 4)
-        y2 = min(H - 1, footer_y + 4)
+        # reset vertical grid cache for this run
+        self._v_grid_xs = []
+
+        # Safety guard: if header/footer are weird, just skip degridding
+        if header_y is None or footer_y is None or footer_y <= header_y + 10:
+            base = os.path.splitext(os.path.basename(image_path))[0]
+            out_dir = os.path.dirname(image_path)
+            gridless_dir = os.path.join(out_dir, "Gridless_Images")
+            os.makedirs(gridless_dir, exist_ok=True)
+            gridless_path = os.path.join(gridless_dir, f"{base}_gridless.png")
+            cv2.imwrite(gridless_path, work)
+            self._last_gridless_path = gridless_path
+            return work, gridless_path
+
+        # Restrict to the breaker table band
+        y1 = max(0, int(header_y) - 4)
+        y2 = min(H - 1, int(footer_y) + 4)
+        if y2 <= y1:
+            base = os.path.splitext(os.path.basename(image_path))[0]
+            out_dir = os.path.dirname(image_path)
+            gridless_dir = os.path.join(out_dir, "Gridless_Images")
+            os.makedirs(gridless_dir, exist_ok=True)
+            gridless_path = os.path.join(gridless_dir, f"{base}_gridless.png")
+            cv2.imwrite(gridless_path, work)
+            self._last_gridless_path = gridless_path
+            return work, gridless_path
+
         roi = work[y1:y2, :]
 
-        blur = cv2.GaussianBlur(roi, (3,3), 0)
-        bw   = cv2.adaptiveThreshold(
-            blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 21, 10
+        # --- binarize ROI ---
+        blur = cv2.GaussianBlur(roi, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur, 255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21, 10
         )
-        Kv = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(25, int(0.015*(y2-y1)))))
-        Kh = cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, int(0.12*W)), 1))
-        vlines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kv, iterations=1)
-        hlines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
-        grid = cv2.bitwise_or(vlines, hlines)
 
-        grid_mask = cv2.dilate(grid, cv2.getStructuringElement(cv2.MORPH_RECT, (3,3)), iterations=1)
+        roi_h = roi.shape[0]
+
+        # --- detect candidate vertical and horizontal lines via morphology ---
+        Kv = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (1, max(25, int(0.015 * roi_h)))
+        )
+        Kh = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (max(40, int(0.12 * W)), 1)
+        )
+        v_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kv, iterations=1)
+        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+
+        # --- filter to keep only LONG, SKINNY components (true grid lines) ---
+
+        # Vertical line mask
+        v_mask = np.zeros_like(v_candidates, dtype=np.uint8)
+        v_x_centers: List[int] = []  # <-- define the accumulator
+
+        num_v, labels_v, stats_v, _ = cv2.connectedComponentsWithStats(v_candidates, connectivity=8)
+        if num_v > 1:
+            min_vert_len = int(0.40 * roi_h)  # at least 40% the table height
+            max_vert_thick = max(2, int(0.02 * W))
+            for i in range(1, num_v):
+                x, y, w, h, area = stats_v[i]
+                if h >= min_vert_len and w <= max_vert_thick and area > 0:
+                    v_mask[labels_v == i] = 255
+                    # Track the center X of this vertical grid line for column finding later
+                    x_center = x + w // 2
+                    v_x_centers.append(int(x_center))
+
+        # Collapse near-duplicate X’s into one per column
+        if v_x_centers:
+            xs = sorted(v_x_centers)
+            collapsed = []
+            for x in xs:
+                if not collapsed or abs(x - collapsed[-1]) > 4:  # 4px merge window
+                    collapsed.append(x)
+            self._v_grid_xs = collapsed
+        else:
+            self._v_grid_xs = []
+
+        # Horizontal line mask
+        h_mask = np.zeros_like(h_candidates, dtype=np.uint8)
+        num_h, labels_h, stats_h, _ = cv2.connectedComponentsWithStats(h_candidates, connectivity=8)
+        if num_h > 1:
+            min_horiz_len = int(0.40 * W)     # at least 40% of page width
+            max_horiz_thick = max(2, int(0.02 * roi_h))
+            for i in range(1, num_h):
+                x, y, w, h, area = stats_h[i]
+                if w >= min_horiz_len and h <= max_horiz_thick and area > 0:
+                    h_mask[labels_h == i] = 255
+
+        # Combine structural lines
+        grid = cv2.bitwise_or(v_mask, h_mask)
+
+        # If nothing was detected, just save original and return
+        if grid.sum() == 0:
+            base = os.path.splitext(os.path.basename(image_path))[0]
+            out_dir = os.path.dirname(image_path)
+            gridless_dir = os.path.join(out_dir, "Gridless_Images")
+            os.makedirs(gridless_dir, exist_ok=True)
+            gridless_path = os.path.join(gridless_dir, f"{base}_gridless.png")
+            cv2.imwrite(gridless_path, work)
+            self._last_gridless_path = gridless_path
+            return work, gridless_path
+
+        # Thin dilation: make sure we cover the center of the line, but don't eat letters
+        grid_mask = cv2.dilate(
+            grid,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+            iterations=1
+        )
+
+        # --- inpaint only those long lines ---
         roi_bgr = cv2.cvtColor(roi, cv2.COLOR_GRAY2BGR)
-        inpainted = cv2.inpaint(roi_bgr, grid_mask, 3, cv2.INPAINT_TELEA)
+        inpainted = cv2.inpaint(roi_bgr, grid_mask, 2, cv2.INPAINT_TELEA)
         clean_roi_gray = cv2.cvtColor(inpainted, cv2.COLOR_BGR2GRAY)
+
+        # Write cleaned ROI back into the full page
         work[y1:y2, :] = clean_roi_gray
 
+        # Save gridless output
         base = os.path.splitext(os.path.basename(image_path))[0]
         out_dir = os.path.dirname(image_path)
         gridless_dir = os.path.join(out_dir, "Gridless_Images")
@@ -853,8 +977,29 @@ class BreakerTableAnalyzer:
         ok = cv2.imwrite(gridless_path, work)
         if not ok:
             raise IOError(f"Failed to write gridless image to: {gridless_path}")
+
         self._last_gridless_path = gridless_path
         return work, gridless_path
+
+    def _save_column_overlay(self, gray: np.ndarray, out_path: str):
+        """
+        Debug overlay that ONLY shows inferred column grid lines (v_grid_xs).
+        """
+        vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        H, W = gray.shape
+
+        v_xs = getattr(self, "_v_grid_xs", [])
+        for x in v_xs:
+            xi = int(x)
+            cv2.line(vis, (xi, 0), (xi, H - 1), (255, 0, 255), 1)
+            cv2.putText(vis, "COL", (xi + 2, 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1, cv2.LINE_AA)
+
+        try:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            cv2.imwrite(out_path, vis)
+        except Exception:
+            pass
 
     def _save_debug(self, gray: np.ndarray, centers: List[int], borders: List[int],
                     out_path: str, header_y_abs: Optional[int], footer_y_abs: Optional[int]):
