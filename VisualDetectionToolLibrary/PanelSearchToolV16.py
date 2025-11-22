@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 import fitz  # PyMuPDF
 
+
 class PanelBoardSearch:
     """
     Detect panel-board 'voids' on a detection bitmap rendered by PyMuPDF
