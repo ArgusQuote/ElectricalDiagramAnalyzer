@@ -28,11 +28,11 @@ SNAP_MAP = {
 VALID_VOLTAGES = {120, 208, 240, 480, 600}
 AMP_MIN = 100
 AMP_MAX = 1200
-
+ 
 # --- Header band refinement (from dev "find header" env) ---
 SEARCH_UP_FIRST     = True   # try above header first when picking band
 MAX_DELTA_PX        = 80     # max distance from OCR header row
-MIN_COVERAGE_FRAC   = 0.25   # row coverage threshold
+MIN_COVERAGE_FRAC   = 0.60   # row coverage threshold
 MERGE_Y_TOLERANCE   = 3      # merge contiguous rows into bands
 
 def ocr_tokens_in_header_band(gray, analyzer):
@@ -169,7 +169,7 @@ def _horiz_mask_from_bin(bw_inv: np.ndarray, W: int,
 
 def extract_horiz_lines(gray: np.ndarray,
                         horiz_kernel_frac: float = 0.035,
-                        min_width_frac: float = 0.25,
+                        min_width_frac: float = 0.60,
                         max_thickness_px: int = 6,
                         y_merge_tol_px: int = 4):
     """
@@ -282,6 +282,55 @@ def find_near_header_band(hmask: np.ndarray,
         if below:
             return min(below)
         return max(above) if above else None
+
+def find_header_bottom_band(hmask: np.ndarray,
+                            header_token_y: int | None,
+                            used_header_y: int | None = None,
+                            min_cov_frac: float = MIN_COVERAGE_FRAC,
+                            merge_tol: int = MERGE_Y_TOLERANCE) -> int | None:
+    """
+    Find the first strong horizontal band *below* the header tokens.
+
+    - header_token_y: median/header-row y from tokens (must be non-None)
+    - used_header_y : the y we already chose as header_y (avoid reusing that band)
+    - Returns an absolute y (int) or None.
+    """
+    if header_token_y is None:
+        return None
+
+    H, W = hmask.shape
+    row_cov = (hmask > 0).sum(axis=1)
+    thr = int(round(min_cov_frac * W))
+    ys = np.where(row_cov >= thr)[0].astype(int)
+    if ys.size == 0:
+        return None
+
+    # Merge contiguous rows into bands
+    bands = []
+    s = ys[0]
+    p = ys[0]
+    for y in ys[1:]:
+        if y - p <= merge_tol:
+            p = y
+        else:
+            bands.append((s, p))
+            s = p = y
+    bands.append((s, p))
+
+    reps = [int((a + b) // 2) for a, b in bands]
+
+    # Cutoff = must be below the token line AND below the header_y we chose,
+    # so we never pick the same band.
+    cutoff = int(header_token_y)
+    if used_header_y is not None:
+        cutoff = max(cutoff, int(used_header_y))
+
+    below = [y for y in reps if y > cutoff]
+    if not below:
+        return None
+
+    # Closest band just below the cutoff
+    return int(min(below))
 
 # --- Panel name de-duper (module-scope; persists for this process/job) ---
 _NAME_COUNTS = {}
@@ -466,12 +515,12 @@ class BreakerTablePipeline:
                         _lines, horiz_only = extract_horiz_lines(
                             gray,
                             horiz_kernel_frac=0.035,
-                            min_width_frac=0.25,
+                            min_width_frac=0.60,
                             max_thickness_px=6,
                             y_merge_tol_px=4,
                         )
 
-                        # 3) From OCR header row, find nearest strong band
+                        # 3) From OCR header row, find nearest strong band (top-of-header logic)
                         refined_y = find_near_header_band(
                             horiz_only,
                             header_y_tokens,
@@ -502,7 +551,24 @@ class BreakerTablePipeline:
                                     f"tokens_y={header_y_tokens}, band_y={refined_y}, old_y={old_hy}"
                                 )
 
-                            # --- VISUAL: overwrite the existing overlay PNG with the refined header line ---
+                            # 3b) NEW: find header "bottom" band strictly below the token band
+                            header_bottom_y = find_header_bottom_band(
+                                horiz_only,
+                                header_token_y=header_y_tokens,
+                                used_header_y=refined_y,
+                                min_cov_frac=MIN_COVERAGE_FRAC,
+                                merge_tol=MERGE_Y_TOLERANCE,
+                            )
+                            if header_bottom_y is not None:
+                                analyzer_result["header_bottom_y"] = int(header_bottom_y)
+                                analyzer_result["header_bottom_rule_source"] = "near_header_band_v1"
+                                if self.debug:
+                                    print(
+                                        f"[INFO] Detected header bottom band: "
+                                        f"token_y={header_y_tokens}, bottom_y={header_bottom_y}"
+                                    )
+
+                            # --- VISUAL: overwrite the existing overlay PNG with the refined header line(s) ---
                             try:
                                 overlay_path = analyzer_result.get("page_overlay_path")
                                 if overlay_path and os.path.exists(overlay_path):
@@ -511,18 +577,41 @@ class BreakerTablePipeline:
                                         H_ov, W_ov = ov.shape[:2]
                                         H_gray = float(gray.shape[0])
 
-                                        # Map refined_y (on gray) → overlay coords via ratio
-                                        y_ratio = float(refined_y) / H_gray if H_gray > 0 else 0.0
-                                        y_line  = int(max(0, min(H_ov - 1, round(y_ratio * H_ov))))
+                                        def _map_y(y_src: int) -> int:
+                                            y_ratio = float(y_src) / H_gray if H_gray > 0 else 0.0
+                                            return int(max(0, min(H_ov - 1, round(y_ratio * H_ov))))
 
-                                        # Draw a new red line at the refined header (this visually overwrites the old one)
-                                        cv2.line(ov, (0, y_line), (W_ov - 1, y_line), (0, 0, 255), 3)
+                                        # Top-of-header (refined header_y)
+                                        y_line_top = _map_y(int(refined_y))
+                                        cv2.line(ov, (0, y_line_top), (W_ov - 1, y_line_top), (0, 0, 255), 3)
+                                        cv2.putText(
+                                            ov, "HDR_TOP",
+                                            (8, max(16, y_line_top - 6)),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                                            (0, 0, 255), 1, cv2.LINE_AA
+                                        )
+
+                                        # Bottom-of-header (if found) — draw in cyan
+                                        hb_y_val = analyzer_result.get("header_bottom_y")
+                                        if isinstance(hb_y_val, (int, float)):
+                                            y_line_bottom = _map_y(int(hb_y_val))
+                                            cv2.line(
+                                                ov, (0, y_line_bottom),
+                                                (W_ov - 1, y_line_bottom),
+                                                (0, 255, 0), 2
+                                            )
+                                            cv2.putText(
+                                                ov, "HDR_BOTTOM",
+                                                (8, max(16, y_line_bottom + 14)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                                                (0, 255, 0), 1, cv2.LINE_AA
+                                            )
 
                                         # Overwrite the original overlay file so there isn't an "old" header debug image
                                         cv2.imwrite(overlay_path, ov)
 
                                         if self.debug:
-                                            print(f"[DEBUG] Overwrote overlay with refined header line: {overlay_path}")
+                                            print(f"[DEBUG] Overwrote overlay with refined header line(s): {overlay_path}")
 
                                 # OPTIONAL: if there was a dedicated header debug image, remove it
                                 old_hdr_dbg = analyzer_result.get("header_debug_path")
