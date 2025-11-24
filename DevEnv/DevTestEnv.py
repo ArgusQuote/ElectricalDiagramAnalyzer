@@ -14,12 +14,12 @@ if project_root not in sys.path:
 
 # ---------- IMPORTS ----------
 from PageFilter.PageFilter import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV15 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
 from OcrLibrary.BreakerTableParserAPIv4 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/NoAmps.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -78,9 +78,9 @@ def main():
     FINDER = PanelBoardSearch(
         output_dir=str(FINDER_OUT_DIR),
         dpi=400,
-        #render_dpi=1400, ------------------ commented out for v11 to run
-        #aa_level=8, ------------------ commented out for v11 to run
-        #render_colorspace="gray", ------------------ commented out for v11 to run
+        render_dpi=1400,
+        aa_level=8,
+        render_colorspace="gray",
         min_void_area_fr=0.004,
         min_void_w_px=90,
         min_void_h_px=90,
@@ -124,11 +124,14 @@ def main():
 
         # ---- Analyzer summary ----
         print("\n=== ANALYZER ===")
-        print("header_y:", ana_res.get("header_y"))
-        print("footer_y:", ana_res.get("footer_y"))
-        print("spaces  :", ana_res.get("spaces_detected"), "→", ana_res.get("spaces_corrected"))
-        print("gridless:", ana_res.get("gridless_path"))
-        print("overlay :", ana_res.get("page_overlay_path"))
+        print("header_y        :", ana_res.get("header_y"))
+        print("header_y_orig   :", ana_res.get("header_y_original"))
+        print("header_token_y  :", ana_res.get("header_token_y"))
+        print("header_rule_src :", ana_res.get("header_rule_source"))
+        print("footer_y        :", ana_res.get("footer_y"))
+        print("spaces          :", ana_res.get("spaces_detected"), "→", ana_res.get("spaces_corrected"))
+        print("gridless        :", ana_res.get("gridless_path"))
+        print("overlay         :", ana_res.get("page_overlay_path"))
 
         # ---- Header summary ----
         print("\n=== HEADER PARSER ===")

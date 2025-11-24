@@ -14,11 +14,11 @@ if project_root not in sys.path:
 from OcrLibrary.BreakerTableAnalyzer6 import BreakerTableAnalyzer
 
 # ---------- USER SETTINGS ----------
-INPUT_DIR        = os.path.expanduser("~/Documents/Diagrams/CaseStudy_VectorCrop_Run11")
+INPUT_DIR        = os.path.expanduser("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/chucksmall_electrical_filtered_page001_panel01.png")
 OUTPUT_DIR       = os.path.expanduser("~/Documents/Diagrams/DebugOutput2")
-FORCE_CPU_OCR    = True
+FORCE_CPU_OCR    = False
 HORIZ_THICKEN_PX = 3
-
+ 
 # Search strategy near header text line (we do NOT draw the header line)
 SEARCH_UP_FIRST     = True   # try above the header first
 MAX_DELTA_PX        = 80     # search radius in pixels (up and down)
@@ -26,26 +26,36 @@ MIN_COVERAGE_FRAC   = 0.25   # required white coverage across the row (fraction 
 MERGE_Y_TOLERANCE   = 3      # merge contiguous rows into a single band if within this many px
 
 # ---------- IO ----------
-def gather_images(input_dir):
-    d = os.path.expanduser(input_dir)
-    if not os.path.isdir(d):
-        print(f"[ERROR] INPUT_DIR not found or not a folder: {d}")
-        return []
-    files = sorted(glob(os.path.join(d, "*.png")))
-    print(f"[INFO] Found {len(files)} PNG(s) in {d}")
-    for f in files[:10]: print("       ", f)
-    if len(files) > 10: print(f"       ... +{len(files)-10} more")
-    return files
+def gather_images(input_path: str):
+    """
+    Accepts either:
+      - A directory: returns all *.png files in that directory (sorted)
+      - A single file: returns [that_file] if it exists and ends with .png
+    """
+    p = os.path.expanduser(input_path)
 
-# ---------- ANALYZER HEADER ----------
-def find_header_like_analyzer(gray, analyzer: BreakerTableAnalyzer):
-    H, W = gray.shape
-    header_y = analyzer._find_header_by_tokens(gray)
-    if header_y is None:
-        header_y = analyzer._find_cct_header_y(gray)
-    if header_y is not None and header_y > int(0.62 * H):
-        header_y = None
-    return header_y
+    # Case 1: direct PNG file path
+    if os.path.isfile(p):
+        if p.lower().endswith(".png"):
+            print(f"[INFO] Using single PNG file: {p}")
+            return [p]
+        else:
+            print(f"[ERROR] INPUT_PATH is a file but not a PNG: {p}")
+            return []
+
+    # Case 2: directory containing PNGs
+    if os.path.isdir(p):
+        files = sorted(glob(os.path.join(p, "*.png")))
+        print(f"[INFO] Found {len(files)} PNG(s) in {p}")
+        for f in files[:10]:
+            print("       ", f)
+        if len(files) > 10:
+            print(f"       ... +{len(files)-10} more")
+        return files
+
+    # Case 3: neither file nor folder
+    print(f"[ERROR] INPUT_PATH is neither a file nor a folder: {p}")
+    return []
 
 # ---------- EASYOCR helpers ----------
 def _rebuild_reader_cpu(analyzer):
@@ -61,7 +71,7 @@ def ocr_tokens_in_header_band(gray, analyzer: BreakerTableAnalyzer):
     if analyzer.reader is None:
         return []
     H, W = gray.shape
-    y1, y2 = int(0.08*H), int(0.65*H)
+    y1, y2 = int(0.08*H), int(0.50*H)
     roi = gray[y1:y2, :]
 
     def _ocr_pass(mag):
@@ -103,6 +113,50 @@ def ocr_tokens_in_header_band(gray, analyzer: BreakerTableAnalyzer):
             "x2": int(max(xs)), "y2": int(max(ys))+y1
         })
     return toks
+
+def infer_header_y_from_tokens(tokens, img_height: int, max_rel_height: float = 0.65) -> int | None:
+    """
+    Infer a single header_y from already OCR'd tokens, without running
+    any additional EasyOCR passes.
+
+    Strategy:
+      - Group tokens into coarse horizontal bands (~16 px).
+      - Score each band by how many 'header words' it has.
+      - Pick the band with the highest score.
+      - Use the topmost y1 within that band as header_y.
+      - Reject if it's too low on the page (> max_rel_height * H).
+    """
+    if not tokens:
+        return None
+
+    # Group tokens into rough rows
+    rows = {}  # band_y -> [tokens]
+    for t in tokens:
+        cy = (t["y1"] + t["y2"]) // 2
+        band = (cy // 16) * 16  # 16px buckets
+        rows.setdefault(band, []).append(t)
+
+    best_band = None
+    best_score = 0
+
+    for band_y, row_tokens in rows.items():
+        # score = number of header words in this row
+        score = sum(1 for t in row_tokens if t.get("is_header_word"))
+        if score > best_score:
+            best_score = score
+            best_band = band_y
+
+    if best_band is None or best_score == 0:
+        return None
+
+    # Header line = top of the best-scoring band
+    header_y = min(t["y1"] for t in rows[best_band])
+
+    # guardrail: header should not be down in the bottom half of the page
+    if header_y > int(max_rel_height * img_height):
+        return None
+
+    return int(header_y)
 
 # ---------- BINARIZE + HORIZONTAL LINES ----------
 def binarize(gray):
@@ -298,7 +352,7 @@ def main():
         gray = analyzer._prep(bgr)
         base = os.path.splitext(os.path.basename(img_path))[0]
 
-        # 1) OCR tokens FIRST
+        # 1) OCR tokens FIRST (single OCR step for this script)
         tokens = ocr_tokens_in_header_band(gray, analyzer)
         if not tokens:
             print(f"[ERROR] No tokens found -> skipping header detection: {img_path}")
@@ -310,8 +364,8 @@ def main():
             cv2.imwrite(os.path.join(OUTPUT_DIR, f"{base}_TOKENS_ONLY.png"), draw_tokens_overlay(gray, tokens, banner="NO TOKENS"))
             continue
 
-        # 2) Header text row (remember it; don't draw it)
-        header_y = find_header_like_analyzer(gray, analyzer)
+        # 2) Infer header_y directly from those tokens (no extra EasyOCR passes)
+        header_y = infer_header_y_from_tokens(tokens, gray.shape[0])
 
         # 3) Horizontal-only mask (+thicken)
         horiz_lines, horiz_only = extract_horiz_lines(
