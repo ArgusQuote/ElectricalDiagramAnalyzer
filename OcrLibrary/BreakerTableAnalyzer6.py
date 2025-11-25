@@ -1009,37 +1009,47 @@ class BreakerTableAnalyzer:
         # borders
         for y in borders:
             cv2.line(vis, (0, int(y)), (W - 1, int(y)), (0, 165, 255), 1)
+
         # centers
         for y in centers:
             cv2.circle(vis, (24, int(y)), 4, (0, 255, 0), -1)
 
-        # header
-        if header_y_abs is not None:
-            y = int(header_y_abs)
-            cv2.line(vis, (0, y), (W - 1, y), (0, 220, 0), 2)
-            cv2.putText(vis, "CCT HEADER", (12, max(16, y - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2, cv2.LINE_AA)
+        # NOTE: we no longer draw the original "CCT HEADER" line here.
+        # Header_y_abs is still passed in but only used for guards if needed later.
 
         # structural footer (if different from final, show in dark blue)
-        if self._footer_struct_y is not None and footer_y_abs is not None and abs(self._footer_struct_y - footer_y_abs) > 2:
+        if self._footer_struct_y is not None and footer_y_abs is not None \
+           and abs(self._footer_struct_y - footer_y_abs) > 2:
             ys = int(self._footer_struct_y)
             cv2.line(vis, (0, ys), (W - 1, ys), (180, 0, 0), 2)
-            cv2.putText(vis, "FOOTER_STRUCT", (12, max(16, ys - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 0, 0), 1, cv2.LINE_AA)
+            cv2.putText(
+                vis, "FOOTER_STRUCT",
+                (12, max(16, ys - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                (180, 0, 0), 1, cv2.LINE_AA
+            )
 
         # final footer
         if footer_y_abs is not None:
             y = int(footer_y_abs)
             cv2.line(vis, (0, y), (W - 1, y), (0, 0, 255), 2)
-            cv2.putText(vis, "FOOTER", (12, max(16, y + 18)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                vis, "FOOTER",
+                (12, max(16, y + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                (0, 0, 255), 2, cv2.LINE_AA
+            )
 
         # OCR cue markers (if you keep OCR pass)
         for y_mark, label in getattr(self, "_ocr_footer_marks", []):
             y = int(y_mark)
             cv2.line(vis, (0, y), (W - 1, y), (200, 50, 200), 1)
-            cv2.putText(vis, label, (240, max(14, y - 4)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 50, 200), 1, cv2.LINE_AA)
+            cv2.putText(
+                vis, label,
+                (240, max(14, y - 4)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                (200, 50, 200), 1, cv2.LINE_AA
+            )
 
         # snap trail + counts
         note = getattr(self, "_snap_note", None)
@@ -1051,8 +1061,12 @@ class BreakerTableAnalyzer:
         if note:
             trail.append(note)
         if trail:
-            cv2.putText(vis, " | ".join(trail), (12, H - 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(
+                vis, " | ".join(trail),
+                (12, H - 12),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                (255, 255, 0), 1, cv2.LINE_AA
+            )
 
         try:
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
