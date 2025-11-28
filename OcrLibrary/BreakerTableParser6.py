@@ -68,6 +68,8 @@ class HeaderBandScanner:
         H = W = None
         if gray is not None:
             H, W = gray.shape
+        
+        header_bottom_y = analyzer_result.get("header_bottom_y")
 
         debug_dir = self._ensure_debug_dir(analyzer_result)
         debug_img_raw_path = None
@@ -87,19 +89,18 @@ class HeaderBandScanner:
             }
 
         # --- 1) define the header band in page coordinates ---
-        y1 = max(0, int(header_y) - _HDR_PAD_ROWS_TOP)
-        y2 = min(H, int(header_y) + _HDR_PAD_ROWS_BOT)
-        if y2 <= y1:
-            if self.debug:
-                print(f"[HeaderBandScanner] Invalid band y1={y1}, y2={y2}; skipping.")
-            return {
-                "band_y1": y1,
-                "band_y2": y2,
-                "tokens": [],
-                "debugImageRaw": None,
-                "debugImageOverlay": None,
-                "columnGroups": [],
-            }
+        if (
+            isinstance(header_bottom_y, (int, float))
+            and isinstance(header_y, (int, float))
+            and header_bottom_y > header_y + 4  # must be *below* header line
+        ):
+            y1 = max(0, int(header_y))
+            y2 = min(H, int(header_bottom_y))
+        else:
+            # Fallback: legacy padding behaviour
+            y1 = max(0, int(header_y) - _HDR_PAD_ROWS_TOP)
+            y2 = min(H, int(header_y) + _HDR_PAD_ROWS_BOT)
+
 
         band = gray[y1:y2, :]
         if band.size == 0:
@@ -323,17 +324,24 @@ class HeaderBandScanner:
         """
         Given column_groups (each with .items = OCR tokens), assign a semantic
         role per column: 'ckt', 'description', 'trip', 'poles', 'combo', or ignored.
-        Also returns a convenient summary and a panel-level layout:
+        Also returns a panel-level layout:
 
-          layout: 'combined'   -> has combo columns, no (trip + poles) pairs
-                  'separated'  -> has distinct trip and poles columns, no combos
-                  'unknown'    -> anything else
+          layout: 'combined'   -> trip + poles live in same "hero" column (per side)
+                  'separated'  -> trip and poles live in different hero columns (per side)
+                  'unknown'    -> anything else / insufficient signal
 
-        - Only ignores explicit NOTES/REMARKS/COMMENTS columns.
-        - Handles common OCR confusions (0/O, 1/I/L/J, 5/S, 2/Z, 8/B).
-        - Uses fuzzy matching so near-misses like 'Descrlptlon' still score.
-        - Treats long, sentence-like chunks as inline notes: they can mark a
-          column as "notes", but they do NOT drive header role scoring.
+        Hero-word priorities (for breaking ties between hero columns):
+
+          Trip heroes (highest → lowest):
+            AMP/AMPS  >  TRIP/TRIPPING  >  LOAD  >  SIZE  >  BREAKER/BKR/BRKR/CB
+
+          Poles heroes:
+            POLE/POLES/PO/PO. (strong)  >  bare 'P' (weak)
+
+        IMPORTANT:
+          - CKT/CCT and DESCRIPTION/NAME always outrank trip/poles for a column.
+            If a column has any ckt/description signal, it will NEVER be
+            assigned as trip/poles/combo.
         """
         def norm_word(s: str) -> str:
             """
@@ -372,7 +380,7 @@ class HeaderBandScanner:
 
         def _is_like(word: str, targets: List[str], base_threshold: float = 0.78) -> bool:
             """
-            Fuzzy match `word` against a list of canonical `targets`.
+            General fuzzy match `word` against a list of canonical `targets`.
 
             - Uses norm_word() on both sides.
             - Uses SequenceMatcher ratio.
@@ -398,12 +406,43 @@ class HeaderBandScanner:
 
             return False
 
-        # First pass: compute scores per column and stash everything
+        def _hero_match(word: str, targets: List[str]) -> bool:
+            """
+            Stricter fuzzy match specifically for hero words (trip/poles).
+
+            We *really* only want near-exact matches here to avoid things like
+            'WIRE' being treated as 'LOAD' or 'POLE'.
+            """
+            w = norm_word(word)
+            if not w:
+                return False
+
+            for t in targets:
+                t_norm = norm_word(t)
+                if not t_norm:
+                    continue
+
+                # Hero matching thresholds:
+                # - very short tokens (<=4): need ~0.90+
+                # - longer tokens: allow a bit more noise (~0.75+)
+                if len(t_norm) <= 4:
+                    threshold = 0.90
+                else:
+                    threshold = 0.75
+
+                if SequenceMatcher(a=w, b=t_norm).ratio() >= threshold:
+                    return True
+
+            return False
+
+        # ---------- First pass: compute scores + hero ranks per column ----------
         col_infos: List[Dict] = []
 
         for col in column_groups:
             items = col.get("items", []) or []
 
+            # texts will now be a flat list of individual words,
+            # e.g. ['Circuit', 'Description'] instead of ['Circuit Description']
             texts: List[str] = []
             # (word, is_sentence_like)
             word_entries: List[Tuple[str, bool]] = []
@@ -413,7 +452,6 @@ class HeaderBandScanner:
                 txt = str(tok.get("text", "")).strip()
                 if not txt:
                     continue
-                texts.append(txt)
 
                 conf = float(tok.get("conf", 0.0))
                 if conf < _HDR_MIN_CONF:
@@ -423,6 +461,12 @@ class HeaderBandScanner:
                 pieces = [w for w in re.split(r"[\s/,;-]+", txt) if w.strip()]
                 if not pieces:
                     continue
+
+                # For debug: store *separated* words
+                for raw in pieces:
+                    raw_clean = raw.strip()
+                    if raw_clean:
+                        texts.append(raw_clean)
 
                 # Treat long, multi-word chunks as sentence-like notes
                 # Example: "(d) PROVIDE WITH SHUNT TRIP BREAKER." -> many words -> sentence-like
@@ -450,9 +494,11 @@ class HeaderBandScanner:
             score = {
                 "ckt": 0,
                 "description": 0,
-                "trip": 0,
+                "trip": 0,   # kept for debugging / future use
                 "poles": 0,
             }
+            hero_trip_rank = 0  # 0 = no trip hero; 1..5 = increasing strength
+            hero_poles_rank = 0  # 0 = no poles hero; 1..4 = increasing strength
 
             if not word_entries:
                 col_infos.append(
@@ -464,12 +510,16 @@ class HeaderBandScanner:
                         "has_notes": has_notes,
                         "ignoredReason": None,
                         "score": score,
+                        "hero_trip_rank": hero_trip_rank,
+                        "hero_poles_rank": hero_poles_rank,
+                        "has_ckt_signal": False,
+                        "has_desc_signal": False,
                         "role": None,  # final role filled later
                     }
                 )
                 continue
 
-            # Score words
+            # Score words + hero ranks
             for w_raw, is_sentence_like in word_entries:
                 w_norm = norm_word(w_raw)
                 if not w_norm:
@@ -485,7 +535,7 @@ class HeaderBandScanner:
                     has_notes = True
 
                 # If this word came from a sentence-like chunk, don't let it
-                # drive header-role scoring (treat as inline note).
+                # drive header-role scoring (treat as inline note only).
                 if is_sentence_like:
                     continue
 
@@ -512,21 +562,29 @@ class HeaderBandScanner:
                 ):
                     score["description"] += 3
 
-                # --- TRIP / AMP(S) / BKR / SIZE / LOAD (≈1 error allowed) ---
-                if _is_like(
-                    w_raw,
-                    ["TRIP", "TRIPPING", "AMP", "AMPS", "BREAKER", "BKR", "BRKR", "SIZE", "LOAD"],
-                    base_threshold=0.74,  # TRIP len=4 → 1 mismatch ~0.75
-                ):
-                    score["trip"] += 2
+                # ---------- Trip hero ranks ----------
+                # Priority:
+                #   AMP/AMPS (5) > TRIP/TRIPPING (4) > LOAD (3) > SIZE (2) > BREAKER/BKR/BRKR/CB (1)
+                if _hero_match(w_raw, ["AMP", "AMPS"]):
+                    hero_trip_rank = max(hero_trip_rank, 5)
+                elif _hero_match(w_raw, ["TRIP", "TRIPPING"]):
+                    hero_trip_rank = max(hero_trip_rank, 4)
+                elif _hero_match(w_raw, ["LOAD"]):
+                    hero_trip_rank = max(hero_trip_rank, 3)
+                elif _hero_match(w_raw, ["SIZE"]):
+                    hero_trip_rank = max(hero_trip_rank, 2)
+                elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
+                    hero_trip_rank = max(hero_trip_rank, 1)
 
-                # --- POLES / P (1–2 errors allowed on POLE/POLES; 'P' stays strict) ---
-                if w_norm == "P" or _is_like(
-                    w_raw,
-                    ["POLE", "POLES", "PO.", "PO"],
-                    base_threshold=0.78,  # POLES len=5 → 1 mismatch ~0.8, 2 ~0.6
-                ):
-                    score["poles"] += 3
+                # ---------- Poles hero ranks ----------
+                #   POLE/POLES/PO/PO. (4) > bare 'P' (1)
+                if _hero_match(w_raw, ["POLE", "POLES", "PO.", "PO"]):
+                    hero_poles_rank = max(hero_poles_rank, 4)
+                elif w_norm == "P":
+                    hero_poles_rank = max(hero_poles_rank, 1)
+
+            has_ckt_signal = score["ckt"] > 0
+            has_desc_signal = score["description"] > 0
 
             col_infos.append(
                 {
@@ -537,117 +595,189 @@ class HeaderBandScanner:
                     "has_notes": has_notes,
                     "ignoredReason": "notes" if has_notes else None,
                     "score": score,
-                    "role": None,  # fill in second pass
+                    "hero_trip_rank": hero_trip_rank,
+                    "hero_poles_rank": hero_poles_rank,
+                    "has_ckt_signal": has_ckt_signal,
+                    "has_desc_signal": has_desc_signal,
+                    "role": None,  # filled later
                 }
             )
 
-        # --- Panel-level layout decision (combined vs separated vs unknown) ---
-        any_combo_candidate = False
-        any_trip_only = False
-        any_poles_only = False
+        if not col_infos:
+            return {
+                "roles": {},
+                "columns": [],
+                "layout": "unknown",
+            }
 
+        # ---------- First: assign ckt / description from fuzzy scores ----------
         for info in col_infos:
             if info["has_notes"]:
+                info["role"] = None
                 continue
+
             s = info["score"]
-            trip_pos = s["trip"] > 0
-            poles_pos = s["poles"] > 0
+            best_role = None
+            best_score_val = 0
 
-            if trip_pos and poles_pos:
-                any_combo_candidate = True
-            elif trip_pos:
-                any_trip_only = True
-            elif poles_pos:
-                any_poles_only = True
+            # Only compete ckt vs description here; trip/poles/combo handled via hero logic
+            for r in ("ckt", "description"):
+                if s[r] > best_score_val:
+                    best_score_val = s[r]
+                    best_role = r
 
-        if any_combo_candidate and not (any_trip_only or any_poles_only):
+            # Threshold of 2 keeps us from random noise, but:
+            # even if we don't cross 2, the presence of ANY ckt/desc
+            # will still block trip/poles later via has_ckt_signal/has_desc_signal.
+            if best_role is not None and best_score_val >= 2:
+                info["role"] = best_role
+            else:
+                info["role"] = None
+
+        # ---------- Hero candidates: only pure trip/poles columns ----------
+        # We NEVER allow a column that has any ckt/description signal to become
+        # trip/poles/combo. That enforces "NAME beats BKR", "CKT beats everything",
+        # etc.
+        hero_candidates = [
+            info
+            for info in col_infos
+            if (not info["has_notes"])
+               and info["role"] is None
+               and not info.get("has_ckt_signal")
+               and not info.get("has_desc_signal")
+        ]
+
+        if not hero_candidates:
+            # nothing to do for trip/poles
+            role_to_index: Dict[str, int] = {}
+            summaries: List[Dict] = []
+            for info in col_infos:
+                role = info.get("role")
+                ignored_reason = info.get("ignoredReason")
+                if role and role not in role_to_index:
+                    role_to_index[role] = info["index"]
+                summaries.append(
+                    {
+                        "index": info["index"],
+                        "x_left": info["x_left"],
+                        "x_right": info["x_right"],
+                        "texts": info["texts"],
+                        "role": role,
+                        "ignoredReason": ignored_reason,
+                    }
+                )
+            return {
+                "roles": role_to_index,
+                "columns": summaries,
+                "layout": "unknown",
+            }
+
+        # ---------- Determine left/right side using geometric center ----------
+        global_left = min(info["x_left"] for info in hero_candidates)
+        global_right = max(info["x_right"] for info in hero_candidates)
+        center_x = 0.5 * (global_left + global_right)
+
+        for info in col_infos:
+            col_center = 0.5 * (info["x_left"] + info["x_right"])
+            info["side"] = "left" if col_center < center_x else "right"
+
+        # ---------- Pick best hero trip/poles per side ----------
+        best_trip_col = {"left": None, "right": None}
+        best_trip_rank = {"left": 0, "right": 0}
+        best_poles_col = {"left": None, "right": None}
+        best_poles_rank = {"left": 0, "right": 0}
+
+        for info in hero_candidates:
+            side = info["side"]
+            ht = info["hero_trip_rank"]
+            hp = info["hero_poles_rank"]
+
+            if ht > best_trip_rank[side]:
+                best_trip_rank[side] = ht
+                best_trip_col[side] = info
+
+            if hp > best_poles_rank[side]:
+                best_poles_rank[side] = hp
+                best_poles_col[side] = info
+
+        # ---------- Panel-level layout decision ----------
+        combo_side_exists = False
+        for side in ("left", "right"):
+            tcol = best_trip_col[side]
+            pcol = best_poles_col[side]
+            if (
+                tcol is not None
+                and pcol is not None
+                and tcol["index"] == pcol["index"]
+                and best_trip_rank[side] > 0
+                and best_poles_rank[side] > 0
+            ):
+                combo_side_exists = True
+                break
+
+        any_trip_hero = any(best_trip_rank[side] > 0 for side in ("left", "right"))
+        any_poles_hero = any(best_poles_rank[side] > 0 for side in ("left", "right"))
+
+        if combo_side_exists:
             layout = "combined"
-        elif (any_trip_only and any_poles_only) and not any_combo_candidate:
+        elif any_trip_hero and any_poles_hero:
             layout = "separated"
-        elif any_combo_candidate and (any_trip_only or any_poles_only):
-            # Ambiguous, but presence of combo columns is a strong hint
-            layout = "combined"
         else:
             layout = "unknown"
 
-        # --- Second pass: finalize per-column roles, enforcing layout rules ---
+        # ---------- Hero-based assignment for trip/poles/combo (per side) ----------
+        # We never override an existing 'ckt' or 'description' role.
+
+        if layout == "combined":
+            # Per side: if best trip and poles are same col, mark as combo
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                pcol = best_poles_col[side]
+                if (
+                    tcol is not None
+                    and pcol is not None
+                    and tcol["index"] == pcol["index"]
+                    and best_trip_rank[side] > 0
+                    and best_poles_rank[side] > 0
+                ):
+                    if tcol["role"] is None:
+                        tcol["role"] = "combo"
+
+        elif layout == "separated":
+            # One trip + one poles per side (up to 2 of each overall)
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                if tcol is not None and best_trip_rank[side] > 0:
+                    if tcol["role"] is None:
+                        tcol["role"] = "trip"
+
+                pcol = best_poles_col[side]
+                if pcol is not None and best_poles_rank[side] > 0:
+                    # Don't override a trip column with poles on the same side
+                    if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
+                        pcol["role"] = "poles"
+
+        else:  # layout == "unknown"
+            # Still pick best trip + best poles per side if present
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                if tcol is not None and best_trip_rank[side] > 0:
+                    if tcol["role"] is None:
+                        tcol["role"] = "trip"
+
+                pcol = best_poles_col[side]
+                if pcol is not None and best_poles_rank[side] > 0:
+                    if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
+                        pcol["role"] = "poles"
+
+        # ---------- Build roles map + summaries ----------
         role_to_index: Dict[str, int] = {}
         summaries: List[Dict] = []
 
         for info in col_infos:
-            score = info["score"]
-            has_notes = info["has_notes"]
-            ignored_reason = info["ignoredReason"]
-            role = None
+            role = info.get("role")
+            ignored_reason = info.get("ignoredReason")
 
-            if not has_notes:
-                trip_pos = score["trip"] > 0
-                poles_pos = score["poles"] > 0
-
-                # If this column has BOTH trip & poles signal, treat as combo
-                if trip_pos and poles_pos:
-                    if layout in ("combined", "unknown"):
-                        role = "combo"
-                    else:
-                        # separated layout: don't use combo; will fall back to best single role
-                        pass
-
-                if role is None:
-                    # Fall back to best single role (existing behavior)
-                    best_role = None
-                    best_score = 0
-                    for r, val in score.items():
-                        if val > best_score:
-                            best_score = val
-                            best_role = r
-
-                    if best_role is not None and best_score >= 2:
-                        role = best_role
-
-                # Enforce mutual exclusivity depending on layout
-                if layout == "combined" and role in ("trip", "poles"):
-                    role = None  # only combo is allowed for trip/poles info
-                if layout == "separated" and role == "combo":
-                    role = None  # no combo in strictly separated layouts
-
-                # --- Combined-layout fallback: rescue low-conf AMP+POLES columns ---
-                # Only runs if we *still* don't have a role and we're in a combined layout.
-                if role is None and layout == "combined" and info.get("texts"):
-                    col_has_amp = False
-                    col_has_pole = False
-
-                    for txt in info["texts"]:
-                        for raw in re.split(r"[\s/,;-]+", txt):
-                            raw = raw.strip()
-                            if not raw:
-                                continue
-
-                            w_norm = norm_word(raw)
-                            if not w_norm:
-                                continue
-
-                            # Same rule: ignore pure-numeric tokens here too.
-                            if not any(ch.isalpha() for ch in w_norm):
-                                continue
-
-                            if _is_like(
-                                raw,
-                                ["AMP", "AMPS"],
-                                base_threshold=0.70,
-                            ):
-                                col_has_amp = True
-
-                            if _is_like(
-                                raw,
-                                ["POLE", "POLES", "PO.", "PO"],
-                                base_threshold=0.70,
-                            ):
-                                col_has_pole = True
-
-                    if col_has_amp and col_has_pole:
-                        role = "combo"
-
-            # Track first index per role
             if role and role not in role_to_index:
                 role_to_index[role] = info["index"]
 
@@ -656,17 +786,18 @@ class HeaderBandScanner:
                     "index": info["index"],
                     "x_left": info["x_left"],
                     "x_right": info["x_right"],
-                    "texts": info["texts"],
+                    "texts": info["texts"],  # now per-word
                     "role": role,
                     "ignoredReason": ignored_reason,
                 }
             )
 
         return {
-            "roles": role_to_index,   # e.g. {"ckt": 5, "description": 1, "trip": 3, "poles": 4} or {"combo": 3}
-            "columns": summaries,     # per-column details
-            "layout": layout,         # 'combined' | 'separated' | 'unknown'
+            "roles": role_to_index,
+            "columns": summaries,
+            "layout": layout,
         }
+
 
 class BreakerTableParser:
     """
