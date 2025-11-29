@@ -987,6 +987,191 @@ class HeaderBandScanner:
             "layout": layout,
         }
 
+class SeparatedLayoutParser:
+    """
+    Handles parsing when the header layout is 'separated':
+      - Trip and poles live in different hero columns (left/right).
+      - For now, we only:
+          * identify the trip/poles columns from the header scan
+          * crop their body strips (header_bottom -> footer)
+          * save debug images (raw + upscaled) per column
+      - No breaker OCR / row parsing yet; that will be layered on later.
+    """
+
+    def __init__(self, *, debug: bool = False, reader=None):
+        self.debug = bool(debug)
+        self.reader = reader  # reserved for when we start OCR'ing the body
+
+    def parse(self, analyzer_result: Dict, header_scan: Dict) -> Dict:
+        """
+        Given analyzer_result + header_scan with normalizedColumns.layout == 'separated',
+        crop the body strips for all trip/poles columns and emit debug images.
+        """
+        # --- image sources (same pattern as HeaderBandScanner) ---
+        raw_gray      = analyzer_result.get("gray", None)
+        gridless_gray = analyzer_result.get("gridless_gray", None)
+
+        gray_body = gridless_gray if gridless_gray is not None else raw_gray
+        if gray_body is None:
+            if self.debug:
+                print("[SeparatedLayoutParser] Missing gray_body; cannot crop body columns.")
+            return {
+                "layout": "separated",
+                "bodyColumns": [],
+                "detected_breakers": [],
+            }
+
+        H, W = gray_body.shape[:2]
+
+        src_path = analyzer_result.get("src_path")
+        src_dir  = analyzer_result.get("src_dir") or os.path.dirname(src_path or ".")
+        debug_dir = analyzer_result.get("debug_dir") or os.path.join(src_dir, "debug")
+        if self.debug:
+            os.makedirs(debug_dir, exist_ok=True)
+
+        base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
+
+        # --- header / footer anchors ---
+        header_y         = analyzer_result.get("header_y")
+        header_bottom_y  = analyzer_result.get("header_bottom_y")
+
+        # Prefer explicit header_bottom_y, else fall back to headerScan band
+        band_y2 = header_scan.get("band_y2")
+        if isinstance(header_bottom_y, (int, float)) and isinstance(header_y, (int, float)):
+            body_y_top = max(0, int(header_bottom_y))
+        elif isinstance(band_y2, (int, float)):
+            body_y_top = max(0, int(band_y2))
+        elif isinstance(header_y, (int, float)):
+            body_y_top = max(0, int(header_y))
+        else:
+            body_y_top = 0
+
+        # Footer top (defensive against different analyzer versions)
+        footer_y = analyzer_result.get("footer_y")
+        if not isinstance(footer_y, (int, float)):
+            footer_y = analyzer_result.get("footer_top_y")
+        if not isinstance(footer_y, (int, float)):
+            footer_y = analyzer_result.get("footer_band_y1")
+        if not isinstance(footer_y, (int, float)):
+            footer_y = H  # fallback: run to bottom of page
+
+        body_y_bottom = min(H, int(footer_y))
+
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] Body Y-range: [{body_y_top}, {body_y_bottom}) "
+                f"(H={H})"
+            )
+
+        if body_y_bottom <= body_y_top + 4:
+            if self.debug:
+                print("[SeparatedLayoutParser] Body band too small; skipping body columns.")
+            return {
+                "layout": "separated",
+                "bodyColumns": [],
+                "detected_breakers": [],
+            }
+
+        normalized = header_scan.get("normalizedColumns") or {}
+        if normalized.get("layout") != "separated":
+            # Guard: caller should only invoke this when layout == 'separated'
+            if self.debug:
+                print(
+                    "[SeparatedLayoutParser] Warning: called with layout "
+                    f"{normalized.get('layout')}; expected 'separated'."
+                )
+            return {
+                "layout": normalized.get("layout", "unknown"),
+                "bodyColumns": [],
+                "detected_breakers": [],
+            }
+
+        cols_summary = normalized.get("columns", []) or []
+
+        # We want all columns that are trip or poles (both sides)
+        wanted_roles = {"trip", "poles"}
+
+        body_columns: List[Dict] = []
+
+        for col in cols_summary:
+            role = col.get("role")
+            if role not in wanted_roles:
+                continue
+
+            x_left  = max(0, int(col.get("x_left", 0)))
+            x_right = min(W - 1, int(col.get("x_right", W - 1)))
+            if x_right <= x_left + 1:
+                continue
+
+            body_strip = gray_body[body_y_top:body_y_bottom, x_left:x_right]
+            if body_strip.size == 0:
+                continue
+
+            raw_path = None
+            up_path  = None
+
+            if self.debug:
+                # Raw body strip
+                raw_path = os.path.join(
+                    debug_dir,
+                    f"{base}_parser_body_sep_col{col['index']}_{role}_raw.png",
+                )
+                try:
+                    cv2.imwrite(raw_path, body_strip)
+                except Exception as e:
+                    print(
+                        f"[SeparatedLayoutParser] Failed to write body raw col "
+                        f"{col['index']} ({role}): {e}"
+                    )
+                    raw_path = None
+
+                # Up-res body strip (same scale factor as header OCR)
+                try:
+                    body_up = cv2.resize(
+                        body_strip,
+                        None,
+                        fx=_HDR_OCR_SCALE,
+                        fy=_HDR_OCR_SCALE,
+                        interpolation=cv2.INTER_CUBIC,
+                    )
+                    up_path = os.path.join(
+                        debug_dir,
+                        f"{base}_parser_body_sep_col{col['index']}_{role}_up.png",
+                    )
+                    cv2.imwrite(up_path, body_up)
+                except Exception as e:
+                    print(
+                        f"[SeparatedLayoutParser] Failed to write body up col "
+                        f"{col['index']} ({role}): {e}"
+                    )
+                    up_path = None
+
+            body_columns.append(
+                {
+                    "index": col["index"],
+                    "role": role,
+                    "x_left": x_left,
+                    "x_right": x_right,
+                    "y_top": body_y_top,
+                    "y_bottom": body_y_bottom,
+                    "debugImageRaw": raw_path,
+                    "debugImageUp": up_path,
+                }
+            )
+
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] Extracted {len(body_columns)} body columns "
+                f"for trip/poles."
+            )
+
+        # No breaker parsing yet; just prepping geometry + debug images.
+        return {
+            "layout": "separated",
+            "bodyColumns": body_columns,
+            "detected_breakers": [],
+        }
+
 class BreakerTableParser:
     """
     Parser6 orchestrator (work-in-progress).
@@ -1012,6 +1197,7 @@ class BreakerTableParser:
             self.reader = None
 
         self._header_scanner = HeaderBandScanner(debug=self.debug, reader=self.reader)
+        self._separated_parser = SeparatedLayoutParser(debug=self.debug, reader=self.reader)        
 
     def parse_from_analyzer(self, analyzer_result: Dict) -> Dict:
         """
@@ -1020,6 +1206,7 @@ class BreakerTableParser:
         Right now:
           - Reads spaces from analyzer_result (corrected if available)
           - Runs the header-band OCR scan
+          - If header layout is 'separated', runs SeparatedLayoutParser
           - Returns skeleton parser result (no breaker parsing yet)
         """
         if not isinstance(analyzer_result, dict):
@@ -1033,19 +1220,33 @@ class BreakerTableParser:
 
         header_scan = self._header_scanner.scan(analyzer_result)
 
+        normalized = header_scan.get("normalizedColumns") or {}
+        layout = normalized.get("layout", "unknown")
+
+        separated_scan: Optional[Dict] = None
+        detected_breakers: List[Dict] = []
+
+        if layout == "separated":
+            if self.debug:
+                print("[BreakerTableParser] Layout 'separated' → using SeparatedLayoutParser.")
+            separated_scan = self._separated_parser.parse(analyzer_result, header_scan)
+            detected_breakers = separated_scan.get("detected_breakers", [])
+        else:
+            if self.debug:
+                print(f"[BreakerTableParser] Layout '{layout}' → no body parser yet.")
+
         if self.debug:
             print(
                 f"[BreakerTableParser] Header band y:[{header_scan.get('band_y1')},"
                 f"{header_scan.get('band_y2')}) tokens={len(header_scan.get('tokens', []))}"
             )
-            if header_scan.get("debugImage"):
-                print(f"[BreakerTableParser] Header-band debug image: {header_scan['debugImage']}")
 
-        # Minimal, legacy-compatible result
+        # Minimal, legacy-compatible result + new separated path metadata
         return {
             "parserVersion": PARSER_VERSION,
             "name": None,  # API will overwrite with deduped panel name
             "spaces": int(spaces),
-            "detected_breakers": [],  # filled later as we implement parsing
+            "detected_breakers": detected_breakers,
             "headerScan": header_scan,
+            "separatedScan": separated_scan,
         }
