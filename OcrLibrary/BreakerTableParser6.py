@@ -17,7 +17,7 @@ _HDR_OCR_SCALE        = 2.0          # up-res factor for header band OCR
 _HDR_PAD_ROWS_TOP     = 50           # pixels above header_y
 _HDR_PAD_ROWS_BOT     = 85           # pixels below header_y
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/()."
-_HDR_MIN_CONF        = 0.50         # minimum OCR confidence to use a token for header scoring
+_HDR_MIN_CONF         = 0.50         # minimum OCR confidence to use a token for header scoring
 
 class HeaderBandScanner:
     """
@@ -55,20 +55,22 @@ class HeaderBandScanner:
         Inputs:
           analyzer_result: dict from BreakerTableAnalyzer.analyze()
             - expects keys: gray or gridless_gray, header_y, src_path, src_dir, debug_dir
-            - may include v_grid_xs: list of x positions for long vertical grid lines
         """
-        # --- SAFE gray selection (no boolean ops on numpy arrays) ---
-        gray = analyzer_result.get("gridless_gray", None)
-        if gray is None:
-            gray = analyzer_result.get("gray", None)
+        # --- separate gray for OCR vs line detection ---
+        raw_gray      = analyzer_result.get("gray", None)          # with grid lines
+        gridless_gray = analyzer_result.get("gridless_gray", None) # after degridding
+
+        # use gridless for OCR if available, otherwise fall back to raw
+        gray_ocr   = gridless_gray if gridless_gray is not None else raw_gray
+        gray_lines = raw_gray if raw_gray is not None else gray_ocr
 
         header_y = analyzer_result.get("header_y")
         src_path = analyzer_result.get("src_path")
 
         H = W = None
-        if gray is not None:
-            H, W = gray.shape
-        
+        if gray_ocr is not None:
+            H, W = gray_ocr.shape
+
         header_bottom_y = analyzer_result.get("header_bottom_y")
 
         debug_dir = self._ensure_debug_dir(analyzer_result)
@@ -76,7 +78,7 @@ class HeaderBandScanner:
         debug_img_overlay_path = None
 
         # If we don't have the basics, bail gracefully
-        if gray is None or header_y is None or H is None:
+        if gray_ocr is None or gray_lines is None or header_y is None or H is None:
             if self.debug:
                 print("[HeaderBandScanner] Missing gray or header_y; skipping header scan.")
             return {
@@ -86,6 +88,11 @@ class HeaderBandScanner:
                 "debugImageRaw": None,
                 "debugImageOverlay": None,
                 "columnGroups": [],
+                "normalizedColumns": {
+                    "roles": {},
+                    "columns": [],
+                    "layout": "unknown",
+                },
             }
 
         # --- 1) define the header band in page coordinates ---
@@ -101,9 +108,10 @@ class HeaderBandScanner:
             y1 = max(0, int(header_y) - _HDR_PAD_ROWS_TOP)
             y2 = min(H, int(header_y) + _HDR_PAD_ROWS_BOT)
 
+        band_ocr   = gray_ocr[y1:y2, :]
+        band_lines = gray_lines[y1:y2, :]
 
-        band = gray[y1:y2, :]
-        if band.size == 0:
+        if band_ocr.size == 0 or band_lines.size == 0:
             if self.debug:
                 print("[HeaderBandScanner] Empty header band after crop; skipping.")
             return {
@@ -113,6 +121,11 @@ class HeaderBandScanner:
                 "debugImageRaw": None,
                 "debugImageOverlay": None,
                 "columnGroups": [],
+                "normalizedColumns": {
+                    "roles": {},
+                    "columns": [],
+                    "layout": "unknown",
+                },
             }
 
         # --- 1b) save RAW cropped band to debug folder so you can see exactly what we used ---
@@ -120,105 +133,188 @@ class HeaderBandScanner:
             base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
             debug_img_raw_path = os.path.join(debug_dir, f"{base}_parser_header_band_raw.png")
             try:
-                cv2.imwrite(debug_img_raw_path, band)
+                cv2.imwrite(debug_img_raw_path, band_ocr)
             except Exception as e:
                 print(f"[HeaderBandScanner] Failed to write raw header band image: {e}")
                 debug_img_raw_path = None
 
+        # Always define these so there are no "referenced before assignment" issues
         tokens: List[Dict] = []
+        column_groups: List[Dict] = []
+
+        # --- 2) find header-local vertical lines (column dividers) ---
+        header_v_cols = self._find_header_verticals(band_lines)
+        v_cols = sorted(int(x) for x in header_v_cols)
+
+        if self.debug:
+            print(f"[HeaderBandScanner] header_v_cols (lines band) = {v_cols}")
 
         if self.reader is not None:
-            # --- 2) up-res the band for OCR ---
-            band_up = cv2.resize(
-                band,
-                None,
-                fx=_HDR_OCR_SCALE,
-                fy=_HDR_OCR_SCALE,
-                interpolation=cv2.INTER_CUBIC,
-            )
+            H_band, W_band = band_ocr.shape[:2]
 
-            try:
-                dets = self.reader.readtext(
-                    band_up,
-                    detail=1,
-                    paragraph=False,
-                    allowlist=_HDR_OCR_ALLOWLIST,
-                    mag_ratio=1.0,
-                    contrast_ths=0.05,
-                    adjust_contrast=0.7,
-                    text_threshold=0.4,
-                    low_text=0.25,
-                )
-            except Exception as e:
-                if self.debug:
-                    print(f"[HeaderBandScanner] OCR failed on header band: {e}")
-                dets = []
+            if v_cols and len(v_cols) >= 2:
+                # --- 2a) OCR per column strip between successive vertical lines ---
+                for i in range(len(v_cols) - 1):
+                    x_left = v_cols[i]
+                    x_right = v_cols[i + 1]
 
-            # --- 3) map OCR boxes back to band + page coordinates ---
-            for box, txt, conf in dets:
-                try:
-                    conf_f = float(conf or 0.0)
-                except Exception:
-                    conf_f = 0.0
+                    # guard against degenerate / reversed intervals
+                    if x_right <= x_left or x_left < 0 or x_right > W_band:
+                        continue
 
-                # box in upscaled space -> downscale back to band coords
-                pts_band = [
-                    (
-                        int(p[0] / _HDR_OCR_SCALE),
-                        int(p[1] / _HDR_OCR_SCALE),
+                    # Initialize this column group up front
+                    col_group = {
+                        "index": len(column_groups) + 1,
+                        "x_left": int(x_left),
+                        "x_right": int(x_right),
+                        "items": [],
+                    }
+                    column_groups.append(col_group)
+
+                    # Crop this column strip from the OCR band
+                    col_band = band_ocr[:, x_left:x_right]
+
+                    if col_band.size == 0:
+                        continue
+
+                    # Up-res the column band
+                    col_band_up = cv2.resize(
+                        col_band,
+                        None,
+                        fx=_HDR_OCR_SCALE,
+                        fy=_HDR_OCR_SCALE,
+                        interpolation=cv2.INTER_CUBIC,
                     )
-                    for p in box
-                ]
-                xs = [p[0] for p in pts_band]
-                ys = [p[1] for p in pts_band]
-                x1b, x2b = max(0, min(xs)), min(W - 1, max(xs))
-                y1b, y2b = max(0, min(ys)), min(y2 - y1 - 1, max(ys))
 
-                # page-coordinates (add vertical offset)
-                y1_abs = y1 + y1b
-                y2_abs = y1 + y2b
+                    try:
+                        dets = self.reader.readtext(
+                            col_band_up,
+                            detail=1,
+                            paragraph=False,
+                            allowlist=_HDR_OCR_ALLOWLIST,
+                            mag_ratio=1.0,
+                            contrast_ths=0.05,
+                            adjust_contrast=0.7,
+                            text_threshold=0.4,
+                            low_text=0.25,
+                        )
+                    except Exception as e:
+                        if self.debug:
+                            print(f"[HeaderBandScanner] OCR failed on header column {i}: {e}")
+                        dets = []
 
-                tokens.append(
-                    {
+                    # Map OCR boxes back to *full band* coordinates, and lock them to this column
+                    for box, txt, conf in dets:
+                        try:
+                            conf_f = float(conf or 0.0)
+                        except Exception:
+                            conf_f = 0.0
+
+                        # box in upscaled column space -> downscale back to column-band coords
+                        pts_band_local = [
+                            (
+                                int(p[0] / _HDR_OCR_SCALE),
+                                int(p[1] / _HDR_OCR_SCALE),
+                            )
+                            for p in box
+                        ]
+                        xs = [p[0] for p in pts_band_local]
+                        ys = [p[1] for p in pts_band_local]
+
+                        # local coords within this column strip
+                        x1_local = max(0, min(xs))
+                        x2_local = min(col_band.shape[1] - 1, max(xs))
+                        y1b = max(0, min(ys))
+                        y2b = min(H_band - 1, max(ys))
+
+                        # convert to *band* coords by offsetting with x_left
+                        x1b = x_left + x1_local
+                        x2b = x_left + x2_local
+
+                        # page-coordinates (add vertical offset)
+                        y1_abs = y1 + y1b
+                        y2_abs = y1 + y2b
+
+                        tok = {
+                            "text": str(txt or "").strip(),
+                            "conf": conf_f,
+                            "box_band": [int(x1b), int(y1b), int(x2b), int(y2b)],
+                            "box_page": [int(x1b), int(y1_abs), int(x2b), int(y2_abs)],
+                        }
+                        tokens.append(tok)
+                        col_group["items"].append(tok)
+
+            else:
+                # --- 2b) Fallback: no reliable verticals -> OCR whole band as a single "column" ---
+                if self.debug:
+                    print("[HeaderBandScanner] No full-height verticals; OCRing whole header band.")
+
+                band_up = cv2.resize(
+                    band_ocr,
+                    None,
+                    fx=_HDR_OCR_SCALE,
+                    fy=_HDR_OCR_SCALE,
+                    interpolation=cv2.INTER_CUBIC,
+                )
+
+                try:
+                    dets = self.reader.readtext(
+                        band_up,
+                        detail=1,
+                        paragraph=False,
+                        allowlist=_HDR_OCR_ALLOWLIST,
+                        mag_ratio=1.0,
+                        contrast_ths=0.05,
+                        adjust_contrast=0.7,
+                        text_threshold=0.4,
+                        low_text=0.25,
+                    )
+                except Exception as e:
+                    if self.debug:
+                        print(f"[HeaderBandScanner] OCR failed on header band (fallback): {e}")
+                    dets = []
+
+                col_group = {
+                    "index": 1,
+                    "x_left": 0,
+                    "x_right": band_ocr.shape[1] - 1,
+                    "items": [],
+                }
+                column_groups.append(col_group)
+
+                H_band, W_band = band_ocr.shape[:2]
+
+                for box, txt, conf in dets:
+                    try:
+                        conf_f = float(conf or 0.0)
+                    except Exception:
+                        conf_f = 0.0
+
+                    pts_band = [
+                        (
+                            int(p[0] / _HDR_OCR_SCALE),
+                            int(p[1] / _HDR_OCR_SCALE),
+                        )
+                        for p in box
+                    ]
+                    xs = [p[0] for p in pts_band]
+                    ys = [p[1] for p in pts_band]
+                    x1b, x2b = max(0, min(xs)), min(W_band - 1, max(xs))
+                    y1b, y2b = max(0, min(ys)), min(H_band - 1, max(ys))
+
+                    y1_abs = y1 + y1b
+                    y2_abs = y1 + y2b
+
+                    tok = {
                         "text": str(txt or "").strip(),
                         "conf": conf_f,
                         "box_band": [int(x1b), int(y1b), int(x2b), int(y2b)],
                         "box_page": [int(x1b), int(y1_abs), int(x2b), int(y2_abs)],
                     }
-                )
+                    tokens.append(tok)
+                    col_group["items"].append(tok)
 
-        # --- 3b) group header tokens into column buckets using v_grid_xs ---
-        column_groups: List[Dict] = []
-        v_cols = analyzer_result.get("v_grid_xs") or []
-        if v_cols and len(v_cols) >= 2 and tokens:
-            v_cols_sorted = sorted(int(x) for x in v_cols)
-
-            # build intervals: [x_left, x_right] = one column
-            for i in range(len(v_cols_sorted) - 1):
-                x_left = v_cols_sorted[i]
-                x_right = v_cols_sorted[i + 1]
-                column_groups.append(
-                    {
-                        "index": i + 1,
-                        "x_left": int(x_left),
-                        "x_right": int(x_right),
-                        "items": [],
-                    }
-                )
-
-            # assign tokens by x-center into these intervals (with small tolerance)
-            TOL = 2  # px tolerance so items touching the grid line still count
-            for tok in tokens:
-                x1b, y1b, x2b, y2b = tok["box_band"]
-                x_center = 0.5 * (x1b + x2b)
-                for col in column_groups:
-                    if (col["x_left"] - TOL) <= x_center <= (col["x_right"] + TOL):
-                        col["items"].append(tok)
-                        break  # stop at first matching column
-        else:
-            column_groups = []
-
-        # --- 3c) normalize & score columns into semantic roles (ckt/desc/trip/poles) ---
+        # --- 3) normalize & score columns into semantic roles (ckt/desc/trip/poles) ---
         normalized_columns = self._score_header_columns(column_groups)
 
         # Debug printout to terminal
@@ -248,7 +344,7 @@ class HeaderBandScanner:
 
         # --- 4) build debug overlay for the band (cropped view) ---
         if self.debug:
-            vis = cv2.cvtColor(band, cv2.COLOR_GRAY2BGR)
+            vis = cv2.cvtColor(band_lines, cv2.COLOR_GRAY2BGR)
 
             # draw a thin border around the band
             cv2.rectangle(vis, (0, 0), (vis.shape[1] - 1, vis.shape[0] - 1), (0, 255, 255), 1)
@@ -272,7 +368,6 @@ class HeaderBandScanner:
 
                 cv2.rectangle(vis, (x1b, y1b), (x2b, y2b), (0, 0, 255), 1)
                 lbl = f"{text} ({conf_f:.2f})"
-                # ensure label is visible above the box if possible
                 ty = y1b - 4 if y1b - 4 > 10 else y2b + 12
                 cv2.putText(
                     vis,
@@ -287,13 +382,18 @@ class HeaderBandScanner:
 
             # overlay the column grid lines on the header band too
             H_band, W_band = vis.shape[:2]
-            for x in v_cols:
+
+            # Use same header-local lines we used for OCR
+            header_v_cols_dbg = v_cols
+
+            # Draw header-local lines in magenta
+            for x in header_v_cols_dbg:
                 xi = int(x)
                 if 0 <= xi < W_band:
                     cv2.line(vis, (xi, 0), (xi, H_band - 1), (255, 0, 255), 1)
                     cv2.putText(
                         vis,
-                        "COL",
+                        "HDR",
                         (xi + 2, 16),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.4,
@@ -303,7 +403,10 @@ class HeaderBandScanner:
                     )
 
             base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
-            debug_img_overlay_path = os.path.join(debug_dir, f"{base}_parser_header_band_overlay.png")
+            debug_img_overlay_path = os.path.join(
+                debug_dir,
+                f"{base}_parser_header_band_overlay.png",
+            )
             try:
                 cv2.imwrite(debug_img_overlay_path, vis)
             except Exception as e:
@@ -319,6 +422,92 @@ class HeaderBandScanner:
             "columnGroups": column_groups,
             "normalizedColumns": normalized_columns,
         }
+
+    def _find_header_verticals(self, band: np.ndarray) -> List[int]:
+        """
+        Detect vertical grid lines inside the *header band only*.
+
+        Strategy:
+          - Binarize the band.
+          - Morphologically open with a tall vertical kernel to keep vertical strokes.
+          - Connected-components over the result.
+          - Keep only components that:
+              * are tall enough (>= ~85% of band height), and
+              * start near the top and end near the bottom of the band, and
+              * are thin (not blocks of fill).
+          - Return sorted, de-duplicated X-center positions for those components.
+        """
+        if band is None or band.size == 0:
+            return []
+
+        H_band, W_band = band.shape
+
+        # 1) binarize
+        blur = cv2.GaussianBlur(band, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # 2) emphasize vertical strokes with a tall, skinny kernel
+        Kv = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (
+                1,
+                max(15, int(0.40 * H_band)),  # 40% of band height – enough to glue segments
+            ),
+        )
+        v_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kv, iterations=1)
+
+        # 3) connected components -> filter long, skinny, full-height-ish components
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            v_candidates,
+            connectivity=8,
+        )
+
+        if num_labels <= 1:
+            return []
+
+        min_full_len = int(0.85 * H_band)             # must span at least 85% of header height
+        max_thick    = max(2, int(0.02 * W_band))     # must be thin
+        top_margin   = 3                              # must touch near top
+        bot_margin   = 3                              # and near bottom
+
+        xs_raw: List[int] = []
+
+        for i in range(1, num_labels):  # label 0 is background
+            x, y, w, h, area = stats[i]
+            if h < min_full_len:
+                continue
+            if w > max_thick:
+                continue
+
+            # Require line to effectively touch both top and bottom of header band
+            if y > top_margin:
+                continue
+            if (y + h) < (H_band - bot_margin):
+                continue
+
+            x_center = x + w // 2
+            xs_raw.append(int(x_center))
+
+        if not xs_raw:
+            return []
+
+        xs_raw.sort()
+
+        # collapse near-duplicates into one X per visual line
+        collapsed: List[int] = []
+        MERGE_PX = 4
+        for x in xs_raw:
+            if not collapsed or abs(x - collapsed[-1]) > MERGE_PX:
+                collapsed.append(x)
+
+        return collapsed
 
     def _score_header_columns(self, column_groups: List[Dict]) -> Dict:
         """
@@ -797,7 +986,6 @@ class HeaderBandScanner:
             "columns": summaries,
             "layout": layout,
         }
-
 
 class BreakerTableParser:
     """
