@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerHeaderFinder.py
+# AnchoringClasses/BreakerHeaderFinder.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -12,6 +12,10 @@ import numpy as np
 class HeaderDbg:
     lines: List[int]
     centers: List[int]
+
+
+# alias so other code can import `Dbg` if it wants
+Dbg = HeaderDbg
 
 
 @dataclass
@@ -31,52 +35,33 @@ class HeaderResult:
 
 class BreakerHeaderFinder:
     """
-    Encapsulates header + row-structure logic that used to live inside
-    BreakerTableAnalyzer6:
-
+    Header + row-structure + structural footer.
+    This is the logic that used to live in BreakerTableAnalyzer6:
       - _find_cct_header_y
       - _find_header_by_tokens
       - _row_centers_from_lines
-
-    You pass in:
-      - gray: prepped grayscale image (same as BreakerTableAnalyzer._prep output)
-      - an OCR reader (easyocr.Reader or None)
-
-    It returns:
-      - centers (row centers)
-      - dbg (lines/centers for overlays)
-      - header_y (absolute Y in gray)
-      - footer_struct_y / last_footer_y (structural footer from cadence)
-      - spacing/snap info for your snap logic
     """
 
     def __init__(self, reader, debug: bool = False):
         self.reader = reader
         self.debug = debug
 
-        # ocr debug: used by dev env scripts for CCT/CKT token overlays
         self.ocr_dbg_items: List[dict] = []
         self.ocr_dbg_rois: List[Tuple[int, int, int, int]] = []
 
-        # structural footer + row stats
         self.footer_struct_y: Optional[int] = None
         self.last_footer_y: Optional[int] = None
         self.bottom_border_y: Optional[int] = None
         self.bottom_row_center_y: Optional[int] = None
 
-        # space/snap stats
         self.spaces_detected: int = 0
         self.spaces_corrected: int = 0
         self.footer_snapped: bool = False
         self.snap_note: Optional[str] = None
 
-    # ---------- public API ----------
+    # ---------- public ----------
 
     def analyze_rows(self, gray: np.ndarray) -> HeaderResult:
-        """
-        Main entry – essentially your old _row_centers_from_lines(gray), but
-        factored into this class and returning a structured HeaderResult.
-        """
         centers, dbg, header_y = self._row_centers_from_lines(gray)
 
         return HeaderResult(
@@ -93,11 +78,8 @@ class BreakerHeaderFinder:
             bottom_row_center_y=self.bottom_row_center_y,
         )
 
-    # ---------- MIGRATED METHODS FROM BreakerTableAnalyzer6 ----------
+    # ---------- internals (migrated from BreakerTableAnalyzer6) ----------
 
-    # This is your original _find_cct_header_y, with:
-    #   - self._ocr_dbg_items -> self.ocr_dbg_items
-    #   - self._ocr_dbg_rois  -> self.ocr_dbg_rois
     def _find_cct_header_y(self, gray: np.ndarray) -> Optional[int]:
         if self.reader is None:
             return None
@@ -167,7 +149,7 @@ class BreakerHeaderFinder:
                 key = (yc // 14) * 14
                 lines.setdefault(key, []).append((box, txt))
 
-            cands = []
+            cands: List[int] = []
 
             for box, txt, _ in det:
                 t = norm(txt)
@@ -234,7 +216,6 @@ class BreakerHeaderFinder:
             return None
         return int(min(all_hits))
 
-    # This is your original _find_header_by_tokens, unchanged except for class name.
     def _find_header_by_tokens(self, gray: np.ndarray) -> Optional[int]:
         if self.reader is None:
             return None
@@ -359,12 +340,6 @@ class BreakerHeaderFinder:
             return None
         return int(best[1])
 
-    # This is your original _row_centers_from_lines, with:
-    #   - _Dbg -> HeaderDbg
-    #   - self._footer_* -> self.footer_*
-    #   - self._spaces_* -> self.spaces_*
-    #   - self._snap_note -> self.snap_note
-    #   - self._last_footer_y -> self.last_footer_y
     def _row_centers_from_lines(self, gray: np.ndarray):
         H, W = gray.shape
         y_top = int(H * 0.12)
