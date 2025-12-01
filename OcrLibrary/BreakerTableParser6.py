@@ -1123,6 +1123,12 @@ class SeparatedLayoutParser:
     ):
         """
         OCR a single trip/poles body strip and return tokens in PAGE coordinates.
+
+        NEW:
+          - After cropping the body strip, we split it into two vertical halves.
+          - Each half is up-resed and OCR'd separately.
+          - This keeps EasyOCR from creating one giant box that spans multiple rows
+            and helps it pick up small digits that would otherwise be missed.
         """
         import cv2
 
@@ -1139,68 +1145,97 @@ class SeparatedLayoutParser:
         if band.size == 0:
             return []
 
-        band_up = cv2.resize(
-            band,
-            None,
-            fx=_HDR_OCR_SCALE,
-            fy=_HDR_OCR_SCALE,
-            interpolation=cv2.INTER_CUBIC,
-        )
+        H_band, W_band = band.shape[:2]
+        if H_band <= 0:
+            return []
 
-        try:
-            dets = self.reader.readtext(
-                band_up,
-                detail=1,
-                paragraph=False,
-                allowlist=_HDR_OCR_ALLOWLIST,
-                mag_ratio=1.0,
-                contrast_ths=0.05,
-                adjust_contrast=0.7,
-                text_threshold=0.4,
-                low_text=0.25,
-            )
-        except Exception:
-            dets = []
+        # Always split into two vertical halves (top and bottom)
+        mid_local = H_band // 2
+        halves = [
+            (0, mid_local),
+            (mid_local, H_band),
+        ]
 
         tokens = []
-        H_band, W_band = band.shape[:2]
 
-        for box, txt, conf in dets:
-            try:
-                conf_f = float(conf or 0.0)
-            except Exception:
-                conf_f = 0.0
-
-            if conf_f < _HDR_MIN_CONF:
+        for y0_local, y1_local in halves:
+            if y1_local <= y0_local + 1:
                 continue
 
-            pts_local = [
-                (
-                    int(p[0] / _HDR_OCR_SCALE),
-                    int(p[1] / _HDR_OCR_SCALE),
-                )
-                for p in box
-            ]
-            xs = [p[0] for p in pts_local]
-            ys = [p[1] for p in pts_local]
+            sub_band = band[y0_local:y1_local, :]
+            if sub_band.size == 0:
+                continue
 
-            x1_local = max(0, min(xs))
-            x2_local = min(W_band - 1, max(xs))
-            y1_local = max(0, min(ys))
-            y2_local = min(H_band - 1, max(ys))
-
-            x1_page = x_left + x1_local
-            x2_page = x_left + x2_local
-            y1_page = body_y_top + y1_local
-            y2_page = body_y_top + y2_local
-
-            tokens.append(
-                {
-                    "text": str(txt or "").strip(),
-                    "conf": conf_f,
-                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                }
+            # Up-res this half-band
+            sub_up = cv2.resize(
+                sub_band,
+                None,
+                fx=_HDR_OCR_SCALE,
+                fy=_HDR_OCR_SCALE,
+                interpolation=cv2.INTER_CUBIC,
             )
+
+            try:
+                dets = self.reader.readtext(
+                    sub_up,
+                    detail=1,
+                    paragraph=False,
+                    allowlist=_HDR_OCR_ALLOWLIST,
+                    mag_ratio=1.0,
+                    contrast_ths=0.05,
+                    adjust_contrast=0.7,
+                    text_threshold=0.4,
+                    low_text=0.25,
+                )
+            except Exception:
+                dets = []
+
+            H_sub, W_sub = sub_band.shape[:2]
+
+            for box, txt, conf in dets:
+                try:
+                    conf_f = float(conf or 0.0)
+                except Exception:
+                    conf_f = 0.0
+
+                if conf_f < _HDR_MIN_CONF:
+                    continue
+
+                # OCR box is in upscaled sub_band coordinates → map back to sub_band
+                pts_local_sub = [
+                    (
+                        int(p[0] / _HDR_OCR_SCALE),
+                        int(p[1] / _HDR_OCR_SCALE),
+                    )
+                    for p in box
+                ]
+                xs = [p[0] for p in pts_local_sub]
+                ys = [p[1] for p in pts_local_sub]
+
+                x1_sub = max(0, min(xs))
+                x2_sub = min(W_sub - 1, max(xs))
+                y1_sub = max(0, min(ys))
+                y2_sub = min(H_sub - 1, max(ys))
+
+                # Map from sub_band coords back into full band coords
+                y1_band = y0_local + y1_sub
+                y2_band = y0_local + y2_sub
+                x1_band = x1_sub
+                x2_band = x2_sub
+
+                # Finally, map band coords into PAGE coords
+                x1_page = x_left + x1_band
+                x2_page = x_left + x2_band
+                y1_page = body_y_top + y1_band
+                y2_page = body_y_top + y2_band
+
+                tokens.append(
+                    {
+                        "text": str(txt or "").strip(),
+                        "conf": conf_f,
+                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                    }
+                )
 
         return tokens
 
@@ -1295,12 +1330,13 @@ class SeparatedLayoutParser:
         we:
           - crop body strips for trip/poles columns
           - detect body row bands from the grid
-          - OCR each trip/poles column
+          - OCR each trip/poles column (split into halves)
           - associate each row's amps + poles
           - accumulate breaker counts
         """
         import os
         import cv2
+        from typing import Dict
 
         # --- image sources ---
         raw_gray      = analyzer_result.get("gray", None)
@@ -1385,7 +1421,7 @@ class SeparatedLayoutParser:
         body_columns = []
         tokens_by_col_index = {}
 
-        # --- crop body strips for trip/poles and OCR them ---
+        # --- crop body strips for trip/poles and OCR them (with splitting) ---
         for col in cols_summary:
             role = col.get("role")
             if role not in wanted_roles:
@@ -1400,45 +1436,6 @@ class SeparatedLayoutParser:
             if body_strip.size == 0:
                 continue
 
-            raw_path = None
-            up_path  = None
-
-            if self.debug:
-                # Raw body strip
-                raw_path = os.path.join(
-                    debug_dir,
-                    f"{base}_parser_body_sep_col{col['index']}_{role}_raw.png",
-                )
-                try:
-                    cv2.imwrite(raw_path, body_strip)
-                except Exception as e:
-                    print(
-                        f"[SeparatedLayoutParser] Failed to write body raw col "
-                        f"{col['index']} ({role}): {e}"
-                    )
-                    raw_path = None
-
-                # Up-res body strip
-                try:
-                    body_up = cv2.resize(
-                        body_strip,
-                        None,
-                        fx=_HDR_OCR_SCALE,
-                        fy=_HDR_OCR_SCALE,
-                        interpolation=cv2.INTER_CUBIC,
-                    )
-                    up_path = os.path.join(
-                        debug_dir,
-                        f"{base}_parser_body_sep_col{col['index']}_{role}_up.png",
-                    )
-                    cv2.imwrite(up_path, body_up)
-                except Exception as e:
-                    print(
-                        f"[SeparatedLayoutParser] Failed to write body up col "
-                        f"{col['index']} ({role}): {e}"
-                    )
-                    up_path = None
-
             body_columns.append(
                 {
                     "index": col["index"],
@@ -1447,8 +1444,7 @@ class SeparatedLayoutParser:
                     "x_right": x_right,
                     "y_top": body_y_top,
                     "y_bottom": body_y_bottom,
-                    "debugImageRaw": raw_path,
-                    "debugImageUp": up_path,
+                    "debugImageOverlay": None,  # filled in below when debug=True
                 }
             )
 
@@ -1474,6 +1470,108 @@ class SeparatedLayoutParser:
                 "detected_breakers": [],
                 "breakerCounts": {},
             }
+
+        # --- Build OCR overlays for each body column (debug only, high quality only) ---
+        if self.debug:
+            for col in body_columns:
+                idx   = col["index"]
+                role  = col["role"]
+                x_l   = col["x_left"]
+                x_r   = col["x_right"]
+                y_top = col["y_top"]
+                y_bot = col["y_bottom"]
+
+                col_tokens = tokens_by_col_index.get(idx, [])
+                if not col_tokens:
+                    continue
+
+                # Crop the strip again for visualization only
+                strip = gray_body[y_top:y_bot, x_l:x_r]
+                if strip.size == 0:
+                    continue
+
+                vis = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
+
+                # Draw a border + label for the column
+                cv2.rectangle(
+                    vis,
+                    (0, 0),
+                    (vis.shape[1] - 1, vis.shape[0] - 1),
+                    (0, 255, 255),
+                    1,
+                )
+                lbl = f"BODY {role.upper()}  col={idx}"
+                cv2.putText(
+                    vis,
+                    lbl,
+                    (8, max(16, 16)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+                # Show where the column was split for OCR (top / bottom halves)
+                H_strip, W_strip = strip.shape[:2]
+                mid_y = H_strip // 2
+                cv2.line(
+                    vis,
+                    (0, mid_y),
+                    (W_strip - 1, mid_y),
+                    (255, 0, 255),
+                    1,
+                )
+                cv2.putText(
+                    vis,
+                    "HALF",
+                    (4, max(10, mid_y - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (255, 0, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+                # Draw each OCR token (convert from page coords to strip-local coords)
+                for tok in col_tokens:
+                    x1p, y1p, x2p, y2p = tok["box_page"]
+                    text = tok.get("text", "")
+                    conf = tok.get("conf", 0.0)
+
+                    # local coords within the strip
+                    x1 = max(0, min(W_strip - 1, x1p - x_l))
+                    x2 = max(0, min(W_strip - 1, x2p - x_l))
+                    y1 = max(0, min(H_strip - 1, y1p - y_top))
+                    y2 = max(0, min(H_strip - 1, y2p - y_top))
+
+                    cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 0, 255), 1)
+                    label = f"{text} ({conf:.2f})"
+                    ty = y1 - 4 if y1 - 4 > 10 else y2 + 12
+                    cv2.putText(
+                        vis,
+                        label,
+                        (x1, ty),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (0, 255, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+                overlay_path = os.path.join(
+                    debug_dir,
+                    f"{base}_parser_body_sep_col{idx}_{role}_overlay.png",
+                )
+                try:
+                    cv2.imwrite(overlay_path, vis)
+                    col["debugImageOverlay"] = overlay_path
+                except Exception as e:
+                    print(
+                        f"[SeparatedLayoutParser] Failed to write body overlay col "
+                        f"{idx} ({role}): {e}"
+                    )
+                    col["debugImageOverlay"] = None
 
         # --- assign columns to left/right sides based on X center ---
         role_cols = [c for c in body_columns if c["role"] in wanted_roles]
