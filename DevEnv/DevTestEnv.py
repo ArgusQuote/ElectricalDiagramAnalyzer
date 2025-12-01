@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
+import os, re
 import sys
 import json
 from pathlib import Path
@@ -19,7 +19,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV15 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv4 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/NoAmps.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic2.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -139,30 +139,51 @@ def main():
         print("attrs   :", (hdr_res or {}).get("attrs"))
         hdr_breakers = ((hdr_res or {}).get("attrs") or {}).get("detected_breakers") or []
         print(f"\n--- Breakers found in HEADER attrs: {len(hdr_breakers)} ---")
-        for b in hdr_breakers:
-            print(_one_line_breaker(b))
 
-        # ---- Table summary ----
-        print("\n=== TABLE PARSER ===")
+        # ---- Table summary (tally only) ----
+        print("\n=== TABLE PARSER (summary) ===")
         if tbl_res:
-            tbl_breakers = tbl_res.get("detected_breakers") or []
-            print("spaces  :", tbl_res.get("spaces"))
-            print(f"breakers: {len(tbl_breakers)}")
-            print("\n--- Breakers from TABLE parser ---")
-            for b in tbl_breakers:
-                print(_one_line_breaker(b))
+            spaces            = tbl_res.get("spaces")
+            detected_breakers = tbl_res.get("detected_breakers") or []
+            breaker_counts    = tbl_res.get("breakerCounts") or {}
+
+            print("spaces        :", spaces)
+            print("rows parsed   :", len(detected_breakers))
+            print("Breakers (tally):")
+
+            if not breaker_counts:
+                print("  (none detected)")
+            else:
+                # sort by poles, then amps numerically: 1P_20A, 1P_30A, 3P_100A, ...
+                def _sort_key(item):
+                    key, _count = item
+                    m = re.match(r"(\d+)P_(\d+)A", key)
+                    if not m:
+                        return (9999, 9999, key)
+                    p = int(m.group(1))
+                    a = int(m.group(2))
+                    return (p, a, key)
+
+                for key, count in sorted(breaker_counts.items(), key=_sort_key):
+                    m = re.match(r"(\d+)P_(\d+)A", key)
+                    if m:
+                        poles = int(m.group(1))
+                        amps  = int(m.group(2))
+                        print(f"  {poles} P, {amps} A, count - {count}")
+                    else:
+                        print(f"  {key}, count - {count}")
         else:
             print("parser  : None")
-            tbl_breakers = []
+            detected_breakers = []
 
         total_hdr_breakers += len(hdr_breakers)
-        total_tbl_breakers += len(tbl_breakers)
+        total_tbl_breakers += len(detected_breakers)
 
         all_results.append({
             "image": img_path,
             "results": result,
             "header_breakers": hdr_breakers,
-            "table_breakers": tbl_breakers,
+            "table_breakers": detected_breakers,
         })
 
     # ---- Write JSON dump ----

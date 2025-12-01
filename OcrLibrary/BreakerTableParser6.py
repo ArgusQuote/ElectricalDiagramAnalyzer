@@ -991,34 +991,332 @@ class SeparatedLayoutParser:
     """
     Handles parsing when the header layout is 'separated':
       - Trip and poles live in different hero columns (left/right).
-      - For now, we only:
-          * identify the trip/poles columns from the header scan
-          * crop their body strips (header_bottom -> footer)
-          * save debug images (raw + upscaled) per column
-      - No breaker OCR / row parsing yet; that will be layered on later.
+      - Identifies body rows from the grid lines.
+      - OCRs the trip/poles body strips and associates them by row.
+      - Emits per-breaker records plus an aggregate (amps/poles) histogram.
     """
 
     def __init__(self, *, debug: bool = False, reader=None):
         self.debug = bool(debug)
-        self.reader = reader  # reserved for when we start OCR'ing the body
+        self.reader = reader  # shared EasyOCR instance (same as header)
 
-    def parse(self, analyzer_result: Dict, header_scan: Dict) -> Dict:
+    def _find_body_rows(
+        self,
+        gray_lines,
+        body_y_top: int,
+        body_y_bottom: int,
+        x_min: int,
+        x_max: int,
+    ):
+        """
+        Use horizontal grid lines inside the body band to estimate row bands.
+
+        Returns a list of (row_top, row_bottom) in PAGE coordinates.
+        """
+        import cv2
+        import numpy as np  # noqa: F401  (may be useful later)
+
+        if gray_lines is None:
+            return []
+
+        H, W = gray_lines.shape[:2]
+        body_y_top = max(0, min(H - 1, int(body_y_top)))
+        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
+
+        if body_y_bottom <= body_y_top + 4:
+            return []
+
+        x_min = max(0, min(W - 1, int(x_min)))
+        x_max = max(x_min + 1, min(W, int(x_max)))
+
+        band = gray_lines[body_y_top:body_y_bottom, x_min:x_max]
+        if band.size == 0:
+            return []
+
+        # 1) binarize
+        blur = cv2.GaussianBlur(band, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # 2) emphasize horizontal strokes
+        Kh = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (
+                max(15, int(0.40 * (x_max - x_min))),  # wide
+                1,                                     # thin vertically
+            ),
+        )
+        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+
+        # 3) connected components over horizontal candidates
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            h_candidates,
+            connectivity=8,
+        )
+        if num_labels <= 1:
+            return []
+
+        min_full_w = int(0.70 * (x_max - x_min))           # must span most of width
+        max_thick = max(2, int(0.03 * (body_y_bottom - body_y_top)))  # must be thin
+
+        ys_raw = []
+        for i in range(1, num_labels):
+            x, y, w, h, area = stats[i]
+            if w < min_full_w:
+                continue
+            if h > max_thick:
+                continue
+            ys_raw.append(y + h // 2)
+
+        if not ys_raw:
+            return []
+
+        ys_raw.sort()
+
+        # collapse near-duplicate line centers
+        merged = []
+        MERGE_PX = 3
+        for y in ys_raw:
+            if not merged or abs(y - merged[-1]) > MERGE_PX:
+                merged.append(y)
+
+        if not merged:
+            return []
+
+        # Convert line centers into row bands (top/bottom in page coords)
+        row_spans = []
+        last_center = None
+        for idx, yc in enumerate(merged):
+            if idx == 0:
+                top = body_y_top
+            else:
+                mid = (last_center + yc) // 2 + body_y_top
+                top = max(body_y_top, mid)
+
+            last_center = yc
+
+            if idx + 1 < len(merged):
+                next_center = merged[idx + 1]
+                mid = (yc + next_center) // 2 + body_y_top
+                bottom = min(body_y_bottom, mid)
+            else:
+                bottom = body_y_bottom
+
+            if bottom > top + 3:
+                row_spans.append((int(top), int(bottom)))
+
+        return row_spans
+
+    def _ocr_body_column(
+        self,
+        gray_body,
+        body_y_top: int,
+        body_y_bottom: int,
+        x_left: int,
+        x_right: int,
+    ):
+        """
+        OCR a single trip/poles body strip and return tokens in PAGE coordinates.
+        """
+        import cv2
+
+        if gray_body is None or self.reader is None:
+            return []
+
+        H, W = gray_body.shape[:2]
+        body_y_top = max(0, min(H - 1, int(body_y_top)))
+        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
+        x_left = max(0, min(W - 1, int(x_left)))
+        x_right = max(x_left + 1, min(W, int(x_right)))
+
+        band = gray_body[body_y_top:body_y_bottom, x_left:x_right]
+        if band.size == 0:
+            return []
+
+        band_up = cv2.resize(
+            band,
+            None,
+            fx=_HDR_OCR_SCALE,
+            fy=_HDR_OCR_SCALE,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+        try:
+            dets = self.reader.readtext(
+                band_up,
+                detail=1,
+                paragraph=False,
+                allowlist=_HDR_OCR_ALLOWLIST,
+                mag_ratio=1.0,
+                contrast_ths=0.05,
+                adjust_contrast=0.7,
+                text_threshold=0.4,
+                low_text=0.25,
+            )
+        except Exception:
+            dets = []
+
+        tokens = []
+        H_band, W_band = band.shape[:2]
+
+        for box, txt, conf in dets:
+            try:
+                conf_f = float(conf or 0.0)
+            except Exception:
+                conf_f = 0.0
+
+            if conf_f < _HDR_MIN_CONF:
+                continue
+
+            pts_local = [
+                (
+                    int(p[0] / _HDR_OCR_SCALE),
+                    int(p[1] / _HDR_OCR_SCALE),
+                )
+                for p in box
+            ]
+            xs = [p[0] for p in pts_local]
+            ys = [p[1] for p in pts_local]
+
+            x1_local = max(0, min(xs))
+            x2_local = min(W_band - 1, max(xs))
+            y1_local = max(0, min(ys))
+            y2_local = min(H_band - 1, max(ys))
+
+            x1_page = x_left + x1_local
+            x2_page = x_left + x2_local
+            y1_page = body_y_top + y1_local
+            y2_page = body_y_top + y2_local
+
+            tokens.append(
+                {
+                    "text": str(txt or "").strip(),
+                    "conf": conf_f,
+                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                }
+            )
+
+        return tokens
+
+    def _row_text_for_column(self, row_top: int, row_bottom: int, col_tokens):
+        """
+        For a given column + row band, stitch together all tokens that fall
+        in that vertical band, ordered left→right.
+        """
+        if not col_tokens:
+            return ""
+
+        parts = []
+        for tok in col_tokens:
+            x1, y1, x2, y2 = tok["box_page"]
+            y_center = 0.5 * (y1 + y2)
+            if y_center < row_top or y_center >= row_bottom:
+                continue
+            parts.append((x1, tok["text"]))
+
+        if not parts:
+            return ""
+
+        parts.sort(key=lambda t: t[0])
+        return " ".join(p[1] for p in parts).strip()
+
+    def _parse_trip_value(self, text: str):
+        """
+        Extract an amp rating (e.g. '20', '20A', '20 AMP') from trip text.
+        Returns an int or None.
+        """
+        import re
+
+        if not text:
+            return None
+
+        t = text.upper()
+        # If clearly marked SPARE, ignore
+        if "SPARE" in t or "SPACE" in t:
+            return None
+
+        m = re.search(r"(\d{1,4})", t)
+        if not m:
+            return None
+
+        try:
+            val = int(m.group(1))
+        except Exception:
+            return None
+
+        if val <= 0:
+            return None
+
+        return val
+
+    def _parse_poles_value(self, text: str):
+        """
+        Extract a pole count (1/2/3) from poles text.
+        Returns 1,2,3 or None.
+        """
+        import re
+
+        if not text:
+            return None
+
+        t = text.upper()
+        if "SPARE" in t or "SPACE" in t:
+            return None
+
+        # Strong patterns first
+        if "3P" in t or "3-P" in t or "3 POLE" in t:
+            return 3
+        if "2P" in t or "2-P" in t or "2 POLE" in t:
+            return 2
+        if "1P" in t or "1-P" in t or "1 POLE" in t:
+            return 1
+        if "SP" in t:  # SP = single pole
+            return 1
+
+        # Fallback: bare digit 1/2/3
+        m = re.search(r"\b([123])\b", t)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                pass
+
+        return None
+
+    def parse(self, analyzer_result: dict, header_scan: dict) -> dict:
         """
         Given analyzer_result + header_scan with normalizedColumns.layout == 'separated',
-        crop the body strips for all trip/poles columns and emit debug images.
+        we:
+          - crop body strips for trip/poles columns
+          - detect body row bands from the grid
+          - OCR each trip/poles column
+          - associate each row's amps + poles
+          - accumulate breaker counts
         """
-        # --- image sources (same pattern as HeaderBandScanner) ---
+        import os
+        import cv2
+
+        # --- image sources ---
         raw_gray      = analyzer_result.get("gray", None)
         gridless_gray = analyzer_result.get("gridless_gray", None)
 
-        gray_body = gridless_gray if gridless_gray is not None else raw_gray
-        if gray_body is None:
+        gray_body  = gridless_gray if gridless_gray is not None else raw_gray
+        gray_lines = raw_gray if raw_gray is not None else gray_body
+
+        if gray_body is None or gray_lines is None:
             if self.debug:
-                print("[SeparatedLayoutParser] Missing gray_body; cannot crop body columns.")
+                print("[SeparatedLayoutParser] Missing gray_body/gray_lines; cannot crop body columns.")
             return {
                 "layout": "separated",
                 "bodyColumns": [],
                 "detected_breakers": [],
+                "breakerCounts": {},
             }
 
         H, W = gray_body.shape[:2]
@@ -1031,11 +1329,10 @@ class SeparatedLayoutParser:
 
         base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
 
-        # --- header / footer anchors ---
-        header_y         = analyzer_result.get("header_y")
-        header_bottom_y  = analyzer_result.get("header_bottom_y")
+        # --- header anchor / body top ---
+        header_y        = analyzer_result.get("header_y")
+        header_bottom_y = analyzer_result.get("header_bottom_y")
 
-        # Prefer explicit header_bottom_y, else fall back to headerScan band
         band_y2 = header_scan.get("band_y2")
         if isinstance(header_bottom_y, (int, float)) and isinstance(header_y, (int, float)):
             body_y_top = max(0, int(header_bottom_y))
@@ -1046,21 +1343,13 @@ class SeparatedLayoutParser:
         else:
             body_y_top = 0
 
-        # Footer top (defensive against different analyzer versions)
-        footer_y = analyzer_result.get("footer_y")
-        if not isinstance(footer_y, (int, float)):
-            footer_y = analyzer_result.get("footer_top_y")
-        if not isinstance(footer_y, (int, float)):
-            footer_y = analyzer_result.get("footer_band_y1")
-        if not isinstance(footer_y, (int, float)):
-            footer_y = H  # fallback: run to bottom of page
-
-        body_y_bottom = min(H, int(footer_y))
+        # --- TEMP: ignore footer completely; just run to bottom of panel image ---
+        body_y_bottom = H
 
         if self.debug:
             print(
                 f"[SeparatedLayoutParser] Body Y-range: [{body_y_top}, {body_y_bottom}) "
-                f"(H={H})"
+                f"(H={H})  (footer ignored; using full page height)"
             )
 
         if body_y_bottom <= body_y_top + 4:
@@ -1070,6 +1359,7 @@ class SeparatedLayoutParser:
                 "layout": "separated",
                 "bodyColumns": [],
                 "detected_breakers": [],
+                "breakerCounts": {},
             }
 
         normalized = header_scan.get("normalizedColumns") or {}
@@ -1084,6 +1374,7 @@ class SeparatedLayoutParser:
                 "layout": normalized.get("layout", "unknown"),
                 "bodyColumns": [],
                 "detected_breakers": [],
+                "breakerCounts": {},
             }
 
         cols_summary = normalized.get("columns", []) or []
@@ -1091,8 +1382,10 @@ class SeparatedLayoutParser:
         # We want all columns that are trip or poles (both sides)
         wanted_roles = {"trip", "poles"}
 
-        body_columns: List[Dict] = []
+        body_columns = []
+        tokens_by_col_index = {}
 
+        # --- crop body strips for trip/poles and OCR them ---
         for col in cols_summary:
             role = col.get("role")
             if role not in wanted_roles:
@@ -1125,7 +1418,7 @@ class SeparatedLayoutParser:
                     )
                     raw_path = None
 
-                # Up-res body strip (same scale factor as header OCR)
+                # Up-res body strip
                 try:
                     body_up = cv2.resize(
                         body_strip,
@@ -1159,17 +1452,113 @@ class SeparatedLayoutParser:
                 }
             )
 
+            # OCR this body strip now and store tokens in page coords
+            tokens_by_col_index[col["index"]] = self._ocr_body_column(
+                gray_body,
+                body_y_top,
+                body_y_bottom,
+                x_left,
+                x_right,
+            )
+
         if self.debug:
             print(
                 f"[SeparatedLayoutParser] Extracted {len(body_columns)} body columns "
                 f"for trip/poles."
             )
 
-        # No breaker parsing yet; just prepping geometry + debug images.
+        if not body_columns or not tokens_by_col_index:
+            return {
+                "layout": "separated",
+                "bodyColumns": body_columns,
+                "detected_breakers": [],
+                "breakerCounts": {},
+            }
+
+        # --- assign columns to left/right sides based on X center ---
+        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
+        global_left = min(c["x_left"] for c in role_cols)
+        global_right = max(c["x_right"] for c in role_cols)
+        center_x = 0.5 * (global_left + global_right)
+
+        by_side = {
+            "left": {"trip": None, "poles": None},
+            "right": {"trip": None, "poles": None},
+        }
+
+        for col in role_cols:
+            col_center = 0.5 * (col["x_left"] + col["x_right"])
+            side = "left" if col_center < center_x else "right"
+            role = col["role"]
+            # First one wins per side/role (if there happen to be multiples)
+            if by_side[side][role] is None:
+                by_side[side][role] = col["index"]
+
+        if self.debug:
+            print("[SeparatedLayoutParser] trip/poles columns by side:", by_side)
+
+        # --- find body row bands from the grid lines ---
+        row_spans = self._find_body_rows(
+            gray_lines,
+            body_y_top,
+            body_y_bottom,
+            global_left,
+            global_right,
+        )
+
+        if self.debug:
+            print(f"[SeparatedLayoutParser] Found {len(row_spans)} body row bands.")
+
+        detected_breakers = []
+        breaker_counts: Dict[str, int] = {}
+
+        # --- walk rows and associate amps + poles per side ---
+        for row_idx, (row_top, row_bottom) in enumerate(row_spans):
+            for side in ("left", "right"):
+                trip_idx = by_side[side].get("trip")
+                poles_idx = by_side[side].get("poles")
+                if trip_idx is None or poles_idx is None:
+                    continue
+
+                trip_tokens = tokens_by_col_index.get(trip_idx, [])
+                poles_tokens = tokens_by_col_index.get(poles_idx, [])
+
+                trip_text = self._row_text_for_column(row_top, row_bottom, trip_tokens)
+                poles_text = self._row_text_for_column(row_top, row_bottom, poles_tokens)
+
+                amps = self._parse_trip_value(trip_text)
+                poles = self._parse_poles_value(poles_text)
+
+                if amps is None or poles is None:
+                    continue
+
+                key = f"{amps}A_{poles}P"
+                breaker_counts[key] = breaker_counts.get(key, 0) + 1
+
+                detected_breakers.append(
+                    {
+                        "side": side,
+                        "rowIndex": row_idx,
+                        "rowTop": row_top,
+                        "rowBottom": row_bottom,
+                        "amps": int(amps),
+                        "poles": int(poles),
+                        "tripText": trip_text,
+                        "polesText": poles_text,
+                    }
+                )
+
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] detected_breakers={len(detected_breakers)}, "
+                f"unique combos={len(breaker_counts)}"
+            )
+
         return {
             "layout": "separated",
             "bodyColumns": body_columns,
-            "detected_breakers": [],
+            "detected_breakers": detected_breakers,
+            "breakerCounts": breaker_counts,
         }
 
 class BreakerTableParser:
@@ -1207,7 +1596,9 @@ class BreakerTableParser:
           - Reads spaces from analyzer_result (corrected if available)
           - Runs the header-band OCR scan
           - If header layout is 'separated', runs SeparatedLayoutParser
-          - Returns skeleton parser result (no breaker parsing yet)
+          - Aggregates detected breakers into breakerCounts
+          - Prints a human-readable summary to the terminal (when debug=True)
+          - Returns JSON-safe parser result
         """
         if not isinstance(analyzer_result, dict):
             analyzer_result = {}
@@ -1230,10 +1621,25 @@ class BreakerTableParser:
             if self.debug:
                 print("[BreakerTableParser] Layout 'separated' → using SeparatedLayoutParser.")
             separated_scan = self._separated_parser.parse(analyzer_result, header_scan)
-            detected_breakers = separated_scan.get("detected_breakers", [])
+            detected_breakers = separated_scan.get("detected_breakers", []) or []
         else:
             if self.debug:
                 print(f"[BreakerTableParser] Layout '{layout}' → no body parser yet.")
+
+        # --- Aggregate breaker counts (amps + poles) ---
+        breaker_counts: Dict[str, int] = {}
+        for br in detected_breakers:
+            amps = br.get("amps")
+            poles = br.get("poles")
+            if amps is None or poles is None:
+                continue
+            try:
+                a = int(amps)
+                p = int(poles)
+            except Exception:
+                continue
+            key = f"{p}P_{a}A"   # e.g. "1P_20A"
+            breaker_counts[key] = breaker_counts.get(key, 0) + 1
 
         if self.debug:
             print(
@@ -1241,12 +1647,141 @@ class BreakerTableParser:
                 f"{header_scan.get('band_y2')}) tokens={len(header_scan.get('tokens', []))}"
             )
 
-        # Minimal, legacy-compatible result + new separated path metadata
-        return {
+        # --- Build final JSON-safe result ---
+        result = {
             "parserVersion": PARSER_VERSION,
             "name": None,  # API will overwrite with deduped panel name
             "spaces": int(spaces),
             "detected_breakers": detected_breakers,
+            "breakerCounts": breaker_counts,
             "headerScan": header_scan,
             "separatedScan": separated_scan,
         }
+
+        # --- Human-readable terminal summary (only when debug=True) ---
+        if self.debug:
+            self._print_terminal_summary(analyzer_result, result)
+
+        return result
+
+    def _print_terminal_summary(self, analyzer_result: Dict, result: Dict) -> None:
+        """
+        Print a simple, human-readable summary that mirrors the final JSON, per panel:
+
+          Panel name - LIA
+          Amps - 125A, main breaker amps - Unknown, volts - 480V, spaces - 42
+          Breakers
+            1 P, 20 A, count - 30
+            3 P, 100 A, count - 4
+            ...
+
+        No per-breaker rows are printed here; only the aggregated tally.
+        """
+
+        # ---- Source image / crop ----
+        src_path = analyzer_result.get("src_path") or analyzer_result.get("image_path")
+        if src_path:
+            src_name = os.path.basename(src_path)
+        else:
+            src_name = "Unknown source"
+
+        # ---- Panel-level metadata ----
+
+        # Name: prefer parser result, then analyzer, then header attrs if present
+        name = (
+            result.get("name")
+            or analyzer_result.get("panel_name")
+            or analyzer_result.get("name")
+        )
+
+        header_attrs = analyzer_result.get("header_attrs") or {}
+        if not name:
+            name = header_attrs.get("name")
+
+        if not name:
+            name = "Unknown"
+
+        # Amps / main breaker amps / voltage:
+
+        # Panel bus amps
+        panel_amps = (
+            analyzer_result.get("panel_amps")
+            or analyzer_result.get("amps")
+            or analyzer_result.get("rating_amps")
+            or header_attrs.get("amperage")
+        )
+
+        # Main breaker amps
+        main_breaker_amps = (
+            analyzer_result.get("main_breaker_amps")
+            or analyzer_result.get("main_amps")
+            or analyzer_result.get("main_rating_amps")
+        )
+
+        # Voltage
+        volts = (
+            analyzer_result.get("voltage")
+            or analyzer_result.get("volts")
+            or analyzer_result.get("system_voltage")
+            or header_attrs.get("voltage")
+        )
+
+        spaces = result.get("spaces")
+
+        # Convert missing values to "Unknown" strings for nice printing
+        def _fmt(v: Optional[object], suffix: str = "") -> str:
+            if v is None:
+                return "Unknown"
+            try:
+                if suffix:
+                    return f"{int(v)}{suffix}"
+                return str(v)
+            except Exception:
+                return str(v)
+
+        panel_amps_str = _fmt(panel_amps, "A")
+        main_amps_str = _fmt(main_breaker_amps, "A")
+        volts_str = _fmt(volts, "V")
+        spaces_str = _fmt(spaces)
+
+        breaker_counts: Dict[str, int] = result.get("breakerCounts") or {}
+
+        # ---- Pretty print ----
+        print()
+        print("====================================")
+        print(f"Source    - {src_name}")
+        print(f"Panel name - {name}")
+        print(
+            f"Amps - {panel_amps_str}, "
+            f"main breaker amps - {main_amps_str}, "
+            f"volts - {volts_str}, "
+            f"spaces - {spaces_str}"
+        )
+        print("Breakers")
+
+        if not breaker_counts:
+            print("  (none detected)")
+            print("====================================")
+            return
+
+        # sort by poles, then amps numerically if possible
+        def _sort_key(item):
+            key, _count = item
+            m = re.match(r"(\d+)P_(\d+)A", key)
+            if not m:
+                return (9999, 9999, key)
+            p = int(m.group(1))
+            a = int(m.group(2))
+            return (p, a, key)
+
+        for key, count in sorted(breaker_counts.items(), key=_sort_key):
+            m = re.match(r"(\d+)P_(\d+)A", key)
+            if m:
+                poles = int(m.group(1))
+                amps = int(m.group(2))
+                print(f"  {poles} P, {amps} A, count - {count}")
+            else:
+                # Fallback if key format ever changes
+                print(f"  {key}, count - {count}")
+
+        print("====================================")
