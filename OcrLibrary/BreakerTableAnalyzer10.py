@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableAnalyzer6.py
+# OcrLibrary/BreakerTableAnalyzer9.py
 from __future__ import annotations
 import os, re, json, difflib, cv2, numpy as np
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ from AnchoringClasses.BreakerHeaderFinder import BreakerHeaderFinder, HeaderResu
 from AnchoringClasses.BreakerFooterFinder import BreakerFooterFinder, FooterResult
 
 # Version: TP band location removed. Hybrid footer logic (Total Load/Load + structural).
-ANALYZER_VERSION = "Analyzer6"
+ANALYZER_VERSION = "Analyzer9"
 ANALYZER_ORIGIN  = __file__
 
 
@@ -69,10 +69,10 @@ class BreakerTableAnalyzer:
       - image prep
       - HEADER / FIRST BREAKER row / row centers via BreakerHeaderFinder
       - HYBRID footer:
-          new primary: token-based footer via BreakerFooterFinder
-          fallback   : structural footer from header finder
+          primary  : token-based footer via BreakerFooterFinder
+          fallback : structural footer from header finder
       - remove gridlines (Gridless_Images/)
-      - optional overlay to <src_dir>/debug
+      - optional overlay to <debug_root_dir> or <src_dir>/debug
 
     Outputs a dict payload consumed by the parser (second stage).
     """
@@ -114,6 +114,13 @@ class BreakerTableAnalyzer:
 
         self._last_gridless_path: Optional[str] = None
 
+        # footer token info (from footer finder)
+        self._footer_token_y: Optional[int] = None
+        self._footer_token_val: Optional[int] = None
+
+        # External debug root; if set, all overlays go there
+        self.debug_root_dir: Optional[str] = None
+
         cfg_path = _abs_repo_cfg(config_path)
         self._cfg = _load_jsonc(cfg_path) or {}
 
@@ -146,9 +153,21 @@ class BreakerTableAnalyzer:
         if not os.path.exists(src_path):
             raise FileNotFoundError(src_path)
         src_dir = os.path.dirname(src_path)
-        debug_dir = os.path.join(src_dir, "debug")
+
+        # Choose debug directory:
+        # - if debug_root_dir is set, use that
+        # - otherwise fall back to <src_dir>/debug
+        if self.debug_root_dir:
+            debug_dir = os.path.abspath(self.debug_root_dir)
+        else:
+            debug_dir = os.path.join(src_dir, "debug")
+
         if self.debug:
             os.makedirs(debug_dir, exist_ok=True)
+            # footer finder debug output (vertical_mask, col crops) goes here
+            self._footer_finder.debug_dir = debug_dir
+        else:
+            self._footer_finder.debug_dir = None
 
         img = cv2.imread(src_path, cv2.IMREAD_COLOR)
         if img is None:
@@ -159,6 +178,8 @@ class BreakerTableAnalyzer:
         # reset per-run debug state
         self._ocr_footer_marks = []
         self._v_grid_xs = []
+        self._footer_token_y = None
+        self._footer_token_val = None
 
         # ---------- HEADER + ROW STRUCTURE VIA HEADER FINDER ----------
         header_res: HeaderResult = self._header_finder.analyze_rows(gray)
@@ -167,7 +188,7 @@ class BreakerTableAnalyzer:
         dbg      = header_res.dbg
         header_y = header_res.header_y
 
-        # expose OCR debug items to external code/dev tools
+        # OCR debug items (includes CCT/CKT tokens)
         self._ocr_dbg_items = self._header_finder.ocr_dbg_items
         self._ocr_dbg_rois  = self._header_finder.ocr_dbg_rois
 
@@ -192,12 +213,15 @@ class BreakerTableAnalyzer:
             centers=centers,
             dbg=dbg,
             ocr_dbg_items=self._ocr_dbg_items,
-            footer_struct_y=self._footer_struct_y,
+            footer_struct_y=self._footer_struct_y,  # fallback only
+            orig_bgr=img,                           # source image for crops
         )
 
         footer_y = footer_res.footer_y
         self._last_footer_y = footer_y
         self._ocr_footer_marks = footer_res.dbg_marks
+        self._footer_token_y   = footer_res.token_y
+        self._footer_token_val = footer_res.token_val
 
         # ---------- OVERLAY PATHS ----------
         page_overlay_path = None
@@ -256,7 +280,7 @@ class BreakerTableAnalyzer:
                 footer_y,
             )
 
-            # columns overlay (vertical grid xs)
+            # columns overlay (vertical grid xs from grid removal)
             column_overlay_path = os.path.join(
                 debug_dir, f"{base}_columns_{ts}.png"
             )
@@ -502,6 +526,113 @@ class BreakerTableAnalyzer:
         except Exception:
             pass
 
+    # ---------- helper: recompute verticals + CCT/CKT columns for overlay ----------
+    def _compute_cct_columns_for_debug(
+        self,
+        gray: np.ndarray,
+        header_y_abs: Optional[int],
+        footer_struct_y: Optional[int],
+    ) -> Tuple[List[Tuple[int, int]], List[int]]:
+        """
+        For debug overlay only:
+          - rebuild vertical-line mask between header and structural footer
+          - use header OCR items (CCT/CKT) to find column spans
+
+        Returns:
+          (cct_column_spans, all_vertical_xs)
+        """
+        H, W = gray.shape
+        if header_y_abs is None or footer_struct_y is None:
+            return [], []
+
+        if footer_struct_y <= header_y_abs + 10:
+            return [], []
+
+        y1 = max(0, int(header_y_abs) - 4)
+        y2 = min(H - 1, int(footer_struct_y) + 4)
+        if y2 <= y1:
+            return [], []
+
+        roi = gray[y1:y2, :]
+        if roi.size == 0:
+            return [], []
+
+        blur = cv2.GaussianBlur(roi, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        roi_h = roi.shape[0]
+        Kv = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (1, max(25, int(0.015 * roi_h))),
+        )
+        v_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kv, iterations=1)
+
+        v_x_centers: List[int] = []
+        num_v, labels_v, stats_v, _ = cv2.connectedComponentsWithStats(
+            v_candidates, connectivity=8,
+        )
+        if num_v > 1:
+            min_vert_len = int(0.40 * roi_h)
+            max_vert_thick = max(2, int(0.02 * W))
+            for i in range(1, num_v):
+                x, y, w, h, area = stats_v[i]
+                if h >= min_vert_len and w <= max_vert_thick and area > 0:
+                    x_center = x + w // 2
+                    v_x_centers.append(int(x_center))
+
+        if not v_x_centers:
+            return [], []
+
+        # collapse near-duplicates
+        xs = sorted(v_x_centers)
+        collapsed: List[int] = []
+        for x in xs:
+            if not collapsed or abs(x - collapsed[-1]) > 4:
+                collapsed.append(x)
+
+        vlines_x = collapsed
+
+        # now use OCR CCT/CKT tokens to pick column spans
+        def _norm(s: str) -> str:
+            return re.sub(
+                r"\s+",
+                " ",
+                re.sub(r"[^A-Z0-9/\[\] \-]", "", (s or "").upper()),
+            ).strip()
+
+        col_spans: set[Tuple[int, int]] = set()
+
+        for item in self._ocr_dbg_items:
+            txt = item.get("text", "")
+            norm = _norm(txt)
+            if norm not in ("CCT", "CKT"):
+                continue
+
+            x1 = int(item["x1"])
+            x2 = int(item["x2"])
+
+            left_candidates  = [vx for vx in vlines_x if vx <= x1]
+            right_candidates = [vx for vx in vlines_x if vx >= x2]
+            if not left_candidates or not right_candidates:
+                continue
+
+            xl = max(left_candidates)
+            xr = min(right_candidates)
+            if xr <= xl:
+                continue
+
+            col_spans.add((xl, xr))
+
+        col_spans_sorted = sorted(col_spans, key=lambda p: p[0])
+        return col_spans_sorted, vlines_x
+
     def _save_debug(
         self,
         gray: np.ndarray,
@@ -511,18 +642,156 @@ class BreakerTableAnalyzer:
         header_y_abs: Optional[int],
         footer_y_abs: Optional[int],
     ):
+        """
+        Main page overlay with:
+          1) Row borders + centers
+          2) Header text line, HEADER, FIRST_BREAKER_LINE
+          3) CCT/CKT column spans (vertical lines around tokens)
+          4) Footer token line + footer line + structural footer (if different)
+          5) Footer dbg marks (e.g. FOOTER_TOKEN_XX, FOOTER_LINE_STRUCT)
+          6) Snap info / spaces info
+        """
         vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         H, W = gray.shape
 
-        # borders
+        # ------------------------------------------------------------------
+        # 1) Row borders + centers
+        # ------------------------------------------------------------------
         for y in borders:
             cv2.line(vis, (0, int(y)), (W - 1, int(y)), (0, 165, 255), 1)
 
-        # centers
         for y in centers:
             cv2.circle(vis, (24, int(y)), 4, (0, 255, 0), -1)
 
-        # HEADER is not explicitly drawn here (handled in other tools if needed)
+        # ------------------------------------------------------------------
+        # 2) HEADER TEXT LINE, HEADER LINE, FIRST BREAKER LINE
+        # ------------------------------------------------------------------
+        first_breaker_line_y = None
+        if header_y_abs is not None:
+            hy = int(header_y_abs)
+
+            # "header text" baseline (just above header rule)
+            header_text_y = max(0, hy - 8)
+            cv2.line(vis, (0, header_text_y), (W - 1, header_text_y), (0, 255, 255), 1)
+            cv2.putText(
+                vis,
+                "HEADER_TEXT",
+                (12, max(16, header_text_y - 4)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+            # actual header rule
+            cv2.line(vis, (0, hy), (W - 1, hy), (255, 255, 0), 2)
+            cv2.putText(
+                vis,
+                "HEADER",
+                (12, max(16, hy + 16)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+            # FIRST_BREAKER_LINE = first border > header
+            for b in sorted(borders):
+                if b > hy + 2:
+                    first_breaker_line_y = int(b)
+                    break
+
+        if first_breaker_line_y is not None:
+            y = int(first_breaker_line_y)
+            cv2.line(vis, (0, y), (W - 1, y), (0, 165, 255), 2)
+            cv2.putText(
+                vis,
+                "FIRST_BREAKER_LINE",
+                (12, max(16, y + 16)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 165, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+        # ------------------------------------------------------------------
+        # 3) CCT/CKT COLUMN SPANS (recomputed from OCR + verticals)
+        # ------------------------------------------------------------------
+        footer_struct = self._footer_struct_y if self._footer_struct_y is not None else footer_y_abs
+        cct_cols, vlines_x = self._compute_cct_columns_for_debug(
+            gray,
+            header_y_abs,
+            footer_struct,
+        )
+
+        # Show ALL vertical candidates (light bluish) for context
+        for x in vlines_x:
+            x = int(x)
+            cv2.line(vis, (x, 0), (x, H - 1), (180, 180, 255), 1)
+
+        # Highlight the specific CCT/CKT columns (magenta pairs)
+        for idx, (xl, xr) in enumerate(cct_cols, start=1):
+            xl = int(xl)
+            xr = int(xr)
+            cv2.line(vis, (xl, 0), (xl, H - 1), (255, 0, 255), 2)
+            cv2.line(vis, (xr, 0), (xr, H - 1), (255, 0, 255), 2)
+
+            label_y = 16
+            if header_y_abs is not None:
+                label_y = max(16, int(header_y_abs) - 6)
+
+            cv2.putText(
+                vis,
+                f"CCT_COL{idx}",
+                (xl + 2, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # ------------------------------------------------------------------
+        # 4) FOOTER TEXT LINE (TOKEN) + FOOTER LINE + STRUCTURAL FOOTER
+        # ------------------------------------------------------------------
+        footer_token_y   = self._footer_token_y
+        footer_token_val = self._footer_token_val
+
+        # Token text baseline (footer text)
+        if footer_token_y is not None:
+            fty = int(footer_token_y)
+            cv2.line(vis, (0, fty), (W - 1, fty), (200, 50, 200), 1)
+            label = (
+                f"FOOTER_TEXT ({footer_token_val})"
+                if footer_token_val is not None
+                else "FOOTER_TEXT"
+            )
+            cv2.putText(
+                vis,
+                label,
+                (12, max(16, fty - 4)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (200, 50, 200),
+                1,
+                cv2.LINE_AA,
+            )
+
+            # Big token label in corner
+            if footer_token_val is not None:
+                cv2.putText(
+                    vis,
+                    f"FOOTER_TOKEN = {footer_token_val}",
+                    (W - 300, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
 
         # structural footer (if different from final, show in dark blue)
         if (
@@ -543,7 +812,7 @@ class BreakerTableAnalyzer:
                 cv2.LINE_AA,
             )
 
-        # final footer
+        # final footer line
         if footer_y_abs is not None:
             y = int(footer_y_abs)
             cv2.line(vis, (0, y), (W - 1, y), (0, 0, 255), 2)
@@ -558,22 +827,26 @@ class BreakerTableAnalyzer:
                 cv2.LINE_AA,
             )
 
-        # OCR cue markers (from footer finder)
+        # ------------------------------------------------------------------
+        # 5) OCR cue markers from footer finder (dbg_marks)
+        # ------------------------------------------------------------------
         for y_mark, label in getattr(self, "_ocr_footer_marks", []):
             y = int(y_mark)
-            cv2.line(vis, (0, y), (W - 1, y), (200, 50, 200), 1)
+            cv2.line(vis, (0, y), (W - 1, y), (160, 160, 255), 1)
             cv2.putText(
                 vis,
                 label,
                 (240, max(14, y - 4)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.45,
-                (200, 50, 200),
+                (160, 160, 255),
                 1,
                 cv2.LINE_AA,
             )
 
-        # snap trail + counts
+        # ------------------------------------------------------------------
+        # 6) snap trail + counts
+        # ------------------------------------------------------------------
         note = getattr(self, "_snap_note", None)
         det = getattr(self, "_spaces_detected", None)
         cor = getattr(self, "_spaces_corrected", None)
