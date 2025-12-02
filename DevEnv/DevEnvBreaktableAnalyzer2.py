@@ -11,7 +11,7 @@ import numpy as np
 
 # ---------- HARD-CODED PATHS ----------
 SOURCE_PATH = "/home/marco/Documents/Diagrams/CaseStudy_VectorCrop_Run15"
-DEBUG_OUTPUT_DIR = "/home/marco/Documents/Diagrams/BreakerDebug"
+DEBUG_OUTPUT_DIR = "/home/marco/Documents/Diagrams/BreakerDebug3"
 
 DEBUG_MODE = True  # set False if you want no debug.png outputs
 
@@ -21,7 +21,7 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from OcrLibrary.BreakerTableAnalyzer10 import BreakerTableAnalyzer, ANALYZER_VERSION
+from OcrLibrary.BreakerTableAnalyzer11 import BreakerTableAnalyzer, ANALYZER_VERSION
 
 
 def _collect_images(path: str) -> List[Path]:
