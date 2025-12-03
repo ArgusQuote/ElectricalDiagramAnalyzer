@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import easyocr
 
-# ---------------- PATH SETUP (optional) ----------------
+# ---------------- PATH SETUP ----------------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
@@ -20,6 +20,7 @@ from AnchoringClasses.BreakerHeaderFinder import BreakerHeaderFinder, HeaderResu
 
 
 def prep_gray(img_bgr: np.ndarray) -> np.ndarray:
+    """Convert BGR -> enhanced gray, upscale if too small."""
     g = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
     H, W = g.shape
@@ -29,121 +30,14 @@ def prep_gray(img_bgr: np.ndarray) -> np.ndarray:
     return g
 
 
-def save_header_overlay(
-    gray: np.ndarray,
-    header_res: HeaderResult,
-    out_path: str,
-):
-    """
-    Header-only overlay:
-      - horizontal row borders
-      - HEADER_TEXT line
-      - HEADER line
-      - FIRST_BREAKER_LINE
-    """
-    vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-    H, W = gray.shape
-
-    borders = header_res.dbg.lines
-    centers = header_res.centers
-    header_y = header_res.header_y
-
-    # ----------------------------------------------------------------------
-    # draw row borders lightly for context
-    # ----------------------------------------------------------------------
-    for y in borders:
-        cv2.line(vis, (0, int(y)), (W - 1, int(y)), (220, 220, 220), 1)
-
-    # ----------------------------------------------------------------------
-    # HEADER + FIRST BREAKER LINE
-    # ----------------------------------------------------------------------
-    first_breaker_line_y = None
-
-    if header_y is not None:
-        hy = int(header_y)
-
-        # "header text" baseline (slightly above header rule)
-        header_text_y = max(0, hy - 8)
-        cv2.line(vis, (0, header_text_y), (W - 1, header_text_y), (0, 255, 255), 1)
-        cv2.putText(
-            vis,
-            "HEADER_TEXT",
-            (12, max(16, header_text_y - 4)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-        # actual header rule
-        cv2.line(vis, (0, hy), (W - 1, hy), (255, 255, 0), 2)
-        cv2.putText(
-            vis,
-            "HEADER",
-            (12, max(16, hy + 16)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 0),
-            2,
-            cv2.LINE_AA,
-        )
-
-        # FIRST_BREAKER_LINE = first border below header
-        for b in sorted(borders):
-            if b > hy + 2:
-                first_breaker_line_y = int(b)
-                break
-
-    if first_breaker_line_y is not None:
-        y = first_breaker_line_y
-        cv2.line(vis, (0, y), (W - 1, y), (0, 165, 255), 2)
-        cv2.putText(
-            vis,
-            "FIRST_BREAKER_LINE",
-            (12, max(16, y + 16)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (0, 165, 255),
-            2,
-            cv2.LINE_AA,
-        )
-
-    # ----------------------------------------------------------------------
-    # optional: small text block with stats at bottom
-    # ----------------------------------------------------------------------
-    stats = []
-    stats.append(f"rows={len(centers)}")
-    if header_y is not None:
-        stats.append(f"header_y={int(header_y)}")
-    if first_breaker_line_y is not None:
-        stats.append(f"first_breaker_y={int(first_breaker_line_y)}")
-
-    if stats:
-        cv2.putText(
-            vis,
-            " | ".join(stats),
-            (12, H - 12),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 255, 0),
-            1,
-            cv2.LINE_AA,
-        )
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    cv2.imwrite(out_path, vis)
-
-
 def main():
-    # ------------------------------------------------------------------
-    # HARD-CODED PATHS: edit these for whatever header test you want
-    # ------------------------------------------------------------------
+    # ---- EDIT THESE PATHS ----
     SOURCE_IMAGE = (
-        "/home/marco/Documents/Diagrams/testfolder/"
-        "generic3_page001_panel05.png"
+        "/home/marco/Documents/Diagrams/CaseStudy_VectorCrop_Run15/"
+        "ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel02.png"
     )
-    OUT_DIR = "/home/marco/Documents/Diagrams/AnchorDebug_HeaderOnly2"
+    OUT_DIR = "/home/marco/Documents/Diagrams/HeaderFinderDebug3"
+    # --------------------------
 
     os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -153,31 +47,29 @@ def main():
 
     gray = prep_gray(img)
 
-    # EasyOCR: use CPU to avoid CUDA OOM headaches
+    # EasyOCR reader
     reader = easyocr.Reader(["en"], gpu=False)
 
-    header_finder = BreakerHeaderFinder(reader, debug=True)
-    # ensure header crop (analysis band) is written here when debug=True
-    header_finder.debug_dir = OUT_DIR
+    # NEW header finder class
+    header_finder = BreakerHeaderFinder(
+        reader,
+        debug=True,           # overlay + band saved only when True
+        debug_dir=OUT_DIR,    # where to dump header band PNG
+    )
 
-    # 1) HEADER + ROW STRUCTURE
+    # Run analysis
     header_res: HeaderResult = header_finder.analyze_rows(gray)
 
     print("Header Y:", header_res.header_y)
-    print("Row count:", len(header_res.centers))
-    print("Row centers:", header_res.centers)
-    print("Structural footer (from header finder):", header_res.footer_struct_y)
-    print("Spaces detected:", header_res.spaces_detected)
-    print("Spaces corrected:", header_res.spaces_corrected)
-    print("Footer snapped?:", header_res.footer_snapped)
-    print("Snap note:", header_res.snap_note)
+
+    # Build overlay on FULL-SIZE image (same size as source)
+    ocr_overlay = header_finder.draw_ocr_overlay(img)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = Path(SOURCE_IMAGE).stem
-    overlay_path = os.path.join(OUT_DIR, f"{base}_header_only_{ts}.png")
-    save_header_overlay(gray, header_res, overlay_path)
-    print("Overlay:", overlay_path)
-    print("Header band (if saved):", os.path.join(OUT_DIR, "header_band.png"))
+    overlay_path = os.path.join(OUT_DIR, f"{base}_header_overlay_{ts}.png")
+    cv2.imwrite(overlay_path, ocr_overlay)
+    print("Overlay saved to:", overlay_path)
 
 
 if __name__ == "__main__":
