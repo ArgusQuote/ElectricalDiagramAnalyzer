@@ -1,6 +1,6 @@
 # OcrLibrary/BreakerTableParser6.py
 from __future__ import annotations
-import os, re, json, cv2, numpy as np
+import os, re, cv2, numpy as np
 from typing import Dict, Optional, List, Tuple
 from difflib import SequenceMatcher
 
@@ -14,8 +14,6 @@ PARSER_VERSION = "BreakerParser6"
 
 # --- simple OCR settings for header band ---
 _HDR_OCR_SCALE        = 2.0          # up-res factor for header band OCR
-_HDR_PAD_ROWS_TOP     = 50           # pixels above header_y
-_HDR_PAD_ROWS_BOT     = 85           # pixels below header_y
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/()."
 _HDR_MIN_CONF         = 0.50         # minimum OCR confidence to use a token for header scoring
 
@@ -30,7 +28,6 @@ class HeaderBandScanner:
 
     def __init__(self, *, debug: bool = False, reader=None):
         self.debug = bool(debug)
-        # Prefer reader provided by analyzer (shared EasyOCR instance)
         if reader is not None:
             self.reader = reader
         elif _HAS_OCR:
@@ -64,14 +61,13 @@ class HeaderBandScanner:
         gray_ocr   = gridless_gray if gridless_gray is not None else raw_gray
         gray_lines = raw_gray if raw_gray is not None else gray_ocr
 
-        header_y = analyzer_result.get("header_y")
-        src_path = analyzer_result.get("src_path")
+        header_y        = analyzer_result.get("header_y")
+        src_path        = analyzer_result.get("src_path")
+        header_bottom_y = analyzer_result.get("header_bottom_y")
 
         H = W = None
         if gray_ocr is not None:
             H, W = gray_ocr.shape
-
-        header_bottom_y = analyzer_result.get("header_bottom_y")
 
         debug_dir = self._ensure_debug_dir(analyzer_result)
         debug_img_raw_path = None
@@ -80,7 +76,7 @@ class HeaderBandScanner:
         # If we don't have the basics, bail gracefully
         if gray_ocr is None or gray_lines is None or header_y is None or H is None:
             if self.debug:
-                print("[HeaderBandScanner] Missing gray or header_y; skipping header scan.")
+                print("[HeaderBandScanner] Missing gray/header_y; skipping header scan.")
             return {
                 "band_y1": None,
                 "band_y2": None,
@@ -93,30 +89,20 @@ class HeaderBandScanner:
                     "columns": [],
                     "layout": "unknown",
                 },
+                "error": "Missing gray image or header_y; cannot scan header band.",
             }
 
-        # --- 1) define the header band in page coordinates ---
-        if (
-            isinstance(header_bottom_y, (int, float))
-            and isinstance(header_y, (int, float))
-            and header_bottom_y > header_y + 4  # must be *below* header line
-        ):
-            y1 = max(0, int(header_y))
-            y2 = min(H, int(header_bottom_y))
-        else:
-            # Fallback: legacy padding behaviour
-            y1 = max(0, int(header_y) - _HDR_PAD_ROWS_TOP)
-            y2 = min(H, int(header_y) + _HDR_PAD_ROWS_BOT)
-
-        band_ocr   = gray_ocr[y1:y2, :]
-        band_lines = gray_lines[y1:y2, :]
-
-        if band_ocr.size == 0 or band_lines.size == 0:
+        # --- 1) define the header band in page coordinates (MUST have valid header_bottom_y) ---
+        if not isinstance(header_bottom_y, (int, float)) or not isinstance(header_y, (int, float)):
             if self.debug:
-                print("[HeaderBandScanner] Empty header band after crop; skipping.")
+                print(
+                    "[HeaderBandScanner] Missing header_bottom_y/header_y; "
+                    "cannot determine header band. Bailing."
+                )
+                print(f"  header_y={header_y!r}, header_bottom_y={header_bottom_y!r}")
             return {
-                "band_y1": y1,
-                "band_y2": y2,
+                "band_y1": None,
+                "band_y2": None,
                 "tokens": [],
                 "debugImageRaw": None,
                 "debugImageOverlay": None,
@@ -126,7 +112,36 @@ class HeaderBandScanner:
                     "columns": [],
                     "layout": "unknown",
                 },
+                "error": "Missing header_bottom_y from analyzer; cannot determine header band.",
             }
+
+        y1 = max(0, int(header_y))
+        y2 = min(H, int(header_bottom_y))
+
+        # Require a non-trivial band height
+        if y2 <= y1 + 4:
+            if self.debug:
+                print(
+                    "[HeaderBandScanner] Header band too small or invalid: "
+                    f"y1={y1}, y2={y2}, H={H}. Bailing."
+                )
+            return {
+                "band_y1": None,
+                "band_y2": None,
+                "tokens": [],
+                "debugImageRaw": None,
+                "debugImageOverlay": None,
+                "columnGroups": [],
+                "normalizedColumns": {
+                    "roles": {},
+                    "columns": [],
+                    "layout": "unknown",
+                },
+                "error": "Invalid header band height from analyzer; cannot scan header.",
+            }
+
+        band_ocr   = gray_ocr[y1:y2, :]
+        band_lines = gray_lines[y1:y2, :]
 
         # --- 1b) save RAW cropped band to debug folder so you can see exactly what we used ---
         if self.debug:
@@ -243,76 +258,9 @@ class HeaderBandScanner:
                         }
                         tokens.append(tok)
                         col_group["items"].append(tok)
-
             else:
-                # --- 2b) Fallback: no reliable verticals -> OCR whole band as a single "column" ---
                 if self.debug:
-                    print("[HeaderBandScanner] No full-height verticals; OCRing whole header band.")
-
-                band_up = cv2.resize(
-                    band_ocr,
-                    None,
-                    fx=_HDR_OCR_SCALE,
-                    fy=_HDR_OCR_SCALE,
-                    interpolation=cv2.INTER_CUBIC,
-                )
-
-                try:
-                    dets = self.reader.readtext(
-                        band_up,
-                        detail=1,
-                        paragraph=False,
-                        allowlist=_HDR_OCR_ALLOWLIST,
-                        mag_ratio=1.0,
-                        contrast_ths=0.05,
-                        adjust_contrast=0.7,
-                        text_threshold=0.4,
-                        low_text=0.25,
-                    )
-                except Exception as e:
-                    if self.debug:
-                        print(f"[HeaderBandScanner] OCR failed on header band (fallback): {e}")
-                    dets = []
-
-                col_group = {
-                    "index": 1,
-                    "x_left": 0,
-                    "x_right": band_ocr.shape[1] - 1,
-                    "items": [],
-                }
-                column_groups.append(col_group)
-
-                H_band, W_band = band_ocr.shape[:2]
-
-                for box, txt, conf in dets:
-                    try:
-                        conf_f = float(conf or 0.0)
-                    except Exception:
-                        conf_f = 0.0
-
-                    pts_band = [
-                        (
-                            int(p[0] / _HDR_OCR_SCALE),
-                            int(p[1] / _HDR_OCR_SCALE),
-                        )
-                        for p in box
-                    ]
-                    xs = [p[0] for p in pts_band]
-                    ys = [p[1] for p in pts_band]
-                    x1b, x2b = max(0, min(xs)), min(W_band - 1, max(xs))
-                    y1b, y2b = max(0, min(ys)), min(H_band - 1, max(ys))
-
-                    y1_abs = y1 + y1b
-                    y2_abs = y1 + y2b
-
-                    tok = {
-                        "text": str(txt or "").strip(),
-                        "conf": conf_f,
-                        "box_band": [int(x1b), int(y1b), int(x2b), int(y2b)],
-                        "box_page": [int(x1b), int(y1_abs), int(x2b), int(y2_abs)],
-                    }
-                    tokens.append(tok)
-                    col_group["items"].append(tok)
+                    print("[HeaderBandScanner] No full-height verticals; skipping header OCR.")
 
         # --- 3) normalize & score columns into semantic roles (ckt/desc/trip/poles) ---
         normalized_columns = self._score_header_columns(column_groups)
@@ -1014,7 +962,7 @@ class SeparatedLayoutParser:
         Returns a list of (row_top, row_bottom) in PAGE coordinates.
         """
         import cv2
-        import numpy as np  # noqa: F401  (may be useful later)
+        import numpy as np
 
         if gray_lines is None:
             return []
@@ -1365,19 +1313,26 @@ class SeparatedLayoutParser:
 
         base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
 
-        # --- header anchor / body top ---
+        # --- header anchor / body top (MUST have header_bottom_y) ---
         header_y        = analyzer_result.get("header_y")
         header_bottom_y = analyzer_result.get("header_bottom_y")
 
-        band_y2 = header_scan.get("band_y2")
-        if isinstance(header_bottom_y, (int, float)) and isinstance(header_y, (int, float)):
-            body_y_top = max(0, int(header_bottom_y))
-        elif isinstance(band_y2, (int, float)):
-            body_y_top = max(0, int(band_y2))
-        elif isinstance(header_y, (int, float)):
-            body_y_top = max(0, int(header_y))
-        else:
-            body_y_top = 0
+        if not isinstance(header_bottom_y, (int, float)):
+            if self.debug:
+                print(
+                    "[SeparatedLayoutParser] Missing header_bottom_y; "
+                    "cannot determine body top. Bailing."
+                )
+                print(f"  header_y={header_y!r}, header_bottom_y={header_bottom_y!r}")
+            return {
+                "layout": "separated",
+                "bodyColumns": [],
+                "detected_breakers": [],
+                "breakerCounts": {},
+                "error": "Missing header_bottom_y from analyzer; cannot determine body band.",
+            }
+
+        body_y_top = max(0, int(header_bottom_y))
 
         # --- TEMP: ignore footer completely; just run to bottom of panel image ---
         body_y_bottom = H
@@ -2185,19 +2140,26 @@ class CombinedLayoutParser:
 
         base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
 
-        # --- header anchor / body top ---
+        # --- header anchor / body top (MUST have header_bottom_y) ---
         header_y        = analyzer_result.get("header_y")
         header_bottom_y = analyzer_result.get("header_bottom_y")
 
-        band_y2 = header_scan.get("band_y2")
-        if isinstance(header_bottom_y, (int, float)) and isinstance(header_y, (int, float)):
-            body_y_top = max(0, int(header_bottom_y))
-        elif isinstance(band_y2, (int, float)):
-            body_y_top = max(0, int(band_y2))
-        elif isinstance(header_y, (int, float)):
-            body_y_top = max(0, int(header_y))
-        else:
-            body_y_top = 0
+        if not isinstance(header_bottom_y, (int, float)):
+            if self.debug:
+                print(
+                    "[CombinedLayoutParser] Missing header_bottom_y; "
+                    "cannot determine body top. Bailing."
+                )
+                print(f"  header_y={header_y!r}, header_bottom_y={header_bottom_y!r}")
+            return {
+                "layout": "combined",
+                "bodyColumns": [],
+                "detected_breakers": [],
+                "breakerCounts": {},
+                "error": "Missing header_bottom_y from analyzer; cannot determine body band.",
+            }
+
+        body_y_top = max(0, int(header_bottom_y))
 
         # TEMP: ignore footer completely; just run to bottom of panel image
         body_y_bottom = H
