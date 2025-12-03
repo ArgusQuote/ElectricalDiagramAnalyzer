@@ -18,6 +18,7 @@ class FooterResult:
     footer_y: Optional[int]
     token_y: Optional[int]
     token_val: Optional[int]
+    panel_size: Optional[int]
     dbg_marks: List[Tuple[int, str]]  # (y, label) for overlays
     vlines_x: List[int] = field(default_factory=list)              # all vertical-line centers (gray coords)
     cct_cols: List[Tuple[int, int]] = field(default_factory=list)  # [(xl, xr), ...] in gray coords
@@ -35,10 +36,22 @@ class BreakerFooterFinder:
             return the CKT/CCT column(s) as cct_cols.
     """
 
-    FOOTER_TOKEN_VALUES = {
-        17, 18, 29, 30, 41, 42, 53, 54,
-        65, 66, 71, 72, 83, 84,
+    # panel size 
+    PANEL_FOOTER_MAP: Dict[int, set[int]] = {
+        84: {84, 83, 82, 81},
+        72: {72, 71, 70, 69},
+        66: {66, 65, 64, 63},
+        54: {54, 53, 52, 51},
+        42: {42, 41, 40, 39},
+        30: {30, 29, 28, 27},
+        18: {18, 17, 16, 15},
     }
+
+    # search largest size first
+    PANEL_SIZE_ORDER: List[int] = [84, 72, 66, 54, 42, 30, 18]
+
+    # flat set of all token values we care about
+    FOOTER_TOKEN_VALUES = set().union(*PANEL_FOOTER_MAP.values())
 
     def __init__(
         self,
@@ -582,7 +595,11 @@ class BreakerFooterFinder:
             "layout": layout,
         }
 
-    def find_footer(self, analyzer_result: Dict) -> FooterResult:
+    def find_footer(
+        self,
+        analyzer_result: Optional[Dict] = None,
+        **kwargs,
+    ) -> FooterResult:
         """
         Current behavior:
           - Crop the header band [header_y, header_bottom_y) exactly like the parser.
@@ -590,9 +607,21 @@ class BreakerFooterFinder:
           - OCR each column band with the same settings as the parser.
           - Run the same header scoring and extract only CKT/CCT columns.
 
-        No actual footer_y detection yet.
+        Supports two calling styles:
+          - find_footer(analyzer_result={...})
+          - find_footer(gray=..., gridless_gray=..., header_y=..., header_bottom_y=..., src_path=..., src_dir=..., debug_dir=...)
         """
-        # --- 0) pull basic images + header geometry from analyzer_result ---
+        # --- 0) normalize inputs into a single analyzer_result dict ---
+        if analyzer_result is None:
+            # Called with keyword args like gray=..., header_y=..., etc.
+            analyzer_result = dict(kwargs)
+        else:
+            # Merge any extra kwargs on top (kwargs wins)
+            tmp = dict(analyzer_result)
+            tmp.update(kwargs)
+            analyzer_result = tmp
+
+        # --- 0b) pull basic images + header geometry from analyzer_result ---
         raw_gray      = analyzer_result.get("gray", None)          # with grid lines
         gridless_gray = analyzer_result.get("gridless_gray", None) # after degridding
 
@@ -617,6 +646,7 @@ class BreakerFooterFinder:
                 footer_y=None,
                 token_y=None,
                 token_val=None,
+                panel_size=None,
                 dbg_marks=dbg_marks,
                 vlines_x=[],
                 cct_cols=[],
@@ -635,6 +665,7 @@ class BreakerFooterFinder:
                 footer_y=None,
                 token_y=None,
                 token_val=None,
+                panel_size=None,
                 dbg_marks=dbg_marks,
                 vlines_x=[],
                 cct_cols=[],
@@ -658,6 +689,7 @@ class BreakerFooterFinder:
                 footer_y=None,
                 token_y=None,
                 token_val=None,
+                panel_size=None,
                 dbg_marks=dbg_marks,
                 vlines_x=[],
                 cct_cols=[],
@@ -789,6 +821,286 @@ class BreakerFooterFinder:
             if col.get("role") == "ckt":
                 cct_cols.append((int(col["x_left"]), int(col["x_right"])))
 
+        # --- 5b) For each CKT/CCT column, crop body (header_bottom_y -> page bottom),
+        #          up-res, trim top/bottom 10%, OCR everything, and save ONLY an overlay.
+        footer_token_candidates: List[Dict] = [] 
+        if cct_cols:
+            y_body_start = int(header_bottom_y)
+            # clamp start in range
+            y_body_start = max(0, min(y_body_start, H - 1))
+            y_body_end = H
+
+            if self.debug:
+                print(
+                    f"[BreakerFooterFinder] Cropping CKT body columns from "
+                    f"y={y_body_start} to y={y_body_end} (H={H})."
+                )
+
+            base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
+
+            side_overlay_written = {"left": False, "right": False}
+
+            for idx, (xl, xr) in enumerate(cct_cols, start=1):
+                xl_clamped = max(0, min(int(xl), W - 1))
+                xr_clamped = max(xl_clamped + 1, min(int(xr), W))
+
+                # decide side for this column based on its center
+                col_center_page = 0.5 * (xl_clamped + xr_clamped)
+                side_for_col = "left" if col_center_page < (W * 0.5) else "right"
+
+                col_body = gray_ocr[y_body_start:y_body_end, xl_clamped:xr_clamped]
+                if col_body.size == 0:
+                    if self.debug:
+                        print(
+                            f"[BreakerFooterFinder] Empty CKT body crop for col {idx}: "
+                            f"xl={xl_clamped}, xr={xr_clamped}"
+                        )
+                    continue
+
+                # Up-res the full body crop
+                col_body_up = cv2.resize(
+                    col_body,
+                    None,
+                    fx=_HDR_OCR_SCALE,
+                    fy=_HDR_OCR_SCALE,
+                    interpolation=cv2.INTER_CUBIC,
+                )
+
+                # --- trim top and bottom 10% of the upresed crop ---
+                H_body_up, W_body_up = col_body_up.shape[:2]
+                trim = int(0.10 * H_body_up)
+                y_top = max(0, trim)
+                y_bot = max(y_top + 1, H_body_up - trim)
+
+                col_body_mid = col_body_up[y_top:y_bot, :]
+                if col_body_mid.size == 0:
+                    if self.debug:
+                        print(
+                            f"[BreakerFooterFinder] Trimmed CKT body crop empty for col {idx}: "
+                            f"H_body_up={H_body_up}, trim={trim}"
+                        )
+                    continue
+
+                # File name for mid-band overlay ONLY (per side)
+                mid_name_overlay = (
+                    f"{base}_footer_ckt_body_{side_for_col}_mid80_overlay.png"
+                )
+                mid_path_overlay = os.path.join(debug_dir, mid_name_overlay)
+
+                # --- OCR on the trimmed mid-band ---
+                dets = []
+                if self.reader is not None:
+                    try:
+                        dets = self.reader.readtext(
+                            col_body_mid,
+                            detail=1,
+                            paragraph=False,
+                            allowlist=_HDR_OCR_ALLOWLIST,
+                            mag_ratio=1.0,
+                            contrast_ths=0.05,
+                            adjust_contrast=0.7,
+                            text_threshold=0.4,
+                            low_text=0.25,
+                        )
+                    except Exception as e:
+                        if self.debug:
+                            print(
+                                f"[BreakerFooterFinder] OCR failed on CKT body col {idx} mid-band: {e}"
+                            )
+                        dets = []
+
+                if self.debug:
+                    print(f"[BreakerFooterFinder] OCR results for CKT body col {idx} (mid 80%):")
+                    for j, (box, txt, conf) in enumerate(dets, start=1):
+                        try:
+                            conf_f = float(conf or 0.0)
+                        except Exception:
+                            conf_f = 0.0
+                        print(f"  [{idx}.{j}] '{txt}' conf={conf_f:.2f} box={box}")
+
+                # --- collect numeric footer token candidates (map to PAGE coords) ---
+                for (box, txt, conf) in dets:
+                    # pull all integer substrings from the OCR text
+                    nums = [int(m.group()) for m in re.finditer(r"\d+", str(txt) or "")]
+                    if not nums:
+                        continue
+
+                    try:
+                        conf_f = float(conf or 0.0)
+                    except Exception:
+                        conf_f = 0.0
+
+                    # ignore low-confidence numbers
+                    if conf_f < 0.50:
+                        continue
+
+                    # box is in col_body_mid coords (upscaled)
+                    pts = [(int(p[0]), int(p[1])) for p in box]
+                    xs = [p[0] for p in pts]
+                    ys = [p[1] for p in pts]
+                    if not xs or not ys:
+                        continue
+
+                    x_mid_c = 0.5 * (min(xs) + max(xs))
+                    y_mid_c = 0.5 * (min(ys) + max(ys))
+
+                    y_up_c = y_top + y_mid_c
+                    x_up_c = x_mid_c
+
+                    y_body_rel = y_up_c / _HDR_OCR_SCALE
+                    x_body_rel = x_up_c / _HDR_OCR_SCALE
+
+                    y_page_c = y_body_start + y_body_rel
+                    x_page_c = xl_clamped + x_body_rel
+
+                    side = "left" if x_page_c < (W * 0.5) else "right"
+
+                    for val in nums:
+                        if val in self.FOOTER_TOKEN_VALUES:
+                            footer_token_candidates.append(
+                                {
+                                    "val": int(val),
+                                    "conf": conf_f,
+                                    "y_page": float(y_page_c),
+                                    "x_page": float(x_page_c),
+                                    "side": side,
+                                    "col_idx": idx,
+                                    "raw_text": str(txt),
+                                }
+                            )
+
+                # --- Build overlay image with OCR boxes + text (with confidence) ---
+                if self.debug and col_body_mid.size > 0 and not side_overlay_written[side_for_col]:
+                    # make color copy for drawing
+                    if len(col_body_mid.shape) == 2:
+                        vis_mid = cv2.cvtColor(col_body_mid, cv2.COLOR_GRAY2BGR)
+                    else:
+                        vis_mid = col_body_mid.copy()
+
+                    for box, txt, conf in dets:
+                        try:
+                            conf_f = float(conf or 0.0)
+                        except Exception:
+                            conf_f = 0.0
+
+                        # EasyOCR box is in the same coordinate system as col_body_mid
+                        pts = [(int(p[0]), int(p[1])) for p in box]
+                        xs = [p[0] for p in pts]
+                        ys = [p[1] for p in pts]
+
+                        x1b = max(0, min(xs))
+                        x2b = min(W_body_up - 1, max(xs))
+                        y1b = max(0, min(ys))
+                        y2b = min(y_bot - y_top - 1, max(ys))
+
+                        # decide if this token is a footer candidate number
+                        nums_for_overlay = [int(m.group()) for m in re.finditer(r"\d+", str(txt) or "")]
+                        is_candidate = (
+                            conf_f >= 0.50
+                            and any(val in self.FOOTER_TOKEN_VALUES for val in nums_for_overlay)
+                        )
+
+                        color = (0, 0, 255) if is_candidate else (0, 255, 0)  # red for candidates, green otherwise
+
+                        # draw rectangle
+                        cv2.rectangle(
+                            vis_mid,
+                            (x1b, y1b),
+                            (x2b, y2b),
+                            color,
+                            1,
+                        )
+
+                        # label with text + confidence
+                        label_txt = f"{txt} ({conf_f:.2f})"
+                        label_y = max(10, y1b - 4)
+                        cv2.putText(
+                            vis_mid,
+                            label_txt,
+                            (x1b, label_y),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.4,
+                            color,
+                            1,
+                            cv2.LINE_AA,
+                        )
+
+                    try:
+                        cv2.imwrite(mid_path_overlay, vis_mid)
+                        side_overlay_written[side_for_col] = True                        
+                        print(
+                            f"[BreakerFooterFinder] Saved CKT body mid80 overlay for col {idx}: {mid_path_overlay}"
+                        )
+                    except Exception as e:
+                        print(
+                            f"[BreakerFooterFinder] Failed to write CKT body mid80 overlay image: {e}"
+                        )
+
+        # --- 5c) choose footer token / panel size from collected candidates ---
+        footer_y: Optional[int] = None
+        token_y: Optional[int] = None
+        token_val: Optional[int] = None
+        panel_size: Optional[int] = None
+
+        if footer_token_candidates:
+            values_present = {c["val"] for c in footer_token_candidates}
+
+            if self.debug:
+                print("[BreakerFooterFinder] footer_token_candidates:")
+                for c in footer_token_candidates:
+                    print(
+                        f"  val={c['val']} conf={c['conf']:.2f} "
+                        f"y_page={c['y_page']:.1f} side={c['side']} col={c['col_idx']} "
+                        f"text='{c['raw_text']}'"
+                    )
+                print(f"[BreakerFooterFinder] values_present={sorted(values_present)}")
+
+            chosen_size: Optional[int] = None
+            chosen_vals: Optional[set[int]] = None
+
+            # search largest first so we don't stop at 18 when 42/84 exist
+            for size in self.PANEL_SIZE_ORDER:
+                needed = self.PANEL_FOOTER_MAP[size]
+                present = values_present & needed
+
+                # require at least 2 numbers from this 4-number window
+                if len(present) >= 2:
+                    chosen_size = size
+                    chosen_vals = present
+                    break
+
+            if chosen_size is not None and chosen_vals:
+                size_cands = [
+                    c for c in footer_token_candidates
+                    if c["val"] in self.PANEL_FOOTER_MAP[chosen_size]
+                ]
+
+                best = max(
+                    size_cands,
+                    key=lambda c: (c["y_page"], c["conf"])
+                )
+
+                footer_y = int(round(best["y_page"]))
+                token_y = footer_y
+                token_val = int(best["val"])
+                panel_size = chosen_size
+
+                dbg_marks.append((footer_y, f"FOOTER_VAL={token_val}"))
+                if self.debug:
+                    print(
+                        "[BreakerFooterFinder] Selected footer token: "
+                        f"panel_size={chosen_size}, "
+                        f"vals_seen={sorted(chosen_vals)}, "
+                        f"val={token_val}, conf={best['conf']:.2f}, "
+                        f"y_page={best['y_page']:.1f}, side={best['side']}"
+                    )
+            else:
+                if self.debug:
+                    print(
+                        "[BreakerFooterFinder] No consistent panel size "
+                        "found from footer token candidates."
+                    )
+
         # --- 6) Debug overlay: band + verticals + CKT boxes ---
         if self.debug:
             vis = cv2.cvtColor(band_lines, cv2.COLOR_GRAY2BGR)
@@ -846,7 +1158,6 @@ class BreakerFooterFinder:
                     0.5,
                     (0, 255, 0),
                     1,
-                    cv2.LINE_AA,
                 )
 
             base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
@@ -862,10 +1173,11 @@ class BreakerFooterFinder:
                 )
 
         return FooterResult(
-            footer_y=None,          # not computed yet
-            token_y=None,           # not computed yet
-            token_val=None,         # not computed yet
+            footer_y=footer_y,
+            token_y=token_y,
+            token_val=token_val,
+            panel_size=panel_size,
             dbg_marks=dbg_marks,
-            vlines_x=v_cols,        # same column separators as parser saw
-            cct_cols=cct_cols,      # ONLY the CKT/CCT column(s)
+            vlines_x=v_cols,
+            cct_cols=cct_cols,
         )

@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableAnalyzer9.py
+# OcrLibrary/BreakerTableAnalyzer10.py
 from __future__ import annotations
 import os, re, json, difflib, cv2, numpy as np
 from dataclasses import dataclass
@@ -24,7 +24,7 @@ from AnchoringClasses.BreakerHeaderFinder import BreakerHeaderFinder, HeaderResu
 from AnchoringClasses.BreakerFooterFinder import BreakerFooterFinder, FooterResult
 
 # Version: TP band location removed. Hybrid footer logic (Total Load/Load + structural).
-ANALYZER_VERSION = "Analyzer9"
+ANALYZER_VERSION = "Analyzer10"
 ANALYZER_ORIGIN  = __file__
 
 
@@ -117,6 +117,7 @@ class BreakerTableAnalyzer:
         # footer token info (from footer finder)
         self._footer_token_y: Optional[int] = None
         self._footer_token_val: Optional[int] = None
+        self._footer_panel_size: Optional[int] = None
 
         # External debug root; if set, all overlays go there
         self.debug_root_dir: Optional[str] = None
@@ -164,9 +165,10 @@ class BreakerTableAnalyzer:
 
         if self.debug:
             os.makedirs(debug_dir, exist_ok=True)
-            # footer finder debug output (vertical_mask, col crops) goes here
+            self._header_finder.debug_dir = debug_dir
             self._footer_finder.debug_dir = debug_dir
         else:
+            self._header_finder.debug_dir = None
             self._footer_finder.debug_dir = None
 
         img = cv2.imread(src_path, cv2.IMREAD_COLOR)
@@ -180,6 +182,12 @@ class BreakerTableAnalyzer:
         self._v_grid_xs = []
         self._footer_token_y = None
         self._footer_token_val = None
+        self._footer_panel_size = None
+        spaces = 0
+        spaces_detected = None
+        spaces_corrected = None
+        self._spaces_detected = None
+        self._spaces_corrected = None
 
         # ---------- HEADER + ROW STRUCTURE VIA HEADER FINDER ----------
         header_res: HeaderResult = self._header_finder.analyze_rows(gray)
@@ -187,22 +195,16 @@ class BreakerTableAnalyzer:
         centers  = header_res.centers
         dbg      = header_res.dbg
         header_y = header_res.header_y
+        header_bottom_y = header_res.header_bottom_y
 
         # OCR debug items (includes CCT/CKT tokens)
         self._ocr_dbg_items = self._header_finder.ocr_dbg_items
         self._ocr_dbg_rois  = self._header_finder.ocr_dbg_rois
 
-        # prefer corrected spaces if available
-        spaces_detected  = header_res.spaces_detected or (len(centers) * 2)
-        spaces_corrected = header_res.spaces_corrected or spaces_detected
-        spaces           = spaces_corrected
-
-        # structural footer from header finder
+        # structural footer from header finder (geometry only)
         self._footer_struct_y     = header_res.footer_struct_y
         self._bottom_border_y     = header_res.bottom_border_y
         self._bottom_row_center_y = header_res.bottom_row_center_y
-        self._spaces_detected     = header_res.spaces_detected
-        self._spaces_corrected    = header_res.spaces_corrected
         self._footer_snapped      = header_res.footer_snapped
         self._snap_note           = header_res.snap_note
 
@@ -210,6 +212,7 @@ class BreakerTableAnalyzer:
         footer_res: FooterResult = self._footer_finder.find_footer(
             gray=gray,
             header_y=header_y,
+            header_bottom_y=header_bottom_y,
             centers=centers,
             dbg=dbg,
             ocr_dbg_items=self._ocr_dbg_items,
@@ -222,6 +225,22 @@ class BreakerTableAnalyzer:
         self._ocr_footer_marks = footer_res.dbg_marks
         self._footer_token_y   = footer_res.token_y
         self._footer_token_val = footer_res.token_val
+
+        # Spaces are footer-only
+        self._footer_panel_size = footer_res.panel_size
+        if isinstance(footer_res.panel_size, int) and footer_res.panel_size > 0:
+            spaces = footer_res.panel_size
+            spaces_detected = footer_res.panel_size
+            spaces_corrected = footer_res.panel_size
+            if self.debug:
+                print(
+                    f"[ANALYZER] Using footer panel_size={footer_res.panel_size} "
+                    f"as spaces"
+                )
+
+        # Store for debug overlay even if still defaults
+        self._spaces_detected = spaces_detected
+        self._spaces_corrected = spaces_corrected
 
         # ---------- OVERLAY PATHS ----------
         page_overlay_path = None
@@ -243,6 +262,7 @@ class BreakerTableAnalyzer:
                 "row_count": len(centers),
                 "spaces": spaces,
                 "header_y": header_y,
+                "header_bottom_y": header_bottom_y,
                 "footer_y": footer_y,
                 "tp_cols": {},
                 "tp_combined": {"left": False, "right": False},
@@ -304,6 +324,7 @@ class BreakerTableAnalyzer:
             "row_count": len(centers),
             "spaces": spaces,
             "header_y": header_y,
+            "header_bottom_y": header_bottom_y,
             "footer_y": footer_y,
             "tp_cols": {},
             "tp_combined": {"left": False, "right": False},
@@ -316,6 +337,7 @@ class BreakerTableAnalyzer:
             "snap_note": getattr(self, "_snap_note", None),
             "v_grid_xs": getattr(self, "_v_grid_xs", []),
             "column_overlay_path": column_overlay_path,
+            "footer_panel_size": self._footer_panel_size,
         }
 
     # ============== internals ==============
@@ -853,9 +875,7 @@ class BreakerTableAnalyzer:
         trail = []
         if det is not None and cor is not None:
             trail.append(
-                f"spaces {det}→{cor}"
-                if det != cor
-                else f"spaces {det}"
+                f"spaces {det}"
             )
         if note:
             trail.append(note)

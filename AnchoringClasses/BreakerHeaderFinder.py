@@ -22,10 +22,9 @@ class HeaderResult:
     centers: List[int]
     dbg: HeaderDbg
     header_y: Optional[int]
+    header_bottom_y: Optional[int]
     footer_struct_y: Optional[int]
     last_footer_y: Optional[int]
-    spaces_detected: int
-    spaces_corrected: int
     footer_snapped: bool
     snap_note: Optional[str]
     bottom_border_y: Optional[int]
@@ -65,8 +64,6 @@ class BreakerHeaderFinder:
         self.bottom_border_y: Optional[int] = None
         self.bottom_row_center_y: Optional[int] = None
 
-        self.spaces_detected: int = 0
-        self.spaces_corrected: int = 0
         self.footer_snapped: bool = False
         self.snap_note: Optional[str] = None
 
@@ -107,8 +104,6 @@ class BreakerHeaderFinder:
         self.last_footer_y = None
         self.bottom_border_y = None
         self.bottom_row_center_y = None
-        self.spaces_detected = 0
-        self.spaces_corrected = 0
         self.footer_snapped = False
         self.snap_note = None
         self.header_text_line_y = None
@@ -126,10 +121,9 @@ class BreakerHeaderFinder:
             centers=centers,
             dbg=dbg,
             header_y=header_y,
+            header_bottom_y=self.header_bottom_y_abs,
             footer_struct_y=self.footer_struct_y,
             last_footer_y=self.last_footer_y,
-            spaces_detected=self.spaces_detected,
-            spaces_corrected=self.spaces_corrected,
             footer_snapped=self.footer_snapped,
             snap_note=self.snap_note,
             bottom_border_y=self.bottom_border_y,
@@ -328,7 +322,8 @@ class BreakerHeaderFinder:
         )
 
         # emphasize HORIZONTAL structures: wide kernel, height=1
-        klen = int(max(70, min(W * 0.35, 400)))
+        klen_target = int(W * 0.70)          # ~70% of page width
+        klen = int(min(W - 2, max(70, klen_target)))  # clamp to [70, W-2]
         K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
         horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
 
@@ -360,8 +355,8 @@ class BreakerHeaderFinder:
             slice_ = horiz[y0:y1, :]
             return bool(slice_.any())
 
-        max_up = 120   # max pixels to search up
-        max_down = 120 # max pixels to search down
+        max_up = 250   # max pixels to search up
+        max_down = 250 # max pixels to search down
 
         # ----- search UPWARDS for nearest white line -----
         steps_up = 0
@@ -391,6 +386,48 @@ class BreakerHeaderFinder:
         header_bottom_y_below = (
             y1_band + best_down_rel if best_down_rel is not None else None
         )
+
+        # --- debug: save horizontal mask with snap lines drawn on it ---
+        if self.debug and self.debug_dir is not None:
+            try:
+                os.makedirs(self.debug_dir, exist_ok=True)
+                # rebuild a BGR version of the horiz mask to draw on
+                vis = cv2.cvtColor(horiz, cv2.COLOR_GRAY2BGR)
+                Hb, Wb = vis.shape[:2]
+
+                # header_text_y in band-relative coords
+                y_rel = int(header_text_y - y1_band)
+                y_rel = max(0, min(Hb - 1, y_rel))
+
+                # draw header_text baseline (blue)
+                cv2.line(vis, (0, y_rel), (Wb - 1, y_rel), (255, 0, 0), 1)
+
+                # draw snapped HEADER_Y (cyan)
+                if best_up_rel is not None:
+                    cv2.line(
+                        vis,
+                        (0, int(best_up_rel)),
+                        (Wb - 1, int(best_up_rel)),
+                        (0, 255, 255),
+                        1,
+                    )
+
+                # draw snapped HEADER_BOTTOM_Y (orange)
+                if best_down_rel is not None:
+                    cv2.line(
+                        vis,
+                        (0, int(best_down_rel)),
+                        (Wb - 1, int(best_down_rel)),
+                        (0, 165, 255),
+                        1,
+                    )
+
+                dbg_name = f"header_horiz_mask_overlay_y{y1_band}_{y2_band}.png"
+                dbg_path = os.path.join(self.debug_dir, dbg_name)
+                cv2.imwrite(dbg_path, vis)
+                print(f"[BreakerHeaderFinder] Saved horiz mask overlay: {dbg_path}")
+            except Exception as e:
+                print(f"[BreakerHeaderFinder] Failed to save horiz mask overlay: {e}")
 
         return (
             int(header_y_above) if header_y_above is not None else None,
@@ -537,8 +574,12 @@ class BreakerHeaderFinder:
             if any(excl in norm for excl in self.EXCLUDE):
                 it["is_excluded_token"] = True
 
-        # header text line (anchor top y) – used for blue overlay
-        header_text_y = int(anchor["y1"])
+        # header text line = average center of all header tokens on this line
+        centers = [
+            0.5 * (it["y1"] + it["y2"])
+            for it in hdr_items
+        ]
+        header_text_y = int(sum(centers) / len(centers))
         self.header_text_line_y = header_text_y
 
         # ---- FIND NEAREST LINES ABOVE & BELOW ON HORIZONTAL MASK ----
@@ -555,7 +596,17 @@ class BreakerHeaderFinder:
         else:
             self.header_y_abs = header_text_y
 
-        # line BELOW = header_bottom_y_abs
-        self.header_bottom_y_abs = header_bottom_y
+        # ensure we always have a usable header band thickness
+        min_band_height = max(40, int(0.03 * H))  # ~3% of page height, at least 40 px
+
+        if header_bottom_y is not None and header_bottom_y > self.header_y_abs + 4:
+            # good structural line below header
+            self.header_bottom_y_abs = int(header_bottom_y)
+        else:
+            # no reliable line below → synthesize one a bit under the header
+            self.header_bottom_y_abs = int(
+                min(H - 1, self.header_y_abs + min_band_height)
+            )
 
         return self.header_y_abs
+ 

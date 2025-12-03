@@ -2478,11 +2478,21 @@ class BreakerTableParser:
         if not isinstance(analyzer_result, dict):
             analyzer_result = {}
 
-        spaces = analyzer_result.get("spaces_corrected")
-        if spaces is None:
-            spaces = analyzer_result.get("spaces")
-        if spaces is None:
+        # --- spaces: always use analyzer/footer finder when provided ---
+        raw_spaces = analyzer_result.get("spaces_corrected")
+        if raw_spaces is None:
+            raw_spaces = analyzer_result.get("spaces")
+
+        if raw_spaces is None:
+            # Only force 0 when analyzer/footer finder gave us nothing
             spaces = 0
+        else:
+            # Trust the analyzer value; just coerce to int if possible
+            try:
+                spaces = int(raw_spaces)
+            except (TypeError, ValueError):
+                # If analyzer gives something non-numeric, don't explode – fall back to 0
+                spaces = 0
 
         header_scan = self._header_scanner.scan(analyzer_result)
 
@@ -2532,7 +2542,7 @@ class BreakerTableParser:
         result = {
             "parserVersion": PARSER_VERSION,
             "name": None,  # API will overwrite with deduped panel name
-            "spaces": int(spaces),
+            "spaces": spaces,
             "detected_breakers": detected_breakers,
             "breakerCounts": breaker_counts,
             "headerScan": header_scan,
