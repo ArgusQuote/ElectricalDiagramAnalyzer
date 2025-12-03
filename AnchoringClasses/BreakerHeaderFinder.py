@@ -1,8 +1,8 @@
-# AnchoringClasses/BreakerHeaderFinder.py
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import os
 import re
 import cv2
 import numpy as np
@@ -14,7 +14,6 @@ class HeaderDbg:
     centers: List[int]
 
 
-# alias so other code can import `Dbg` if it wants
 Dbg = HeaderDbg
 
 
@@ -35,16 +34,28 @@ class HeaderResult:
 
 class BreakerHeaderFinder:
     """
-    Header + row-structure + structural footer.
-    This is the logic that used to live in BreakerTableAnalyzer6:
-      - _find_cct_header_y
-      - _find_header_by_tokens
-      - _row_centers_from_lines
+    Simplified header finder.
+
+    - Crops the top 50% of the page.
+    - Removes the top 15% of that half.
+      => band ~7.5%H to 50%H.
+    - Runs OCR on that band.
+    - Groups tokens into horizontal lines (y-bins).
+    - Chooses the line with the MOST tokens.
+    - The FIRST token on that line (left-most) is the header anchor.
+      - Its top y is used to define the header text line / header_y.
+
+    Debug overlay (only if debug=True):
+      - Blue   : header anchor token + header text line.
+      - Magenta: other header-ish tokens (CKT, DESCRIPTION, TRIP, POLES, ...).
+      - Red    : excluded tokens ("LOAD CLASSIFICATION" family).
+      - Green  : everything else.
     """
 
-    def __init__(self, reader, debug: bool = False):
+    def __init__(self, reader, debug: bool = False, debug_dir: Optional[str] = None):
         self.reader = reader
         self.debug = debug
+        self.debug_dir: Optional[str] = debug_dir
 
         self.ocr_dbg_items: List[dict] = []
         self.ocr_dbg_rois: List[Tuple[int, int, int, int]] = []
@@ -59,10 +70,57 @@ class BreakerHeaderFinder:
         self.footer_snapped: bool = False
         self.snap_note: Optional[str] = None
 
+        self.header_text_line_y: Optional[int] = None   # blue text line
+        self.header_y_abs: Optional[int] = None         # snapped structural line
+        self.header_bottom_y_abs: Optional[int] = None
+
+        self.header_text_line_y: Optional[int] = None
+
+        # snapping debug
+        self.snap_steps_up: Optional[int] = None
+        self.last_horizontal_mask_path: Optional[str] = None
+
+        self.CATEGORY_ALIASES = {
+            "ckt": {"CKT", "CCT"},
+            "description": {
+                "CIRCUITDESCRIPTION", "DESCRIPTION", "LOADDESCRIPTION",
+                "DESIGNATION", "LOADDESIGNATION", "NAME",
+            },
+            "trip": {"TRIP", "AMPS", "AMP", "BREAKER", "BKR", "SIZE"},
+            "poles": {"POLES", "POLE", "P"},
+        }
+        self.EXCLUDE = {"LOADCLASSIFICATION", "CLASSIFICATION"}
+        self.HEADER_TOKEN_SET = set().union(*self.CATEGORY_ALIASES.values())
+
     # ---------- public ----------
 
     def analyze_rows(self, gray: np.ndarray) -> HeaderResult:
-        centers, dbg, header_y = self._row_centers_from_lines(gray)
+        """
+        Main entry point.
+
+        For now, this ONLY finds header_y using OCR tokens.
+        Row centers / footer info are not computed (kept for API compatibility).
+        """
+        self.ocr_dbg_items = []
+        self.ocr_dbg_rois = []
+        self.footer_struct_y = None
+        self.last_footer_y = None
+        self.bottom_border_y = None
+        self.bottom_row_center_y = None
+        self.spaces_detected = 0
+        self.spaces_corrected = 0
+        self.footer_snapped = False
+        self.snap_note = None
+        self.header_text_line_y = None
+        self.header_text_line_y = None
+        self.header_y_abs = None
+        self.snap_steps_up = None
+        self.last_horizontal_mask_path = None
+
+        header_y = self._find_header_by_tokens(gray)
+
+        dbg = HeaderDbg(lines=[], centers=[])
+        centers: List[int] = []
 
         return HeaderResult(
             centers=centers,
@@ -78,665 +136,426 @@ class BreakerHeaderFinder:
             bottom_row_center_y=self.bottom_row_center_y,
         )
 
-    # ---------- internals (migrated from BreakerTableAnalyzer6) ----------
+    # ---------- debug overlay ----------
 
-    def _find_cct_header_y(self, gray: np.ndarray) -> Optional[int]:
-        if self.reader is None:
-            return None
-        self.ocr_dbg_items, self.ocr_dbg_rois = [], []
-        H, W = gray.shape
+    def draw_ocr_overlay(self, base_img: np.ndarray) -> np.ndarray:
+        """
+        Draw OCR debug ROIs and boxes onto base_img.
 
-        def norm(s: str) -> str:
-            return re.sub(r"[^A-Z]", "", s.upper().replace("1", "I"))
+        Only active when self.debug is True.
+        Overlay is full-size (same size as base_img).
 
-        def has_long_line_below(y_abs: int) -> bool:
-            y1 = max(0, y_abs - 6)
-            y2 = min(H, y_abs + 28)
-            band = gray[y1:y2, :]
-            if band.size == 0:
-                return False
-            g = cv2.GaussianBlur(band, (3, 3), 0)
-            bw = cv2.adaptiveThreshold(
-                g, 255,
-                cv2.ADAPTIVE_THRESH_MEAN_C,
-                cv2.THRESH_BINARY_INV,
-                21, 10
-            )
-            klen = max(70, int(W * 0.22))
-            K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
-            lines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
-            return lines.sum() > 0
+        Colors:
+          - Blue   : header anchor token + HEADER_TEXT_LINE (text baseline)
+          - Cyan   : HEADER_Y (snapped structural line above)
+          - Orange : HEADER_BOTTOM_Y (nearest horizontal line below)
+          - Magenta: other header tokens
+          - Red    : excluded tokens
+        """
+        # always return a BGR image
+        if base_img.ndim == 2:
+            overlay = cv2.cvtColor(base_img, cv2.COLOR_GRAY2BGR)
+        else:
+            overlay = base_img.copy()
 
-        def scan_roi(y1f, y2f, x2f) -> List[int]:
-            y1, y2 = int(H * y1f), int(H * y2f)
-            x1, x2 = 0, int(W * x2f)
-            roi = gray[y1:y2, x1:x2]
-            if roi.size == 0:
-                return []
+        if not self.debug:
+            return overlay
 
-            self.ocr_dbg_rois.append((x1, y1, x2, y2))
+        H, W = overlay.shape[:2]
 
-            def pass_once(mag: float):
-                try:
-                    return self.reader.readtext(
-                        roi, detail=1, paragraph=False,
-                        allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -",
-                        mag_ratio=mag, contrast_ths=0.05, adjust_contrast=0.7,
-                        text_threshold=0.4, low_text=0.25
-                    )
-                except Exception:
-                    return []
+        # ROI rectangles (blue box around scanned header band)
+        for (x1, y1, x2, y2) in self.ocr_dbg_rois:
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), (255, 0, 0), 1)
 
-            det = pass_once(1.4) + pass_once(1.9)
+        # header / anchor / excluded tokens only
+        for item in self.ocr_dbg_items:
+            is_anchor = item.get("is_header_anchor", False)
+            is_header = item.get("is_header_token", False)
+            is_excl   = item.get("is_excluded_token", False)
 
-            for box, txt, conf in det:
-                xs = [p[0] + x1 for p in box]
-                ys = [p[1] + y1 for p in box]
-                self.ocr_dbg_items.append({
-                    "text": txt,
-                    "conf": float(conf or 0.0),
-                    "x1": int(min(xs)),
-                    "y1": int(min(ys)),
-                    "x2": int(max(xs)),
-                    "y2": int(max(ys)),
-                })
-
-            lines = {}
-            for box, txt, _ in det:
-                if not txt:
-                    continue
-                yc = int(sum(p[1] for p in box) / 4)
-                key = (yc // 14) * 14
-                lines.setdefault(key, []).append((box, txt))
-
-            cands: List[int] = []
-
-            for box, txt, _ in det:
-                t = norm(txt)
-                if t in ("CCT", "CKT"):
-                    y_abs = y1 + int(min(p[1] for p in box))
-                    if has_long_line_below(y_abs):
-                        cands.append(y_abs)
-
-            for _, items in lines.items():
-                raw = " ".join(t for _, t in items)
-                if "HEADER" in raw.upper():
-                    continue
-                if ("CCT" in norm(raw)) or ("CKT" in norm(raw)):
-                    y_abs = y1 + min(int(min(p[1] for p in b)) for b, _ in items)
-                    if has_long_line_below(y_abs):
-                        cands.append(y_abs)
-
-            return sorted(set(int(y) for y in cands))
-
-        all_hits: List[int] = []
-
-        primary_windows = [
-            (0.08, 0.48, 0.28),
-            (0.10, 0.50, 0.32),
-            (0.08, 0.52, 0.40),
-            (0.12, 0.58, 0.45),
-        ]
-        for y1f, y2f, x2f in primary_windows:
-            all_hits += scan_roi(y1f, y2f, x2f)
-
-        fallback_candidates = [
-            (0.08, 0.52, 0.65),
-            (0.10, 0.56, 0.80),
-            (0.08, 0.60, 1.00),
-        ]
-        for y1f, y2f, x2f in fallback_candidates:
-            all_hits += scan_roi(y1f, y2f, x2f)
-
-        x1, x2 = 0, int(0.48 * W)
-        y1, y2 = int(0.08 * H), int(0.68 * H)
-        roi = gray[y1:y2, x1:x2]
-        if roi.size > 0 and self.reader is not None:
-            det = self.reader.readtext(
-                roi, detail=1, paragraph=False,
-                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -",
-                mag_ratio=1.6, contrast_ths=0.05, adjust_contrast=0.7,
-                text_threshold=0.4, low_text=0.25
-            )
-            cands = []
-            for box, txt, _ in det:
-                t = re.sub(
-                    r"[^A-Z]",
-                    "",
-                    (txt or "").upper().replace("1", "I")
-                )
-                if t in ("CCT", "CKT"):
-                    cands.append(y1 + int(min(p[1] for p in box)))
-            all_hits += cands
-
-        cap = int(0.65 * H)
-        all_hits = [y for y in all_hits if y <= cap]
-
-        if not all_hits:
-            return None
-        return int(min(all_hits))
-
-    def _find_header_by_tokens(self, gray: np.ndarray) -> Optional[int]:
-        if self.reader is None:
-            return None
-
-        H, W = gray.shape
-        y1, y2 = int(0.08 * H), int(0.65 * H)
-        x1, x2 = 0, W
-        roi = gray[y1:y2, x1:x2]
-        if roi.size == 0:
-            return None
-
-        def N(s: str) -> str:
-            return re.sub(
-                r"[^A-Z0-9]", "",
-                (s or "").upper().replace("1", "I").replace("0", "O")
-            )
-
-        CATEGORY_ALIASES = {
-            "ckt": {"CKT", "CCT"},
-            "description": {
-                "CIRCUITDESCRIPTION", "DESCRIPTION", "LOADDESCRIPTION",
-                "DESIGNATION", "LOADDESIGNATION", "NAME"
-            },
-            "trip": {"TRIP", "AMPS", "AMP", "BREAKER", "BKR", "SIZE"},
-            "poles": {"POLES", "POLE", "P"},
-        }
-        EXCLUDE = {"LOADCLASSIFICATION", "CLASSIFICATION"}
-
-        def ocr(img, mag):
-            try:
-                return self.reader.readtext(
-                    img, detail=1, paragraph=False,
-                    allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/",
-                    mag_ratio=mag, contrast_ths=0.05, adjust_contrast=0.7,
-                    text_threshold=0.4, low_text=0.25
-                )
-            except Exception:
-                return []
-
-        det = ocr(roi, 1.6) + ocr(roi, 2.0)
-
-        lines = {}
-        for box, txt, _ in det:
-            if not txt:
-                continue
-            y_abs = y1 + int(min(p[1] for p in box))
-            ybin = (y_abs // 14) * 14
-            lines.setdefault(ybin, []).append((box, txt))
-
-        def has_long_rule_below(y_abs: int) -> bool:
-            band_top = max(0, y_abs - 6)
-            band_bot = min(H, y_abs + 28)
-            band = gray[band_top:band_bot, :]
-            if band.size == 0:
-                return False
-            g = cv2.GaussianBlur(band, (3, 3), 0)
-            bw = cv2.adaptiveThreshold(
-                g, 255,
-                cv2.ADAPTIVE_THRESH_MEAN_C,
-                cv2.THRESH_BINARY_INV,
-                21, 10
-            )
-            klen = max(70, int(W * 0.22))
-            K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
-            longlines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
-            return longlines.sum() > 0
-
-        best = None
-        mid = W * 0.5
-
-        for ybin, items in lines.items():
-            categories_all = set()
-            left_has = set()
-            right_has = set()
-            bad = False
-
-            for box, txt in items:
-                n = N(txt)
-                if not n:
-                    continue
-                if any(ex in n for ex in EXCLUDE):
-                    bad = True
-                    break
-
-                matched_cats = set()
-                for cat, aliases in CATEGORY_ALIASES.items():
-                    if "P" in aliases and n == "P":
-                        matched_cats.add("poles")
-                        continue
-                    if any(alias in n for alias in aliases if alias != "P"):
-                        matched_cats.add(cat)
-
-                if matched_cats:
-                    xs = [p[0] for p in box]
-                    x_center = (min(xs) + max(xs)) / 2.0
-                    categories_all |= matched_cats
-                    if x_center < mid:
-                        left_has |= matched_cats
-                    else:
-                        right_has |= matched_cats
-
-            if bad or not categories_all:
+            # skip non-header junk entirely
+            if not (is_anchor or is_header or is_excl):
                 continue
 
-            score = len(categories_all)
-            if left_has and right_has:
-                score += 1
-            if len(categories_all) >= 2:
-                score += 1
+            x1, y1 = item["x1"], item["y1"]
+            x2, y2 = item["x2"], item["y2"]
+            txt = item.get("text", "")
 
-            y_abs = int(ybin)
-            if score >= 3 and has_long_rule_below(y_abs):
-                cand = (score, y_abs)
-                if (
-                    best is None
-                    or (cand[0] > best[0])
-                    or (cand[0] == best[0] and cand[1] < best[1])
-                ):
-                    best = cand
+            if is_anchor:
+                box_color  = (255, 0, 0)    # blue
+                text_color = (255, 0, 0)
+            elif is_header:
+                box_color  = (255, 0, 255)  # magenta
+                text_color = (255, 0, 255)
+            else:  # excluded
+                box_color  = (0, 0, 255)    # red
+                text_color = (0, 0, 255)
 
-        if best is None:
-            return None
-        return int(best[1])
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), box_color, 1)
+            if txt:
+                cv2.putText(
+                    overlay,
+                    txt[:20],
+                    (x1, max(y1 - 2, 0)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    text_color,
+                    1,
+                    cv2.LINE_AA,
+                )
 
-    def _row_centers_from_lines(self, gray: np.ndarray):
-        H, W = gray.shape
-        y_top = int(H * 0.12)
-        y_bot = int(H * 0.95)
-        roi = gray[y_top:y_bot, :]
+        # HEADER_TEXT_LINE (blue) at text baseline
+        if self.header_text_line_y is not None:
+            y = int(self.header_text_line_y)
+            cv2.line(overlay, (0, y), (W - 1, y), (255, 0, 0), 2)
+            cv2.putText(
+                overlay,
+                "HEADER_TEXT_LINE",
+                (10, max(10, y - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 0),
+                1,
+                cv2.LINE_AA,
+            )
 
-        blur = cv2.GaussianBlur(roi, (3, 3), 0)
-        bw = cv2.adaptiveThreshold(
-            blur, 255,
-            cv2.ADAPTIVE_THRESH_MEAN_C,
-            cv2.THRESH_BINARY_INV,
-            21, 10
+        # HEADER_Y snapped structural line (cyan) + numeric value
+        if self.header_y_abs is not None:
+            y = int(self.header_y_abs)
+            cv2.line(overlay, (0, y), (W - 1, y), (0, 255, 255), 2)
+            label = f"HEADER_Y={y}"
+            cv2.putText(
+                overlay,
+                label,
+                (10, min(H - 10, y + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # HEADER_BOTTOM_Y (nearest horizontal line below, orange-ish)
+        if getattr(self, "header_bottom_y_abs", None) is not None:
+            yb = int(self.header_bottom_y_abs)
+            cv2.line(overlay, (0, yb), (W - 1, yb), (0, 165, 255), 2)
+            label = f"HEADER_BOTTOM_Y={yb}"
+            cv2.putText(
+                overlay,
+                label,
+                (10, min(H - 10, yb + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 165, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # how many rows we moved upward during snapping
+        if self.snap_steps_up is not None:
+            txt = f"snap_up_steps={self.snap_steps_up}"
+            cv2.putText(
+                overlay,
+                txt,
+                (10, 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+        return overlay
+
+    # ---------- helpers ----------
+
+    @staticmethod
+    def _normalize_text(s: str) -> str:
+        return re.sub(
+            r"[^A-Z0-9]",
+            "",
+            (s or "").upper().replace("1", "I").replace("0", "O"),
         )
 
-        def borders_from(bw_src, k_frac, thr_frac):
-            if bw_src.size == 0:
-                return []
-            klen = int(max(70, min(W * k_frac, 320)))
-            K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
-            lines = cv2.morphologyEx(bw_src, cv2.MORPH_OPEN, K, iterations=1)
-            proj = lines.sum(axis=1)
-            if proj.size == 0 or proj.max() == 0:
-                return []
-            need = max(80, int(0.18 * len(proj)))
-            low = proj < (0.08 * proj.max())
-            run = 0
-            cut = None
-            for i, is_low in enumerate(low):
-                run = run + 1 if is_low else 0
-                if run >= need:
-                    cut = i - run + 1
-                    break
-            if cut is not None and cut > 10:
-                proj = proj[:cut]
-                if proj.size == 0 or proj.max() == 0:
-                    return []
-            thr = float(thr_frac * proj.max())
-            ys = np.where(proj >= thr)[0].astype(int)
-            if ys.size == 0:
-                return []
-            segs = []
-            s = ys[0]
-            p = ys[0]
-            for y in ys[1:]:
-                if y - p > 2:
-                    segs.append((s, p))
-                    s = y
-                p = y
-            segs.append((s, p))
-            return [int((a + b) // 2) for a, b in segs]
-
-        b1 = borders_from(bw, 0.35, 0.35)
-        b2 = borders_from(bw, 0.25, 0.30)
-        borders = b1 if len(b1) >= len(b2) else b2
-
-        if not borders:
-            edges = cv2.Canny(blur, 60, 160)
-            lines = cv2.HoughLinesP(
-                edges, 1, np.pi / 180,
-                threshold=140,
-                minLineLength=int(W * 0.30),
-                maxLineGap=6
+    def _run_ocr(self, img, mag: float):
+        try:
+            return self.reader.readtext(
+                img,
+                detail=1,
+                paragraph=False,
+                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/",
+                mag_ratio=mag,
+                contrast_ths=0.05,
+                adjust_contrast=0.7,
+                text_threshold=0.4,
+                low_text=0.25,
             )
-            if lines is None:
-                self.last_footer_y = None
-                self.footer_struct_y = None
-                self.bottom_border_y = None
-                self.bottom_row_center_y = None
-                self.spaces_detected = 0
-                self.spaces_corrected = 0
-                self.footer_snapped = False
-                self.snap_note = None
-                return [], HeaderDbg(lines=[], centers=[]), None
-            ys = sorted(
-                int((y1 + y2) // 2)
-                for x1, y1, x2, y2 in lines[:, 0]
-                if abs(y2 - y1) <= 2
-            )
-            borders = [ys[0]]
-            for y in ys[1:]:
-                if y - borders[-1] > 3:
-                    borders.append(y)
+        except Exception:
+            return []
 
-        header_y_abs = self._find_header_by_tokens(gray)
-        if header_y_abs is None:
-            header_y_abs = self._find_cct_header_y(gray)
+    def _snap_header_to_horizontal_line(
+        self,
+        gray: np.ndarray,
+        y1_band: int,
+        y2_band: int,
+        header_text_y: int,
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """
+        Build a horizontal-line mask on the band [y1_band:y2_band, :]
+        and find the closest white line ABOVE and BELOW header_text_y.
 
-        if header_y_abs is not None and header_y_abs > int(0.62 * H):
-            header_y_abs = None
+        Returns:
+            (header_y_above, header_bottom_y_below)  as absolute y coords.
+        """
+        H, W = gray.shape
+        y1_band = max(0, min(H, y1_band))
+        y2_band = max(y1_band + 1, min(H, y2_band))
 
-        header_loc = None if header_y_abs is None else max(0, header_y_abs - y_top)
+        band = gray[y1_band:y2_band, :]
+        if band.size == 0:
+            self.snap_steps_up = None
+            return None, None
 
-        start_idx = 0
-        if header_loc is not None:
-            for i, b in enumerate(borders):
-                if b > header_loc + 5:
-                    start_idx = i
-                    break
-            if len(borders) - start_idx < 2:
-                start_idx = 0
-                header_y_abs = None
+        # --- build horizontal-line mask ---
+        blur = cv2.GaussianBlur(band, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # emphasize HORIZONTAL structures: wide kernel, height=1
+        klen = int(max(70, min(W * 0.35, 400)))
+        K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
+        horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
+
+        # optional debug: save the mask so you can *see* it
+        self.last_horizontal_mask_path = None
+        if self.debug and self.debug_dir:
+            try:
+                os.makedirs(self.debug_dir, exist_ok=True)
+                mask_name = f"header_horiz_mask_y{y1_band}_{y2_band}.png"
+                mask_path = os.path.join(self.debug_dir, mask_name)
+                cv2.imwrite(mask_path, horiz)
+                self.last_horizontal_mask_path = mask_path
+                print(f"[BreakerHeaderFinder] Saved horizontal mask: {mask_path}")
+            except Exception as e:
+                print(f"[BreakerHeaderFinder] Failed to save horiz mask: {e}")
+
+        band_h = horiz.shape[0]
+
+        # convert absolute header_text_y to band-relative index
+        y_rel_start = header_text_y - y1_band
+        if y_rel_start < 0 or y_rel_start >= band_h:
+            self.snap_steps_up = None
+            return None, None
+
+        # helper: does a small window around y_idx contain any white pixels?
+        def has_white_at(y_idx: int) -> bool:
+            y0 = max(0, y_idx - 2)
+            y1 = min(band_h, y_idx + 3)
+            slice_ = horiz[y0:y1, :]
+            return bool(slice_.any())
+
+        max_up = 120   # max pixels to search up
+        max_down = 120 # max pixels to search down
+
+        # ----- search UPWARDS for nearest white line -----
+        steps_up = 0
+        best_up_rel = None
+        cur = int(y_rel_start)
+        while cur >= 0 and steps_up <= max_up:
+            if has_white_at(cur):
+                best_up_rel = cur
+                break
+            cur -= 1          # *** MOVE WINDOW UP ***
+            steps_up += 1
+
+        self.snap_steps_up = steps_up if best_up_rel is not None else None
+
+        # ----- search DOWNWARDS for nearest white line -----
+        steps_down = 0
+        best_down_rel = None
+        cur = int(y_rel_start)
+        while cur < band_h and steps_down <= max_down:
+            if has_white_at(cur):
+                best_down_rel = cur
+                break
+            cur += 1          # move window down
+            steps_down += 1
+
+        header_y_above = y1_band + best_up_rel if best_up_rel is not None else None
+        header_bottom_y_below = (
+            y1_band + best_down_rel if best_down_rel is not None else None
+        )
+
+        return (
+            int(header_y_above) if header_y_above is not None else None,
+            int(header_bottom_y_below) if header_bottom_y_below is not None else None,
+        )
+
+    # ---------- header finder ----------
+
+    def _find_header_by_tokens(self, gray: np.ndarray) -> Optional[int]:
+        """
+        Use OCR header tokens to find the header row.
+
+        - Crop to top 50% of page.
+        - Remove top 15% of that half  (~7.5%H..50%H).
+        - OCR on that band.
+        - Group tokens by y-bin.
+        - Pick the line with the MOST *header* tokens.
+        - Anchor is the left-most header token on that line.
+        - header_text_line_y = anchor top y (used for blue overlay).
+        - header_y_abs      = nearest horizontal line ABOVE.
+        - header_bottom_y_abs = nearest horizontal line BELOW.
+        """
+        if self.reader is None:
+            return None
+
+        H, W = gray.shape
+
+        # --- header band (same as simple script) ---
+        half_h = int(0.50 * H)
+        y1_band = int(0.15 * half_h)   # ~0.075 * H
+        y2_band = half_h               # 0.50 * H
+        x1_band, x2_band = 0, W
+
+        roi = gray[y1_band:y2_band, x1_band:x2_band]
+        if roi.size == 0:
+            self.header_text_line_y = None
+            self.header_y_abs = None
+            self.header_bottom_y_abs = None
+            self.snap_steps_up = None
+            return None
+
+        # optional: save band for debug
+        if self.debug and self.debug_dir:
+            try:
+                os.makedirs(self.debug_dir, exist_ok=True)
+                dbg_name = (
+                    f"header_band_y{y1_band}_{y2_band}_"
+                    f"h{roi.shape[0]}_w{roi.shape[1]}.png"
+                )
+                dbg_path = os.path.join(self.debug_dir, dbg_name)
+                cv2.imwrite(dbg_path, roi)
+                print(f"[BreakerHeaderFinder] Saved OCR header band: {dbg_path}")
+            except Exception as e:
+                print(f"[BreakerHeaderFinder] Failed to save header band: {e}")
+
+        # reset debug collectors and record ROI in ABSOLUTE coords
+        self.ocr_dbg_items = []
+        self.ocr_dbg_rois = [(x1_band, y1_band, x2_band, y2_band)]
+        self.snap_steps_up = None
+        self.header_text_line_y = None
+        self.header_y_abs = None
+        self.header_bottom_y_abs = None
+
+        # OCR passes on the band
+        det = self._run_ocr(roi, 1.6) + self._run_ocr(roi, 2.0)
+
+        items: List[dict] = []
+        for box, text, conf in det:
+            xs = [int(p[0]) for p in box]
+            ys = [int(p[1]) for p in box]
+            x1b, y1b = min(xs), min(ys)
+            x2b, y2b = max(xs), max(ys)
+
+            # shift to full-image coordinates
+            x1_abs = x1_band + x1b
+            x2_abs = x1_band + x2b
+            y1_abs = y1_band + y1b
+            y2_abs = y1_band + y2b
+
+            norm = self._normalize_text(text)
+            item = {
+                "box": box,
+                "text": text,
+                "conf": float(conf or 0.0),
+                "x1": x1_abs,
+                "y1": y1_abs,
+                "x2": x2_abs,
+                "y2": y2_abs,
+                "norm": norm,
+            }
+            items.append(item)
+            self.ocr_dbg_items.append(item)
+
+        if not items:
+            return None
+
+        # ---- group by y-bin ----
+        lines: dict[int, list[dict]] = {}
+        for it in items:
+            yc = 0.5 * (it["y1"] + it["y2"])
+            ybin = int(yc // 14) * 14
+            lines.setdefault(ybin, []).append(it)
+
+        # ---- choose line with MOST HEADER TOKENS ----
+        best_ybin: Optional[int] = None
+        best_hdr_count = 0
+
+        for ybin, line_items in lines.items():
+            hdr_count = 0
+            for it in line_items:
+                if any(tok in it["norm"] for tok in self.HEADER_TOKEN_SET):
+                    hdr_count += 1
+            if hdr_count > 0:
+                if (
+                    hdr_count > best_hdr_count
+                    or (hdr_count == best_hdr_count and (best_ybin is None or ybin < best_ybin))
+                ):
+                    best_hdr_count = hdr_count
+                    best_ybin = ybin
+
+        if best_ybin is None:
+            # no header-like tokens anywhere in band
+            return None
+
+        # tokens on the winning line
+        line_items = lines[best_ybin]
+        hdr_items = [
+            it for it in line_items
+            if any(tok in it["norm"] for tok in self.HEADER_TOKEN_SET)
+        ]
+        if not hdr_items:
+            return None
+
+        # left-most header token is anchor
+        hdr_items_sorted = sorted(hdr_items, key=lambda it: it["x1"])
+        anchor = hdr_items_sorted[0]
+        anchor["is_header_anchor"] = True
+
+        # mark all header/excluded tokens for overlay
+        for it in items:
+            norm = it["norm"]
+            if any(tok in norm for tok in self.HEADER_TOKEN_SET):
+                it["is_header_token"] = True
+            if any(excl in norm for excl in self.EXCLUDE):
+                it["is_excluded_token"] = True
+
+        # header text line (anchor top y) – used for blue overlay
+        header_text_y = int(anchor["y1"])
+        self.header_text_line_y = header_text_y
+
+        # ---- FIND NEAREST LINES ABOVE & BELOW ON HORIZONTAL MASK ----
+        header_y_above, header_bottom_y = self._snap_header_to_horizontal_line(
+            gray=gray,
+            y1_band=y1_band,
+            y2_band=y2_band,
+            header_text_y=header_text_y,
+        )
+
+        # line ABOVE = header_y_abs
+        if header_y_above is not None:
+            self.header_y_abs = header_y_above
         else:
-            gaps = np.diff(borders)
-            if len(gaps) >= 6:
-                for i in range(len(gaps) - 6):
-                    w = gaps[i : i + 6]
-                    gmed = float(np.median(w))
-                    if gmed > 0 and np.all(
-                        (w >= 0.7 * gmed) & (w <= 1.3 * gmed)
-                    ):
-                        start_idx = i
-                        break
-        tail = borders[start_idx:]
+            self.header_y_abs = header_text_y
 
-        if len(tail) >= 2:
-            gaps = np.diff(tail)
-            med = float(np.median(gaps)) if len(gaps) else 0
-            stop_rel = None
-            for j, g in enumerate(gaps):
-                if med > 0 and g > max(1.9 * med, med + 18):
-                    stop_rel = j
-                    break
-            if stop_rel is not None:
-                tail = tail[: stop_rel + 1]
+        # line BELOW = header_bottom_y_abs
+        self.header_bottom_y_abs = header_bottom_y
 
-        if len(tail) >= 3:
-            gaps = np.diff(tail)
-            med = float(np.median(gaps)) if len(gaps) else 0.0
-            for j, g in enumerate(gaps):
-                if med > 0 and g >= max(1.6 * med, med + 14):
-                    remaining_borders = len(tail) - (j + 1)
-                    if remaining_borders <= 3:
-                        tail = tail[: j + 1]
-                    break
-
-        if len(tail) >= 3:
-            gaps = np.diff(tail)
-            med_row_h = float(np.median(gaps)) if len(gaps) else 0.0
-            if med_row_h > 0:
-                xL = int(0.25 * W)
-                xR = int(0.75 * W)
-                central = bw[:, xL:xR]
-                if central.size > 0:
-                    central_denoised = cv2.morphologyEx(
-                        central, cv2.MORPH_OPEN,
-                        cv2.getStructuringElement(
-                            cv2.MORPH_RECT, (3, 1)
-                        ),
-                        1
-                    )
-                    central_denoised = cv2.morphologyEx(
-                        central_denoised, cv2.MORPH_OPEN,
-                        cv2.getStructuringElement(
-                            cv2.MORPH_RECT, (1, 3)
-                        ),
-                        1
-                    )
-                    row_ink = central_denoised.sum(axis=1).astype(
-                        np.float32
-                    ) / (255.0 * (xR - xL))
-                    win = int(round(1.8 * med_row_h))
-                    win = max(9, min(win, int(0.06 * H)))
-                    if win % 2 == 0:
-                        win += 1
-                    smooth = np.convolve(
-                        row_ink,
-                        np.ones(win, dtype=np.float32) / float(win),
-                        mode="same",
-                    )
-                    LOW_INK = 0.06
-                    y_scan_start = int(
-                        min(tail[0] + 2 * med_row_h, len(smooth) - 1)
-                    )
-                    below = np.where(smooth < LOW_INK)[0]
-                    if below.size:
-                        after = below[below >= y_scan_start]
-                        if after.size:
-                            cut_abs = y_top + int(after[0])
-                            tail = [
-                                b for b in tail
-                                if (b + y_top) < cut_abs - 2
-                            ]
-
-        if len(tail) >= 3:
-            gaps_all = np.diff(tail).astype(np.float32)
-            if gaps_all.size:
-                seed_n = int(min(10, len(gaps_all)))
-                if seed_n > 0:
-                    global_med = float(
-                        np.median(gaps_all[:seed_n])
-                    )
-                else:
-                    global_med = float(np.median(gaps_all))
-                MIN_GAP = 12.0
-                LO = 0.60
-                HI = 1.45
-                WIN = 5
-                best_run_len = 0
-                best_run_end = None
-                i = 0
-                while i < len(gaps_all):
-                    if gaps_all[i] < MIN_GAP:
-                        i += 1
-                        continue
-                    run_start = i
-                    local_vals = []
-                    local_med = (
-                        global_med if global_med > 0 else gaps_all[i]
-                    )
-                    while i < len(gaps_all):
-                        g = gaps_all[i]
-                        local_vals.append(float(g))
-                        if len(local_vals) > WIN:
-                            local_vals.pop(0)
-                        local_med = (
-                            float(np.median(local_vals))
-                            if local_vals
-                            else local_med
-                        )
-                        if not (
-                            (g >= MIN_GAP)
-                            and (LO * local_med <= g <= HI * local_med)
-                        ):
-                            break
-                        i += 1
-                    run_end = i - 1
-                    run_len = run_end - run_start + 1
-                    if run_len > best_run_len:
-                        best_run_len = run_len
-                        best_run_end = run_end
-                    i = max(i, run_end + 1)
-                if best_run_len >= 2:
-                    tail = tail[: int(best_run_end + 1) + 1]
-
-        if len(tail) >= 3:
-            gaps = np.diff(tail)
-            med_row_h = float(np.median(gaps)) if len(gaps) else 0.0
-            if med_row_h > 0:
-                roi_h = bw.shape[0]
-                Kv = cv2.getStructuringElement(
-                    cv2.MORPH_RECT,
-                    (1, max(18, int(0.05 * roi_h)))
-                )
-                vlines = cv2.morphologyEx(
-                    bw, cv2.MORPH_OPEN, Kv, iterations=1
-                )
-                xL = int(0.22 * W)
-                xR = int(0.78 * W)
-                v_central = vlines[:, xL:xR] if xR > xL else vlines
-                if v_central.size > 0:
-                    v_row = v_central.sum(axis=1).astype(
-                        np.float32
-                    ) / (255.0 * (xR - xL))
-                    win = int(round(1.2 * med_row_h))
-                    win = max(7, min(win, int(0.05 * H)))
-                    if win % 2 == 0:
-                        win += 1
-                    v_smooth = np.convolve(
-                        v_row,
-                        np.ones(win, dtype=np.float32) / float(win),
-                        mode="same",
-                    )
-                    thr = max(0.02, 0.12 * float(v_smooth.max() or 1.0))
-                    y_scan_start = int(
-                        min(
-                            tail[0] + 2 * med_row_h,
-                            len(v_smooth) - 1
-                        )
-                    )
-                    need = int(max(1.2 * med_row_h, 12))
-                    run = 0
-                    cut_rel = None
-                    for y in range(y_scan_start, len(v_smooth)):
-                        if v_smooth[y] < thr:
-                            run += 1
-                            if run >= need:
-                                cut_rel = y - run + 1
-                                break
-                        else:
-                            run = 0
-                    if cut_rel is not None:
-                        cut_abs = y_top + int(cut_rel)
-                        tail = [
-                            b for b in tail
-                            if (b + y_top) < cut_abs - 2
-                        ]
-
-        borders_abs = [b + y_top for b in tail]
-        if header_y_abs is not None and len(borders_abs) >= 2:
-            gaps_abs = np.diff(borders_abs)
-            med_gap = float(np.median(gaps_abs)) if len(
-                gaps_abs
-            ) else 0.0
-            if med_gap > 0:
-                d0 = float(borders_abs[0] - header_y_abs)
-                if (
-                    d0 > max(1.80 * med_gap, med_gap + 16)
-                    and d0 < 3.2 * med_gap
-                ):
-                    y_expected = int(round(header_y_abs + med_gap))
-                    if (
-                        y_expected < borders_abs[0] - 8
-                        and y_expected > header_y_abs + 6
-                    ):
-                        borders_abs.insert(0, y_expected)
-
-        borders_rel = [y - y_top for y in borders_abs]
-        if len(borders_rel) < 2:
-            self.last_footer_y = borders_abs[-1] if borders_abs else None
-            self.footer_struct_y = self.last_footer_y
-            self.bottom_border_y = self.last_footer_y
-            self.bottom_row_center_y = None
-            self.spaces_detected = 0
-            self.spaces_corrected = 0
-            self.footer_snapped = False
-            self.snap_note = None
-            dbg = HeaderDbg(lines=[b + y_top for b in borders_rel], centers=[])
-            return [], dbg, header_y_abs
-
-        centers = []
-        for i in range(len(borders_rel) - 1):
-            gap = borders_rel[i + 1] - borders_rel[i]
-            if gap >= 12:
-                centers.append(
-                    int((borders_rel[i] + borders_rel[i + 1]) // 2) + y_top
-                )
-        out = []
-        for y in centers:
-            if out and abs(y - out[-1]) < 8:
-                continue
-            out.append(y)
-
-        footer_struct_y = borders_abs[-1] if len(borders_abs) >= 1 else None
-        self.footer_struct_y = footer_struct_y
-
-        gaps_abs = np.diff(borders_abs)
-        med_row_h = float(np.median(gaps_abs)) if gaps_abs.size else 18.0
-        last_center = out[-1] if out else None
-
-        final_footer = footer_struct_y
-
-        if (
-            (final_footer is not None)
-            and (header_y_abs is not None)
-            and (final_footer <= header_y_abs + 6)
-        ):
-            final_footer = None
-
-        detected_spaces = len(out) * 2
-        self.spaces_detected = detected_spaces
-        self.spaces_corrected = detected_spaces
-        self.footer_snapped = False
-        self.snap_note = None
-
-        snap_map = {
-            16: 18, 20: 18,
-            28: 30, 32: 30,
-            40: 42, 44: 42,
-            52: 54, 56: 54,
-            64: 66, 68: 66,
-            70: 72, 74: 72,
-            82: 84, 86: 84,
-        }
-
-        if (
-            (final_footer is not None)
-            and (detected_spaces in snap_map)
-            and (med_row_h > 0)
-        ):
-            target_spaces = snap_map[detected_spaces]
-            delta_rows = int((target_spaces - detected_spaces) // 2)
-            if delta_rows != 0:
-                shift = int(round(delta_rows * med_row_h))
-                lo = int(
-                    (header_y_abs + 8)
-                    if header_y_abs is not None
-                    else 0
-                )
-                hi = H - 5
-                snapped = int(np.clip(final_footer + shift, lo, hi))
-                if (
-                    (last_center is not None)
-                    and (snapped < last_center + 0.5 * med_row_h)
-                ):
-                    snapped = int(last_center + 0.5 * med_row_h)
-                self.footer_snapped = True
-                self.spaces_corrected = target_spaces
-                self.snap_note = (
-                    f"SNAP spaces {detected_spaces}→{target_spaces}; "
-                    f"footer {final_footer}→{snapped}"
-                )
-                final_footer = snapped
-
-        self.last_footer_y = int(final_footer) if final_footer is not None else None
-        self.bottom_border_y = footer_struct_y
-        self.bottom_row_center_y = last_center
-
-        dbg_lines_abs = [b + y_top for b in borders_rel]
-        dbg = HeaderDbg(lines=dbg_lines_abs, centers=out)
-        return out, dbg, header_y_abs
+        return self.header_y_abs
