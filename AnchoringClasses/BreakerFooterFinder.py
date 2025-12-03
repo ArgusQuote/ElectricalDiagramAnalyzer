@@ -1,14 +1,17 @@
 # AnchoringClasses/BreakerFooterFinder.py
-
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple
-
+from typing import Optional, List, Tuple, Dict
 import os
 import cv2
 import numpy as np
+from difflib import SequenceMatcher
 import re
 
+# Same values you use in HeaderBandScanner
+_HDR_OCR_SCALE = 2.0           # or whatever you use there
+_HDR_OCR_ALLOWLIST = None      # or your actual allowlist
+_HDR_MIN_CONF = 0.35           # or your actual threshold
 
 @dataclass
 class FooterResult:
@@ -16,25 +19,20 @@ class FooterResult:
     token_y: Optional[int]
     token_val: Optional[int]
     dbg_marks: List[Tuple[int, str]]  # (y, label) for overlays
-
-    # NEW: for visualization / debugging
     vlines_x: List[int] = field(default_factory=list)              # all vertical-line centers (gray coords)
     cct_cols: List[Tuple[int, int]] = field(default_factory=list)  # [(xl, xr), ...] in gray coords
 
 
 class BreakerFooterFinder:
     """
-    Footer finder that mirrors the logic from DevEnvFindHeader6.py:
+    Footer finder (work in progress).
 
-      - Builds a vertical-line mask between HEADER and PAGE BOTTOM
-      - Uses CCT/CKT header tokens to find left/right CCT columns
-      - Crops from FIRST BREAKER LINE down from the SOURCE image
-      - Trims bottom & top (knobs)
-      - Degrids each crop, optionally upscales, then OCRs
-      - Looks for FOOTER_TOKEN_VALUES; highest value wins
-      - Uses the bottom of that token as FOOTER_TEXT seed
-      - Snaps to strongest horizontal line cluster near that seed
-      - If anything fails, falls back to footer_struct_y
+    Step 1: mirror the parser logic to crop the HEADER BAND between
+    header_y and header_bottom_y.
+    Step 2: run the exact same vertical-line detector used by the parser
+    inside this band to get column separators.
+    Step 3: run the same OCR + header scoring as the parser, but only
+            return the CKT/CCT column(s) as cct_cols.
     """
 
     FOOTER_TOKEN_VALUES = {
@@ -55,284 +53,34 @@ class BreakerFooterFinder:
         self.top_trim_frac = float(top_trim_frac)
         self.upscale_factor = float(upscale_factor)
         self.debug = debug
-        # optional: where to dump vertical mask + column crops
+        # optional: where to dump vertical mask + column crops / debug images
         self.debug_dir: Optional[str] = None
 
-    # ======================================================================
-    # PUBLIC ENTRY
-    # ======================================================================
-    def find_footer(
-        self,
-        gray: np.ndarray,
-        header_y: Optional[int],
-        centers: List[int],
-        dbg,  # has .lines (row borders)
-        ocr_dbg_items: List[dict],  # header OCR items from header finder
-        footer_struct_y: Optional[int],
-        orig_bgr: Optional[np.ndarray] = None,
-    ) -> FooterResult:
+    def _ensure_debug_dir(self, analyzer_result: Dict) -> str:
         """
-        gray       : preprocessed grayscale page (BreakerTableAnalyzer._prep)
-        header_y   : header rule y in gray coords
-        centers    : row centers (unused directly, but kept for future)
-        dbg        : header debug (_Dbg) with .lines (row borders)
-        ocr_dbg_items : [{'text','x1','y1','x2','y2'}, ...] including CCT/CKT
-        footer_struct_y : structural footer line (old method) used ONLY as fallback
-        orig_bgr   : ORIGINAL page image; if None, synthesize from gray
+        Resolve a debug directory path based on analyzer_result, similar
+        to HeaderBandScanner._ensure_debug_dir().
         """
-        H, W = gray.shape
-        dbg_marks: List[Tuple[int, str]] = []
-
-        # ------------------------------------------------------------------
-        # choose orig_bgr + scaling between orig and gray
-        # ------------------------------------------------------------------
-        if orig_bgr is None:
-            # fallback: treat gray as the source
-            orig_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-
-        Ho, Wo = orig_bgr.shape[:2]
-        Hg, Wg = H, W
-
-        scale_y = Hg / float(Ho)
-        scale_x = Wg / float(Wo)
-
-        # ------------------------------------------------------------------
-        # locate FIRST BREAKER LINE (same as script: first dbg.lines entry)
-        # ------------------------------------------------------------------
-        if dbg.lines:
-            first_breaker_line = int(dbg.lines[0])
-        else:
-            first_breaker_line = None
-
-        # ==================================================================
-        # 1) VERTICAL LINE MASK + VERTICAL POSITIONS
-        # ==================================================================
-        vmask_path = None
-        if self.debug and self.debug_dir:
-            os.makedirs(self.debug_dir, exist_ok=True)
-            vmask_path = os.path.join(self.debug_dir, "vertical_mask.png")
-
-        # IMPORTANT: header_y -> PAGE BOTTOM; NO dependency on footer_struct_y
-        v_xs = self._find_vertical_lines(
-            gray,
-            header_y,
-            H - 1,
-            mask_out_path=vmask_path,
+        src_dir = analyzer_result.get("src_dir") or os.path.dirname(
+            analyzer_result.get("src_path", "") or "."
         )
+        debug_dir = analyzer_result.get("debug_dir") or os.path.join(src_dir, "debug")
+        if self.debug:
+            os.makedirs(debug_dir, exist_ok=True)
+        return debug_dir
 
-        # ==================================================================
-        # 2) FIND CCT/CKT TOKENS IN HEADER
-        # ==================================================================
-        def _norm_token(s: str) -> str:
-            return re.sub(
-                r"\s+",
-                " ",
-                re.sub(r"[^A-Z0-9/\[\] \-]", "", (s or "").upper()),
-            ).strip()
+    def _find_header_verticals(self, band: np.ndarray) -> List[int]:
+        """
+        Detect vertical grid lines inside the *header band only*.
 
-        col_spans_gray: set[Tuple[int, int]] = set()
+        This is a direct copy of HeaderBandScanner._find_header_verticals.
+        """
+        if band is None or band.size == 0:
+            return []
 
-        for item in ocr_dbg_items:
-            txt = item.get("text", "")
-            norm = _norm_token(txt)
-            if norm not in ("CCT", "CKT"):
-                continue
+        H_band, W_band = band.shape
 
-            x1 = int(item["x1"])
-            x2 = int(item["x2"])
-
-            # nearest vertical left / right of token
-            left_candidates = [vx for vx in v_xs if vx <= x1]
-            right_candidates = [vx for vx in v_xs if vx >= x2]
-            if not left_candidates or not right_candidates:
-                continue
-            xl = max(left_candidates)
-            xr = min(right_candidates)
-            if xr <= xl:
-                continue
-
-            col_spans_gray.add((xl, xr))
-
-        col_spans_sorted: List[Tuple[int, int]] = sorted(col_spans_gray, key=lambda p: p[0])
-
-        if not col_spans_sorted or first_breaker_line is None:
-            # cannot use new method -> bail to struct footer
-            return self._fallback_footer(
-                footer_struct_y=footer_struct_y,
-                dbg_marks=dbg_marks,
-                vlines_x=v_xs,
-                cct_cols=col_spans_sorted,
-            )
-
-        # ==================================================================
-        # 3) VERTICAL LIMITS FROM FIRST BREAKER DOWN + BOTTOM TRIM
-        # ==================================================================
-        y_top_g = int(first_breaker_line)
-        y_bot_g = Hg
-
-        # map vertical gray → orig
-        y_top_o = max(0, min(Ho - 1, int(round(y_top_g / scale_y))))
-        y_bot_o = max(y_top_o + 1, min(Ho, int(round(y_bot_g / scale_y))))
-
-        # bottom trim (global)
-        if self.bottom_trim_frac > 0.0:
-            span_h = y_bot_o - y_top_o
-            cut = int(span_h * self.bottom_trim_frac)
-            if cut > 0:
-                y_bot_o = max(y_top_o + 1, y_bot_o - cut)
-
-        # ==================================================================
-        # 4) CROP FROM SOURCE, DEGRID, OCR EACH COLUMN
-        # ==================================================================
-        footer_candidates = []
-
-        for idx, (xl_g, xr_g) in enumerate(col_spans_sorted, start=1):
-            # map horizontal gray -> orig
-            x_left_o = max(0, min(Wo - 1, int(round((xl_g - 1) / scale_x))))
-            x_right_o = max(x_left_o + 1, min(Wo, int(round((xr_g + 1) / scale_x))))
-
-            src_crop = orig_bgr[y_top_o:y_bot_o, x_left_o:x_right_o]
-            if src_crop.size == 0:
-                continue
-
-            # degrid in the crop (returns grayscale)
-            clean_gray = self._degrid_crop(src_crop)
-            Hc, Wc = clean_gray.shape
-
-            # trim top of each crop
-            cut_top = 0
-            if 0.0 < self.top_trim_frac < 1.0:
-                cut_top = int(Hc * self.top_trim_frac)
-                if cut_top > 0 and cut_top < Hc:
-                    clean_gray = clean_gray[cut_top:, :]
-                    Hc, Wc = clean_gray.shape
-                else:
-                    cut_top = 0
-
-            # optional upscaling
-            eff_scale = float(self.upscale_factor) if self.upscale_factor > 0 else 1.0
-            if eff_scale != 1.0:
-                clean_gray = cv2.resize(
-                    clean_gray,
-                    None,
-                    fx=eff_scale,
-                    fy=eff_scale,
-                    interpolation=cv2.INTER_CUBIC,
-                )
-
-            overlay_col = cv2.cvtColor(clean_gray, cv2.COLOR_GRAY2BGR)
-
-            # OCR on processed crop
-            dets = []
-            if self.reader is not None:
-                try:
-                    dets = self.reader.readtext(
-                        clean_gray,
-                        detail=1,
-                        paragraph=False,
-                    )
-                except Exception:
-                    dets = []
-
-            # draw OCR boxes + collect footer tokens
-            for box, txt, conf in dets:
-                if not txt:
-                    continue
-
-                pts = np.array(box, dtype=np.int32)
-                cv2.polylines(overlay_col, [pts], True, (0, 0, 255), 1)
-
-                x0 = int(min(p[0] for p in box))
-                y0 = int(min(p[1] for p in box))
-                cv2.putText(
-                    overlay_col,
-                    str(txt),
-                    (x0, max(10, y0 - 3)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    1,
-                    cv2.LINE_AA,
-                )
-
-                # footer token detection
-                m = re.search(r"\d+", str(txt))
-                if not m:
-                    continue
-                try:
-                    val = int(m.group(0))
-                except ValueError:
-                    continue
-                if val not in self.FOOTER_TOKEN_VALUES:
-                    continue
-
-                # map OCR box -> gray page coords
-                box_gray = []
-                for bx, by in box:
-                    by_unscaled = by / eff_scale
-                    bx_unscaled = bx / eff_scale
-
-                    by_in_src_crop = cut_top + by_unscaled
-                    bx_in_src_crop = bx_unscaled
-
-                    y_orig = y_top_o + by_in_src_crop
-                    x_orig = x_left_o + bx_in_src_crop
-
-                    y_gray = int(round(y_orig * scale_y))
-                    x_gray = int(round(x_orig * scale_x))
-                    box_gray.append((x_gray, y_gray))
-
-                if not box_gray:
-                    continue
-
-                y_bottom_gray = max(p[1] for p in box_gray)
-
-                footer_candidates.append(
-                    {
-                        "val": val,
-                        "text": str(txt),
-                        "y_bottom": y_bottom_gray,
-                        "box_gray": box_gray,
-                        "col_idx": idx,
-                    }
-                )
-
-            # save the crop overlay if debugging
-            if self.debug and self.debug_dir:
-                col_path = os.path.join(self.debug_dir, f"footer_col{idx:02d}_ocr.png")
-                cv2.imwrite(col_path, overlay_col)
-
-        # ==================================================================
-        # 5) PICK BEST FOOTER TOKEN & SNAP TO HORIZONTAL STRUCTURE
-        # ==================================================================
-        if not footer_candidates:
-            return self._fallback_footer(
-                footer_struct_y=footer_struct_y,
-                dbg_marks=dbg_marks,
-                vlines_x=v_xs,
-                cct_cols=col_spans_sorted,
-            )
-
-        best = max(footer_candidates, key=lambda d: (d["val"], d["y_bottom"]))
-        token_val = int(best["val"])
-        token_y = int(best["y_bottom"])
-
-        dbg_marks.append((token_y, f"FOOTER_TOKEN_{token_val}"))
-
-        # snap to structural line near token_y (within this page band)
-        band_top = max(0, token_y - 80)
-        band_bot = min(Hg, token_y + 20)
-        band = gray[band_top:band_bot, :]
-        if band.size == 0:
-            return FooterResult(
-                footer_y=token_y,
-                token_y=token_y,
-                token_val=token_val,
-                dbg_marks=dbg_marks,
-                vlines_x=v_xs,
-                cct_cols=col_spans_sorted,
-            )
-
+        # 1) binarize
         blur = cv2.GaussianBlur(band, (3, 3), 0)
         bw = cv2.adaptiveThreshold(
             blur,
@@ -342,159 +90,782 @@ class BreakerFooterFinder:
             21,
             10,
         )
-        Kh = cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (max(40, int(0.12 * Wg)), 1),
-        )
-        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
-        proj = h_candidates.sum(axis=1)
 
-        footer_y = token_y
-        if proj.size > 0 and proj.max() > 0:
-            rel_y = int(np.argmax(proj))
-            footer_y = int(band_top + rel_y)
-            dbg_marks.append((footer_y, "FOOTER_LINE_STRUCT"))
-
-        return FooterResult(
-            footer_y=footer_y,
-            token_y=token_y,
-            token_val=token_val,
-            dbg_marks=dbg_marks,
-            vlines_x=v_xs,
-            cct_cols=col_spans_sorted,
-        )
-
-    # ======================================================================
-    # HELPERS
-    # ======================================================================
-    def _fallback_footer(
-        self,
-        footer_struct_y: Optional[int],
-        dbg_marks: List[Tuple[int, str]],
-        vlines_x: Optional[List[int]] = None,
-        cct_cols: Optional[List[Tuple[int, int]]] = None,
-    ) -> FooterResult:
-        """Return structural footer as fallback."""
-        if footer_struct_y is not None:
-            dbg_marks.append((int(footer_struct_y), "FOOTER_STRUCT_ONLY"))
-        return FooterResult(
-            footer_y=int(footer_struct_y) if footer_struct_y is not None else None,
-            token_y=None,
-            token_val=None,
-            dbg_marks=dbg_marks,
-            vlines_x=vlines_x or [],
-            cct_cols=cct_cols or [],
-        )
-
-    def _find_vertical_lines(
-        self,
-        gray: np.ndarray,
-        header_y: Optional[int],
-        footer_y: Optional[int],
-        mask_out_path: Optional[str] = None,
-    ) -> List[int]:
-        """Exact same vertical-line logic you had in DevEnvFindHeader6."""
-        if header_y is None or footer_y is None:
-            return []
-        H, W = gray.shape
-        if footer_y <= header_y + 10:
-            return []
-
-        y1 = max(0, int(header_y) - 4)
-        y2 = min(H - 1, int(footer_y) + 4)
-        if y2 <= y1:
-            return []
-
-        roi = gray[y1:y2, :]
-        if roi.size == 0:
-            return []
-
-        blur = cv2.GaussianBlur(roi, (3, 3), 0)
-        bw = cv2.adaptiveThreshold(
-            blur,
-            255,
-            cv2.ADAPTIVE_THRESH_MEAN_C,
-            cv2.THRESH_BINARY_INV,
-            21,
-            10,
-        )
-
-        roi_h = roi.shape[0]
+        # 2) emphasize vertical strokes with a tall, skinny kernel
         Kv = cv2.getStructuringElement(
             cv2.MORPH_RECT,
-            (1, max(25, int(0.015 * roi_h))),
+            (
+                1,
+                max(15, int(0.40 * H_band)),  # 40% of band height – enough to glue segments
+            ),
         )
         v_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kv, iterations=1)
 
-        # optional debug mask
-        if mask_out_path is not None:
-            try:
-                os.makedirs(os.path.dirname(mask_out_path), exist_ok=True)
-                cv2.imwrite(mask_out_path, v_candidates)
-            except Exception:
-                pass
-
-        v_x_centers: List[int] = []
-        num_v, labels_v, stats_v, _ = cv2.connectedComponentsWithStats(
+        # 3) connected components -> filter long, skinny, full-height-ish components
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
             v_candidates,
             connectivity=8,
         )
-        if num_v > 1:
-            min_vert_len = int(0.40 * roi_h)
-            max_vert_thick = max(2, int(0.02 * W))
-            for i in range(1, num_v):
-                x, y, w, h, area = stats_v[i]
-                if h >= min_vert_len and w <= max_vert_thick and area > 0:
-                    x_center = x + w // 2
-                    v_x_centers.append(int(x_center))
 
-        if not v_x_centers:
+        if num_labels <= 1:
             return []
 
-        xs = sorted(v_x_centers)
+        min_full_len = int(0.85 * H_band)             # must span at least 85% of header height
+        max_thick    = max(2, int(0.02 * W_band))     # must be thin
+        top_margin   = 3                              # must touch near top
+        bot_margin   = 3                              # and near bottom
+
+        xs_raw: List[int] = []
+
+        for i in range(1, num_labels):  # label 0 is background
+            x, y, w, h, area = stats[i]
+            if h < min_full_len:
+                continue
+            if w > max_thick:
+                continue
+
+            # Require line to effectively touch both top and bottom of header band
+            if y > top_margin:
+                continue
+            if (y + h) < (H_band - bot_margin):
+                continue
+
+            x_center = x + w // 2
+            xs_raw.append(int(x_center))
+
+        if not xs_raw:
+            return []
+
+        xs_raw.sort()
+
+        # collapse near-duplicates into one X per visual line
         collapsed: List[int] = []
-        for x in xs:
-            if not collapsed or abs(x - collapsed[-1]) > 4:
+        MERGE_PX = 4
+        for x in xs_raw:
+            if not collapsed or abs(x - collapsed[-1]) > MERGE_PX:
                 collapsed.append(x)
+
         return collapsed
 
-    def _degrid_crop(self, src_bgr: np.ndarray) -> np.ndarray:
-        """Same degridding logic as _degrid_crop in DevEnvFindHeader6."""
-        if src_bgr.size == 0:
-            return src_bgr
+    def _score_header_columns(self, column_groups: List[Dict]) -> Dict:
+        """
+        Given column_groups (each with .items = OCR tokens), assign a semantic
+        role per column: 'ckt', 'description', 'trip', 'poles', 'combo', or ignored.
+        Also returns a panel-level layout:
 
-        gray = cv2.cvtColor(src_bgr, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+          layout: 'combined'   -> trip + poles live in same "hero" column (per side)
+                  'separated'  -> trip and poles live in different hero columns (per side)
+                  'unknown'    -> anything else / insufficient signal
+        """
+        def norm_word(s: str) -> str:
+            """
+            Normalize a single OCR token to reduce typical OCR mistakes:
 
-        bw = cv2.adaptiveThreshold(
-            blur,
-            255,
-            cv2.ADAPTIVE_THRESH_MEAN_C,
-            cv2.THRESH_BINARY_INV,
-            21,
-            10,
+              - 0 / O / Q -> O
+              - 1 / I / L / J / | / ! -> I
+              - 5 / S / $ -> S
+              - 2 / Z -> Z
+              - 8 / B -> B
+
+            Then keep only A-Z0-9.
+            """
+            if not s:
+                return ""
+
+            s = str(s).upper()
+            out = []
+
+            for ch in s:
+                if ch in "0OQ":
+                    out.append("O")
+                elif ch in "1ILJ!|":
+                    out.append("I")
+                elif ch in "5S$":
+                    out.append("S")
+                elif ch in "2Z":
+                    out.append("Z")
+                elif ch in "8B":
+                    out.append("B")
+                elif ch.isalnum():
+                    out.append(ch)
+                # everything else is dropped
+
+            return "".join(out)
+
+        def _is_like(word: str, targets: List[str], base_threshold: float = 0.78) -> bool:
+            """
+            General fuzzy match `word` against a list of canonical `targets`.
+            Uses norm_word() on both sides and SequenceMatcher ratio.
+            """
+            w = norm_word(word)
+            if not w:
+                return False
+
+            for t in targets:
+                t_norm = norm_word(t)
+                if not t_norm:
+                    continue
+
+                # Bump threshold for very short targets (to avoid random matches)
+                if len(t_norm) <= 3:
+                    threshold = max(base_threshold, 0.88)
+                else:
+                    threshold = base_threshold
+
+                if SequenceMatcher(a=w, b=t_norm).ratio() >= threshold:
+                    return True
+
+            return False
+
+        def _hero_match(word: str, targets: List[str]) -> bool:
+            """
+            Stricter fuzzy match specifically for hero words (trip/poles).
+            """
+            w = norm_word(word)
+            if not w:
+                return False
+
+            for t in targets:
+                t_norm = norm_word(t)
+                if not t_norm:
+                    continue
+
+                # Hero matching thresholds:
+                # - very short tokens (<=4): need ~0.90+
+                # - longer tokens: allow a bit more noise (~0.75+)
+                if len(t_norm) <= 4:
+                    threshold = 0.90
+                else:
+                    threshold = 0.75
+
+                if SequenceMatcher(a=w, b=t_norm).ratio() >= threshold:
+                    return True
+
+            return False
+
+        # ---------- First pass: compute scores + hero ranks per column ----------
+        col_infos: List[Dict] = []
+
+        for col in column_groups:
+            items = col.get("items", []) or []
+
+            # texts will now be a flat list of individual words,
+            # e.g. ['Circuit', 'Description'] instead of ['Circuit Description']
+            texts: List[str] = []
+            # (word, is_sentence_like)
+            word_entries: List[Tuple[str, bool]] = []
+
+            # Build text + word list, but only from tokens with sufficient OCR confidence
+            for tok in items:
+                txt = str(tok.get("text", "")).strip()
+                if not txt:
+                    continue
+
+                conf = float(tok.get("conf", 0.0))
+                if conf < _HDR_MIN_CONF:
+                    continue  # too noisy for scoring
+
+                # Split into word-ish chunks
+                pieces = [w for w in re.split(r"[\s/,;-]+", txt) if w.strip()]
+                if not pieces:
+                    continue
+
+                # For debug: store *separated* words
+                for raw in pieces:
+                    raw_clean = raw.strip()
+                    if raw_clean:
+                        texts.append(raw_clean)
+
+                # Treat long, multi-word chunks as sentence-like notes
+                is_sentence_like = len(pieces) >= 3
+
+                for raw in pieces:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+
+                    w_norm = norm_word(raw)
+                    if not w_norm:
+                        continue
+
+                    # Skip pure-numeric tokens (no letters)
+                    if not any(ch.isalpha() for ch in w_norm):
+                        continue
+
+                    word_entries.append((raw, is_sentence_like))
+
+            # Base structure for this column
+            has_notes = False
+            score = {
+                "ckt": 0,
+                "description": 0,
+                "trip": 0,
+                "poles": 0,
+            }
+            hero_trip_rank = 0
+            hero_poles_rank = 0
+
+            if not word_entries:
+                col_infos.append(
+                    {
+                        "index": col["index"],
+                        "x_left": col["x_left"],
+                        "x_right": col["x_right"],
+                        "texts": texts,
+                        "has_notes": has_notes,
+                        "ignoredReason": None,
+                        "score": score,
+                        "hero_trip_rank": hero_trip_rank,
+                        "hero_poles_rank": hero_poles_rank,
+                        "has_ckt_signal": False,
+                        "has_desc_signal": False,
+                        "role": None,
+                    }
+                )
+                continue
+
+            # Score words + hero ranks
+            for w_raw, is_sentence_like in word_entries:
+                w_norm = norm_word(w_raw)
+                if not w_norm:
+                    continue
+
+                # notes / remarks
+                if _is_like(
+                    w_raw,
+                    ["NOTE", "NOTES", "REMARK", "REMARKS", "COMMENT", "COMMENTS"],
+                    base_threshold=0.80,
+                ):
+                    has_notes = True
+
+                if is_sentence_like:
+                    continue
+
+                # CKT / CCT / NO.
+                if _is_like(
+                    w_raw,
+                    ["CKT", "CCT", "NO", "NO."],
+                    base_threshold=0.95,
+                ):
+                    score["ckt"] += 3
+
+                # DESCRIPTION / DESIGNATION / NAME
+                if _is_like(
+                    w_raw,
+                    [
+                        "DESCRIPTION",
+                        "CIRCUIT DESCRIPTION",
+                        "LOAD DESCRIPTION",
+                        "DESIGNATION",
+                        "LOAD DESIGNATION",
+                        "NAME",
+                    ],
+                    base_threshold=0.70,
+                ):
+                    score["description"] += 3
+
+                # Trip hero ranks
+                if _hero_match(w_raw, ["AMP", "AMPS"]):
+                    hero_trip_rank = max(hero_trip_rank, 5)
+                elif _hero_match(w_raw, ["TRIP", "TRIPPING"]):
+                    hero_trip_rank = max(hero_trip_rank, 4)
+                elif _hero_match(w_raw, ["LOAD"]):
+                    hero_trip_rank = max(hero_trip_rank, 3)
+                elif _hero_match(w_raw, ["SIZE"]):
+                    hero_trip_rank = max(hero_trip_rank, 2)
+                elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
+                    hero_trip_rank = max(hero_trip_rank, 1)
+
+                # Poles hero ranks
+                if _hero_match(w_raw, ["POLE", "POLES", "PO.", "PO"]):
+                    hero_poles_rank = max(hero_poles_rank, 4)
+                elif w_norm == "P":
+                    hero_poles_rank = max(hero_poles_rank, 1)
+
+            has_ckt_signal = score["ckt"] > 0
+            has_desc_signal = score["description"] > 0
+
+            col_infos.append(
+                {
+                    "index": col["index"],
+                    "x_left": col["x_left"],
+                    "x_right": col["x_right"],
+                    "texts": texts,
+                    "has_notes": has_notes,
+                    "ignoredReason": "notes" if has_notes else None,
+                    "score": score,
+                    "hero_trip_rank": hero_trip_rank,
+                    "hero_poles_rank": hero_poles_rank,
+                    "has_ckt_signal": has_ckt_signal,
+                    "has_desc_signal": has_desc_signal,
+                    "role": None,
+                }
+            )
+
+        if not col_infos:
+            return {
+                "roles": {},
+                "columns": [],
+                "layout": "unknown",
+            }
+
+        # ---------- First: assign ckt / description from fuzzy scores ----------
+        for info in col_infos:
+            if info["has_notes"]:
+                info["role"] = None
+                continue
+
+            s = info["score"]
+            best_role = None
+            best_score_val = 0
+
+            for r in ("ckt", "description"):
+                if s[r] > best_score_val:
+                    best_score_val = s[r]
+                    best_role = r
+
+            if best_role is not None and best_score_val >= 2:
+                info["role"] = best_role
+            else:
+                info["role"] = None
+
+        # Hero candidates: only pure trip/poles columns
+        hero_candidates = [
+            info
+            for info in col_infos
+            if (not info["has_notes"])
+               and info["role"] is None
+               and not info.get("has_ckt_signal")
+               and not info.get("has_desc_signal")
+        ]
+
+        if not hero_candidates:
+            role_to_index: Dict[str, int] = {}
+            summaries: List[Dict] = []
+            for info in col_infos:
+                role = info.get("role")
+                ignored_reason = info.get("ignoredReason")
+                if role and role not in role_to_index:
+                    role_to_index[role] = info["index"]
+                summaries.append(
+                    {
+                        "index": info["index"],
+                        "x_left": info["x_left"],
+                        "x_right": info["x_right"],
+                        "texts": info["texts"],
+                        "role": role,
+                        "ignoredReason": ignored_reason,
+                    }
+                )
+            return {
+                "roles": role_to_index,
+                "columns": summaries,
+                "layout": "unknown",
+            }
+
+        # Determine left/right side using geometric center
+        global_left = min(info["x_left"] for info in hero_candidates)
+        global_right = max(info["x_right"] for info in hero_candidates)
+        center_x = 0.5 * (global_left + global_right)
+
+        for info in col_infos:
+            col_center = 0.5 * (info["x_left"] + info["x_right"])
+            info["side"] = "left" if col_center < center_x else "right"
+
+        # Pick best hero trip/poles per side
+        best_trip_col = {"left": None, "right": None}
+        best_trip_rank = {"left": 0, "right": 0}
+        best_poles_col = {"left": None, "right": None}
+        best_poles_rank = {"left": 0, "right": 0}
+
+        for info in hero_candidates:
+            side = info["side"]
+            ht = info["hero_trip_rank"]
+            hp = info["hero_poles_rank"]
+
+            if ht > best_trip_rank[side]:
+                best_trip_rank[side] = ht
+                best_trip_col[side] = info
+
+            if hp > best_poles_rank[side]:
+                best_poles_rank[side] = hp
+                best_poles_col[side] = info
+
+        # Panel-level layout decision
+        combo_side_exists = False
+        for side in ("left", "right"):
+            tcol = best_trip_col[side]
+            pcol = best_poles_col[side]
+            if (
+                tcol is not None
+                and pcol is not None
+                and tcol["index"] == pcol["index"]
+                and best_trip_rank[side] > 0
+                and best_poles_rank[side] > 0
+            ):
+                combo_side_exists = True
+                break
+
+        any_trip_hero = any(best_trip_rank[side] > 0 for side in ("left", "right"))
+        any_poles_hero = any(best_poles_rank[side] > 0 for side in ("left", "right"))
+
+        if combo_side_exists:
+            layout = "combined"
+        elif any_trip_hero and any_poles_hero:
+            layout = "separated"
+        else:
+            layout = "unknown"
+
+        # Hero-based assignment for trip/poles/combo
+        if layout == "combined":
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                pcol = best_poles_col[side]
+                if (
+                    tcol is not None
+                    and pcol is not None
+                    and tcol["index"] == pcol["index"]
+                    and best_trip_rank[side] > 0
+                    and best_poles_rank[side] > 0
+                ):
+                    if tcol["role"] is None:
+                        tcol["role"] = "combo"
+
+        elif layout == "separated":
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                if tcol is not None and best_trip_rank[side] > 0:
+                    if tcol["role"] is None:
+                        tcol["role"] = "trip"
+
+                pcol = best_poles_col[side]
+                if pcol is not None and best_poles_rank[side] > 0:
+                    if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
+                        pcol["role"] = "poles"
+        else:
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                if tcol is not None and best_trip_rank[side] > 0:
+                    if tcol["role"] is None:
+                        tcol["role"] = "trip"
+
+                pcol = best_poles_col[side]
+                if pcol is not None and best_poles_rank[side] > 0:
+                    if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
+                        pcol["role"] = "poles"
+
+        # Build roles map + summaries
+        role_to_index: Dict[str, int] = {}
+        summaries: List[Dict] = []
+
+        for info in col_infos:
+            role = info.get("role")
+            ignored_reason = info.get("ignoredReason")
+
+            if role and role not in role_to_index:
+                role_to_index[role] = info["index"]
+
+            summaries.append(
+                {
+                    "index": info["index"],
+                    "x_left": info["x_left"],
+                    "x_right": info["x_right"],
+                    "texts": info["texts"],
+                    "role": role,
+                    "ignoredReason": ignored_reason,
+                }
+            )
+
+        return {
+            "roles": role_to_index,
+            "columns": summaries,
+            "layout": layout,
+        }
+
+    def find_footer(self, analyzer_result: Dict) -> FooterResult:
+        """
+        Current behavior:
+          - Crop the header band [header_y, header_bottom_y) exactly like the parser.
+          - Find vertical grid lines inside that band (column separators).
+          - OCR each column band with the same settings as the parser.
+          - Run the same header scoring and extract only CKT/CCT columns.
+
+        No actual footer_y detection yet.
+        """
+        # --- 0) pull basic images + header geometry from analyzer_result ---
+        raw_gray      = analyzer_result.get("gray", None)          # with grid lines
+        gridless_gray = analyzer_result.get("gridless_gray", None) # after degridding
+
+        # use gridless for OCR/inspection if available, else raw
+        gray_ocr   = gridless_gray if gridless_gray is not None else raw_gray
+        gray_lines = raw_gray if raw_gray is not None else gray_ocr
+
+        header_y        = analyzer_result.get("header_y")
+        header_bottom_y = analyzer_result.get("header_bottom_y")
+        src_path        = analyzer_result.get("src_path")
+
+        dbg_marks: List[Tuple[int, str]] = []
+
+        # --- 1) sanity check ---
+        if gray_ocr is None or gray_lines is None or header_y is None:
+            if self.debug:
+                print(
+                    "[BreakerFooterFinder] Missing gray/header_y; "
+                    "cannot crop header band."
+                )
+            return FooterResult(
+                footer_y=None,
+                token_y=None,
+                token_val=None,
+                dbg_marks=dbg_marks,
+                vlines_x=[],
+                cct_cols=[],
+            )
+
+        H, W = gray_ocr.shape[:2]
+
+        if not isinstance(header_bottom_y, (int, float)) or not isinstance(header_y, (int, float)):
+            if self.debug:
+                print(
+                    "[BreakerFooterFinder] Missing header_bottom_y/header_y; "
+                    "cannot determine header band."
+                )
+                print(f"  header_y={header_y!r}, header_bottom_y={header_bottom_y!r}")
+            return FooterResult(
+                footer_y=None,
+                token_y=None,
+                token_val=None,
+                dbg_marks=dbg_marks,
+                vlines_x=[],
+                cct_cols=[],
+            )
+
+        # --- 2) define the header band in page coordinates ---
+        y1 = max(0, int(header_y))
+        y2 = min(H, int(header_bottom_y))
+
+        dbg_marks.append((y1, "HEADER_TOP"))
+        dbg_marks.append((y2, "HEADER_BOTTOM"))
+
+        # Require a non-trivial band height
+        if y2 <= y1 + 4:
+            if self.debug:
+                print(
+                    "[BreakerFooterFinder] Header band too small or invalid: "
+                    f"y1={y1}, y2={y2}, H={H}. Bailing."
+                )
+            return FooterResult(
+                footer_y=None,
+                token_y=None,
+                token_val=None,
+                dbg_marks=dbg_marks,
+                vlines_x=[],
+                cct_cols=[],
+            )
+
+        band_ocr   = gray_ocr[y1:y2, :]
+        band_lines = gray_lines[y1:y2, :]
+
+        debug_dir = self.debug_dir or self._ensure_debug_dir(analyzer_result)
+
+        # --- 3) optional debug: save RAW cropped header band used by footer finder ---
+        if self.debug:
+            base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
+            debug_img_raw_path = os.path.join(
+                debug_dir,
+                f"{base}_footer_header_band_raw.png",
+            )
+            try:
+                cv2.imwrite(debug_img_raw_path, band_ocr)
+            except Exception as e:
+                print(
+                    f"[BreakerFooterFinder] Failed to write footer header band image: {e}"
+                )
+
+        # --- 4) find header-local vertical lines (column dividers), same as parser ---
+        header_v_cols = self._find_header_verticals(band_lines)
+        v_cols = sorted(int(x) for x in header_v_cols)
+
+        if self.debug:
+            print(f"[BreakerFooterFinder] header_v_cols (lines band) = {v_cols}")
+
+        # --- 5) OCR columns exactly like parser, then score + pick CKT columns ---
+        tokens: List[Dict] = []
+        column_groups: List[Dict] = []
+
+        if self.reader is not None and v_cols and len(v_cols) >= 2:
+            H_band, W_band = band_ocr.shape[:2]
+
+            for i in range(len(v_cols) - 1):
+                x_left = v_cols[i]
+                x_right = v_cols[i + 1]
+
+                # guard against degenerate / reversed intervals
+                if x_right <= x_left or x_left < 0 or x_right > W_band:
+                    continue
+
+                col_group = {
+                    "index": len(column_groups) + 1,
+                    "x_left": int(x_left),
+                    "x_right": int(x_right),
+                    "items": [],
+                }
+                column_groups.append(col_group)
+
+                col_band = band_ocr[:, x_left:x_right]
+                if col_band.size == 0:
+                    continue
+
+                col_band_up = cv2.resize(
+                    col_band,
+                    None,
+                    fx=_HDR_OCR_SCALE,
+                    fy=_HDR_OCR_SCALE,
+                    interpolation=cv2.INTER_CUBIC,
+                )
+
+                try:
+                    dets = self.reader.readtext(
+                        col_band_up,
+                        detail=1,
+                        paragraph=False,
+                        allowlist=_HDR_OCR_ALLOWLIST,
+                        mag_ratio=1.0,
+                        contrast_ths=0.05,
+                        adjust_contrast=0.7,
+                        text_threshold=0.4,
+                        low_text=0.25,
+                    )
+                except Exception as e:
+                    if self.debug:
+                        print(f"[BreakerFooterFinder] OCR failed on header column {i}: {e}")
+                    dets = []
+
+                for box, txt, conf in dets:
+                    try:
+                        conf_f = float(conf or 0.0)
+                    except Exception:
+                        conf_f = 0.0
+
+                    pts_band_local = [
+                        (
+                            int(p[0] / _HDR_OCR_SCALE),
+                            int(p[1] / _HDR_OCR_SCALE),
+                        )
+                        for p in box
+                    ]
+                    xs = [p[0] for p in pts_band_local]
+                    ys = [p[1] for p in pts_band_local]
+
+                    x1_local = max(0, min(xs))
+                    x2_local = min(col_band.shape[1] - 1, max(xs))
+                    y1b = max(0, min(ys))
+                    y2b = min(H_band - 1, max(ys))
+
+                    x1b = x_left + x1_local
+                    x2b = x_left + x2_local
+
+                    y1_abs = y1 + y1b
+                    y2_abs = y1 + y2b
+
+                    tok = {
+                        "text": str(txt or "").strip(),
+                        "conf": conf_f,
+                        "box_band": [int(x1b), int(y1b), int(x2b), int(y2b)],
+                        "box_page": [int(x1b), int(y1_abs), int(x2b), int(y2_abs)],
+                    }
+                    tokens.append(tok)
+                    col_group["items"].append(tok)
+        else:
+            if self.debug:
+                print("[BreakerFooterFinder] No full-height verticals; skipping header OCR.")
+
+        # score columns using the exact same logic as the parser
+        normalized_columns = self._score_header_columns(column_groups)
+
+        # keep only CKT/CCT columns
+        cct_cols: List[Tuple[int, int]] = []
+        for col in normalized_columns.get("columns", []):
+            if col.get("role") == "ckt":
+                cct_cols.append((int(col["x_left"]), int(col["x_right"])))
+
+        # --- 6) Debug overlay: band + verticals + CKT boxes ---
+        if self.debug:
+            vis = cv2.cvtColor(band_lines, cv2.COLOR_GRAY2BGR)
+            H_band, W_band = vis.shape[:2]
+
+            cv2.rectangle(
+                vis,
+                (0, 0),
+                (W_band - 1, H_band - 1),
+                (0, 255, 255),
+                1,
+            )
+            label = f"FOOTER HEADER BAND  y:[{y1},{y2})"
+            cv2.putText(
+                vis,
+                label,
+                (8, max(14, 14)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+            # vertical lines
+            for x in v_cols:
+                xi = int(x)
+                if 0 <= xi < W_band:
+                    cv2.line(vis, (xi, 0), (xi, H_band - 1), (255, 0, 255), 1)
+                    cv2.putText(
+                        vis,
+                        "HDR",
+                        (xi + 2, 16),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (255, 0, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+            # highlight CKT columns
+            for xl, xr in cct_cols:
+                cv2.rectangle(
+                    vis,
+                    (int(xl), 0),
+                    (int(xr) - 1, H_band - 1),
+                    (0, 255, 0),
+                    1,
+                )
+                cv2.putText(
+                    vis,
+                    "CKT",
+                    (int(xl) + 4, H_band - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+            base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
+            debug_img_overlay_path = os.path.join(
+                debug_dir,
+                f"{base}_footer_header_band_overlay.png",
+            )
+            try:
+                cv2.imwrite(debug_img_overlay_path, vis)
+            except Exception as e:
+                print(
+                    f"[BreakerFooterFinder] Failed to write footer header band overlay image: {e}"
+                )
+
+        return FooterResult(
+            footer_y=None,          # not computed yet
+            token_y=None,           # not computed yet
+            token_val=None,         # not computed yet
+            dbg_marks=dbg_marks,
+            vlines_x=v_cols,        # same column separators as parser saw
+            cct_cols=cct_cols,      # ONLY the CKT/CCT column(s)
         )
-
-        H, W = bw.shape
-
-        Kv = cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (1, max(18, int(0.12 * H))),
-        )
-        v = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kv, iterations=1)
-
-        Kh = cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (max(25, int(0.35 * W)), 1),
-        )
-        h = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
-
-        grid = cv2.bitwise_or(v, h)
-        mask = cv2.dilate(
-            grid,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
-            iterations=1,
-        )
-
-        clean = cv2.inpaint(gray, mask, 2, cv2.INPAINT_TELEA)
-        return clean
