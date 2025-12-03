@@ -35,6 +35,7 @@ MAX_DELTA_PX        = 80     # max distance from OCR header row
 MIN_COVERAGE_FRAC   = 0.60   # row coverage threshold
 MERGE_Y_TOLERANCE   = 3      # merge contiguous rows into bands
 
+# remove
 def ocr_tokens_in_header_band(gray, analyzer):
     """
     Run EasyOCR only in a top header band and return tokens with a flag
@@ -95,6 +96,7 @@ def ocr_tokens_in_header_band(gray, analyzer):
         })
     return toks
 
+# remove
 def infer_header_y_from_tokens(tokens, img_height: int, max_rel_height: float = 0.65) -> int | None:
     """
     Infer a single header_y from already OCR'd tokens, without additional OCR.
@@ -132,6 +134,7 @@ def infer_header_y_from_tokens(tokens, img_height: int, max_rel_height: float = 
 
     return int(header_y)
 
+# remove
 def _binarize_for_horiz(gray: np.ndarray) -> np.ndarray:
     blur = cv2.GaussianBlur(gray, (3, 3), 0)
     _, bw_inv = cv2.threshold(
@@ -140,7 +143,7 @@ def _binarize_for_horiz(gray: np.ndarray) -> np.ndarray:
     )
     return bw_inv  # white = ink
 
-
+# remove
 def _horiz_mask_from_bin(bw_inv: np.ndarray, W: int,
                          horiz_kernel_frac: float = 0.035,
                          border_trim_px: int = 2) -> np.ndarray:
@@ -166,7 +169,7 @@ def _horiz_mask_from_bin(bw_inv: np.ndarray, W: int,
         out = t if out is None else cv2.bitwise_or(out, t)
     return out
 
-
+# remove
 def extract_horiz_lines(gray: np.ndarray,
                         horiz_kernel_frac: float = 0.035,
                         min_width_frac: float = 0.60,
@@ -229,6 +232,7 @@ def extract_horiz_lines(gray: np.ndarray,
     lines.sort(key=lambda d: d["y_center"])
     return lines, horiz
 
+# remove
 def find_near_header_band(hmask: np.ndarray,
                           header_y: int | None,
                           search_up_first: bool = SEARCH_UP_FIRST,
@@ -283,6 +287,7 @@ def find_near_header_band(hmask: np.ndarray,
             return min(below)
         return max(above) if above else None
 
+# remove
 def find_header_bottom_band(hmask: np.ndarray,
                             header_token_y: int | None,
                             used_header_y: int | None = None,
@@ -332,12 +337,15 @@ def find_header_bottom_band(hmask: np.ndarray,
     # Closest band just below the cutoff
     return int(min(below))
 
+# keep
 # --- Panel name de-duper (module-scope; persists for this process/job) ---
 _NAME_COUNTS = {}
 
+# keep
 def _norm_name(s):
     return str(s or "").strip().upper()
 
+# keep
 def _dedupe_name(raw_name: str | None) -> str:
     base = (str(raw_name or "").strip()) or "(unnamed)"
     key = _norm_name(base)
@@ -345,22 +353,24 @@ def _dedupe_name(raw_name: str | None) -> str:
     _NAME_COUNTS[key] = cnt
     return base if cnt == 1 else f"{base} ({cnt})"
 
+# keep
 # Optional: call from tests to reset between runs in the same process
 def reset_name_deduper():
     _NAME_COUNTS.clear()
 
-# ----- STRICT imports: Analyzer + Header + Parser5 only -----
-from OcrLibrary.BreakerTableAnalyzer6 import BreakerTableAnalyzer, ANALYZER_VERSION
+# ----- Imports -----
+from OcrLibrary.BreakerTableAnalyzer10 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser6   import BreakerTableParser, PARSER_VERSION
 
+# keep
 class BreakerTablePipeline:
-
+# keep
     def __init__(self, *, debug: bool = True):
         self.debug = bool(debug)
         self._analyzer = None
         self._header_parser = None
-
+# keep
     # ---- numeric helpers ----
     def _to_int_or_none(self, v):
         if v is None:
@@ -372,7 +382,7 @@ class BreakerTablePipeline:
             return int(s)
         except Exception:
             return None
-
+# keep
     # ---- validation helpers ----
     def _mask_header_non_name(self, header_result: dict | None, *, detected_name):
         out = dict(header_result) if isinstance(header_result, dict) else {}
@@ -392,14 +402,14 @@ class BreakerTablePipeline:
             if k not in ("name", "attrs"):
                 out[k] = "x"
         return out
-
+# keep
     def _mask_parser_non_name(self, parser_result: dict | None, *, detected_name):
         out = dict(parser_result) if isinstance(parser_result, dict) else {}
         out["name"] = detected_name
         out["spaces"] = "x"
         out["detected_breakers"] = []
         return out or {"name": detected_name, "spaces": "x", "detected_breakers": []}
-
+# keep
     def _extract_panel_keys(self, analyzer_result: dict | None, header_result: dict | None, parser_result: dict | None):
         ar = analyzer_result or {}
         hdr = header_result or {}
@@ -432,7 +442,7 @@ class BreakerTablePipeline:
                     or ah.get("main_amps")
         spaces = prs.get("spaces")
         return name, volts, bus_amps, main_amps, spaces
-
+# keep
     def _parse_voltage(self, v):
         if v is None:
             return None
@@ -446,7 +456,7 @@ class BreakerTablePipeline:
             return hi if hi in VALID_VOLTAGES else None
         m_single = re.search(r'(?<!\d)(120|208|240|480|600)(?!\d)', s)
         return int(m_single.group(1)) if m_single and int(m_single.group(1)) in VALID_VOLTAGES else None
-
+# keep
     def _is_valid_amp(self, val) -> bool:
         n = self._to_int_or_none(val)
         if n is None:
@@ -454,18 +464,20 @@ class BreakerTablePipeline:
         if n < AMP_MIN or n > AMP_MAX:
             return False
         return (n % 10) in (0, 5)
-
+# keep
     # ---- helpers ----
     def _ensure_analyzer(self):
         if self._analyzer is None:
             self._analyzer = BreakerTableAnalyzer(debug=self.debug)
         return self._analyzer
-
+# keep
     def _ensure_header_parser(self):
         if self._header_parser is None:
             self._header_parser = PanelHeaderParser(debug=self.debug)
         return self._header_parser
 
+
+# LIKELY NEED TO EDIT -----------------------------------------------------------------------
     def run(
         self,
         image_path: str,
@@ -759,7 +771,7 @@ class BreakerTablePipeline:
             "panelStatus": panel_status,  # None if OK; message if flagged
         }
 
-
+# keep
 # ---- Back-compat: keep the old function name ----
 def parse_image(
     image_path: str,
@@ -776,7 +788,7 @@ def parse_image(
         run_header=run_header,
         run_parser=run_parser,
     )
-
+# keep
 if __name__ == "__main__":
     # --- Dev banner ---
     modA = sys.modules[BreakerTableAnalyzer.__module__]
