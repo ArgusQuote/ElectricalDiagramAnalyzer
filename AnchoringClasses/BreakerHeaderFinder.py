@@ -70,7 +70,15 @@ class BreakerHeaderFinder:
         self.footer_snapped: bool = False
         self.snap_note: Optional[str] = None
 
+        self.header_text_line_y: Optional[int] = None   # blue text line
+        self.header_y_abs: Optional[int] = None         # snapped structural line
+        self.header_bottom_y_abs: Optional[int] = None
+
         self.header_text_line_y: Optional[int] = None
+
+        # snapping debug
+        self.snap_steps_up: Optional[int] = None
+        self.last_horizontal_mask_path: Optional[str] = None
 
         self.CATEGORY_ALIASES = {
             "ckt": {"CKT", "CCT"},
@@ -104,6 +112,10 @@ class BreakerHeaderFinder:
         self.footer_snapped = False
         self.snap_note = None
         self.header_text_line_y = None
+        self.header_text_line_y = None
+        self.header_y_abs = None
+        self.snap_steps_up = None
+        self.last_horizontal_mask_path = None
 
         header_y = self._find_header_by_tokens(gray)
 
@@ -134,9 +146,11 @@ class BreakerHeaderFinder:
         Overlay is full-size (same size as base_img).
 
         Colors:
-          - Blue   : header anchor token + header text line
+          - Blue   : header anchor token + HEADER_TEXT_LINE (text baseline)
+          - Cyan   : HEADER_Y (snapped structural line above)
+          - Orange : HEADER_BOTTOM_Y (nearest horizontal line below)
           - Magenta: other header tokens
-          - Red    : excluded tokens (optional)
+          - Red    : excluded tokens
         """
         # always return a BGR image
         if base_img.ndim == 2:
@@ -147,15 +161,17 @@ class BreakerHeaderFinder:
         if not self.debug:
             return overlay
 
-        # ROI rectangles
+        H, W = overlay.shape[:2]
+
+        # ROI rectangles (blue box around scanned header band)
         for (x1, y1, x2, y2) in self.ocr_dbg_rois:
             cv2.rectangle(overlay, (x1, y1), (x2, y2), (255, 0, 0), 1)
 
-        # header / anchor tokens only
+        # header / anchor / excluded tokens only
         for item in self.ocr_dbg_items:
-            is_anchor  = item.get("is_header_anchor", False)
-            is_header  = item.get("is_header_token", False)
-            is_excl    = item.get("is_excluded_token", False)
+            is_anchor = item.get("is_header_anchor", False)
+            is_header = item.get("is_header_token", False)
+            is_excl   = item.get("is_excluded_token", False)
 
             # skip non-header junk entirely
             if not (is_anchor or is_header or is_excl):
@@ -166,13 +182,13 @@ class BreakerHeaderFinder:
             txt = item.get("text", "")
 
             if is_anchor:
-                box_color  = (255, 0, 0)   # blue
+                box_color  = (255, 0, 0)    # blue
                 text_color = (255, 0, 0)
             elif is_header:
-                box_color  = (255, 0, 255) # magenta
+                box_color  = (255, 0, 255)  # magenta
                 text_color = (255, 0, 255)
             else:  # excluded
-                box_color  = (0, 0, 255)   # red
+                box_color  = (0, 0, 255)    # red
                 text_color = (0, 0, 255)
 
             cv2.rectangle(overlay, (x1, y1), (x2, y2), box_color, 1)
@@ -188,10 +204,9 @@ class BreakerHeaderFinder:
                     cv2.LINE_AA,
                 )
 
-        # header text line (blue) across full image
+        # HEADER_TEXT_LINE (blue) at text baseline
         if self.header_text_line_y is not None:
             y = int(self.header_text_line_y)
-            H, W = overlay.shape[:2]
             cv2.line(overlay, (0, y), (W - 1, y), (255, 0, 0), 2)
             cv2.putText(
                 overlay,
@@ -201,6 +216,52 @@ class BreakerHeaderFinder:
                 0.5,
                 (255, 0, 0),
                 1,
+                cv2.LINE_AA,
+            )
+
+        # HEADER_Y snapped structural line (cyan) + numeric value
+        if self.header_y_abs is not None:
+            y = int(self.header_y_abs)
+            cv2.line(overlay, (0, y), (W - 1, y), (0, 255, 255), 2)
+            label = f"HEADER_Y={y}"
+            cv2.putText(
+                overlay,
+                label,
+                (10, min(H - 10, y + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # HEADER_BOTTOM_Y (nearest horizontal line below, orange-ish)
+        if getattr(self, "header_bottom_y_abs", None) is not None:
+            yb = int(self.header_bottom_y_abs)
+            cv2.line(overlay, (0, yb), (W - 1, yb), (0, 165, 255), 2)
+            label = f"HEADER_BOTTOM_Y={yb}"
+            cv2.putText(
+                overlay,
+                label,
+                (10, min(H - 10, yb + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 165, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # how many rows we moved upward during snapping
+        if self.snap_steps_up is not None:
+            txt = f"snap_up_steps={self.snap_steps_up}"
+            cv2.putText(
+                overlay,
+                txt,
+                (10, 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 255),
+                2,
                 cv2.LINE_AA,
             )
 
@@ -232,6 +293,110 @@ class BreakerHeaderFinder:
         except Exception:
             return []
 
+    def _snap_header_to_horizontal_line(
+        self,
+        gray: np.ndarray,
+        y1_band: int,
+        y2_band: int,
+        header_text_y: int,
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """
+        Build a horizontal-line mask on the band [y1_band:y2_band, :]
+        and find the closest white line ABOVE and BELOW header_text_y.
+
+        Returns:
+            (header_y_above, header_bottom_y_below)  as absolute y coords.
+        """
+        H, W = gray.shape
+        y1_band = max(0, min(H, y1_band))
+        y2_band = max(y1_band + 1, min(H, y2_band))
+
+        band = gray[y1_band:y2_band, :]
+        if band.size == 0:
+            self.snap_steps_up = None
+            return None, None
+
+        # --- build horizontal-line mask ---
+        blur = cv2.GaussianBlur(band, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # emphasize HORIZONTAL structures: wide kernel, height=1
+        klen = int(max(70, min(W * 0.35, 400)))
+        K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
+        horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
+
+        # optional debug: save the mask so you can *see* it
+        self.last_horizontal_mask_path = None
+        if self.debug and self.debug_dir:
+            try:
+                os.makedirs(self.debug_dir, exist_ok=True)
+                mask_name = f"header_horiz_mask_y{y1_band}_{y2_band}.png"
+                mask_path = os.path.join(self.debug_dir, mask_name)
+                cv2.imwrite(mask_path, horiz)
+                self.last_horizontal_mask_path = mask_path
+                print(f"[BreakerHeaderFinder] Saved horizontal mask: {mask_path}")
+            except Exception as e:
+                print(f"[BreakerHeaderFinder] Failed to save horiz mask: {e}")
+
+        band_h = horiz.shape[0]
+
+        # convert absolute header_text_y to band-relative index
+        y_rel_start = header_text_y - y1_band
+        if y_rel_start < 0 or y_rel_start >= band_h:
+            self.snap_steps_up = None
+            return None, None
+
+        # helper: does a small window around y_idx contain any white pixels?
+        def has_white_at(y_idx: int) -> bool:
+            y0 = max(0, y_idx - 2)
+            y1 = min(band_h, y_idx + 3)
+            slice_ = horiz[y0:y1, :]
+            return bool(slice_.any())
+
+        max_up = 120   # max pixels to search up
+        max_down = 120 # max pixels to search down
+
+        # ----- search UPWARDS for nearest white line -----
+        steps_up = 0
+        best_up_rel = None
+        cur = int(y_rel_start)
+        while cur >= 0 and steps_up <= max_up:
+            if has_white_at(cur):
+                best_up_rel = cur
+                break
+            cur -= 1          # *** MOVE WINDOW UP ***
+            steps_up += 1
+
+        self.snap_steps_up = steps_up if best_up_rel is not None else None
+
+        # ----- search DOWNWARDS for nearest white line -----
+        steps_down = 0
+        best_down_rel = None
+        cur = int(y_rel_start)
+        while cur < band_h and steps_down <= max_down:
+            if has_white_at(cur):
+                best_down_rel = cur
+                break
+            cur += 1          # move window down
+            steps_down += 1
+
+        header_y_above = y1_band + best_up_rel if best_up_rel is not None else None
+        header_bottom_y_below = (
+            y1_band + best_down_rel if best_down_rel is not None else None
+        )
+
+        return (
+            int(header_y_above) if header_y_above is not None else None,
+            int(header_bottom_y_below) if header_bottom_y_below is not None else None,
+        )
+
     # ---------- header finder ----------
 
     def _find_header_by_tokens(self, gray: np.ndarray) -> Optional[int]:
@@ -239,11 +404,14 @@ class BreakerHeaderFinder:
         Use OCR header tokens to find the header row.
 
         - Crop to top 50% of page.
-        - Remove top 15% of that half.  (~7.5%H..50%H)
+        - Remove top 15% of that half  (~7.5%H..50%H).
         - OCR on that band.
         - Group tokens by y-bin.
         - Pick the line with the MOST *header* tokens.
         - Anchor is the left-most header token on that line.
+        - header_text_line_y = anchor top y (used for blue overlay).
+        - header_y_abs      = nearest horizontal line ABOVE.
+        - header_bottom_y_abs = nearest horizontal line BELOW.
         """
         if self.reader is None:
             return None
@@ -259,6 +427,9 @@ class BreakerHeaderFinder:
         roi = gray[y1_band:y2_band, x1_band:x2_band]
         if roi.size == 0:
             self.header_text_line_y = None
+            self.header_y_abs = None
+            self.header_bottom_y_abs = None
+            self.snap_steps_up = None
             return None
 
         # optional: save band for debug
@@ -278,8 +449,12 @@ class BreakerHeaderFinder:
         # reset debug collectors and record ROI in ABSOLUTE coords
         self.ocr_dbg_items = []
         self.ocr_dbg_rois = [(x1_band, y1_band, x2_band, y2_band)]
+        self.snap_steps_up = None
+        self.header_text_line_y = None
+        self.header_y_abs = None
+        self.header_bottom_y_abs = None
 
-        # OCR passes
+        # OCR passes on the band
         det = self._run_ocr(roi, 1.6) + self._run_ocr(roi, 2.0)
 
         items: List[dict] = []
@@ -310,7 +485,6 @@ class BreakerHeaderFinder:
             self.ocr_dbg_items.append(item)
 
         if not items:
-            self.header_text_line_y = None
             return None
 
         # ---- group by y-bin ----
@@ -339,7 +513,6 @@ class BreakerHeaderFinder:
 
         if best_ybin is None:
             # no header-like tokens anywhere in band
-            self.header_text_line_y = None
             return None
 
         # tokens on the winning line
@@ -349,7 +522,6 @@ class BreakerHeaderFinder:
             if any(tok in it["norm"] for tok in self.HEADER_TOKEN_SET)
         ]
         if not hdr_items:
-            self.header_text_line_y = None
             return None
 
         # left-most header token is anchor
@@ -365,7 +537,25 @@ class BreakerHeaderFinder:
             if any(excl in norm for excl in self.EXCLUDE):
                 it["is_excluded_token"] = True
 
+        # header text line (anchor top y) – used for blue overlay
         header_text_y = int(anchor["y1"])
         self.header_text_line_y = header_text_y
 
-        return header_text_y
+        # ---- FIND NEAREST LINES ABOVE & BELOW ON HORIZONTAL MASK ----
+        header_y_above, header_bottom_y = self._snap_header_to_horizontal_line(
+            gray=gray,
+            y1_band=y1_band,
+            y2_band=y2_band,
+            header_text_y=header_text_y,
+        )
+
+        # line ABOVE = header_y_abs
+        if header_y_above is not None:
+            self.header_y_abs = header_y_above
+        else:
+            self.header_y_abs = header_text_y
+
+        # line BELOW = header_bottom_y_abs
+        self.header_bottom_y_abs = header_bottom_y
+
+        return self.header_y_abs
