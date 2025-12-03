@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+import re
 
 import cv2
 import numpy as np
@@ -34,63 +35,39 @@ def save_anchor_overlay(
     gray: np.ndarray,
     header_res: HeaderResult,
     footer_res: FooterResult,
+    ocr_items: list[dict],
     out_path: str,
 ):
+    """
+    Overlay:
+      - row borders
+      - HEADER_TEXT / HEADER / FIRST_BREAKER_LINE
+      - footer token + footer line (if any)
+      - ALL OCR tokens from header_finder.ocr_dbg_items
+        * CCT/CKT highlighted in magenta
+    """
     vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     H, W = gray.shape
 
     borders = header_res.dbg.lines
     centers = header_res.centers
     header_y = header_res.header_y
-    struct_footer_y = header_res.footer_struct_y
 
-    # ----------------------------------------------------------------------
-    # NEW: draw all vertical lines + CCT/CKT column boundaries
-    # ----------------------------------------------------------------------
-    vlines_x = getattr(footer_res, "vlines_x", []) or []
-    cct_cols = getattr(footer_res, "cct_cols", []) or []
-
-    # all vertical candidates (light bluish)
-    for x in vlines_x:
-        x = int(x)
-        cv2.line(vis, (x, 0), (x, H - 1), (180, 180, 255), 1)
-
-    # CCT/CKT column spans (magenta) + labels near header
-    for idx, (xl, xr) in enumerate(cct_cols, start=1):
-        xl = int(xl)
-        xr = int(xr)
-        cv2.line(vis, (xl, 0), (xl, H - 1), (255, 0, 255), 2)
-        cv2.line(vis, (xr, 0), (xr, H - 1), (255, 0, 255), 2)
-
-        if header_y is not None:
-            hy = int(header_y)
-            cv2.putText(
-                vis,
-                f"CCT_COL{idx}",
-                (xl + 2, max(16, hy - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 255),
-                1,
-                cv2.LINE_AA,
-            )
-
-    # ----------------------------------------------------------------------
-    # draw borders lightly for context
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # draw row borders lightly for context
+    # ------------------------------------------------------------------
     for y in borders:
         cv2.line(vis, (0, int(y)), (W - 1, int(y)), (220, 220, 220), 1)
 
-    # row centers, small green dots
-    for y in centers:
-        cv2.circle(vis, (24, int(y)), 4, (0, 255, 0), -1)
-
-    # ----- HEADER + FIRST BREAKER LINE -----
+    # ------------------------------------------------------------------
+    # HEADER + FIRST BREAKER LINE
+    # ------------------------------------------------------------------
     first_breaker_line_y = None
 
     if header_y is not None:
         hy = int(header_y)
 
+        # "header text" baseline (slightly above header rule)
         header_text_y = max(0, hy - 8)
         cv2.line(vis, (0, header_text_y), (W - 1, header_text_y), (0, 255, 255), 1)
         cv2.putText(
@@ -104,6 +81,7 @@ def save_anchor_overlay(
             cv2.LINE_AA,
         )
 
+        # actual header rule
         cv2.line(vis, (0, hy), (W - 1, hy), (255, 255, 0), 2)
         cv2.putText(
             vis,
@@ -116,6 +94,7 @@ def save_anchor_overlay(
             cv2.LINE_AA,
         )
 
+        # FIRST_BREAKER_LINE = first border below header
         for b in sorted(borders):
             if b > hy + 2:
                 first_breaker_line_y = int(b)
@@ -135,7 +114,9 @@ def save_anchor_overlay(
             cv2.LINE_AA,
         )
 
-    # ----- FOOTER TEXT + FOOTER LINE -----
+    # ------------------------------------------------------------------
+    # FOOTER TOKEN + FOOTER LINE (from new footer finder)
+    # ------------------------------------------------------------------
     footer_y = footer_res.footer_y
     footer_token_y = getattr(footer_res, "token_y", None)
     footer_token_val = getattr(footer_res, "token_val", None)
@@ -159,19 +140,6 @@ def save_anchor_overlay(
             cv2.LINE_AA,
         )
 
-        # BIG token label so you can confirm it's using the right one
-        if footer_token_val is not None:
-            cv2.putText(
-                vis,
-                f"FOOTER_TOKEN = {footer_token_val}",
-                (W - 300, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 255, 255),
-                2,
-                cv2.LINE_AA,
-            )
-
     if footer_y is not None:
         fy = int(footer_y)
         cv2.line(vis, (0, fy), (W - 1, fy), (0, 0, 255), 2)
@@ -186,30 +154,66 @@ def save_anchor_overlay(
             cv2.LINE_AA,
         )
 
-    if footer_token_val is None and struct_footer_y is not None:
-        ys = int(struct_footer_y)
-        cv2.line(vis, (0, ys), (W - 1, ys), (180, 0, 0), 2)
+    # ------------------------------------------------------------------
+    # NEW: draw OCR tokens from header_finder.ocr_dbg_items
+    # ------------------------------------------------------------------
+    def _norm_token(s: str) -> str:
+        return re.sub(r"[^A-Z]", "", (s or "").upper().replace("1", "I"))
+
+    for item in ocr_items:
+        txt = item.get("text", "")
+        x1 = int(item.get("x1", 0))
+        y1 = int(item.get("y1", 0))
+        x2 = int(item.get("x2", 0))
+        y2 = int(item.get("y2", 0))
+
+        norm = _norm_token(txt)
+
+        # highlight CCT / CKT tokens
+        if norm in ("CCT", "CKT"):
+            color = (255, 0, 255)  # magenta
+            thick = 2
+            label = norm
+        else:
+            color = (0, 200, 0)  # green-ish
+            thick = 1
+            label = txt[:20] if txt else ""
+
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color, thick)
+        if label:
+            cv2.putText(
+                vis,
+                label,
+                (x1, max(10, y1 - 3)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+
+    # ------------------------------------------------------------------
+    # optional: small text block with stats at bottom
+    # ------------------------------------------------------------------
+    stats = []
+    stats.append(f"rows={len(centers)}")
+    if header_y is not None:
+        stats.append(f"header_y={int(header_y)}")
+    if first_breaker_line_y is not None:
+        stats.append(f"first_breaker_y={int(first_breaker_line_y)}")
+    if footer_y is not None:
+        stats.append(f"footer_y={int(footer_y)}")
+    if footer_token_val is not None:
+        stats.append(f"footer_token={footer_token_val}")
+
+    if stats:
         cv2.putText(
             vis,
-            "FOOTER_STRUCT (FALLBACK)",
-            (12, max(16, ys - 6)),
+            " | ".join(stats),
+            (12, H - 12),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
-            (180, 0, 0),
-            1,
-            cv2.LINE_AA,
-        )
-
-    for y_mark, label in getattr(footer_res, "dbg_marks", []):
-        y = int(y_mark)
-        cv2.line(vis, (0, y), (W - 1, y), (160, 160, 255), 1)
-        cv2.putText(
-            vis,
-            label,
-            (240, max(14, y - 4)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            (160, 160, 255),
+            (255, 255, 0),
             1,
             cv2.LINE_AA,
         )
@@ -219,7 +223,13 @@ def save_anchor_overlay(
 
 
 def main():
-    SOURCE_IMAGE = "/home/marco/Documents/Diagrams/CaseStudy_VectorCrop_Run15/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel02.png"
+    # ------------------------------------------------------------------
+    # HARD-CODED PATHS: edit these for whatever test you want
+    # ------------------------------------------------------------------
+    SOURCE_IMAGE = (
+        "/home/marco/Documents/Diagrams/CaseStudy_VectorCrop_Run15/"
+        "ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel02.png"
+    )
     OUT_DIR = "/home/marco/Documents/Diagrams/AnchorDebug1"
 
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -230,9 +240,12 @@ def main():
 
     gray = prep_gray(img)
 
-    reader = easyocr.Reader(["en"], gpu=True)
+    # Use CPU OCR for stability
+    reader = easyocr.Reader(["en"], gpu=False)
 
     header_finder = BreakerHeaderFinder(reader, debug=True)
+    header_finder.debug_dir = OUT_DIR
+
     footer_finder = BreakerFooterFinder(
         reader,
         bottom_trim_frac=0.15,
@@ -242,36 +255,29 @@ def main():
     )
     footer_finder.debug_dir = OUT_DIR
 
-    # 1) HEADER FIRST
+    # 1) HEADER
     header_res: HeaderResult = header_finder.analyze_rows(gray)
 
-    # 2) FOOTER USING **NEW CROP METHOD** (orig_bgr passed in)
+    # 2) FOOTER using new footer finder (NO footer_struct_y anywhere)
     footer_res: FooterResult = footer_finder.find_footer(
         gray=gray,
         header_y=header_res.header_y,
         centers=header_res.centers,
         dbg=header_res.dbg,
         ocr_dbg_items=header_finder.ocr_dbg_items,
-        footer_struct_y=header_res.footer_struct_y,
         orig_bgr=img,
     )
 
     print("Header Y:", header_res.header_y)
     print("Row count:", len(header_res.centers))
-    print("Footer struct (fallback):", header_res.footer_struct_y)
-    print(
-        "Footer final:",
-        footer_res.footer_y,
-        "token:",
-        footer_res.token_val,
-        "token_y:",
-        footer_res.token_y,
-    )
+    print("Footer final:", footer_res.footer_y,
+          "token:", footer_res.token_val,
+          "token_y:", footer_res.token_y)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     base = Path(SOURCE_IMAGE).stem
     overlay_path = os.path.join(OUT_DIR, f"{base}_anchors_{ts}.png")
-    save_anchor_overlay(gray, header_res, footer_res, overlay_path)
+    save_anchor_overlay(gray, header_res, footer_res, header_finder.ocr_dbg_items, overlay_path)
     print("Overlay:", overlay_path)
 
 
