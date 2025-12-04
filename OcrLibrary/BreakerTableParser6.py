@@ -939,253 +939,113 @@ class SeparatedLayoutParser:
     """
     Handles parsing when the header layout is 'separated':
       - Trip and poles live in different hero columns (left/right).
-      - Identifies body rows from the grid lines.
-      - OCRs the trip/poles body strips and associates them by row.
-      - Emits per-breaker records plus an aggregate (amps/poles) histogram.
+      - Uses horizontal grid lines (within a reference body strip) to define row bands.
+      - OCRs the trip/poles body strips ROW-BY-ROW using those bands.
+      - Associates each row's amps + poles and emits per-breaker records
+        plus an aggregate (amps/poles) histogram.
     """
 
     def __init__(self, *, debug: bool = False, reader=None):
         self.debug = bool(debug)
         self.reader = reader  # shared EasyOCR instance (same as header)
 
-    def _find_body_rows(
+    def _infer_body_rows_from_tokens(
         self,
-        gray_lines,
+        tokens_by_col_index: Dict[int, List[Dict]],
         body_y_top: int,
         body_y_bottom: int,
-        x_min: int,
-        x_max: int,
     ):
         """
-        Use horizontal grid lines inside the body band to estimate row bands.
-
-        Returns a list of (row_top, row_bottom) in PAGE coordinates.
+        OLD: token-clustering-based row inference. Currently unused by parse(),
+        which now relies on horizontal row-divider lines. Kept for possible
+        future fallback / experiments.
         """
-        import cv2
-        import numpy as np
+        ys = []
 
-        if gray_lines is None:
+        for col_tokens in tokens_by_col_index.values():
+            for tok in (col_tokens or []):
+                try:
+                    x1, y1, x2, y2 = tok["box_page"]
+                except Exception:
+                    continue
+                y_center = 0.5 * (y1 + y2)
+                # Keep only tokens that are actually within the body band
+                if y_center < body_y_top or y_center > body_y_bottom:
+                    continue
+                ys.append(float(y_center))
+
+        if not ys:
+            if self.debug:
+                print("[SeparatedLayoutParser] No token Y-centers found; no body rows inferred.")
             return []
 
-        H, W = gray_lines.shape[:2]
-        body_y_top = max(0, min(H - 1, int(body_y_top)))
-        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
+        ys.sort()
 
-        if body_y_bottom <= body_y_top + 4:
-            return []
+        # If there is only one y center, treat the entire band as one row
+        if len(ys) == 1:
+            return [(int(body_y_top), int(body_y_bottom))]
 
-        x_min = max(0, min(W - 1, int(x_min)))
-        x_max = max(x_min + 1, min(W, int(x_max)))
+        # Compute gaps between successive centers
+        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        gaps_sorted = sorted(gaps)
+        # Simple median
+        mid = len(gaps_sorted) // 2
+        if len(gaps_sorted) % 2 == 0:
+            median_gap = 0.5 * (gaps_sorted[mid - 1] + gaps_sorted[mid])
+        else:
+            median_gap = gaps_sorted[mid]
 
-        band = gray_lines[body_y_top:body_y_bottom, x_min:x_max]
-        if band.size == 0:
-            return []
+        # Define a max gap threshold to decide "new row" vs "same row"
+        body_height = max(1, body_y_bottom - body_y_top)
+        # Clamp the threshold into a reasonable range
+        min_gap = 5.0
+        max_gap = max(20.0, 0.15 * body_height)
+        gap_threshold = max(min_gap, min(median_gap * 1.5, max_gap))
 
-        # 1) binarize
-        blur = cv2.GaussianBlur(band, (3, 3), 0)
-        bw = cv2.adaptiveThreshold(
-            blur,
-            255,
-            cv2.ADAPTIVE_THRESH_MEAN_C,
-            cv2.THRESH_BINARY_INV,
-            21,
-            10,
-        )
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] token Y-centers: count={len(ys)}, "
+                f"median_gap={median_gap:.2f}, gap_threshold={gap_threshold:.2f}"
+            )
 
-        # 2) emphasize horizontal strokes
-        Kh = cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (
-                max(15, int(0.40 * (x_max - x_min))),  # wide
-                1,                                     # thin vertically
-            ),
-        )
-        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+        # Cluster ys by gap_threshold
+        clusters = [[ys[0]]]
+        for y in ys[1:]:
+            if y - clusters[-1][-1] <= gap_threshold:
+                clusters[-1].append(y)
+            else:
+                clusters.append([y])
 
-        # 3) connected components over horizontal candidates
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            h_candidates,
-            connectivity=8,
-        )
-        if num_labels <= 1:
-            return []
+        # Compute cluster centers
+        centers = [int(round(sum(c) / len(c))) for c in clusters]
+        centers.sort()
 
-        min_full_w = int(0.70 * (x_max - x_min))           # must span most of width
-        max_thick = max(2, int(0.03 * (body_y_bottom - body_y_top)))  # must be thin
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] inferred row centers={centers} "
+                f"(body_y_top={body_y_top}, body_y_bottom={body_y_bottom})"
+            )
 
-        ys_raw = []
-        for i in range(1, num_labels):
-            x, y, w, h, area = stats[i]
-            if w < min_full_w:
-                continue
-            if h > max_thick:
-                continue
-            ys_raw.append(y + h // 2)
-
-        if not ys_raw:
-            return []
-
-        ys_raw.sort()
-
-        # collapse near-duplicate line centers
-        merged = []
-        MERGE_PX = 3
-        for y in ys_raw:
-            if not merged or abs(y - merged[-1]) > MERGE_PX:
-                merged.append(y)
-
-        if not merged:
-            return []
-
-        # Convert line centers into row bands (top/bottom in page coords)
+        # Convert centers into row bands [top, bottom)
         row_spans = []
-        last_center = None
-        for idx, yc in enumerate(merged):
+        for idx, c in enumerate(centers):
             if idx == 0:
                 top = body_y_top
             else:
-                mid = (last_center + yc) // 2 + body_y_top
-                top = max(body_y_top, mid)
+                top = int((centers[idx - 1] + c) / 2)
 
-            last_center = yc
-
-            if idx + 1 < len(merged):
-                next_center = merged[idx + 1]
-                mid = (yc + next_center) // 2 + body_y_top
-                bottom = min(body_y_bottom, mid)
+            if idx + 1 < len(centers):
+                bottom = int((c + centers[idx + 1]) / 2)
             else:
                 bottom = body_y_bottom
 
             if bottom > top + 3:
-                row_spans.append((int(top), int(bottom)))
+                row_spans.append((top, bottom))
+
+        if self.debug:
+            print(f"[SeparatedLayoutParser] inferred {len(row_spans)} body row bands from tokens.")
 
         return row_spans
-
-    def _ocr_body_column(
-        self,
-        gray_body,
-        body_y_top: int,
-        body_y_bottom: int,
-        x_left: int,
-        x_right: int,
-    ):
-        """
-        OCR a single trip/poles body strip and return tokens in PAGE coordinates.
-
-        NEW:
-          - After cropping the body strip, we split it into two vertical halves.
-          - Each half is up-resed and OCR'd separately.
-          - This keeps EasyOCR from creating one giant box that spans multiple rows
-            and helps it pick up small digits that would otherwise be missed.
-        """
-        import cv2
-
-        if gray_body is None or self.reader is None:
-            return []
-
-        H, W = gray_body.shape[:2]
-        body_y_top = max(0, min(H - 1, int(body_y_top)))
-        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
-        x_left = max(0, min(W - 1, int(x_left)))
-        x_right = max(x_left + 1, min(W, int(x_right)))
-
-        band = gray_body[body_y_top:body_y_bottom, x_left:x_right]
-        if band.size == 0:
-            return []
-
-        H_band, W_band = band.shape[:2]
-        if H_band <= 0:
-            return []
-
-        # Always split into two vertical halves (top and bottom)
-        mid_local = H_band // 2
-        halves = [
-            (0, mid_local),
-            (mid_local, H_band),
-        ]
-
-        tokens = []
-
-        for y0_local, y1_local in halves:
-            if y1_local <= y0_local + 1:
-                continue
-
-            sub_band = band[y0_local:y1_local, :]
-            if sub_band.size == 0:
-                continue
-
-            # Up-res this half-band
-            sub_up = cv2.resize(
-                sub_band,
-                None,
-                fx=_HDR_OCR_SCALE,
-                fy=_HDR_OCR_SCALE,
-                interpolation=cv2.INTER_CUBIC,
-            )
-
-            try:
-                dets = self.reader.readtext(
-                    sub_up,
-                    detail=1,
-                    paragraph=False,
-                    allowlist=_HDR_OCR_ALLOWLIST,
-                    mag_ratio=1.0,
-                    contrast_ths=0.05,
-                    adjust_contrast=0.7,
-                    text_threshold=0.4,
-                    low_text=0.25,
-                )
-            except Exception:
-                dets = []
-
-            H_sub, W_sub = sub_band.shape[:2]
-
-            for box, txt, conf in dets:
-                try:
-                    conf_f = float(conf or 0.0)
-                except Exception:
-                    conf_f = 0.0
-
-                if conf_f < _HDR_MIN_CONF:
-                    continue
-
-                # OCR box is in upscaled sub_band coordinates → map back to sub_band
-                pts_local_sub = [
-                    (
-                        int(p[0] / _HDR_OCR_SCALE),
-                        int(p[1] / _HDR_OCR_SCALE),
-                    )
-                    for p in box
-                ]
-                xs = [p[0] for p in pts_local_sub]
-                ys = [p[1] for p in pts_local_sub]
-
-                x1_sub = max(0, min(xs))
-                x2_sub = min(W_sub - 1, max(xs))
-                y1_sub = max(0, min(ys))
-                y2_sub = min(H_sub - 1, max(ys))
-
-                # Map from sub_band coords back into full band coords
-                y1_band = y0_local + y1_sub
-                y2_band = y0_local + y2_sub
-                x1_band = x1_sub
-                x2_band = x2_sub
-
-                # Finally, map band coords into PAGE coords
-                x1_page = x_left + x1_band
-                x2_page = x_left + x2_band
-                y1_page = body_y_top + y1_band
-                y2_page = body_y_top + y2_band
-
-                tokens.append(
-                    {
-                        "text": str(txt or "").strip(),
-                        "conf": conf_f,
-                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                    }
-                )
-
-        return tokens
 
     def _row_text_for_column(self, row_top: int, row_bottom: int, col_tokens):
         """
@@ -1208,6 +1068,285 @@ class SeparatedLayoutParser:
 
         parts.sort(key=lambda t: t[0])
         return " ".join(p[1] for p in parts).strip()
+
+    def _detect_row_divider_lines_in_strip(self, strip_gray):
+        """
+        Given a single body strip in GRAY (gridless),
+        detect strong horizontal 'row divider' lines that span
+        ~95%+ of the strip width.
+
+        Returns:
+            List of y-centers (ints) in STRIP-LOCAL coordinates.
+        """
+        import cv2
+        import numpy as np  # noqa: F401
+
+        if strip_gray is None or strip_gray.size == 0:
+            return []
+
+        H_strip, W_strip = strip_gray.shape[:2]
+        if H_strip <= 0 or W_strip <= 0:
+            return []
+
+        # 1) Binarize (invert so lines are white on black)
+        blur = cv2.GaussianBlur(strip_gray, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # 2) Emphasize horizontal strokes with a wide, thin kernel
+        Kh = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (
+                max(15, int(0.40 * W_strip)),  # fairly wide
+                1,                             # very thin vertically
+            ),
+        )
+        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+
+        # 3) Connected components to find horizontal blobs
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            h_candidates,
+            connectivity=8,
+        )
+        if num_labels <= 1:
+            return []
+
+        # Lines must span >= 95% of the strip width and be thin
+        min_full_w = int(0.95 * W_strip)
+        max_thick = max(2, int(0.03 * H_strip))
+
+        ys_raw = []
+        for i in range(1, num_labels):
+            x, y, w, h, area = stats[i]
+            if w < min_full_w:
+                continue
+            if h > max_thick:
+                continue
+
+            yc = y + h // 2
+            ys_raw.append(int(yc))
+
+        if not ys_raw:
+            return []
+
+        ys_raw.sort()
+
+        # Collapse near-duplicate line centers
+        merged = []
+        MERGE_PX = 3
+        for y in ys_raw:
+            if not merged or abs(y - merged[-1]) > MERGE_PX:
+                merged.append(y)
+
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] Detected {len(merged)} long horizontal lines "
+                f"in strip (H={H_strip}, W={W_strip})."
+            )
+
+        return merged
+
+    def _compute_row_bands_in_strip(self, strip_gray):
+        """
+        Given a body-strip in GRAY (gridless), use the detected long
+        horizontal lines to define row bands in STRIP-LOCAL coordinates.
+
+        Behavior:
+          - Treat regions:
+                top_of_strip → first_line,
+                each line_i → line_{i+1},
+                last_line → bottom_of_strip
+            as potential row bands.
+          - Use a small padding inside each segment so we avoid the core of
+            the grid line, but do NOT over-trim (to keep single characters
+            near the line, like a lone '1').
+
+        Returns:
+            List of (row_top, row_bottom) in STRIP-LOCAL coordinates.
+        """
+        import cv2  # noqa: F401
+
+        if strip_gray is None or strip_gray.size == 0:
+            return []
+
+        H_strip, W_strip = strip_gray.shape[:2]
+        if H_strip <= 0 or W_strip <= 0:
+            return []
+
+        line_ys = self._detect_row_divider_lines_in_strip(strip_gray)
+        if not line_ys:
+            # No lines at all -> treat whole strip as one band
+            return [(0, H_strip)]
+
+        # Sort and clamp
+        line_ys = sorted(int(y) for y in line_ys)
+        line_ys = [max(0, min(H_strip - 1, y)) for y in line_ys]
+
+        # Build raw segments:
+        #   [0 -> first_line], [line_i -> line_{i+1}], [last_line -> H_strip]
+        segments = []
+        prev = 0
+        for y in line_ys:
+            if y > prev:
+                segments.append((prev, y))
+            prev = y
+        if H_strip > prev:
+            segments.append((prev, H_strip))
+
+        bands = []
+        prev_bottom = 0
+        for (top, bottom) in segments:
+            if bottom <= top + 3:
+                continue
+
+            span = bottom - top
+            # Smaller padding: 2% of span, min 1 px
+            pad = max(1, int(0.02 * span))
+
+            # Slightly "inflate" compared to the raw segment, but keep ordering
+            row_top = max(prev_bottom, top + pad - 1)
+            row_bottom = min(H_strip, bottom - pad + 1)
+
+            if row_bottom > row_top + 2:
+                bands.append((row_top, row_bottom))
+                prev_bottom = row_bottom
+
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] _compute_row_bands_in_strip: "
+                f"lines={line_ys} → segments={segments} → {len(bands)} row bands"
+            )
+
+        if not bands:
+            # Ultra-defensive fallback
+            return [(0, H_strip)]
+
+        return bands
+
+    def _ocr_body_column_by_rows(
+        self,
+        strip_gray,
+        x_left: int,
+        body_y_top: int,
+        row_bands_strip,
+    ):
+        """
+        OCR a single trip/poles body strip ROW-BY-ROW.
+
+        Inputs:
+          - strip_gray: gridless gray crop for this body column
+                        shape (H_strip, W_strip)
+          - x_left:     column's left X in PAGE coordinates
+          - body_y_top: Y at which this strip starts in PAGE coordinates
+          - row_bands_strip: list of (row_top, row_bottom) in STRIP-LOCAL coords
+
+        Returns:
+          Flat list of OCR tokens, each with box_page coordinates.
+        """
+        import cv2
+
+        if strip_gray is None or strip_gray.size == 0 or self.reader is None:
+            return []
+
+        H_strip, W_strip = strip_gray.shape[:2]
+        tokens = []
+
+        for (row_top, row_bottom) in row_bands_strip:
+            row_top = max(0, min(H_strip - 1, int(row_top)))
+            row_bottom = max(row_top + 1, min(H_strip, int(row_bottom)))
+            if row_bottom <= row_top:
+                continue
+
+            row_gray = strip_gray[row_top:row_bottom, :]
+            if row_gray.size == 0:
+                continue
+
+            # Up-res this single row band
+            row_up = cv2.resize(
+                row_gray,
+                None,
+                fx=_HDR_OCR_SCALE,
+                fy=_HDR_OCR_SCALE,
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+            try:
+                dets = self.reader.readtext(
+                    row_up,
+                    detail=1,
+                    paragraph=False,
+                    allowlist=_HDR_OCR_ALLOWLIST,
+                    mag_ratio=1.0,
+                    contrast_ths=0.05,
+                    adjust_contrast=0.7,
+                    text_threshold=0.4,
+                    low_text=0.25,
+                )
+            except Exception:
+                dets = []
+
+            for box, txt, conf in dets:
+                # length-aware confidence thresholding (same as combined)
+                txt_clean = str(txt or "").strip()
+                if not txt_clean:
+                    continue
+
+                try:
+                    conf_f = float(conf or 0.0)
+                except Exception:
+                    conf_f = 0.0
+
+                min_conf = _HDR_MIN_CONF
+                if len(txt_clean) == 1:
+                    # Relax threshold a bit for single-character tokens (e.g. '1')
+                    min_conf = _HDR_MIN_CONF * 0.7
+
+                if conf_f < min_conf:
+                    continue
+
+                # box is in UPSCALED row coords -> map back to row-local
+                pts_local = [
+                    (
+                        int(p[0] / _HDR_OCR_SCALE),
+                        int(p[1] / _HDR_OCR_SCALE),
+                    )
+                    for p in box
+                ]
+                xs = [p[0] for p in pts_local]
+                ys = [p[1] for p in pts_local]
+
+                x1_row = max(0, min(W_strip - 1, min(xs)))
+                x2_row = max(0, min(W_strip - 1, max(xs)))
+                y1_row = max(0, min((row_bottom - row_top) - 1, min(ys)))
+                y2_row = max(0, min((row_bottom - row_top) - 1, max(ys)))
+
+                # Map to STRIP-LOCAL coords
+                x1_strip = x1_row
+                x2_strip = x2_row
+                y1_strip = row_top + y1_row
+                y2_strip = row_top + y2_row
+
+                # Map to PAGE coords
+                x1_page = x_left + x1_strip
+                x2_page = x_left + x2_strip
+                y1_page = body_y_top + y1_strip
+                y2_page = body_y_top + y2_strip
+
+                tokens.append(
+                    {
+                        "text": txt_clean,
+                        "conf": conf_f,
+                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                    }
+                )
+
+        return tokens
 
     def _parse_trip_value(self, text: str):
         """
@@ -1277,8 +1416,8 @@ class SeparatedLayoutParser:
         Given analyzer_result + header_scan with normalizedColumns.layout == 'separated',
         we:
           - crop body strips for trip/poles columns
-          - detect body row bands from the grid
-          - OCR each trip/poles column (split into halves)
+          - compute row bands from horizontal row-divider lines in a reference strip
+          - OCR each trip/poles column ROW-BY-ROW using those bands
           - associate each row's amps + poles
           - accumulate breaker counts
         """
@@ -1316,6 +1455,7 @@ class SeparatedLayoutParser:
         # --- header anchor / body top (MUST have header_bottom_y) ---
         header_y        = analyzer_result.get("header_y")
         header_bottom_y = analyzer_result.get("header_bottom_y")
+        footer_y        = analyzer_result.get("footer_y")
 
         if not isinstance(header_bottom_y, (int, float)):
             if self.debug:
@@ -1332,15 +1472,28 @@ class SeparatedLayoutParser:
                 "error": "Missing header_bottom_y from analyzer; cannot determine body band.",
             }
 
-        body_y_top = max(0, int(header_bottom_y))
+        if not isinstance(footer_y, (int, float)):
+            if self.debug:
+                print(
+                    "[SeparatedLayoutParser] Missing footer_y; "
+                    "cannot determine body bottom. Bailing."
+                )
+                print(f"  footer_y={footer_y!r}")
+            return {
+                "layout": "separated",
+                "bodyColumns": [],
+                "detected_breakers": [],
+                "breakerCounts": {},
+                "error": "Missing footer_y from analyzer; cannot determine body band.",
+            }
 
-        # --- TEMP: ignore footer completely; just run to bottom of panel image ---
-        body_y_bottom = H
+        body_y_top    = max(0, int(header_bottom_y))
+        body_y_bottom = int(footer_y)
 
         if self.debug:
             print(
                 f"[SeparatedLayoutParser] Body Y-range: [{body_y_top}, {body_y_bottom}) "
-                f"(H={H})  (footer ignored; using full page height)"
+                f"(H={H})  (using header_bottom_y→footer_y as body band)"
             )
 
         if body_y_bottom <= body_y_top + 4:
@@ -1374,9 +1527,8 @@ class SeparatedLayoutParser:
         wanted_roles = {"trip", "poles"}
 
         body_columns = []
-        tokens_by_col_index = {}
 
-        # --- crop body strips for trip/poles and OCR them (with splitting) ---
+        # --- collect body strips for trip/poles (geometry only) ---
         for col in cols_summary:
             role = col.get("role")
             if role not in wanted_roles:
@@ -1403,22 +1555,13 @@ class SeparatedLayoutParser:
                 }
             )
 
-            # OCR this body strip now and store tokens in page coords
-            tokens_by_col_index[col["index"]] = self._ocr_body_column(
-                gray_body,
-                body_y_top,
-                body_y_bottom,
-                x_left,
-                x_right,
-            )
-
         if self.debug:
             print(
                 f"[SeparatedLayoutParser] Extracted {len(body_columns)} body columns "
                 f"for trip/poles."
             )
 
-        if not body_columns or not tokens_by_col_index:
+        if not body_columns:
             return {
                 "layout": "separated",
                 "bodyColumns": body_columns,
@@ -1426,7 +1569,67 @@ class SeparatedLayoutParser:
                 "breakerCounts": {},
             }
 
-        # --- Build OCR overlays for each body column (debug only, high quality only) ---
+        # --- determine row bands (strip-local) from a reference body column ---
+        # Prefer a trip column as reference (often cleaner), else first available.
+        ref_col = None
+        for c in body_columns:
+            if c["role"] == "trip":
+                ref_col = c
+                break
+        if ref_col is None:
+            ref_col = body_columns[0]
+
+        ref_strip = gray_body[
+            ref_col["y_top"]:ref_col["y_bottom"],
+            ref_col["x_left"]:ref_col["x_right"],
+        ]
+        if ref_strip.size == 0:
+            row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+        else:
+            row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+
+        # Convert strip-local row bands to PAGE coords for later use
+        row_spans = [
+            (body_y_top + top_s, body_y_top + bottom_s)
+            for (top_s, bottom_s) in row_bands_strip
+        ]
+
+        if self.debug:
+            print(
+                f"[SeparatedLayoutParser] Using {len(row_spans)} row bands from "
+                f"horizontal lines."
+            )
+
+        # --- OCR each trip/poles column ROW-BY-ROW using the same row bands ---
+        tokens_by_col_index = {}
+        for col in body_columns:
+            idx   = col["index"]
+            x_l   = col["x_left"]
+            x_r   = col["x_right"]
+            y_top = col["y_top"]
+            y_bot = col["y_bottom"]
+
+            strip = gray_body[y_top:y_bot, x_l:x_r]
+            if strip.size == 0:
+                tokens_by_col_index[idx] = []
+                continue
+
+            tokens_by_col_index[idx] = self._ocr_body_column_by_rows(
+                strip_gray=strip,
+                x_left=x_l,
+                body_y_top=y_top,
+                row_bands_strip=row_bands_strip,
+            )
+
+        if not tokens_by_col_index:
+            return {
+                "layout": "separated",
+                "bodyColumns": body_columns,
+                "detected_breakers": [],
+                "breakerCounts": {},
+            }
+
+        # --- Build OCR overlays for each body column (debug only) ---
         if self.debug:
             for col in body_columns:
                 idx   = col["index"]
@@ -1440,11 +1643,12 @@ class SeparatedLayoutParser:
                 if not col_tokens:
                     continue
 
-                # Crop the strip again for visualization only
+                # Crop the strip again for visualization only (GRIDLESS body)
                 strip = gray_body[y_top:y_bot, x_l:x_r]
                 if strip.size == 0:
                     continue
 
+                H_strip, W_strip = strip.shape[:2]
                 vis = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
 
                 # Draw a border + label for the column
@@ -1467,26 +1671,27 @@ class SeparatedLayoutParser:
                     cv2.LINE_AA,
                 )
 
-                # Show where the column was split for OCR (top / bottom halves)
-                H_strip, W_strip = strip.shape[:2]
-                mid_y = H_strip // 2
-                cv2.line(
-                    vis,
-                    (0, mid_y),
-                    (W_strip - 1, mid_y),
-                    (255, 0, 255),
-                    1,
-                )
-                cv2.putText(
-                    vis,
-                    "HALF",
-                    (4, max(10, mid_y - 4)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.4,
-                    (255, 0, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+                # Draw detected row-divider lines (for debug) in BLUE
+                line_ys = self._detect_row_divider_lines_in_strip(strip)
+                for yc in line_ys:
+                    yc_int = max(0, min(H_strip - 1, int(yc)))
+                    cv2.line(
+                        vis,
+                        (0, yc_int),
+                        (W_strip - 1, yc_int),
+                        (255, 0, 0),  # BLUE in BGR
+                        1,
+                    )
+                    cv2.putText(
+                        vis,
+                        "ROW",
+                        (4, max(10, yc_int - 2)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.3,
+                        (255, 0, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
 
                 # Draw each OCR token (convert from page coords to strip-local coords)
                 for tok in col_tokens:
@@ -1549,18 +1754,6 @@ class SeparatedLayoutParser:
 
         if self.debug:
             print("[SeparatedLayoutParser] trip/poles columns by side:", by_side)
-
-        # --- find body row bands from the grid lines ---
-        row_spans = self._find_body_rows(
-            gray_lines,
-            body_y_top,
-            body_y_bottom,
-            global_left,
-            global_right,
-        )
-
-        if self.debug:
-            print(f"[SeparatedLayoutParser] Found {len(row_spans)} body row bands.")
 
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}
@@ -1637,116 +1830,93 @@ class CombinedLayoutParser:
         self.debug = bool(debug)
         self.reader = reader  # shared EasyOCR instance (same as header)
 
-    def _find_body_rows(
+    def _infer_body_rows_from_tokens(
         self,
-        gray_lines,
+        tokens_by_col_index: Dict[int, List[Dict]],
         body_y_top: int,
         body_y_bottom: int,
-        x_min: int,
-        x_max: int,
     ):
         """
-        Use horizontal grid lines inside the body band to estimate row bands.
+        Infer body row bands purely from OCR token positions (gridless body),
+        instead of using horizontal grid lines.
 
-        Returns a list of (row_top, row_bottom) in PAGE coordinates.
+        Shared logic with SeparatedLayoutParser but kept separate for clarity.
         """
-        import cv2
-        import numpy as np  # noqa: F401
+        ys = []
 
-        if gray_lines is None:
+        for col_tokens in tokens_by_col_index.values():
+            for tok in (col_tokens or []):
+                try:
+                    x1, y1, x2, y2 = tok["box_page"]
+                except Exception:
+                    continue
+                y_center = 0.5 * (y1 + y2)
+                if y_center < body_y_top or y_center > body_y_bottom:
+                    continue
+                ys.append(float(y_center))
+
+        if not ys:
+            if self.debug:
+                print("[CombinedLayoutParser] No token Y-centers found; no body rows inferred.")
             return []
 
-        H, W = gray_lines.shape[:2]
-        body_y_top = max(0, min(H - 1, int(body_y_top)))
-        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
+        ys.sort()
 
-        if body_y_bottom <= body_y_top + 4:
-            return []
+        if len(ys) == 1:
+            return [(int(body_y_top), int(body_y_bottom))]
 
-        x_min = max(0, min(W - 1, int(x_min)))
-        x_max = max(x_min + 1, min(W, int(x_max)))
+        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        gaps_sorted = sorted(gaps)
+        mid = len(gaps_sorted) // 2
+        if len(gaps_sorted) % 2 == 0:
+            median_gap = 0.5 * (gaps_sorted[mid - 1] + gaps_sorted[mid])
+        else:
+            median_gap = gaps_sorted[mid]
 
-        band = gray_lines[body_y_top:body_y_bottom, x_min:x_max]
-        if band.size == 0:
-            return []
+        body_height = max(1, body_y_bottom - body_y_top)
+        min_gap = 5.0
+        max_gap = max(20.0, 0.15 * body_height)
+        gap_threshold = max(min_gap, min(median_gap * 1.5, max_gap))
 
-        # 1) binarize
-        blur = cv2.GaussianBlur(band, (3, 3), 0)
-        bw = cv2.adaptiveThreshold(
-            blur,
-            255,
-            cv2.ADAPTIVE_THRESH_MEAN_C,
-            cv2.THRESH_BINARY_INV,
-            21,
-            10,
-        )
+        if self.debug:
+            print(
+                f"[CombinedLayoutParser] token Y-centers: count={len(ys)}, "
+                f"median_gap={median_gap:.2f}, gap_threshold={gap_threshold:.2f}"
+            )
 
-        # 2) emphasize horizontal strokes
-        Kh = cv2.getStructuringElement(
-            cv2.MORPH_RECT,
-            (
-                max(15, int(0.40 * (x_max - x_min))),  # wide
-                1,                                     # thin vertically
-            ),
-        )
-        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+        clusters = [[ys[0]]]
+        for y in ys[1:]:
+            if y - clusters[-1][-1] <= gap_threshold:
+                clusters[-1].append(y)
+            else:
+                clusters.append([y])
 
-        # 3) connected components over horizontal candidates
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            h_candidates,
-            connectivity=8,
-        )
-        if num_labels <= 1:
-            return []
+        centers = [int(round(sum(c) / len(c))) for c in clusters]
+        centers.sort()
 
-        min_full_w = int(0.70 * (x_max - x_min))           # must span most of width
-        max_thick = max(2, int(0.03 * (body_y_bottom - body_y_top)))  # thin
+        if self.debug:
+            print(
+                f"[CombinedLayoutParser] inferred row centers={centers} "
+                f"(body_y_top={body_y_top}, body_y_bottom={body_y_bottom})"
+            )
 
-        ys_raw = []
-        for i in range(1, num_labels):
-            x, y, w, h, area = stats[i]
-            if w < min_full_w:
-                continue
-            if h > max_thick:
-                continue
-            ys_raw.append(y + h // 2)
-
-        if not ys_raw:
-            return []
-
-        ys_raw.sort()
-
-        # collapse near-duplicate line centers
-        merged = []
-        MERGE_PX = 3
-        for y in ys_raw:
-            if not merged or abs(y - merged[-1]) > MERGE_PX:
-                merged.append(y)
-
-        if not merged:
-            return []
-
-        # Convert line centers into row bands (top/bottom in page coords)
         row_spans = []
-        last_center = None
-        for idx, yc in enumerate(merged):
+        for idx, c in enumerate(centers):
             if idx == 0:
                 top = body_y_top
             else:
-                mid = (last_center + yc) // 2 + body_y_top
-                top = max(body_y_top, mid)
+                top = int((centers[idx - 1] + c) / 2)
 
-            last_center = yc
-
-            if idx + 1 < len(merged):
-                next_center = merged[idx + 1]
-                mid = (yc + next_center) // 2 + body_y_top
-                bottom = min(body_y_bottom, mid)
+            if idx + 1 < len(centers):
+                bottom = int((c + centers[idx + 1]) / 2)
             else:
                 bottom = body_y_bottom
 
             if bottom > top + 3:
-                row_spans.append((int(top), int(bottom)))
+                row_spans.append((top, bottom))
+
+        if self.debug:
+            print(f"[CombinedLayoutParser] inferred {len(row_spans)} body row bands from tokens.")
 
         return row_spans
 
@@ -1761,8 +1931,8 @@ class CombinedLayoutParser:
         """
         OCR a single combo body strip and return tokens in PAGE coordinates.
 
-        We split the strip into two horizontal halves (top/bottom) and OCR
-        each half separately to prevent one giant OCR box spanning many rows.
+        UPDATED:
+          - No splitting into halves; OCR the full strip at once.
         """
         import cv2
 
@@ -1783,93 +1953,70 @@ class CombinedLayoutParser:
         if H_band <= 0:
             return []
 
-        # Always split into two vertical halves (top and bottom)
-        mid_local = H_band // 2
-        halves = [
-            (0, mid_local),
-            (mid_local, H_band),
-        ]
+        # Up-res entire band
+        band_up = cv2.resize(
+            band,
+            None,
+            fx=_HDR_OCR_SCALE,
+            fy=_HDR_OCR_SCALE,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+        try:
+            dets = self.reader.readtext(
+                band_up,
+                detail=1,
+                paragraph=False,
+                allowlist=_HDR_OCR_ALLOWLIST,
+                mag_ratio=1.0,
+                contrast_ths=0.05,
+                adjust_contrast=0.7,
+                text_threshold=0.4,
+                low_text=0.25,
+            )
+        except Exception:
+            dets = []
 
         tokens = []
 
-        for y0_local, y1_local in halves:
-            if y1_local <= y0_local + 1:
-                continue
-
-            sub_band = band[y0_local:y1_local, :]
-            if sub_band.size == 0:
-                continue
-
-            # Up-res this half-band
-            sub_up = cv2.resize(
-                sub_band,
-                None,
-                fx=_HDR_OCR_SCALE,
-                fy=_HDR_OCR_SCALE,
-                interpolation=cv2.INTER_CUBIC,
-            )
-
+        for box, txt, conf in dets:
             try:
-                dets = self.reader.readtext(
-                    sub_up,
-                    detail=1,
-                    paragraph=False,
-                    allowlist=_HDR_OCR_ALLOWLIST,
-                    mag_ratio=1.0,
-                    contrast_ths=0.05,
-                    adjust_contrast=0.7,
-                    text_threshold=0.4,
-                    low_text=0.25,
-                )
+                conf_f = float(conf or 0.0)
             except Exception:
-                dets = []
+                conf_f = 0.0
 
-            H_sub, W_sub = sub_band.shape[:2]
+            if conf_f < _HDR_MIN_CONF:
+                continue
 
-            for box, txt, conf in dets:
-                try:
-                    conf_f = float(conf or 0.0)
-                except Exception:
-                    conf_f = 0.0
-
-                if conf_f < _HDR_MIN_CONF:
-                    continue
-
-                # OCR box is in upscaled sub_band coordinates → map back to sub_band
-                pts_local_sub = [
-                    (
-                        int(p[0] / _HDR_OCR_SCALE),
-                        int(p[1] / _HDR_OCR_SCALE),
-                    )
-                    for p in box
-                ]
-                xs = [p[0] for p in pts_local_sub]
-                ys = [p[1] for p in pts_local_sub]
-
-                x1_sub = max(0, min(W_sub - 1, max(min(xs), 0)))
-                x2_sub = max(0, min(W_sub - 1, max(xs)))
-                y1_sub = max(0, min(H_sub - 1, max(min(ys), 0)))
-                y2_sub = max(0, min(H_sub - 1, max(ys)))
-
-                # Map from sub_band coords back into full band coords
-                y1_band = y0_local + y1_sub
-                y2_band = y0_local + y2_sub
-                x1_band = x1_sub
-                x2_band = x2_sub
-
-                # Finally, map band coords into PAGE coords
-                x1_page = x_left + x1_band
-                x2_page = x_left + x2_band
-                y1_page = body_y_top + y1_band
-                y2_page = body_y_top + y2_band
-
-                tokens.append(
-                    {
-                        "text": str(txt or "").strip(),
-                        "conf": conf_f,
-                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                    }
+            # OCR box is in upscaled band coordinates → map back to band
+            pts_local = [
+                (
+                    int(p[0] / _HDR_OCR_SCALE),
+                    int(p[1] / _HDR_OCR_SCALE),
                 )
+                for p in box
+            ]
+            xs = [p[0] for p in pts_local]
+            ys = [p[1] for p in pts_local]
+
+            x1_band = max(0, min(W_band - 1, min(xs)))
+            x2_band = max(0, min(W_band - 1, max(xs)))
+            y1_band = max(0, min(H_band - 1, min(ys)))
+            y2_band = max(0, min(H_band - 1, max(ys)))
+
+            # Map band coords into PAGE coords
+            x1_page = x_left + x1_band
+            x2_page = x_left + x2_band
+            y1_page = body_y_top + y1_band
+            y2_page = body_y_top + y2_band
+
+            tokens.append(
+                {
+                    "text": str(txt or "").strip(),
+                    "conf": conf_f,
+                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                }
+            )
 
         return tokens
 
@@ -1894,6 +2041,287 @@ class CombinedLayoutParser:
 
         parts.sort(key=lambda t: t[0])
         return " ".join(p[1] for p in parts).strip()
+
+    def _detect_row_divider_lines_in_strip(self, strip_gray):
+        """
+        Given a single body combo-strip in GRAY (gridless),
+        detect strong horizontal 'row divider' lines that span
+        ~95%+ of the strip width.
+
+        Returns:
+            List of y-centers (ints) in STRIP-LOCAL coordinates.
+        """
+        import cv2
+        import numpy as np  # noqa: F401
+
+        if strip_gray is None or strip_gray.size == 0:
+            return []
+
+        H_strip, W_strip = strip_gray.shape[:2]
+        if H_strip <= 0 or W_strip <= 0:
+            return []
+
+        # 1) Binarize (invert so lines are white on black)
+        blur = cv2.GaussianBlur(strip_gray, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # 2) Emphasize horizontal strokes with a wide, thin kernel
+        Kh = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (
+                max(15, int(0.40 * W_strip)),  # fairly wide
+                1,                             # very thin vertically
+            ),
+        )
+        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+
+        # 3) Connected components to find horizontal blobs
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            h_candidates,
+            connectivity=8,
+        )
+        if num_labels <= 1:
+            return []
+
+        # Lines must span >= 95% of the strip width and be thin
+        min_full_w = int(0.95 * W_strip)
+        max_thick = max(2, int(0.03 * H_strip))
+
+        ys_raw = []
+        for i in range(1, num_labels):
+            x, y, w, h, area = stats[i]
+            if w < min_full_w:
+                continue
+            if h > max_thick:
+                continue
+
+            yc = y + h // 2
+            ys_raw.append(int(yc))
+
+        if not ys_raw:
+            return []
+
+        ys_raw.sort()
+
+        # Collapse near-duplicate line centers
+        merged = []
+        MERGE_PX = 3
+        for y in ys_raw:
+            if not merged or abs(y - merged[-1]) > MERGE_PX:
+                merged.append(y)
+
+        if self.debug:
+            print(
+                f"[CombinedLayoutParser] Detected {len(merged)} long horizontal lines "
+                f"in strip (H={H_strip}, W={W_strip})."
+            )
+
+        return merged
+
+    def _compute_row_bands_in_strip(self, strip_gray):
+        """
+        Given a combo body-strip in GRAY (gridless), use the detected long
+        horizontal lines to define row bands in STRIP-LOCAL coordinates.
+
+        NEW BEHAVIOR:
+          - We treat regions:
+                top_of_strip → first_line,
+                each line_i → line_{i+1},
+                last_line → bottom_of_strip
+            as potential row bands.
+          - This way, we still get a top row and bottom row even if there
+            is no grid line at the very top or very bottom of the body.
+
+        Returns:
+            List of (row_top, row_bottom) in STRIP-LOCAL coordinates.
+        """
+        import cv2  # noqa: F401
+
+        if strip_gray is None or strip_gray.size == 0:
+            return []
+
+        H_strip, W_strip = strip_gray.shape[:2]
+        if H_strip <= 0 or W_strip <= 0:
+            return []
+
+        line_ys = self._detect_row_divider_lines_in_strip(strip_gray)
+        if not line_ys:
+            # No lines at all -> treat whole strip as one band
+            return [(0, H_strip)]
+
+        # Sort and clamp
+        line_ys = sorted(int(y) for y in line_ys)
+        line_ys = [max(0, min(H_strip - 1, y)) for y in line_ys]
+
+        # Build raw segments:
+        # [0 -> first_line], [line_i -> line_{i+1}], [last_line -> H_strip]
+        segments = []
+        prev = 0
+        for y in line_ys:
+            if y > prev:
+                segments.append((prev, y))
+            prev = y
+
+        if H_strip > prev:
+            segments.append((prev, H_strip))
+
+        bands = []
+        prev_bottom = 0
+        for (top, bottom) in segments:
+            if bottom <= top + 3:
+                continue
+
+            span = bottom - top
+            # Smaller padding than before:2% of span, min 1 px
+            pad = max(1, int(0.02 * span))
+
+            # Slightly "inflate" compared to the raw segment, but keep ordering
+            row_top = max(prev_bottom, top + pad - 1)
+            row_bottom = min(H_strip, bottom - pad + 1)
+
+            if row_bottom > row_top + 2:
+                bands.append((row_top, row_bottom))
+                prev_bottom = row_bottom
+
+        if self.debug:
+            print(
+                f"[CombinedLayoutParser] _compute_row_bands_in_strip: "
+                f"lines={line_ys} → segments={segments} → {len(bands)} row bands"
+            )
+
+        if not bands:
+            # Ultra-defensive fallback
+            return [(0, H_strip)]
+
+        return bands
+
+    def _ocr_body_column_by_rows(
+        self,
+        strip_gray,
+        x_left: int,
+        body_y_top: int,
+        row_bands_strip,
+    ):
+        """
+        OCR a single combo body strip ROW-BY-ROW.
+
+        Inputs:
+          - strip_gray: gridless gray crop for this combo column
+                        shape (H_strip, W_strip)
+          - x_left:     column's left X in PAGE coordinates
+          - body_y_top: Y at which this strip starts in PAGE coordinates
+          - row_bands_strip: list of (row_top, row_bottom) in STRIP-LOCAL coords
+
+        Returns:
+          Flat list of OCR tokens, each with box_page coordinates.
+        """
+        import cv2
+
+        if strip_gray is None or strip_gray.size == 0 or self.reader is None:
+            return []
+
+        H_strip, W_strip = strip_gray.shape[:2]
+        tokens = []
+
+        for (row_top, row_bottom) in row_bands_strip:
+            row_top = max(0, min(H_strip - 1, int(row_top)))
+            row_bottom = max(row_top + 1, min(H_strip, int(row_bottom)))
+            if row_bottom <= row_top:
+                continue
+
+            row_gray = strip_gray[row_top:row_bottom, :]
+            if row_gray.size == 0:
+                continue
+
+            # Up-res this single row band
+            row_up = cv2.resize(
+                row_gray,
+                None,
+                fx=_HDR_OCR_SCALE,
+                fy=_HDR_OCR_SCALE,
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+            try:
+                dets = self.reader.readtext(
+                    row_up,
+                    detail=1,
+                    paragraph=False,
+                    allowlist=_HDR_OCR_ALLOWLIST,
+                    mag_ratio=1.0,
+                    contrast_ths=0.05,
+                    adjust_contrast=0.7,
+                    text_threshold=0.4,
+                    low_text=0.25,
+                )
+            except Exception:
+                dets = []
+
+            for box, txt, conf in dets:
+                # --- NEW: length-aware confidence thresholding ---
+                txt_clean = str(txt or "").strip()
+                if not txt_clean:
+                    continue
+
+                try:
+                    conf_f = float(conf or 0.0)
+                except Exception:
+                    conf_f = 0.0
+
+                # Default threshold
+                min_conf = _HDR_MIN_CONF
+                # But if it's a single character (e.g. '1'), allow a bit lower
+                if len(txt_clean) == 1:
+                    min_conf = _HDR_MIN_CONF * 0.7
+
+                if conf_f < min_conf:
+                    continue
+                # --- END NEW LOGIC ---
+
+                # box is in UPSCALED row coords -> map back to row-local
+                pts_local = [
+                    (
+                        int(p[0] / _HDR_OCR_SCALE),
+                        int(p[1] / _HDR_OCR_SCALE),
+                    )
+                    for p in box
+                ]
+                xs = [p[0] for p in pts_local]
+                ys = [p[1] for p in pts_local]
+
+                x1_row = max(0, min(W_strip - 1, min(xs)))
+                x2_row = max(0, min(W_strip - 1, max(xs)))
+                y1_row = max(0, min((row_bottom - row_top) - 1, min(ys)))
+                y2_row = max(0, min((row_bottom - row_top) - 1, max(ys)))
+
+                # Map to STRIP-LOCAL coords
+                x1_strip = x1_row
+                x2_strip = x2_row
+                y1_strip = row_top + y1_row
+                y2_strip = row_top + y2_row
+
+                # Map to PAGE coords
+                x1_page = x_left + x1_strip
+                x2_page = x_left + x2_strip
+                y1_page = body_y_top + y1_strip
+                y2_page = body_y_top + y2_strip
+
+                tokens.append(
+                    {
+                        "text": txt_clean,
+                        "conf": conf_f,
+                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                    }
+                )
+
+        return tokens
 
     def _normalize_digitish_chars(self, s: str) -> str:
         """
@@ -2105,7 +2533,7 @@ class CombinedLayoutParser:
         we:
           - crop body strips for combo columns
           - detect body row bands from the grid
-          - OCR each combo column (split into halves)
+          - OCR each combo column
           - for each row, parse a combined amps/poles cell
           - accumulate breaker counts
         """
@@ -2143,6 +2571,7 @@ class CombinedLayoutParser:
         # --- header anchor / body top (MUST have header_bottom_y) ---
         header_y        = analyzer_result.get("header_y")
         header_bottom_y = analyzer_result.get("header_bottom_y")
+        footer_y        = analyzer_result.get("footer_y")
 
         if not isinstance(header_bottom_y, (int, float)):
             if self.debug:
@@ -2159,15 +2588,28 @@ class CombinedLayoutParser:
                 "error": "Missing header_bottom_y from analyzer; cannot determine body band.",
             }
 
-        body_y_top = max(0, int(header_bottom_y))
+        if not isinstance(footer_y, (int, float)):
+            if self.debug:
+                print(
+                    "[CombinedLayoutParser] Missing footer_y; "
+                    "cannot determine body bottom. Bailing."
+                )
+                print(f"  footer_y={footer_y!r}")
+            return {
+                "layout": "combined",
+                "bodyColumns": [],
+                "detected_breakers": [],
+                "breakerCounts": {},
+                "error": "Missing footer_y from analyzer; cannot determine body band.",
+            }
 
-        # TEMP: ignore footer completely; just run to bottom of panel image
-        body_y_bottom = H
+        body_y_top    = max(0, int(header_bottom_y))
+        body_y_bottom = int(footer_y)
 
         if self.debug:
             print(
                 f"[CombinedLayoutParser] Body Y-range: [{body_y_top}, {body_y_bottom}) "
-                f"(H={H})  (footer ignored; using full page height)"
+                f"(H={H})  (using header_bottom_y→footer_y as body band)"
             )
 
         if body_y_bottom <= body_y_top + 4:
@@ -2203,7 +2645,7 @@ class CombinedLayoutParser:
         body_columns = []
         tokens_by_col_index = {}
 
-        # --- crop body strips for combo columns and OCR them (with splitting) ---
+        # --- collect combo body columns (geometry only) ---
         for col in cols_summary:
             role = col.get("role")
             if role not in wanted_roles:
@@ -2230,14 +2672,70 @@ class CombinedLayoutParser:
                 }
             )
 
-            # OCR this body strip now and store tokens in page coords
-            tokens_by_col_index[col["index"]] = self._ocr_body_column(
-                gray_body,
-                body_y_top,
-                body_y_bottom,
-                x_left,
-                x_right,
+        if self.debug:
+            print(
+                f"[CombinedLayoutParser] Extracted {len(body_columns)} body combo columns."
             )
+
+        if not body_columns:
+            return {
+                "layout": "combined",
+                "bodyColumns": body_columns,
+                "detected_breakers": [],
+                "breakerCounts": {},
+            }
+
+        # --- determine row bands (strip-local) from a reference combo column ---
+        ref_col = body_columns[0]
+        ref_strip = gray_body[
+            ref_col["y_top"]:ref_col["y_bottom"],
+            ref_col["x_left"]:ref_col["x_right"],
+        ]
+        if ref_strip.size == 0:
+            # Fallback: one big band = whole body
+            row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+        else:
+            row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+
+        # Convert strip-local row bands to PAGE coords for later use
+        row_spans = [
+            (body_y_top + top_s, body_y_top + bottom_s)
+            for (top_s, bottom_s) in row_bands_strip
+        ]
+
+        if self.debug:
+            print(
+                f"[CombinedLayoutParser] Using {len(row_spans)} row bands from "
+                f"horizontal lines."
+            )
+
+        # --- OCR each combo column ROW-BY-ROW using the same row bands ---
+        for col in body_columns:
+            idx   = col["index"]
+            x_l   = col["x_left"]
+            x_r   = col["x_right"]
+            y_top = col["y_top"]
+            y_bot = col["y_bottom"]
+
+            strip = gray_body[y_top:y_bot, x_l:x_r]
+            if strip.size == 0:
+                tokens_by_col_index[idx] = []
+                continue
+
+            tokens_by_col_index[idx] = self._ocr_body_column_by_rows(
+                strip_gray=strip,
+                x_left=x_l,
+                body_y_top=y_top,
+                row_bands_strip=row_bands_strip,
+            )
+
+        if not tokens_by_col_index:
+            return {
+                "layout": "combined",
+                "bodyColumns": body_columns,
+                "detected_breakers": [],
+                "breakerCounts": {},
+            }
 
         if self.debug:
             print(
@@ -2266,11 +2764,12 @@ class CombinedLayoutParser:
                 if not col_tokens:
                     continue
 
-                # Crop the strip again for visualization only
+                # Crop the strip again for visualization only (GRIDLESS body)
                 strip = gray_body[y_top:y_bot, x_l:x_r]
                 if strip.size == 0:
                     continue
 
+                H_strip, W_strip = strip.shape[:2]
                 vis = cv2.cvtColor(strip, cv2.COLOR_GRAY2BGR)
 
                 # Draw a border + label for the column
@@ -2293,26 +2792,30 @@ class CombinedLayoutParser:
                     cv2.LINE_AA,
                 )
 
-                # Show where the column was split for OCR (top / bottom halves)
-                H_strip, W_strip = strip.shape[:2]
-                mid_y = H_strip // 2
-                cv2.line(
-                    vis,
-                    (0, mid_y),
-                    (W_strip - 1, mid_y),
-                    (255, 0, 255),
-                    1,
-                )
-                cv2.putText(
-                    vis,
-                    "HALF",
-                    (4, max(10, mid_y - 4)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.4,
-                    (255, 0, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
+                # --- NEW: detect long horizontal row-divider lines in this strip ---
+                line_ys = self._detect_row_divider_lines_in_strip(strip)
+
+                # Draw them in BLUE across full width of the strip
+                for yc in line_ys:
+                    yc_int = max(0, min(H_strip - 1, int(yc)))
+                    cv2.line(
+                        vis,
+                        (0, yc_int),
+                        (W_strip - 1, yc_int),
+                        (255, 0, 0),  # BLUE in BGR
+                        1,
+                    )
+                    # optional tiny label
+                    cv2.putText(
+                        vis,
+                        "ROW",
+                        (4, max(10, yc_int - 2)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.3,
+                        (255, 0, 0),
+                        1,
+                        cv2.LINE_AA,
+                    )
 
                 # Draw each OCR token (convert from page coords to strip-local coords)
                 for tok in col_tokens:
@@ -2370,18 +2873,6 @@ class CombinedLayoutParser:
 
         if self.debug:
             print("[CombinedLayoutParser] combo columns by side:", by_side)
-
-        # --- find body row bands from the grid lines ---
-        row_spans = self._find_body_rows(
-            gray_lines,
-            body_y_top,
-            body_y_bottom,
-            global_left,
-            global_right,
-        )
-
-        if self.debug:
-            print(f"[CombinedLayoutParser] Found {len(row_spans)} body row bands.")
 
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}
@@ -2478,20 +2969,15 @@ class BreakerTableParser:
         if not isinstance(analyzer_result, dict):
             analyzer_result = {}
 
-        # --- spaces: always use analyzer/footer finder when provided ---
-        raw_spaces = analyzer_result.get("spaces_corrected")
-        if raw_spaces is None:
-            raw_spaces = analyzer_result.get("spaces")
+        # --- spaces: directly from analyzer 'spaces' ---
+        raw_spaces = analyzer_result.get("spaces")
 
         if raw_spaces is None:
-            # Only force 0 when analyzer/footer finder gave us nothing
             spaces = 0
         else:
-            # Trust the analyzer value; just coerce to int if possible
             try:
                 spaces = int(raw_spaces)
             except (TypeError, ValueError):
-                # If analyzer gives something non-numeric, don't explode – fall back to 0
                 spaces = 0
 
         header_scan = self._header_scanner.scan(analyzer_result)
@@ -2641,14 +3127,6 @@ class BreakerTableParser:
         # ---- Pretty print ----
         print()
         print("====================================")
-        print(f"Source    - {src_name}")
-        print(f"Panel name - {name}")
-        print(
-            f"Amps - {panel_amps_str}, "
-            f"main breaker amps - {main_amps_str}, "
-            f"volts - {volts_str}, "
-            f"spaces - {spaces_str}"
-        )
         print("Breakers")
 
         if not breaker_counts:
