@@ -63,7 +63,7 @@ class PanelParser:
 
     # ====== Role weights (blend of value-shape, label-affinity, side, ctx, penalties) ======
     _WEIGHTS = {
-        "VOLTAGE": dict(W_shape=0.60, W_conf=0.15, W_lbl=0.15, W_side=0.03, W_ctx=0.07, W_wrong=0.12, W_y=0.00),
+        "VOLTAGE": dict(W_shape=0.55, W_conf=0.15, W_lbl=0.22, W_side=0.12, W_ctx=0.07, W_wrong=0.12, W_y=0.00),
         "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.12, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
@@ -634,7 +634,7 @@ class PanelParser:
 
         return result
 
-    # --------- Helpers for association ---------
+    # --------- Helpers ---------
     def _scan_main_mode(self, items: List[dict]) -> Optional[str]:
         txt = " ".join(str(it.get("text","")) for it in items).upper()
         has_mlo = bool(re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txt))
@@ -897,7 +897,6 @@ class PanelParser:
         dmin = min(dist(it, L) for L in Ls)
         return math.exp(-dmin / self._SIGMA_PX)
 
-    # ---------- Collect label candidates ----------
     def _collect_label_candidates(self, items: list) -> dict:
         import re
         role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","AIC","NAME","WRONG")}
@@ -912,7 +911,6 @@ class PanelParser:
                     })
         return role_map
 
-    # ---------- Collect value candidates (shape-first) ----------
     def _collect_value_candidates(self, items: list) -> dict:
         import re
         out = {k: [] for k in ("NAME","VOLTAGE","BUS","MAIN","AIC")}
@@ -938,13 +936,49 @@ class PanelParser:
 
             # VOLTAGE (pairs or single; tolerate OCR typos and missing slash)
             txtN = self._normalize_voltage_text(txtD)
-            pair = re.search(r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b', txtN)
-            single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)  # 3–4 digits, no trailing V required
+
+            # --- Guards: don't let AIC-like or explicit-amp tokens become VOLTAGE ---
+
+            # AIC-like: 10k..100k numbers, optionally with A/KA (e.g. "18000", "65,000A")
+            aic_like = bool(re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD))
+
+            # Amperage-like: "125 A", "225A", "400 AMPS"
+            amps_like = bool(re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMPS?\.?)\b", txtD))
+
+            # Voltage-ish context words/letters
+            has_volty_ctx = bool(
+                re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|V)\b', txtN)
+            )
+
+            # Recognize "pair" voltages like "480/277", "208/120", "480Y/277V", etc.
+            pair = re.search(
+                r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b',
+                txtN,
+            )
+
+            # If it looks AIC-like and has no clear voltage context or separators,
+            # kill the pair match so things like "18000" don't become VOLTAGE.
+            if pair and aic_like and not has_volty_ctx and "/" not in txtN and "Y" not in txtN and "V" not in txtN:
+                pair = None
+
+            # Single-voltage detection (e.g. "480V", "208", "600V")
+            # Only allowed when this token does NOT look like AIC or amps
+            # and has some voltage-ish context.
+            single = None
+            if not aic_like and not amps_like and has_volty_ctx:
+                single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
+
             if pair or single:
                 shape = 0.92 if pair else 0.62
-                ctx = 0.15 if re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|V)\b', txtN) else 0.0
-                out["VOLTAGE"].append({"x1":x1,"y1":y1,"x2":x2,"y2":y2,"xc":xc,"yc":yc,
-                                       "conf":conf,"text":raw,"shape":min(1.0,shape),"ctx":min(1.0,ctx)})
+                ctx = 0.15 if has_volty_ctx else 0.0
+                out["VOLTAGE"].append({
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                    "xc": xc, "yc": yc,
+                    "conf": conf,
+                    "text": raw,
+                    "shape": min(1.0, shape),
+                    "ctx": min(1.0, ctx),
+                })
 
             # BUS/MAIN (accept "###A", "### A", and bare "###" when in rating ranges)
             m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMPS?\.?)\b", txtD)  # 60..9999 A w/ unit
@@ -1066,7 +1100,6 @@ class PanelParser:
             out[role] = merged
         return out
 
-    # ---------- Scoring & pick ----------
     def _score_candidates(self, role: str, cands: list, labels_map: dict, band_top: int, main_mode: Optional[str] = None) -> list:
         import math
         W = dict(self._WEIGHTS[role])
@@ -1202,7 +1235,6 @@ class PanelParser:
         u = re.sub(r'(?<=\d)[Oo](?=\s*(?:A|AMPS?)\b)', '0', u, flags=re.I)
         return u
 
-    # ======= overlay & legacy helpers =======
     def _write_overlay_with_band(
         self,
         image_path: str,
@@ -1303,7 +1335,6 @@ class PanelParser:
         except Exception as e:
             print(f"[HEADER] Failed to write overlay: {e}")
 
-    # ======= support methods (kept) =======
     def _prep_for_ocr(self, img: np.ndarray) -> np.ndarray:
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))

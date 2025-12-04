@@ -16,38 +16,16 @@ if project_root not in sys.path:
 from PageFilter.PageFilter import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV15 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
-from OcrLibrary.BreakerTableParserAPIv4 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv5 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/makayla2.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
 
 for d in (FILTER_OUT_DIR, FINDER_OUT_DIR, PIPE_OUT_DIR):
     d.mkdir(parents=True, exist_ok=True)
-
-# ---------- SMALL HELPERS ----------
-def _first(d: dict, keys, default=None):
-    for k in keys:
-        if k in d and d[k] not in (None, "", []):
-            return d[k]
-    return default
-
-def _one_line_breaker(b: dict) -> str:
-    num  = _first(b, ["ckt","cct","circuit","circuit_number","number","idx"], default="?")
-    desc = _first(b, ["desc","description","label","load","cktdesc","ckt_desc"], default="")
-    trip = _first(b, ["trip","amps","amperage","size","rating"], default="")
-    poles= _first(b, ["poles","pole","ph","phase"], default="")
-    side = _first(b, ["side","left_right","L/R","lr"], default="")
-    qty  = _first(b, ["count","qty","quantity"], default="")
-    extras = []
-    if side not in ("", None): extras.append(f"side={side}")
-    if poles not in ("", None): extras.append(f"poles={poles}")
-    if qty  not in ("", None): extras.append(f"qty={qty}")
-    if trip not in ("", None): extras.append(f"trip={trip}")
-    meta = ("  [" + ", ".join(extras) + "]") if extras else ""
-    return f"  - CKT {num}: {desc}{meta}"
 
 def main():
     # ---- 1) PageFilter ----
@@ -129,7 +107,7 @@ def main():
         print("header_token_y  :", ana_res.get("header_token_y"))
         print("header_rule_src :", ana_res.get("header_rule_source"))
         print("footer_y        :", ana_res.get("footer_y"))
-        print("spaces          :", ana_res.get("spaces_detected"), "→", ana_res.get("spaces_corrected"))
+        print("spaces          :", ana_res.get("spaces_detected"))
         print("gridless        :", ana_res.get("gridless_path"))
         print("overlay         :", ana_res.get("page_overlay_path"))
 
