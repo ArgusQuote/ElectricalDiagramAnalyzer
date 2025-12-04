@@ -19,7 +19,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV15 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv5 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/makayla2.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -103,13 +103,8 @@ def main():
         # ---- Analyzer summary ----
         print("\n=== ANALYZER ===")
         print("header_y        :", ana_res.get("header_y"))
-        print("header_y_orig   :", ana_res.get("header_y_original"))
-        print("header_token_y  :", ana_res.get("header_token_y"))
-        print("header_rule_src :", ana_res.get("header_rule_source"))
         print("footer_y        :", ana_res.get("footer_y"))
         print("spaces          :", ana_res.get("spaces_detected"))
-        print("gridless        :", ana_res.get("gridless_path"))
-        print("overlay         :", ana_res.get("page_overlay_path"))
 
         # ---- Header summary ----
         print("\n=== HEADER PARSER ===")
