@@ -266,6 +266,10 @@ class PanelBoardSearch:
         if self.enforce_one_box and all_pngs:
             all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
+        # NEW: debug horizontal-line masks for each final crop
+        if self.debug and all_pngs:
+            self._save_horizontal_line_masks(all_pngs)
+
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
             print(f"      Vector PDFs → {self.vec_dir}")
@@ -415,7 +419,6 @@ class PanelBoardSearch:
 
         return final_paths
 
-
     def _find_table_boxes(self, img_bgr,
                         min_rel_area=0.02,
                         max_rel_area=0.75,
@@ -484,3 +487,54 @@ class PanelBoardSearch:
         area_b = (bx2-bx1) * (by2-by1)
         denom = (area_a + area_b - inter)
         return inter / float(denom) if denom > 0 else 0.0
+
+    # ---------------- Horizontal-line debug masks ----------------
+    def _save_horizontal_line_masks(self, image_paths: list[str]) -> None:
+        """
+        For each final crop PNG, create a binarized mask that shows only
+        horizontal lines and save it into a debug folder.
+
+        Output: <output_dir>/debug_horizontal_lines/<crop_stem>__horiz_mask.png
+        """
+        debug_dir = Path(self.output_dir) / "debug_horizontal_lines"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+
+        for p in image_paths:
+            img = cv2.imread(p, cv2.IMREAD_COLOR)
+            if img is None:
+                if self.verbose:
+                    print(f"[WARN] Could not read crop for horiz debug: {p}")
+                continue
+
+            mask = self._horizontal_line_mask(img)
+            out_path = debug_dir / f"{Path(p).stem}__horiz_mask.png"
+            cv2.imwrite(str(out_path), mask)
+
+    @staticmethod
+    def _horizontal_line_mask(img_bgr: np.ndarray) -> np.ndarray:
+        """
+        Return a binarized mask (0/255) highlighting horizontal table lines only.
+        """
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+        # Same style as _find_table_boxes: text/lines become white (255)
+        thr = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            31,
+            10,
+        )
+
+        H, W = gray.shape
+        # Horizontal structuring element: wide, 1 pixel tall
+        hk = max(W // 80, 5)
+        kh = cv2.getStructuringElement(cv2.MORPH_RECT, (hk, 1))
+
+        # Morphological open: keeps horizontal structures, removes non-horizontal noise
+        horiz = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kh)
+
+        # Ensure strict binary 0/255 output
+        _, horiz_bin = cv2.threshold(horiz, 0, 255, cv2.THRESH_BINARY)
+        return horiz_bin

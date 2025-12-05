@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import os
 from pathlib import Path
-import json
 import numpy as np
 import cv2
 import fitz  # PyMuPDF
+import json 
 
 
 class PanelBoardSearch:
@@ -13,8 +13,7 @@ class PanelBoardSearch:
     (so coordinates match the PDF page), then:
       1) Write a vector-only PDF for each table via clip.
       2) Render a high-DPI PNG from the same clip.
-      3) (POST) Run the same horizontal-line check you validated in your simple script
-         on every produced PNG. Writes per-image overlays + JSON; deletes PNGs that fail.
+    Always writes a magenta overlay per source page for QA.
 
     Public API:
         crops = PanelBoardSearch(...).readPdf("/path/to.pdf")
@@ -24,14 +23,14 @@ class PanelBoardSearch:
         self,
         output_dir: str,
         # --- detection (bitmap) ---
-        dpi: int = 400,
+        dpi: int = 400,         # detection DPI (rendered with fitz for alignment)
         # --- PDF→PNG render ---
-        render_dpi: int = 1200,
-        aa_level: int = 8,
+        render_dpi: int = 1200, # final PNG DPI
+        aa_level: int = 8,      # fitz AA 0..8 (higher = smoother lines/text)
         render_colorspace: str = "gray",  # "gray" or "rgb"
-        downsample_max_w: int | None = None,
+        downsample_max_w: int | None = None,  # optional max width for PNGs
 
-        # whitespace / void heuristics
+        # whitespace / void heuristics (same semantics as before)
         min_whitespace_area_fr: float = 0.01,
         margin_shave_px: int = 6,
         min_void_area_fr: float = 0.004,
@@ -58,16 +57,6 @@ class PanelBoardSearch:
         onebox_max_rel_area: float = 0.75,
         onebox_aspect_range: tuple = (0.4, 3.0),
         onebox_min_side_px: int = 80,
-
-        # ------- line-check params (your working settings) -------
-        linecheck_enable: bool = True,
-        line_run_len: int = 5,                 # you said this worked
-        line_tolerance: int = 8,               # you said this worked
-        line_min_width_frac: float = 0.30,
-        line_hkernel_frac: float = 0.035,
-        line_max_thickness_px: int = 6,
-        line_y_merge_tol_px: int = 4,
-        line_out_subdir: str = "line_check",
     ):
         self.output_dir = os.path.expanduser(output_dir)
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
@@ -77,8 +66,6 @@ class PanelBoardSearch:
         self.magenta_dir.mkdir(parents=True, exist_ok=True)
         self.vec_dir = Path(self.output_dir) / "cropped_tables_pdf"
         self.vec_dir.mkdir(parents=True, exist_ok=True)
-        self.line_dir = Path(self.output_dir) / line_out_subdir
-        self.line_dir.mkdir(parents=True, exist_ok=True)
 
         # knobs
         self.dpi = dpi
@@ -118,15 +105,6 @@ class PanelBoardSearch:
         self.onebox_aspect_range = onebox_aspect_range
         self.onebox_min_side_px = onebox_min_side_px
 
-        # line-check
-        self.linecheck_enable = linecheck_enable
-        self.line_run_len = line_run_len
-        self.line_tolerance = line_tolerance
-        self.line_min_width_frac = line_min_width_frac
-        self.line_hkernel_frac = line_hkernel_frac
-        self.line_max_thickness_px = line_max_thickness_px
-        self.line_y_merge_tol_px = line_y_merge_tol_px
-
     # ----------------- Public API -----------------
     def readPdf(self, pdf_path: str) -> list[str]:
         pdf_path = os.path.expanduser(pdf_path)
@@ -145,7 +123,7 @@ class PanelBoardSearch:
         rend_mat = fitz.Matrix(self.render_dpi / 72.0, self.render_dpi / 72.0)
         cs       = fitz.csGRAY if self.render_colorspace == "gray" else fitz.csRGB
 
-        # Turn AA OFF for detection so lines are crisp
+        # Turn AA OFF for detection so lines are crisp (prevents “hole” fill-in)
         try:
             fitz.TOOLS.set_aa_level(0)
         except Exception:
@@ -161,6 +139,7 @@ class PanelBoardSearch:
             page_area = H * W
 
             gray = cv2.cvtColor(det_bgr, cv2.COLOR_BGR2GRAY)
+            # Gentle morphology preserves thin frames; adjust if needed
             ink = self._binarize_ink(gray, close_px=0, dilate_px=1)
             whitespace = cv2.bitwise_not(ink)
             whitespace = self._shave_margin(whitespace, self.margin_shave_px)
@@ -284,13 +263,13 @@ class PanelBoardSearch:
         except Exception:
             pass
 
-        # --- post: split multi-table crops (lossless) ---
+        # --- post-pass: enforce one table per PNG (lossless) ---
         if self.enforce_one_box and all_pngs:
             all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
-        # --- final: run line checker on all PNGs; delete failures; return kept only ---
-        if self.linecheck_enable and all_pngs:
-            all_pngs = self._post_linecheck_delete_failures(all_pngs)
+        # NEW: always compute, only save if debug inside the helper
+        if all_pngs:
+            self._save_horizontal_line_masks(all_pngs)
 
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
@@ -299,213 +278,11 @@ class PanelBoardSearch:
 
         return all_pngs
 
-    # ---------------- line-check (simple script port) ----------------
-    def _post_linecheck_delete_failures(self, image_paths: list[str]) -> list[str]:
-        kept: list[str] = []
-        for ipath in image_paths:
-            try:
-                img = cv2.imread(ipath, cv2.IMREAD_COLOR)
-                if img is None:
-                    if self.verbose:
-                        print(f"[lines] unreadable: {ipath}")
-                    continue
-
-                lines = self._detect_horizontal_lines(
-                    img_bgr=img,
-                    horiz_kernel_frac=self.line_hkernel_frac,
-                    min_width_frac=self.line_min_width_frac,
-                    max_thickness_px=self.line_max_thickness_px,
-                    y_merge_tol_px=self.line_y_merge_tol_px,
-                )
-                lines = self._add_gaps(lines)
-
-                subdir = self.line_dir / Path(ipath).stem
-                subdir.mkdir(parents=True, exist_ok=True)
-
-                overlay = self._overlay_lines(img, lines, thickness=2)
-                cv2.imwrite(str(subdir / "overlay_horizontal_lines.png"), overlay)
-
-                with open(subdir / "lines.json", "w", encoding="utf-8") as f:
-                    json.dump(lines, f, indent=2)
-
-                next_gaps = [ln.get("next_gap", None) for ln in lines]
-                with open(subdir / "line_measurements.json", "w", encoding="utf-8") as f:
-                    json.dump({"next_gaps": next_gaps}, f, indent=2)
-
-                ok = self._uniform_run_found(next_gaps, run_len=self.line_run_len, tol=self.line_tolerance)
-
-                summary = {
-                    "input_image": str(Path(ipath).resolve()),
-                    "overlay_image": str((subdir / "overlay_horizontal_lines.png").resolve()),
-                    "lines_json": str((subdir / "lines.json").resolve()),
-                    "measurements_json": str((subdir / "line_measurements.json").resolve()),
-                    "run_len": self.line_run_len,
-                    "tolerance": self.line_tolerance,
-                    "uniform_run_found": bool(ok),
-                    "num_lines": len(lines),
-                }
-                with open(subdir / "summary.json", "w", encoding="utf-8") as f:
-                    json.dump(summary, f, indent=2)
-
-                if ok:
-                    kept.append(ipath)
-                    print(f"[lines] {Path(ipath).name}: PASS | lines={len(lines)}")
-                else:
-                    # delete failing PNG
-                    try:
-                        os.remove(ipath)
-                        print(f"[lines] {Path(ipath).name}: FAIL → deleted")
-                    except Exception as de:
-                        print(f"[lines] {Path(ipath).name}: FAIL (delete error: {de})")
-
-            except Exception as e:
-                print(f"[lines] ERROR {ipath}: {e}")
-        return kept
-
-    @staticmethod
-    def _detect_horizontal_lines(
-        img_bgr: np.ndarray,
-        horiz_kernel_frac: float = 0.035,
-        min_width_frac: float = 0.20,
-        max_thickness_px: int = 6,
-        y_merge_tol_px: int = 4,
-    ):
-        """
-        Adaptive + multi-scale horizontal line extraction.
-        Returns [{y_center,y_top,y_bottom,x_left,x_right,width,height}, ...]
-        """
-        H, W = img_bgr.shape[:2]
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-        thr = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 41, 10
-        )
-
-        fracs = [
-            max(0.02, horiz_kernel_frac * 0.7),
-            horiz_kernel_frac,
-            min(0.08, horiz_kernel_frac * 1.8),
-        ]
-        masks = []
-        for f in fracs:
-            klen = max(5, int(round(W * f)))
-            kh = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
-            m = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kh, iterations=1)
-            m = cv2.dilate(m, None, iterations=1)
-            m = cv2.erode(m, None, iterations=1)
-            masks.append(m)
-
-        horiz = masks[0]
-        for m in masks[1:]:
-            horiz = cv2.bitwise_or(horiz, m)
-
-        cnts, _ = cv2.findContours(horiz, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        min_width_px = int(round(W * min_width_frac))
-        raws = []
-        for c in cnts:
-            x, y, w, h = cv2.boundingRect(c)
-            if w < min_width_px or h < 1 or h > max_thickness_px:
-                continue
-            y_mid = y + h // 2
-            row = horiz[y_mid, :]
-            xs = np.where(row > 0)[0]
-            if xs.size == 0:
-                continue
-            x_left = int(xs.min())
-            x_right = int(xs.max())
-            if (x_right - x_left + 1) < min_width_px:
-                continue
-            raws.append((y, y + h - 1, x_left, x_right))
-
-        if not raws:
-            return []
-
-        raws.sort(key=lambda r: (r[0] + r[1]) / 2.0)
-        merged, cur = [], [raws[0]]
-        for r in raws[1:]:
-            y0, y1, _, _ = r
-            py0, py1, _, _ = cur[-1]
-            if abs(((y0 + y1) / 2.0) - ((py0 + py1) / 2.0)) <= y_merge_tol_px:
-                cur.append(r)
-            else:
-                merged.append(cur); cur = [r]
-        merged.append(cur)
-
-        lines = []
-        for grp in merged:
-            y_t = min(g[0] for g in grp)
-            y_b = max(g[1] for g in grp)
-            x_l = min(g[2] for g in grp)
-            x_r = max(g[3] for g in grp)
-            y_c = (y_t + y_b) // 2
-            lines.append({
-                "y_center": int(y_c),
-                "y_top":    int(y_t),
-                "y_bottom": int(y_b),
-                "x_left":   int(x_l),
-                "x_right":  int(x_r),
-                "width":    int(x_r - x_l + 1),
-                "height":   int(max(1, y_b - y_t + 1)),
-            })
-        lines.sort(key=lambda d: d["y_center"])
-        return lines
-
-    @staticmethod
-    def _add_gaps(lines):
-        n = len(lines)
-        for i in range(n):
-            prev_gap = None if i == 0 else int(lines[i]["y_center"] - lines[i-1]["y_center"])
-            next_gap = None if i == n - 1 else int(lines[i+1]["y_center"] - lines[i]["y_center"])
-            lines[i]["prev_gap"] = prev_gap
-            lines[i]["next_gap"] = next_gap
-        return lines
-
-    @staticmethod
-    def _overlay_lines(img_bgr: np.ndarray, lines, thickness: int = 2) -> np.ndarray:
-        out = img_bgr.copy()
-        for ln in lines:
-            y = (ln["y_top"] + ln["y_bottom"]) // 2
-            cv2.line(out, (ln["x_left"], y), (ln["x_right"], y), (0, 0, 255), thickness)
-        return out
-
-    @staticmethod
-    def _uniform_run_found(next_gaps, run_len=20, tol=8):
-        i = 0
-        N = len(next_gaps)
-        while i < N:
-            while i < N and next_gaps[i] is None:
-                i += 1
-            if i >= N:
-                break
-            total = 0.0
-            count = 0
-            lo = hi = None
-            length = 0
-            j = i
-            while j < N:
-                g = next_gaps[j]
-                if g is None:
-                    break
-                if count == 0:
-                    total = float(g); count = 1; length = 1
-                    lo = g - tol; hi = g + tol
-                else:
-                    mean = total / count
-                    if abs(g - mean) <= tol and lo <= g <= hi:
-                        total += g; count += 1; length += 1
-                        lo = max(lo, int(mean - tol))
-                        hi = min(hi, int(mean + tol))
-                    else:
-                        break
-                if length >= run_len:
-                    return True
-                j += 1
-            i = j + 1
-        return False
-
-    # ---------------- other helpers (unchanged) ----------------
     def _grid_proposals_fallback(self, img_bgr):
+        """
+        Return a list of (x0,y0,x1,y1) covering big grid-like regions even if
+        the 'holes inside whitespace' logic yields nothing.
+        """
         H, W = img_bgr.shape[:2]
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         gray = cv2.bilateralFilter(gray, d=5, sigmaColor=20, sigmaSpace=20)
@@ -515,11 +292,13 @@ class PanelBoardSearch:
         lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=90,
                                 minLineLength=min_len, maxLineGap=4)
 
+        # accumulate vertical & horizontal edges
         acc = np.zeros_like(gray, dtype=np.uint8)
         if lines is not None:
             for x1, y1, x2, y2 in lines[:, 0, :]:
                 cv2.line(acc, (x1, y1), (x2, y2), 255, 2)
 
+        # close gaps → contours
         acc = cv2.dilate(acc, None, iterations=1)
         acc = cv2.erode(acc, None, iterations=1)
         cnts, _ = cv2.findContours(acc, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -527,12 +306,15 @@ class PanelBoardSearch:
         props = []
         for c in cnts:
             x, y, w, h = cv2.boundingRect(c)
+            # prefer table-like rectangles (reasonably big, not micro)
             if w < 120 or h < 90:
                 continue
             props.append((x, y, x + w, y + h))
+        # largest first
         props.sort(key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
         return props
 
+    # ---------------- helpers (unchanged semantics) ----------------
     @staticmethod
     def _pix_to_bgr(pix: fitz.Pixmap) -> np.ndarray:
         H, W, C = pix.height, pix.width, pix.n
@@ -574,6 +356,7 @@ class PanelBoardSearch:
             m[labels == cid] = 255
         return m
 
+    # One box logic
     def _enforce_one_box_on_paths(self, image_paths: list[str]) -> list[str]:
         final_paths = []
         for p in image_paths:
@@ -596,6 +379,7 @@ class PanelBoardSearch:
                 out_dir = Path(self.output_dir)
                 H, W = img.shape[:2]
 
+                # If 0 or 1 table box -> keep as-is
                 if len(boxes) <= 1:
                     final_paths.append(p)
                     if self.onebox_debug:
@@ -605,12 +389,12 @@ class PanelBoardSearch:
                         cv2.imwrite(str(out_dir / f"{base}__debug_single_box.png"), dbg)
                     continue
 
+                # Split into multiple
                 saved = []
                 for i, (x1, y1, x2, y2) in enumerate(boxes, 1):
                     x1p, y1p = max(0, x1 - self.onebox_pad), max(0, y1 - self.onebox_pad)
                     x2p, y2p = min(W, x2 + self.onebox_pad), min(H, y2 + self.onebox_pad)
                     crop = img[y1p:y2p, x1p:x2p]
-                    out_path = out_dir / f"{base}__tbl{i:02d}.png"
                     out_path = out_dir / f"{base}__tbl{i:02d}.png"
                     cv2.imwrite(str(out_path), crop)
                     saved.append(str(out_path))
@@ -637,10 +421,10 @@ class PanelBoardSearch:
         return final_paths
 
     def _find_table_boxes(self, img_bgr,
-                          min_rel_area=0.02,
-                          max_rel_area=0.75,
-                          aspect_range=(0.4, 3.0),
-                          min_side_px=80):
+                        min_rel_area=0.02,
+                        max_rel_area=0.75,
+                        aspect_range=(0.4, 3.0),
+                        min_side_px=80):
         H, W = img_bgr.shape[:2]
         page_area = H * W
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
@@ -678,6 +462,7 @@ class PanelBoardSearch:
         boxes.sort(key=lambda b: (b[1], b[0]))
         return boxes
 
+
     @staticmethod
     def _nms_keep_larger(boxes, iou_thr=0.5):
         if len(boxes) <= 1:
@@ -688,6 +473,7 @@ class PanelBoardSearch:
             if all(PanelBoardSearch._iou(box, k) <= iou_thr for k in keep):
                 keep.append(box)
         return keep
+
 
     @staticmethod
     def _iou(a, b):
@@ -702,3 +488,188 @@ class PanelBoardSearch:
         area_b = (bx2-bx1) * (by2-by1)
         denom = (area_a + area_b - inter)
         return inter / float(denom) if denom > 0 else 0.0
+
+    # ---------------- Horizontal-line debug masks ----------------
+    def _save_horizontal_line_masks(self, image_paths: list[str]) -> None:
+        """
+        For each final crop PNG, create:
+          - a binarized mask that shows only horizontal lines
+          - line spacing metrics
+          - a 'valid_table' flag based on spacing regularity
+
+        If self.debug is True, write artifacts into:
+            <output_dir>/debug_horizontal_lines/
+                <crop_stem>__horiz_mask.png
+                <crop_stem>__horiz_lines.json
+
+        The JSON structure is:
+            {
+              "lines": [[line_idx, dy_from_previous], ...],
+              "valid_table": true/false
+            }
+        """
+        debug_dir = Path(self.output_dir) / "debug_horizontal_lines"
+        if self.debug:
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+        for p in image_paths:
+            img = cv2.imread(p, cv2.IMREAD_COLOR)
+            if img is None:
+                if self.verbose:
+                    print(f"[WARN] Could not read crop for horiz debug: {p}")
+                continue
+
+            # 1) mask image (always computed)
+            mask = self._horizontal_line_mask(img)
+
+            # 2) spacing metrics (always computed)
+            metrics = self._extract_horizontal_line_metrics(mask)
+
+            # 3) validity flag based on spacing pattern
+            valid_table = self._is_valid_table_spacing(metrics)
+
+            # Optional: you can stash it on the instance if you want:
+            # (uncomment if helpful)
+            # if not hasattr(self, "horizontal_line_info"):
+            #     self.horizontal_line_info = {}
+            # self.horizontal_line_info[p] = {
+            #     "lines": metrics,
+            #     "valid_table": valid_table,
+            # }
+
+            # Only write files if debug is enabled
+            if not self.debug:
+                continue
+
+            mask_path = debug_dir / f"{Path(p).stem}__horiz_mask.png"
+            cv2.imwrite(str(mask_path), mask)
+
+            payload = {
+                "lines": metrics,
+                "valid_table": bool(valid_table),
+            }
+            json_path = debug_dir / f"{Path(p).stem}__horiz_lines.json"
+            try:
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+            except Exception as e:
+                if self.verbose:
+                    print(f"[WARN] Failed to write horiz lines JSON for {p}: {e}")
+
+    @staticmethod
+    def _horizontal_line_mask(img_bgr: np.ndarray) -> np.ndarray:
+        """
+        Return a binarized mask (0/255) highlighting horizontal table lines only.
+        """
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+        # Same style as _find_table_boxes: text/lines become white (255)
+        thr = cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            31,
+            10,
+        )
+
+        H, W = gray.shape
+        # Horizontal structuring element: wide, 1 pixel tall
+        hk = max(W // 80, 5)
+        kh = cv2.getStructuringElement(cv2.MORPH_RECT, (hk, 1))
+
+        # Morphological open: keeps horizontal structures, removes non-horizontal noise
+        horiz = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kh)
+
+        # Ensure strict binary 0/255 output
+        _, horiz_bin = cv2.threshold(horiz, 0, 255, cv2.THRESH_BINARY)
+        return horiz_bin
+    
+    @staticmethod
+    def _extract_horizontal_line_metrics(mask: np.ndarray) -> list[list[int]]:
+        """
+        Given a horizontal-line mask (0/255), detect distinct horizontal
+        line bands and return:
+
+            [[line_index, distance_from_previous_line], ...]
+
+        - line_index is 1-based from top to bottom
+        - distance_from_previous_line is in pixels, along y
+          (for the first line, this value is 0)
+        """
+        if mask.ndim == 3:
+            # just in case, convert to single channel
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
+        h, w = mask.shape[:2]
+
+        # Boolean: does this row contain any white pixels?
+        row_has_line = (mask > 0).any(axis=1)
+
+        # Group consecutive rows into "spans" = individual lines
+        spans = []
+        in_span = False
+        start_y = 0
+
+        for y, has in enumerate(row_has_line):
+            if has and not in_span:
+                in_span = True
+                start_y = y
+            elif not has and in_span:
+                in_span = False
+                end_y = y - 1
+                spans.append((start_y, end_y))
+
+        if in_span:
+            spans.append((start_y, h - 1))
+
+        # Compute center y for each span
+        centers = [ (s + e) // 2 for (s, e) in spans ]
+        centers.sort()
+
+        metrics: list[list[int]] = []
+        prev_center = None
+
+        for idx, cy in enumerate(centers, start=1):
+            if prev_center is None:
+                dy = 0
+            else:
+                dy = int(cy - prev_center)
+            metrics.append([idx, dy])
+            prev_center = cy
+
+        return metrics
+
+    @staticmethod
+    def _is_valid_table_spacing(
+        metrics: list[list[int]],
+        spacing_tol_px: int = 4,
+        min_repeats: int = 5,
+    ) -> bool:
+        """
+        Given [[line_idx, dy], ...], decide if this looks like a valid table:
+        True if there are at least `min_repeats` spacing values (dy) that are
+        similar to each other within ±spacing_tol_px.
+
+        - Ignores dy == 0 (first line, or merged spans).
+        """
+        # collect all non-zero spacings
+        spacings = [dy for _, dy in metrics if dy > 0]
+        if len(spacings) < min_repeats:
+            return False
+
+        spacings.sort()
+        n = len(spacings)
+
+        # sliding window: for each spacing, count how many are within ±tol
+        for i in range(n):
+            base = spacings[i]
+            count = 1  # include spacings[i] itself
+            j = i + 1
+            while j < n and abs(spacings[j] - base) <= spacing_tol_px:
+                count += 1
+                j += 1
+            if count >= min_repeats:
+                return True
+
+        return False
