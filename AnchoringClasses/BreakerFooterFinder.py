@@ -156,6 +156,178 @@ class BreakerFooterFinder:
 
         return collapsed
 
+    def _find_footer_line_from_anchor(
+        self,
+        gray_lines: np.ndarray,
+        anchor_y: float,
+        search_down_px: int = 60,
+    ) -> Optional[int]:
+        """
+        Starting at anchor_y (footer token y), look downward up to search_down_px
+        for a strong horizontal line spanning most of the width.
+        Returns the page Y of that line or None if not found.
+        """
+        if gray_lines is None or anchor_y is None:
+            return None
+
+        H, W = gray_lines.shape[:2]
+        y_start = int(max(0, min(anchor_y, H - 1)))
+        y_end = int(min(H, y_start + max(10, search_down_px)))
+        if y_end <= y_start + 2:
+            return None
+
+        band = gray_lines[y_start:y_end, :]
+        if band.size == 0:
+            return None
+
+        # binarize
+        blur = cv2.GaussianBlur(band, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        band_h = band.shape[0]
+
+        # emphasize horizontal strokes
+        Kh = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (max(40, int(0.60 * W)), 1),   # wide kernel: 60% of page width
+        )
+        h_candidates = cv2.morphologyEx(bw, cv2.MORPH_OPEN, Kh, iterations=1)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            h_candidates, connectivity=8
+        )
+        if num_labels <= 1:
+            return None
+
+        min_len = int(0.60 * W)                 # at least 60% width
+        max_thick = max(3, int(0.03 * band_h))  # thin-ish line
+
+        line_ys: List[int] = []
+        for i in range(1, num_labels):
+            x, y, w, h, area = stats[i]
+            if w < min_len:
+                continue
+            if h > max_thick:
+                continue
+            if area <= 0:
+                continue
+
+            y_center = y + h // 2
+            line_ys.append(int(y_center))
+
+        if not line_ys:
+            return None
+
+        # choose the first strong line below the anchor
+        rel_y = min(line_ys)
+        return int(y_start + rel_y)
+
+    def _snap_footer_line_from_token(
+        self,
+        gray_lines: np.ndarray,
+        token_y: float,
+        max_down: int = 60,
+    ) -> Optional[int]:
+        """
+        Given the PAGE y of the footer token text (panel size, e.g. 84 / 41),
+        look downward a short distance for a strong horizontal line that spans
+        across most of the panel.
+
+        This mirrors the header snapping approach:
+          - build a horizontal-line mask in a band below token_y
+          - search downward from token_y for the first horizontal run
+          - return its absolute y in page coords
+        """
+        if gray_lines is None:
+            return None
+
+        H, W = gray_lines.shape[:2]
+
+        # band from just above token_y downwards a bit
+        y1_band = max(0, int(token_y) - 2)
+        y2_band = min(H, int(token_y) + max_down + 10)  # small cushion
+
+        if y2_band <= y1_band + 1:
+            return None
+
+        band = gray_lines[y1_band:y2_band, :]
+        if band is None or band.size == 0:
+            return None
+
+        # --- build horizontal-line mask (similar to header snapping) ---
+        blur = cv2.GaussianBlur(band, (3, 3), 0)
+        bw = cv2.adaptiveThreshold(
+            blur,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,
+            21,
+            10,
+        )
+
+        # emphasize HORIZONTAL structures
+        klen_target = int(W * 0.70)                  # ~70% of page width
+        klen        = int(min(W - 2, max(70, klen_target)))
+        K = cv2.getStructuringElement(cv2.MORPH_RECT, (klen, 1))
+        horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, K, iterations=1)
+
+        band_h = horiz.shape[0]
+
+        # token baseline in band-relative coords
+        y_rel_start = int(token_y) - y1_band
+        if y_rel_start < 0 or y_rel_start >= band_h:
+            return None
+
+        def has_white_at(y_idx: int) -> bool:
+            y0 = max(0, y_idx - 2)
+            y1 = min(band_h, y_idx + 3)
+            slice_ = horiz[y0:y1, :]
+            return bool(slice_.any())
+
+        best_down_rel = None
+        steps_down = 0
+        cur = int(y_rel_start)
+
+        while cur < band_h and steps_down <= max_down:
+            if has_white_at(cur):
+                best_down_rel = cur
+                break
+            cur += 1
+            steps_down += 1
+
+        if best_down_rel is None:
+            return None
+
+        footer_line_y = y1_band + best_down_rel
+
+        # optional: dump mask overlay for debugging
+        if self.debug and self.debug_dir:
+            try:
+                os.makedirs(self.debug_dir, exist_ok=True)
+                vis = cv2.cvtColor(horiz, cv2.COLOR_GRAY2BGR)
+                Hb, Wb = vis.shape[:2]
+
+                # token baseline in band coords
+                y_rel = max(0, min(Hb - 1, y_rel_start))
+                cv2.line(vis, (0, y_rel), (Wb - 1, y_rel), (255, 0, 0), 1)      # token baseline
+                cv2.line(vis, (0, best_down_rel), (Wb - 1, best_down_rel), (0, 255, 255), 1)  # snapped footer
+
+                mask_name = f"footer_horiz_mask_overlay_y{y1_band}_{y2_band}.png"
+                mask_path = os.path.join(self.debug_dir, mask_name)
+                cv2.imwrite(mask_path, vis)
+                print(f"[BreakerFooterFinder] Saved footer horiz mask overlay: {mask_path}")
+            except Exception as e:
+                print(f"[BreakerFooterFinder] Failed to write footer horiz mask overlay: {e}")
+
+        return int(footer_line_y)
+
     def _score_header_columns(self, column_groups: List[Dict]) -> Dict:
         """
         Given column_groups (each with .items = OCR tokens), assign a semantic
@@ -628,6 +800,7 @@ class BreakerFooterFinder:
         header_y        = analyzer_result.get("header_y")
         header_bottom_y = analyzer_result.get("header_bottom_y")
         src_path        = analyzer_result.get("src_path")
+        footer_struct_y = analyzer_result.get("footer_struct_y")
 
         dbg_marks: List[Tuple[int, str]] = []
 
@@ -1076,20 +1249,51 @@ class BreakerFooterFinder:
                     key=lambda c: (c["y_page"], c["conf"])
                 )
 
-                footer_y = int(round(best["y_page"]))
-                token_y = footer_y
+                token_y = int(round(best["y_page"]))
                 token_val = int(best["val"])
                 panel_size = chosen_size
 
-                dbg_marks.append((footer_y, f"FOOTER_VAL={token_val}"))
+                # try to find a strong horizontal line just below the token
+                footer_line_y = self._find_footer_line_from_anchor(
+                    gray_lines,
+                    token_y,
+                    search_down_px=60,
+                )
+
+                if footer_line_y is not None:
+                    footer_y = footer_line_y
+                    dbg_marks.append((token_y, f"FOOTER_VAL={token_val}"))
+                    dbg_marks.append((footer_y, "FOOTER_LINE"))
+                else:
+                    # fall back: use token baseline as footer
+                    footer_y = token_y
+                    dbg_marks.append((footer_y, f"FOOTER_VAL={token_val}"))
+
                 if self.debug:
                     print(
                         "[BreakerFooterFinder] Selected footer token: "
                         f"panel_size={chosen_size}, "
                         f"vals_seen={sorted(chosen_vals)}, "
                         f"val={token_val}, conf={best['conf']:.2f}, "
-                        f"y_page={best['y_page']:.1f}, side={best['side']}"
+                        f"token_y={token_y}, footer_y={footer_y}, "
+                        f"side={best['side']}"
                     )
+
+                # 2) snap the actual footer LINE from the token downward
+                snapped_footer_y = None
+                if gray_lines is not None:
+                    snapped_footer_y = self._snap_footer_line_from_token(
+                        gray_lines=gray_lines,
+                        token_y=token_y,
+                    )
+
+                if snapped_footer_y is not None:
+                    footer_y = snapped_footer_y
+                    dbg_marks.append((footer_y, "FOOTER_LINE"))
+                else:
+                    # fallback: use token baseline if no strong line found
+                    footer_y = token_y
+                    dbg_marks.append((footer_y, "FOOTER_LINE_FALLBACK"))
             else:
                 if self.debug:
                     print(

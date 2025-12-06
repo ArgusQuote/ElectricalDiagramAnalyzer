@@ -532,32 +532,92 @@ class BreakerHeaderFinder:
             lines.setdefault(ybin, []).append(it)
 
         # ---- choose line with MOST HEADER TOKENS ----
+        # ---- choose line with BEST HEADER SCORE (weighted by category) ----
         best_ybin: Optional[int] = None
-        best_hdr_count = 0
+        best_score = -1.0
+
+        # weights: CKT & DESCRIPTION are strongest; POLES strong; TRIP/AMPS weakest
+        cat_weights = {
+            "ckt": 4.0,
+            "description": 4.0,
+            "poles": 3.0,
+            "trip": 1.0,
+        }
 
         for ybin, line_items in lines.items():
-            hdr_count = 0
+            # track how many of each category we see on this line
+            cat_counts = {k: 0 for k in self.CATEGORY_ALIASES.keys()}
+            cats_present = set()
+
             for it in line_items:
-                if any(tok in it["norm"] for tok in self.HEADER_TOKEN_SET):
-                    hdr_count += 1
-            if hdr_count > 0:
+                norm = it["norm"]
+
+                # --- strict for CKT-like tokens (must be exact & digit-free) ---
                 if (
-                    hdr_count > best_hdr_count
-                    or (hdr_count == best_hdr_count and (best_ybin is None or ybin < best_ybin))
+                    norm in self.CATEGORY_ALIASES["ckt"]
+                    and not any(ch.isdigit() for ch in norm)
                 ):
-                    best_hdr_count = hdr_count
-                    best_ybin = ybin
+                    cat_counts["ckt"] += 1
+                    cats_present.add("ckt")
+
+                # --- other categories still use substring match ---
+                for cat, aliases in self.CATEGORY_ALIASES.items():
+                    if cat == "ckt":
+                        continue
+                    if any(alias in norm for alias in aliases):
+                        cat_counts[cat] += 1
+                        cats_present.add(cat)
+
+            if not cats_present:
+                continue  # no header-ish tokens at all on this line
+
+            # score = big bonus for multiple distinct categories
+            #       + weighted count per category
+            distinct_bonus = 5.0 * len(cats_present)
+            token_score = 0.0
+            for cat in cats_present:
+                w = cat_weights.get(cat, 1.0)
+                token_score += w * cat_counts[cat]
+
+            score = distinct_bonus + token_score
+
+            if (
+                score > best_score
+                or (score == best_score and (best_ybin is None or ybin < best_ybin))
+            ):
+                best_score = score
+                best_ybin = ybin
 
         if best_ybin is None:
             # no header-like tokens anywhere in band
             return None
 
-        # tokens on the winning line
+        # tokens on the winning line, using the same category logic
         line_items = lines[best_ybin]
-        hdr_items = [
-            it for it in line_items
-            if any(tok in it["norm"] for tok in self.HEADER_TOKEN_SET)
-        ]
+        hdr_items: List[dict] = []
+
+        for it in line_items:
+            norm = it["norm"]
+            is_header = False
+
+            # strict CKT / CCT
+            if (
+                norm in self.CATEGORY_ALIASES["ckt"]
+                and not any(ch.isdigit() for ch in norm)
+            ):
+                is_header = True
+            else:
+                # other categories
+                for cat, aliases in self.CATEGORY_ALIASES.items():
+                    if cat == "ckt":
+                        continue
+                    if any(alias in norm for alias in aliases):
+                        is_header = True
+                        break
+
+            if is_header:
+                hdr_items.append(it)
+
         if not hdr_items:
             return None
 
@@ -566,11 +626,29 @@ class BreakerHeaderFinder:
         anchor = hdr_items_sorted[0]
         anchor["is_header_anchor"] = True
 
-        # mark all header/excluded tokens for overlay
+        # mark all header/excluded tokens for overlay using same rules
         for it in items:
             norm = it["norm"]
-            if any(tok in norm for tok in self.HEADER_TOKEN_SET):
+            is_header = False
+
+            # strict CKT / CCT
+            if (
+                norm in self.CATEGORY_ALIASES["ckt"]
+                and not any(ch.isdigit() for ch in norm)
+            ):
+                is_header = True
+            else:
+                # other categories
+                for cat, aliases in self.CATEGORY_ALIASES.items():
+                    if cat == "ckt":
+                        continue
+                    if any(alias in norm for alias in aliases):
+                        is_header = True
+                        break
+
+            if is_header:
                 it["is_header_token"] = True
+
             if any(excl in norm for excl in self.EXCLUDE):
                 it["is_excluded_token"] = True
 

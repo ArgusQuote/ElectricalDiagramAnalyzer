@@ -103,7 +103,6 @@ class BreakerTableAnalyzer:
 
         # row/spacing stats
         self._spaces_detected: int = 0
-        self._spaces_corrected: int = 0
         self._footer_snapped: bool = False
         self._snap_note: Optional[str] = None
         self._bottom_border_y: Optional[int] = None
@@ -185,9 +184,7 @@ class BreakerTableAnalyzer:
         self._footer_panel_size = None
         spaces = 0
         spaces_detected = None
-        spaces_corrected = None
         self._spaces_detected = None
-        self._spaces_corrected = None
 
         # ---------- HEADER + ROW STRUCTURE VIA HEADER FINDER ----------
         header_res: HeaderResult = self._header_finder.analyze_rows(gray)
@@ -216,8 +213,11 @@ class BreakerTableAnalyzer:
             centers=centers,
             dbg=dbg,
             ocr_dbg_items=self._ocr_dbg_items,
-            footer_struct_y=self._footer_struct_y,  # fallback only
-            orig_bgr=img,                           # source image for crops
+            footer_struct_y=self._footer_struct_y,
+            orig_bgr=img,
+            src_path=src_path,
+            src_dir=src_dir,
+            debug_dir=debug_dir,        
         )
 
         footer_y = footer_res.footer_y
@@ -231,7 +231,6 @@ class BreakerTableAnalyzer:
         if isinstance(footer_res.panel_size, int) and footer_res.panel_size > 0:
             spaces = footer_res.panel_size
             spaces_detected = footer_res.panel_size
-            spaces_corrected = footer_res.panel_size
             if self.debug:
                 print(
                     f"[ANALYZER] Using footer panel_size={footer_res.panel_size} "
@@ -240,19 +239,40 @@ class BreakerTableAnalyzer:
 
         # Store for debug overlay even if still defaults
         self._spaces_detected = spaces_detected
-        self._spaces_corrected = spaces_corrected
 
         # ---------- OVERLAY PATHS ----------
-        page_overlay_path = None
         column_overlay_path = None
+        hf_overlay_path = None
 
-        # Early-exit safety
+        # Early-exit safety – but still dump overlays if debug is on
         if not centers or header_y is None or footer_y is None:
             if self.debug:
                 print(
                     f"[ANALYZER] Early return: centers={len(centers)} "
                     f"header={header_y} footer={footer_y}"
                 )
+
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                base = os.path.splitext(os.path.basename(src_path))[0]
+
+                # minimal HF overlay
+                hf_overlay_path = os.path.join(
+                    debug_dir, f"{base}_hf_overlay_{ts}.png"
+                )
+                self._save_header_footer_overlay(
+                    gray,
+                    hf_overlay_path,
+                    header_y,
+                    header_bottom_y,
+                    footer_y,
+                )
+
+                # columns overlay (may be empty if no v_grid_xs)
+                column_overlay_path = os.path.join(
+                    debug_dir, f"{base}_columns_{ts}.png"
+                )
+                self._save_column_overlay(gray, column_overlay_path)
+
             return {
                 "src_path": src_path,
                 "src_dir": src_dir,
@@ -268,13 +288,13 @@ class BreakerTableAnalyzer:
                 "tp_combined": {"left": False, "right": False},
                 "gridless_gray": gray,
                 "gridless_path": None,
-                "page_overlay_path": page_overlay_path,
                 "spaces_detected": spaces_detected,
-                "spaces_corrected": spaces_corrected,
                 "footer_snapped": getattr(self, "_footer_snapped", False),
                 "snap_note": getattr(self, "_snap_note", None),
                 "v_grid_xs": getattr(self, "_v_grid_xs", []),
                 "column_overlay_path": column_overlay_path,
+                "hf_overlay_path": hf_overlay_path,
+                "footer_panel_size": self._footer_panel_size,
             }
 
         # ---------- GRID REMOVAL ----------
@@ -287,16 +307,19 @@ class BreakerTableAnalyzer:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             base = os.path.splitext(os.path.basename(src_path))[0]
 
-            # page overlay (rows/header/footer/etc.)
-            page_overlay_path = os.path.join(
-                debug_dir, f"{base}_page_overlay_{ts}.png"
+        if self.debug:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = os.path.splitext(os.path.basename(src_path))[0]
+
+            # minimal full-page header/footer overlay (3 red lines)
+            hf_overlay_path = os.path.join(
+                debug_dir, f"{base}_hf_overlay_{ts}.png"
             )
-            self._save_debug(
+            self._save_header_footer_overlay(
                 gray,
-                centers,
-                dbg.lines if hasattr(dbg, "lines") else [],
-                page_overlay_path,
+                hf_overlay_path,
                 header_y,
+                header_bottom_y,
                 footer_y,
             )
 
@@ -311,8 +334,8 @@ class BreakerTableAnalyzer:
             if getattr(self, "_snap_note", None):
                 print(f"[ANALYZER] {self._snap_note}")
             print(f"[ANALYZER] Gridless : {gridless_path}")
-            if page_overlay_path:
-                print(f"[ANALYZER] Overlay  : {page_overlay_path}")
+            if hf_overlay_path:
+                print(f"[ANALYZER] HF Overlay: {hf_overlay_path}")
 
         # ---------- RETURN PAYLOAD ----------
         return {
@@ -330,14 +353,13 @@ class BreakerTableAnalyzer:
             "tp_combined": {"left": False, "right": False},
             "gridless_gray": gridless_gray,
             "gridless_path": gridless_path,
-            "page_overlay_path": page_overlay_path,
             "spaces_detected": spaces_detected,
-            "spaces_corrected": spaces_corrected,
             "footer_snapped": getattr(self, "_footer_snapped", False),
             "snap_note": getattr(self, "_snap_note", None),
             "v_grid_xs": getattr(self, "_v_grid_xs", []),
             "column_overlay_path": column_overlay_path,
             "footer_panel_size": self._footer_panel_size,
+            "hf_overlay_path": hf_overlay_path,
         }
 
     # ============== internals ==============
@@ -655,6 +677,78 @@ class BreakerTableAnalyzer:
         col_spans_sorted = sorted(col_spans, key=lambda p: p[0])
         return col_spans_sorted, vlines_x
 
+    def _save_header_footer_overlay(
+        self,
+        gray: np.ndarray,
+        out_path: str,
+        header_y_abs: Optional[int],
+        header_bottom_y_abs: Optional[int],
+        footer_y_abs: Optional[int],
+    ):
+        """
+        Minimal overlay:
+          - full page
+          - only three red lines:
+              * header_y (HEADER_TOP)
+              * header_bottom_y (HEADER_BOTTOM)
+              * footer_y (FOOTER)
+        """
+        vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        H, W = gray.shape
+        red = (0, 0, 255)
+
+        # Header top
+        if header_y_abs is not None:
+            y = int(header_y_abs)
+            cv2.line(vis, (0, y), (W - 1, y), red, 2)
+            cv2.putText(
+                vis,
+                "HEADER_TOP",
+                (12, max(16, y - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                red,
+                1,
+                cv2.LINE_AA,
+            )
+
+        # Header bottom
+        if header_bottom_y_abs is not None:
+            yb = int(header_bottom_y_abs)
+            cv2.line(vis, (0, yb), (W - 1, yb), red, 2)
+            cv2.putText(
+                vis,
+                "HEADER_BOTTOM",
+                (12, max(16, yb + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                red,
+                1,
+                cv2.LINE_AA,
+            )
+
+        # Footer
+        if footer_y_abs is not None:
+            yf = int(footer_y_abs)
+            cv2.line(vis, (0, yf), (W - 1, yf), red, 2)
+            cv2.putText(
+                vis,
+                "FOOTER",
+                (12, max(16, yf + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                red,
+                2,
+                cv2.LINE_AA,
+            )
+
+        try:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            cv2.imwrite(out_path, vis)
+        except Exception:
+            pass
+
+
     def _save_debug(
         self,
         gray: np.ndarray,
@@ -662,6 +756,7 @@ class BreakerTableAnalyzer:
         borders: List[int],
         out_path: str,
         header_y_abs: Optional[int],
+        header_bottom_y_abs: Optional[int],
         footer_y_abs: Optional[int],
     ):
         """
@@ -676,109 +771,60 @@ class BreakerTableAnalyzer:
         vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         H, W = gray.shape
 
-        # ------------------------------------------------------------------
-        # 1) Row borders + centers
-        # ------------------------------------------------------------------
+        # 1) Row borders + centers (keep as context)
         for y in borders:
             cv2.line(vis, (0, int(y)), (W - 1, int(y)), (0, 165, 255), 1)
 
         for y in centers:
             cv2.circle(vis, (24, int(y)), 4, (0, 255, 0), -1)
 
-        # ------------------------------------------------------------------
-        # 2) HEADER TEXT LINE, HEADER LINE, FIRST BREAKER LINE
-        # ------------------------------------------------------------------
-        first_breaker_line_y = None
+        red = (0, 0, 255)
+
+        # 2) HEADER TOP / BOTTOM (both in red)
         if header_y_abs is not None:
             hy = int(header_y_abs)
-
-            # "header text" baseline (just above header rule)
-            header_text_y = max(0, hy - 8)
-            cv2.line(vis, (0, header_text_y), (W - 1, header_text_y), (0, 255, 255), 1)
+            cv2.line(vis, (0, hy), (W - 1, hy), red, 2)
             cv2.putText(
                 vis,
-                "HEADER_TEXT",
-                (12, max(16, header_text_y - 4)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
-
-            # actual header rule
-            cv2.line(vis, (0, hy), (W - 1, hy), (255, 255, 0), 2)
-            cv2.putText(
-                vis,
-                "HEADER",
-                (12, max(16, hy + 16)),
+                "HEADER_TOP",
+                (12, max(16, hy - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                (255, 255, 0),
+                red,
                 2,
                 cv2.LINE_AA,
             )
 
-            # FIRST_BREAKER_LINE = first border > header
-            for b in sorted(borders):
-                if b > hy + 2:
-                    first_breaker_line_y = int(b)
-                    break
-
-        if first_breaker_line_y is not None:
-            y = int(first_breaker_line_y)
-            cv2.line(vis, (0, y), (W - 1, y), (0, 165, 255), 2)
+        if header_bottom_y_abs is not None:
+            hby = int(header_bottom_y_abs)
+            cv2.line(vis, (0, hby), (W - 1, hby), red, 2)
             cv2.putText(
                 vis,
-                "FIRST_BREAKER_LINE",
-                (12, max(16, y + 16)),
+                "HEADER_BOTTOM",
+                (12, max(16, hby + 18)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (0, 165, 255),
+                0.6,
+                red,
                 2,
                 cv2.LINE_AA,
             )
 
-        # ------------------------------------------------------------------
-        # 3) CCT/CKT COLUMN SPANS (recomputed from OCR + verticals)
-        # ------------------------------------------------------------------
-        footer_struct = self._footer_struct_y if self._footer_struct_y is not None else footer_y_abs
-        cct_cols, vlines_x = self._compute_cct_columns_for_debug(
-            gray,
-            header_y_abs,
-            footer_struct,
-        )
-
-        # Show ALL vertical candidates (light bluish) for context
-        for x in vlines_x:
-            x = int(x)
-            cv2.line(vis, (x, 0), (x, H - 1), (180, 180, 255), 1)
-
-        # Highlight the specific CCT/CKT columns (magenta pairs)
-        for idx, (xl, xr) in enumerate(cct_cols, start=1):
-            xl = int(xl)
-            xr = int(xr)
-            cv2.line(vis, (xl, 0), (xl, H - 1), (255, 0, 255), 2)
-            cv2.line(vis, (xr, 0), (xr, H - 1), (255, 0, 255), 2)
-
-            label_y = 16
-            if header_y_abs is not None:
-                label_y = max(16, int(header_y_abs) - 6)
-
+        # 3) FOOTER LINE (in red)
+        if footer_y_abs is not None:
+            fy = int(footer_y_abs)
+            cv2.line(vis, (0, fy), (W - 1, fy), red, 2)
             cv2.putText(
                 vis,
-                f"CCT_COL{idx}",
-                (xl + 2, label_y),
+                "FOOTER",
+                (12, max(16, fy + 18)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 0, 255),
-                1,
+                0.6,
+                red,
+                2,
                 cv2.LINE_AA,
             )
 
-        # ------------------------------------------------------------------
         # 4) FOOTER TEXT LINE (TOKEN) + FOOTER LINE + STRUCTURAL FOOTER
-        # ------------------------------------------------------------------
         footer_token_y   = self._footer_token_y
         footer_token_val = self._footer_token_val
 
@@ -849,9 +895,7 @@ class BreakerTableAnalyzer:
                 cv2.LINE_AA,
             )
 
-        # ------------------------------------------------------------------
         # 5) OCR cue markers from footer finder (dbg_marks)
-        # ------------------------------------------------------------------
         for y_mark, label in getattr(self, "_ocr_footer_marks", []):
             y = int(y_mark)
             cv2.line(vis, (0, y), (W - 1, y), (160, 160, 255), 1)
@@ -866,17 +910,12 @@ class BreakerTableAnalyzer:
                 cv2.LINE_AA,
             )
 
-        # ------------------------------------------------------------------
         # 6) snap trail + counts
-        # ------------------------------------------------------------------
         note = getattr(self, "_snap_note", None)
         det = getattr(self, "_spaces_detected", None)
-        cor = getattr(self, "_spaces_corrected", None)
         trail = []
-        if det is not None and cor is not None:
-            trail.append(
-                f"spaces {det}"
-            )
+        if det is not None:
+            trail.append(f"spaces {det}")
         if note:
             trail.append(note)
         if trail:
