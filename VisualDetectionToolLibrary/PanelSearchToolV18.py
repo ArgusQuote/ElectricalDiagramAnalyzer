@@ -264,14 +264,14 @@ class PanelBoardSearch:
         except Exception:
             pass
 
-        # --- post-pass: enforce one table per PNG (lossless) ---
-        if self.enforce_one_box and all_pngs:
-            all_pngs = self._enforce_one_box_on_paths(all_pngs)
-
-        # Always compute line info; moves invalid tables out
+        # --- post-pass: FIRST run horizontal-line spacing / validity ---
         if all_pngs:
             valid_pngs, invalid_pngs = self._save_horizontal_line_masks(all_pngs)
-            all_pngs = valid_pngs  # only return valid tables
+            all_pngs = valid_pngs  # only keep valid tables for next step
+
+        # --- then enforce one table per PNG (lossless) on the remaining valid ones ---
+        if self.enforce_one_box and all_pngs:
+            all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
