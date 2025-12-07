@@ -9,9 +9,9 @@ from difflib import SequenceMatcher
 import re
 
 # Same values you use in HeaderBandScanner
-_HDR_OCR_SCALE = 2.0           # or whatever you use there
-_HDR_OCR_ALLOWLIST = None      # or your actual allowlist
-_HDR_MIN_CONF = 0.35           # or your actual threshold
+_HDR_OCR_SCALE = 2.0
+_HDR_OCR_ALLOWLIST = None
+_HDR_MIN_CONF = 0.35
 
 @dataclass
 class FooterResult:
@@ -310,25 +310,6 @@ class BreakerFooterFinder:
             return None
 
         footer_line_y = y1_band + best_down_rel
-
-        # optional: dump mask overlay for debugging
-        if self.debug and self.debug_dir:
-            try:
-                os.makedirs(self.debug_dir, exist_ok=True)
-                vis = cv2.cvtColor(horiz, cv2.COLOR_GRAY2BGR)
-                Hb, Wb = vis.shape[:2]
-
-                # token baseline in band coords
-                y_rel = max(0, min(Hb - 1, y_rel_start))
-                cv2.line(vis, (0, y_rel), (Wb - 1, y_rel), (255, 0, 0), 1)      # token baseline
-                cv2.line(vis, (0, best_down_rel), (Wb - 1, best_down_rel), (0, 255, 255), 1)  # snapped footer
-
-                mask_name = f"footer_horiz_mask_overlay_y{y1_band}_{y2_band}.png"
-                mask_path = os.path.join(self.debug_dir, mask_name)
-                cv2.imwrite(mask_path, vis)
-                print(f"[BreakerFooterFinder] Saved footer horiz mask overlay: {mask_path}")
-            except Exception as e:
-                print(f"[BreakerFooterFinder] Failed to write footer horiz mask overlay: {e}")
 
         return int(footer_line_y)
 

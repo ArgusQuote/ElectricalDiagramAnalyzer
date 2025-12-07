@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParser6.py
+# OcrLibrary/BreakerTableParser7.py
 from __future__ import annotations
 import os, re, cv2, numpy as np
 from typing import Dict, Optional, List, Tuple
@@ -10,12 +10,61 @@ try:
 except Exception:
     _HAS_OCR = False
 
-PARSER_VERSION = "BreakerParser6"
+PARSER_VERSION = "BreakerParser7"
 
-# --- simple OCR settings for header band ---
-_HDR_OCR_SCALE        = 2.0          # up-res factor for header band OCR
+_HDR_OCR_SCALE        = 2.0
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/()."
-_HDR_MIN_CONF         = 0.50         # minimum OCR confidence to use a token for header scoring
+_HDR_MIN_CONF         = 0.50
+
+def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
+    """
+    Recreate the same gray image that BreakerTableAnalyzer12 uses:
+
+      - BGR -> gray
+      - CLAHE
+      - upscale to min height 1600 px
+
+    This ensures header_y / footer_y coordinates still line up.
+    """
+    if not src_path:
+        return None
+
+    try:
+        img = cv2.imread(src_path, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
+        H, W = g.shape
+        if H < 1600:
+            s = 1600.0 / H
+            g = cv2.resize(
+                g,
+                (int(W * s), int(H * s)),
+                interpolation=cv2.INTER_CUBIC,
+            )
+        return g
+    except Exception:
+        return None
+
+def _ensure_gray(analyzer_result: Dict) -> Optional[np.ndarray]:
+    """
+    Make sure analyzer_result has a 'gray' image.
+
+    - If 'gray' already exists, return it.
+    - Otherwise, reconstruct it from src_path using the same prep as Analyzer12,
+      store it back into analyzer_result['gray'], and return it.
+    """
+    gray = analyzer_result.get("gray")
+    if gray is not None:
+        return gray
+
+    src_path = analyzer_result.get("src_path")
+    gray = _prep_gray_like_analyzer12(src_path)
+    if gray is not None:
+        analyzer_result["gray"] = gray
+    return gray
 
 class HeaderBandScanner:
     """
@@ -51,15 +100,16 @@ class HeaderBandScanner:
         """
         Inputs:
           analyzer_result: dict from BreakerTableAnalyzer.analyze()
-            - expects keys: gray or gridless_gray, header_y, src_path, src_dir, debug_dir
+            - expects keys: src_path, header_y, header_bottom_y
+            - if 'gray' is missing, we will rebuild it from src_path
         """
-        # --- separate gray for OCR vs line detection ---
-        raw_gray      = analyzer_result.get("gray", None)          # with grid lines
-        gridless_gray = analyzer_result.get("gridless_gray", None) # after degridding
+        # --- get gray for OCR + line detection ---
+        raw_gray = analyzer_result.get("gray")
+        if raw_gray is None:
+            raw_gray = _ensure_gray(analyzer_result)
 
-        # use gridless for OCR if available, otherwise fall back to raw
-        gray_ocr   = gridless_gray if gridless_gray is not None else raw_gray
-        gray_lines = raw_gray if raw_gray is not None else gray_ocr
+        gray_ocr   = raw_gray
+        gray_lines = raw_gray
 
         header_y        = analyzer_result.get("header_y")
         src_path        = analyzer_result.get("src_path")
@@ -947,7 +997,7 @@ class SeparatedLayoutParser:
 
     def __init__(self, *, debug: bool = False, reader=None):
         self.debug = bool(debug)
-        self.reader = reader  # shared EasyOCR instance (same as header)
+        self.reader = reader
 
     def _infer_body_rows_from_tokens(
         self,
@@ -1426,11 +1476,12 @@ class SeparatedLayoutParser:
         from typing import Dict
 
         # --- image sources ---
-        raw_gray      = analyzer_result.get("gray", None)
-        gridless_gray = analyzer_result.get("gridless_gray", None)
+        raw_gray = analyzer_result.get("gray")
+        if raw_gray is None:
+            raw_gray = _ensure_gray(analyzer_result)
 
-        gray_body  = gridless_gray if gridless_gray is not None else raw_gray
-        gray_lines = raw_gray if raw_gray is not None else gray_body
+        gray_body  = raw_gray
+        gray_lines = raw_gray
 
         if gray_body is None or gray_lines is None:
             if self.debug:
@@ -1643,7 +1694,7 @@ class SeparatedLayoutParser:
                 if not col_tokens:
                     continue
 
-                # Crop the strip again for visualization only (GRIDLESS body)
+                # Crop the strip again for visualization only
                 strip = gray_body[y_top:y_bot, x_l:x_r]
                 if strip.size == 0:
                     continue
@@ -2542,11 +2593,12 @@ class CombinedLayoutParser:
         from typing import Dict
 
         # --- image sources ---
-        raw_gray      = analyzer_result.get("gray", None)
-        gridless_gray = analyzer_result.get("gridless_gray", None)
+        raw_gray = analyzer_result.get("gray")
+        if raw_gray is None:
+            raw_gray = _ensure_gray(analyzer_result)
 
-        gray_body  = gridless_gray if gridless_gray is not None else raw_gray
-        gray_lines = raw_gray if raw_gray is not None else gray_body
+        gray_body  = raw_gray
+        gray_lines = raw_gray
 
         if gray_body is None or gray_lines is None:
             if self.debug:
@@ -2764,7 +2816,7 @@ class CombinedLayoutParser:
                 if not col_tokens:
                     continue
 
-                # Crop the strip again for visualization only (GRIDLESS body)
+                # Crop the strip again for visualization only
                 strip = gray_body[y_top:y_bot, x_l:x_r]
                 if strip.size == 0:
                     continue
@@ -2969,8 +3021,10 @@ class BreakerTableParser:
         if not isinstance(analyzer_result, dict):
             analyzer_result = {}
 
-        # --- spaces: directly from analyzer 'spaces' ---
+        # --- spaces: from analyzer 'spaces', or fall back to 'panel_size' (Analyzer12) ---
         raw_spaces = analyzer_result.get("spaces")
+        if raw_spaces is None:
+            raw_spaces = analyzer_result.get("panel_size")
 
         if raw_spaces is None:
             spaces = 0
