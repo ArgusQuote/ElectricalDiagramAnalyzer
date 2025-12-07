@@ -62,6 +62,9 @@ class BreakerFooterFinder:
         debug: bool = False,
     ):
         self.reader = reader
+        self.bottom_trim_frac = float(bottom_trim_frac)
+        self.top_trim_frac = float(top_trim_frac)
+        self.upscale_factor = float(upscale_factor)
         self.debug = debug
         # optional: where to dump vertical mask + column crops / debug images
         self.debug_dir: Optional[str] = None
@@ -93,11 +96,12 @@ class BreakerFooterFinder:
         # 1) binarize
         blur = cv2.GaussianBlur(band, (3, 3), 0)
         bw = cv2.adaptiveThreshold(
+            blur,
             255,
             cv2.ADAPTIVE_THRESH_MEAN_C,
             cv2.THRESH_BINARY_INV,
             21,
-            8,
+            10,
         )
 
         # 2) emphasize vertical strokes with a tall, skinny kernel

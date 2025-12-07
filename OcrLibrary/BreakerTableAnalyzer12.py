@@ -62,6 +62,9 @@ class BreakerTableAnalyzer:
 
     Returns ONLY those values in a small dict / dataclass.
     No row centers, no degridding, no column overlays.
+
+    If debug=True, also writes a combined header+footer overlay:
+        debug/<base>_hf_overlay.png
     """
 
     def __init__(self, debug: bool = False):
@@ -108,6 +111,16 @@ class BreakerTableAnalyzer:
             "panel_size":       <int or None>,
             "debug_dir":        <str or None>,
           }
+
+        If self.debug is True, also writes:
+            <debug_dir>/<base>_hf_overlay.png
+        showing:
+          - header tokens
+          - header text line (blue)
+          - HEADER_Y (cyan)
+          - HEADER_BOTTOM_Y (orange)
+          - footer token text line (magenta, with value)
+          - FOOTER_Y (green)
         """
         src_path = os.path.abspath(os.path.expanduser(image_path))
         if not os.path.exists(src_path):
@@ -162,15 +175,29 @@ class BreakerTableAnalyzer:
             analyzer_result=analyzer_result
         )
 
-        footer_y        = footer_res.footer_y
+        footer_y         = footer_res.footer_y
         footer_token_val = footer_res.token_val
-        panel_size      = footer_res.panel_size
+        panel_size       = footer_res.panel_size
 
         if self.debug:
             print(
                 f"[BreakerTableAnalyzer] footer_y={footer_y}, "
                 f"footer_token_val={footer_token_val}, panel_size={panel_size}"
             )
+
+        # ---------- debug overlay ----------
+        if self.debug and debug_dir is not None:
+            try:
+                self._write_debug_overlay(
+                    gray=gray,
+                    header_res=header_res,
+                    footer_res=footer_res,
+                    src_path=src_path,
+                    debug_dir=debug_dir,
+                )
+            except Exception as e:
+                # don't kill the pipeline on debug failure
+                print(f"[BreakerTableAnalyzer] Failed to write debug overlay: {e}")
 
         # ---------- minimal payload ----------
         out = {
@@ -202,11 +229,94 @@ class BreakerTableAnalyzer:
             )
         return g
 
+    def _write_debug_overlay(
+        self,
+        gray: np.ndarray,
+        header_res: HeaderResult,
+        footer_res: FooterResult,
+        src_path: str,
+        debug_dir: Optional[str],
+    ) -> None:
+        """
+        Build a single overlay showing:
 
-# Optional: quick test harness
+          - header tokens (from BreakerHeaderFinder.draw_ocr_overlay)
+          - HEADER_TEXT_LINE (blue)
+          - HEADER_Y (cyan)
+          - HEADER_BOTTOM_Y (orange)
+          - footer token baseline (magenta, labeled with value)
+          - footer_y (green)
+          - footer dbg_marks (teal ticks with labels)
+        """
+        if debug_dir is None:
+            return
+
+        H, W = gray.shape[:2]
+
+        # start from header overlay (already draws header tokens + lines)
+        overlay = self._header_finder.draw_ocr_overlay(gray)
+
+        # ensure BGR
+        if overlay.ndim == 2:
+            overlay = cv2.cvtColor(overlay, cv2.COLOR_GRAY2BGR)
+
+        # ----- footer token: treat token_y as footer_text_line -----
+        if footer_res.token_y is not None:
+            y_tok = int(footer_res.token_y)
+            val   = footer_res.token_val
+            cv2.line(overlay, (0, y_tok), (W - 1, y_tok), (255, 0, 255), 1)  # magenta
+            label = f"FOOTER_TEXT_LINE (val={val})"
+            cv2.putText(
+                overlay,
+                label,
+                (10, max(20, y_tok - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # ----- footer_y (snapped footer line) -----
+        if footer_res.footer_y is not None:
+            y_footer = int(footer_res.footer_y)
+            cv2.line(overlay, (0, y_footer), (W - 1, y_footer), (0, 255, 0), 2)  # green
+            cv2.putText(
+                overlay,
+                "FOOTER_Y",
+                (10, min(H - 10, y_footer + 18)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+                cv2.LINE_AA,
+            )
+
+        # ----- optional: footer dbg_marks as small ticks -----
+        for y_mark, label in footer_res.dbg_marks:
+            y = int(y_mark)
+            if 0 <= y < H:
+                cv2.line(overlay, (0, y), (W - 1, y), (0, 128, 128), 1)
+                cv2.putText(
+                    overlay,
+                    label,
+                    (W - 220, max(10, y - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (0, 128, 128),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        base = os.path.splitext(os.path.basename(src_path))[0]
+        out_path = os.path.join(debug_dir, f"{base}_hf_overlay.png")
+
+        cv2.imwrite(out_path, overlay)
+        print(f"[BreakerTableAnalyzer] Saved header+footer overlay -> {out_path}")
+
+
+# Optional: quick CLI hook
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) < 2:
         print("Usage: python BreakerTableAnalyzer9.py /path/to/panel.png")
         sys.exit(1)
