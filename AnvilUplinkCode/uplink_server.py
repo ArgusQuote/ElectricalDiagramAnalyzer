@@ -22,6 +22,24 @@ if str(REPO_ROOT) not in sys.path:
 BASE_JOBS_DIR = Path.home() / "jobs"
 BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
+# ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
+PANEL_FINDER_DEFAULTS = {
+    # Same knobs you use in your dev env script
+    "render_dpi": 1400,
+    "aa_level": 8,
+    "render_colorspace": "gray",
+    "min_void_area_fr": 0.004,
+    "min_void_w_px": 90,
+    "min_void_h_px": 90,
+    "max_void_area_fr": 0.30,
+    "void_w_fr_range": (0.20, 0.60),
+    "void_h_fr_range": (0.15, 0.55),
+    "min_whitespace_area_fr": 0.01,
+    "margin_shave_px": 6,
+    "pad": 6,
+    "verbose": True,
+}
+
 # Keep legacy dir around (not used directly)
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
@@ -85,8 +103,8 @@ _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV2 import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
+from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
+from OcrLibrary.BreakerTableParserAPIv6 import BreakerTablePipeline, API_VERSION
 import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
@@ -117,7 +135,7 @@ def _warmup_ocr_once():
                 run_parser=False,
                 run_header=True,
             )
-            print(">>> OCR warmup complete (analyzer + header)")
+            print(f">>> OCR warmup complete (analyzer + header) | API_VERSION={API_VERSION}")
         finally:
             try:
                 os.remove(tmp_path)
@@ -393,24 +411,24 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
 
-    # --- 2) Run the panel finder on the chosen PDF ---
+    # --- 2) Run the panel finder (PanelSearchToolV18) on the chosen PDF ---
     local_finder = PanelBoardSearch(
         output_dir=str(img_dir),
         dpi=dpi,
-        min_void_area_fr=0.004,
-        min_void_w_px=90,
-        min_void_h_px=90,
-        # ↓ tighten these three to kill giant/near-page blobs
-        max_void_area_fr=0.30,          # was 0.30
-        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
-        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
-        min_whitespace_area_fr=0.01,
-        margin_shave_px=6,
-        pad=6,
-        debug=False,
-        verbose=True,
-        save_masked_shape_crop=False,
-        replace_multibox=True,
+        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match your dev env
+        render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
+        aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
+        render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
+        min_void_area_fr=PANEL_FINDER_DEFAULTS["min_void_area_fr"],
+        min_void_w_px=PANEL_FINDER_DEFAULTS["min_void_w_px"],
+        min_void_h_px=PANEL_FINDER_DEFAULTS["min_void_h_px"],
+        max_void_area_fr=PANEL_FINDER_DEFAULTS["max_void_area_fr"],
+        void_w_fr_range=PANEL_FINDER_DEFAULTS["void_w_fr_range"],
+        void_h_fr_range=PANEL_FINDER_DEFAULTS["void_h_fr_range"],
+        min_whitespace_area_fr=PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"],
+        margin_shave_px=PANEL_FINDER_DEFAULTS["margin_shave_px"],
+        pad=PANEL_FINDER_DEFAULTS["pad"],
+        verbose=PANEL_FINDER_DEFAULTS["verbose"],
     )
 
     try:
@@ -584,7 +602,7 @@ def _btp_run_once(
     debug: bool = True
 ) -> dict:
     """
-    Construct a BreakerTablePipeline and run it for this image.
+    Construct a BreakerTablePipeline (v6) and run it for this image.
     (No global caching; per your request.)
     """
     pipe = BreakerTablePipeline(debug=debug)

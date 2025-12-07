@@ -1867,7 +1867,7 @@ class SeparatedLayoutParser:
                         "rowIndex": row_idx,  # index is per-side now
                         "rowTop": row_top,
                         "rowBottom": row_bottom,
-                        "amps": int(amps),
+                        "amperage": int(amps),
                         "poles": int(poles),
                         "tripText": trip_text,
                         "polesText": poles_text,
@@ -2993,7 +2993,7 @@ class CombinedLayoutParser:
                             "rowIndex": row_idx,  # per-side row index
                             "rowTop": row_top,
                             "rowBottom": row_bottom,
-                            "amps": int(amps),
+                            "amperage": int(amps),
                             "poles": int(poles),
                             "comboText": combo_text,
                         }
@@ -3094,16 +3094,13 @@ class BreakerTableParser:
         # --- Aggregate breaker counts (amps + poles) ---
         breaker_counts: Dict[str, int] = {}
         for br in detected_breakers:
-            amps = br.get("amps")
+            amps = br.get("amperage")
             poles = br.get("poles")
             if amps is None or poles is None:
                 continue
-            try:
-                a = int(amps)
-                p = int(poles)
-            except Exception:
-                continue
-            key = f"{p}P_{a}A"   # e.g. "1P_20A"
+            a = int(amps)
+            p = int(poles)
+            key = f"{p}P_{a}A"
             breaker_counts[key] = breaker_counts.get(key, 0) + 1
 
         if self.debug:
