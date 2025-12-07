@@ -1466,9 +1466,9 @@ class SeparatedLayoutParser:
         Given analyzer_result + header_scan with normalizedColumns.layout == 'separated',
         we:
           - crop body strips for trip/poles columns
-          - compute row bands from horizontal row-divider lines in a reference strip
-          - OCR each trip/poles column ROW-BY-ROW using those bands
-          - associate each row's amps + poles
+          - compute row bands *independently per side* from horizontal row-divider lines
+          - OCR each trip/poles column ROW-BY-ROW using that side's bands
+          - associate each row's amps + poles per side
           - accumulate breaker counts
         """
         import os
@@ -1603,6 +1603,7 @@ class SeparatedLayoutParser:
                     "y_top": body_y_top,
                     "y_bottom": body_y_bottom,
                     "debugImageOverlay": None,  # filled in below when debug=True
+                    # 'side' assigned below
                 }
             )
 
@@ -1620,45 +1621,93 @@ class SeparatedLayoutParser:
                 "breakerCounts": {},
             }
 
-        # --- determine row bands (strip-local) from a reference body column ---
-        # Prefer a trip column as reference (often cleaner), else first available.
-        ref_col = None
-        for c in body_columns:
-            if c["role"] == "trip":
-                ref_col = c
-                break
-        if ref_col is None:
-            ref_col = body_columns[0]
+        # --- assign columns to left/right sides based on X center ---
+        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
+        global_left = min(c["x_left"] for c in role_cols)
+        global_right = max(c["x_right"] for c in role_cols)
+        center_x = 0.5 * (global_left + global_right)
 
-        ref_strip = gray_body[
-            ref_col["y_top"]:ref_col["y_bottom"],
-            ref_col["x_left"]:ref_col["x_right"],
-        ]
-        if ref_strip.size == 0:
-            row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
-        else:
-            row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+        for col in role_cols:
+            col_center = 0.5 * (col["x_left"] + col["x_right"])
+            col["side"] = "left" if col_center < center_x else "right"
 
-        # Convert strip-local row bands to PAGE coords for later use
-        row_spans = [
-            (body_y_top + top_s, body_y_top + bottom_s)
-            for (top_s, bottom_s) in row_bands_strip
-        ]
+        by_side = {
+            "left": {"trip": None, "poles": None},
+            "right": {"trip": None, "poles": None},
+        }
+
+        for col in role_cols:
+            side = col["side"]
+            role = col["role"]
+            # First seen per (side, role) wins
+            if by_side[side][role] is None:
+                by_side[side][role] = col["index"]
 
         if self.debug:
-            print(
-                f"[SeparatedLayoutParser] Using {len(row_spans)} row bands from "
-                f"horizontal lines."
-            )
+            print("[SeparatedLayoutParser] trip/poles columns by side:", by_side)
 
-        # --- OCR each trip/poles column ROW-BY-ROW using the same row bands ---
-        tokens_by_col_index = {}
+        # --- determine row bands *per side* from that side's reference column ---
+        row_bands_by_side = {"left": None, "right": None}
+        row_spans_by_side = {"left": [], "right": []}
+
+        for side in ("left", "right"):
+            side_cols = [c for c in role_cols if c["side"] == side]
+            if not side_cols:
+                continue
+
+            # Prefer trip column on that side as reference, else any poles column
+            ref_col = None
+            for c in side_cols:
+                if c["role"] == "trip":
+                    ref_col = c
+                    break
+            if ref_col is None:
+                for c in side_cols:
+                    if c["role"] == "poles":
+                        ref_col = c
+                        break
+
+            if ref_col is None:
+                continue  # nothing usable on this side
+
+            ref_strip = gray_body[
+                ref_col["y_top"]:ref_col["y_bottom"],
+                ref_col["x_left"]:ref_col["x_right"],
+            ]
+            if ref_strip.size == 0:
+                row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+            else:
+                row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+                if not row_bands_strip:
+                    row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+
+            row_bands_by_side[side] = row_bands_strip
+            row_spans_by_side[side] = [
+                (body_y_top + top_s, body_y_top + bottom_s)
+                for (top_s, bottom_s) in row_bands_strip
+            ]
+
+            if self.debug:
+                print(
+                    f"[SeparatedLayoutParser] Side='{side}' using "
+                    f"{len(row_spans_by_side[side])} row bands from horizontal lines."
+                )
+
+        # --- OCR each trip/poles column ROW-BY-ROW using that column's side bands ---
+        tokens_by_col_index: Dict[int, List[Dict]] = {}
+
         for col in body_columns:
             idx   = col["index"]
             x_l   = col["x_left"]
             x_r   = col["x_right"]
             y_top = col["y_top"]
             y_bot = col["y_bottom"]
+            side  = col.get("side", "left")
+
+            row_bands_strip = row_bands_by_side.get(side)
+            if not row_bands_strip:
+                tokens_by_col_index[idx] = []
+                continue
 
             strip = gray_body[y_top:y_bot, x_l:x_r]
             if strip.size == 0:
@@ -1784,42 +1833,22 @@ class SeparatedLayoutParser:
                     )
                     col["debugImageOverlay"] = None
 
-        # --- assign columns to left/right sides based on X center ---
-        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
-        global_left = min(c["x_left"] for c in role_cols)
-        global_right = max(c["x_right"] for c in role_cols)
-        center_x = 0.5 * (global_left + global_right)
-
-        by_side = {
-            "left": {"trip": None, "poles": None},
-            "right": {"trip": None, "poles": None},
-        }
-
-        for col in role_cols:
-            col_center = 0.5 * (col["x_left"] + col["x_right"])
-            side = "left" if col_center < center_x else "right"
-            role = col["role"]
-            # First one wins per side/role (if there happen to be multiples)
-            if by_side[side][role] is None:
-                by_side[side][role] = col["index"]
-
-        if self.debug:
-            print("[SeparatedLayoutParser] trip/poles columns by side:", by_side)
-
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}
 
-        # --- walk rows and associate amps + poles per side ---
-        for row_idx, (row_top, row_bottom) in enumerate(row_spans):
-            for side in ("left", "right"):
-                trip_idx = by_side[side].get("trip")
-                poles_idx = by_side[side].get("poles")
-                if trip_idx is None or poles_idx is None:
-                    continue
+        # --- walk rows and associate amps + poles *per side* ---
+        for side in ("left", "right"):
+            trip_idx = by_side[side].get("trip")
+            poles_idx = by_side[side].get("poles")
+            side_row_spans = row_spans_by_side.get(side) or []
 
-                trip_tokens = tokens_by_col_index.get(trip_idx, [])
-                poles_tokens = tokens_by_col_index.get(poles_idx, [])
+            if trip_idx is None or poles_idx is None or not side_row_spans:
+                continue
 
+            trip_tokens = tokens_by_col_index.get(trip_idx, [])
+            poles_tokens = tokens_by_col_index.get(poles_idx, [])
+
+            for row_idx, (row_top, row_bottom) in enumerate(side_row_spans):
                 trip_text = self._row_text_for_column(row_top, row_bottom, trip_tokens)
                 poles_text = self._row_text_for_column(row_top, row_bottom, poles_tokens)
 
@@ -1835,7 +1864,7 @@ class SeparatedLayoutParser:
                 detected_breakers.append(
                     {
                         "side": side,
-                        "rowIndex": row_idx,
+                        "rowIndex": row_idx,  # index is per-side now
                         "rowTop": row_top,
                         "rowBottom": row_bottom,
                         "amps": int(amps),
@@ -2583,14 +2612,14 @@ class CombinedLayoutParser:
         Given analyzer_result + header_scan with normalizedColumns.layout == 'combined',
         we:
           - crop body strips for combo columns
-          - detect body row bands from the grid
-          - OCR each combo column
-          - for each row, parse a combined amps/poles cell
+          - compute row bands *independently per side* from horizontal row-divider lines
+          - OCR each combo column ROW-BY-ROW using that side's bands
+          - for each row+side, parse combined amps/poles text
           - accumulate breaker counts
         """
         import os
         import cv2
-        from typing import Dict
+        from typing import Dict, Optional
 
         # --- image sources ---
         raw_gray = analyzer_result.get("gray")
@@ -2695,7 +2724,6 @@ class CombinedLayoutParser:
         wanted_roles = {"combo"}
 
         body_columns = []
-        tokens_by_col_index = {}
 
         # --- collect combo body columns (geometry only) ---
         for col in cols_summary:
@@ -2721,6 +2749,7 @@ class CombinedLayoutParser:
                     "y_top": body_y_top,
                     "y_bottom": body_y_bottom,
                     "debugImageOverlay": None,  # filled when debug=True
+                    # 'side' assigned below
                 }
             )
 
@@ -2737,37 +2766,74 @@ class CombinedLayoutParser:
                 "breakerCounts": {},
             }
 
-        # --- determine row bands (strip-local) from a reference combo column ---
-        ref_col = body_columns[0]
-        ref_strip = gray_body[
-            ref_col["y_top"]:ref_col["y_bottom"],
-            ref_col["x_left"]:ref_col["x_right"],
-        ]
-        if ref_strip.size == 0:
-            # Fallback: one big band = whole body
-            row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
-        else:
-            row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+        # --- assign columns to left/right sides based on X center ---
+        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
+        global_left = min(c["x_left"] for c in role_cols)
+        global_right = max(c["x_right"] for c in role_cols)
+        center_x = 0.5 * (global_left + global_right)
 
-        # Convert strip-local row bands to PAGE coords for later use
-        row_spans = [
-            (body_y_top + top_s, body_y_top + bottom_s)
-            for (top_s, bottom_s) in row_bands_strip
-        ]
+        by_side: Dict[str, Optional[int]] = {"left": None, "right": None}
+        for col in role_cols:
+            col_center = 0.5 * (col["x_left"] + col["x_right"])
+            side = "left" if col_center < center_x else "right"
+            col["side"] = side
+            # First combo column per side wins
+            if by_side[side] is None:
+                by_side[side] = col["index"]
 
         if self.debug:
-            print(
-                f"[CombinedLayoutParser] Using {len(row_spans)} row bands from "
-                f"horizontal lines."
-            )
+            print("[CombinedLayoutParser] combo columns by side:", by_side)
 
-        # --- OCR each combo column ROW-BY-ROW using the same row bands ---
+        # --- determine row bands *per side* from that side's reference combo column ---
+        row_bands_by_side = {"left": None, "right": None}
+        row_spans_by_side = {"left": [], "right": []}
+
+        for side in ("left", "right"):
+            side_cols = [c for c in role_cols if c.get("side") == side]
+            if not side_cols:
+                continue
+
+            # Single role: combo. Use the first combo column on this side as reference.
+            ref_col = side_cols[0]
+
+            ref_strip = gray_body[
+                ref_col["y_top"]:ref_col["y_bottom"],
+                ref_col["x_left"]:ref_col["x_right"],
+            ]
+            if ref_strip.size == 0:
+                row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+            else:
+                row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+                if not row_bands_strip:
+                    row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+
+            row_bands_by_side[side] = row_bands_strip
+            row_spans_by_side[side] = [
+                (body_y_top + top_s, body_y_top + bottom_s)
+                for (top_s, bottom_s) in row_bands_strip
+            ]
+
+            if self.debug:
+                print(
+                    f"[CombinedLayoutParser] Side='{side}' using "
+                    f"{len(row_spans_by_side[side])} row bands from horizontal lines."
+                )
+
+        tokens_by_col_index: Dict[int, list] = {}
+
+        # --- OCR each combo column ROW-BY-ROW using that column's side bands ---
         for col in body_columns:
             idx   = col["index"]
             x_l   = col["x_left"]
             x_r   = col["x_right"]
             y_top = col["y_top"]
             y_bot = col["y_bottom"]
+            side  = col.get("side", "left")
+
+            row_bands_strip = row_bands_by_side.get(side)
+            if not row_bands_strip:
+                tokens_by_col_index[idx] = []
+                continue
 
             strip = gray_body[y_top:y_bot, x_l:x_r]
             if strip.size == 0:
@@ -2789,20 +2855,7 @@ class CombinedLayoutParser:
                 "breakerCounts": {},
             }
 
-        if self.debug:
-            print(
-                f"[CombinedLayoutParser] Extracted {len(body_columns)} body combo columns."
-            )
-
-        if not body_columns or not tokens_by_col_index:
-            return {
-                "layout": "combined",
-                "bodyColumns": body_columns,
-                "detected_breakers": [],
-                "breakerCounts": {},
-            }
-
-        # --- Build OCR overlays for each body column (debug only, high quality only) ---
+        # --- Build OCR overlays for each body column (debug only) ---
         if self.debug:
             for col in body_columns:
                 idx   = col["index"]
@@ -2844,10 +2897,8 @@ class CombinedLayoutParser:
                     cv2.LINE_AA,
                 )
 
-                # --- NEW: detect long horizontal row-divider lines in this strip ---
+                # Draw detected row-divider lines (for debug) in BLUE
                 line_ys = self._detect_row_divider_lines_in_strip(strip)
-
-                # Draw them in BLUE across full width of the strip
                 for yc in line_ys:
                     yc_int = max(0, min(H_strip - 1, int(yc)))
                     cv2.line(
@@ -2857,7 +2908,6 @@ class CombinedLayoutParser:
                         (255, 0, 0),  # BLUE in BGR
                         1,
                     )
-                    # optional tiny label
                     cv2.putText(
                         vis,
                         "ROW",
@@ -2909,43 +2959,27 @@ class CombinedLayoutParser:
                     )
                     col["debugImageOverlay"] = None
 
-        # --- assign columns to left/right sides based on X center ---
-        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
-        global_left = min(c["x_left"] for c in role_cols)
-        global_right = max(c["x_right"] for c in role_cols)
-        center_x = 0.5 * (global_left + global_right)
-
-        by_side: Dict[str, Optional[int]] = {"left": None, "right": None}
-        for col in role_cols:
-            col_center = 0.5 * (col["x_left"] + col["x_right"])
-            side = "left" if col_center < center_x else "right"
-            # First combo column per side wins
-            if by_side[side] is None:
-                by_side[side] = col["index"]
-
-        if self.debug:
-            print("[CombinedLayoutParser] combo columns by side:", by_side)
-
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}
 
-        # --- walk rows and parse combo text per side ---
-        for row_idx, (row_top, row_bottom) in enumerate(row_spans):
-            for side in ("left", "right"):
-                col_idx = by_side[side]
-                if col_idx is None:
-                    continue
+        # --- walk rows and parse combo text *per side* ---
+        for side in ("left", "right"):
+            col_idx = by_side.get(side)
+            side_row_spans = row_spans_by_side.get(side) or []
+            if col_idx is None or not side_row_spans:
+                continue
 
-                col_tokens = tokens_by_col_index.get(col_idx, [])
+            col_tokens = tokens_by_col_index.get(col_idx, [])
+
+            for row_idx, (row_top, row_bottom) in enumerate(side_row_spans):
                 combo_text = self._row_text_for_column(row_top, row_bottom, col_tokens)
-
                 combo_pairs = self._parse_combo_cell(combo_text)
                 if not combo_pairs:
                     continue
 
                 if self.debug:
                     print(
-                        f"[CombinedLayoutParser] row={row_idx} side={side} "
+                        f"[CombinedLayoutParser] side={side} row={row_idx} "
                         f"text='{combo_text}' -> {combo_pairs}"
                     )
 
@@ -2956,7 +2990,7 @@ class CombinedLayoutParser:
                     detected_breakers.append(
                         {
                             "side": side,
-                            "rowIndex": row_idx,
+                            "rowIndex": row_idx,  # per-side row index
                             "rowTop": row_top,
                             "rowBottom": row_bottom,
                             "amps": int(amps),

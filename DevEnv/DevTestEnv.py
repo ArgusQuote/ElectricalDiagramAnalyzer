@@ -19,7 +19,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv6 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/NoAmps.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -64,7 +64,7 @@ def main():
         min_void_h_px=90,
         max_void_area_fr=0.30,
         void_w_fr_range=(0.20, 0.60),
-        void_h_fr_range=(0.20, 0.55),
+        void_h_fr_range=(0.15, 0.55),
         min_whitespace_area_fr=0.01,
         margin_shave_px=6,
         pad=6,
@@ -104,7 +104,6 @@ def main():
         print("\n=== ANALYZER ===")
         print("header_y        :", ana_res.get("header_y"))
         print("footer_y        :", ana_res.get("footer_y"))
-        print("spaces          :", ana_res.get("spaces_detected"))
 
         # ---- Header summary ----
         print("\n=== HEADER PARSER ===")
@@ -120,8 +119,8 @@ def main():
             detected_breakers = tbl_res.get("detected_breakers") or []
             breaker_counts    = tbl_res.get("breakerCounts") or {}
 
-            print("spaces        :", spaces)
-            print("rows parsed   :", len(detected_breakers))
+            print("spaces               :", spaces)
+            print("detected breakers    :", len(detected_breakers))
             print("Breakers (tally):")
 
             if not breaker_counts:
