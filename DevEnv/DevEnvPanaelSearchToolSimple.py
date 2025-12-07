@@ -11,7 +11,7 @@ if project_root not in sys.path:
 from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
 
 # Inputs/Outputs
-INPUT_PDF = Path("~/Documents/Diagrams/generic2.pdf").expanduser()
+INPUT_PDF = Path("~/Documents/Diagrams/makayla1.pdf").expanduser()
 OUT_DIR   = Path("~/Documents/Diagrams/CaseStudy_VectorCrop_Run5").expanduser()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -26,12 +26,12 @@ finder = PanelBoardSearch(
     min_void_h_px=90,
     max_void_area_fr=0.30,
     void_w_fr_range=(0.20, 0.60),
-    void_h_fr_range=(0.20, 0.55),
+    void_h_fr_range=(0.15, 0.55),
     min_whitespace_area_fr=0.01,
     margin_shave_px=6,
     pad=6,
     verbose=True,
-    debug=True
+    debug=False
     # one-box settings (defaults are fine, but you can loosen slightly if needed):
     # onebox_min_rel_area=0.02, onebox_max_rel_area=0.75,
     # onebox_aspect_range=(0.4, 3.0), onebox_min_side_px=80,

@@ -538,8 +538,10 @@ class PanelBoardSearch:
             metrics = self._extract_horizontal_line_metrics(mask)
 
             # 3) validity flag based on spacing pattern
-            valid_table = self._is_valid_table_spacing(metrics)
-
+            valid_table = self._is_valid_table_spacing(
+                                                            metrics,
+                                                            mask_width=mask.shape[1],
+                                                        )
             # --- Move invalid tables ---
             if not valid_table:
                 # move to invalid_tables folder
@@ -613,14 +615,15 @@ class PanelBoardSearch:
         Given a horizontal-line mask (0/255), detect distinct horizontal
         line bands and return:
 
-            [[line_index, distance_from_previous_line], ...]
+            [[line_index, distance_from_previous_line, line_length], ...]
 
         - line_index is 1-based from top to bottom
-        - distance_from_previous_line is in pixels, along y
+        - distance_from_previous_line is in pixels along y
           (for the first line, this value is 0)
+        - line_length is the number of columns that contain line pixels
+          in that band (in pixels)
         """
         if mask.ndim == 3:
-            # just in case, convert to single channel
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
         h, w = mask.shape[:2]
@@ -645,19 +648,27 @@ class PanelBoardSearch:
         if in_span:
             spans.append((start_y, h - 1))
 
-        # Compute center y for each span
-        centers = [ (s + e) // 2 for (s, e) in spans ]
-        centers.sort()
+        # Compute center y and line length for each span
+        centers: list[int] = []
+        lengths: list[int] = []
+        for (s, e) in spans:
+            cy = (s + e) // 2
+            span_mask = (mask[s:e+1, :] > 0)
+            # columns that have any line pixels in this vertical band
+            col_has_line = span_mask.any(axis=0)
+            length = int(col_has_line.sum())
+            centers.append(cy)
+            lengths.append(length)
 
         metrics: list[list[int]] = []
         prev_center = None
 
-        for idx, cy in enumerate(centers, start=1):
+        for idx, (cy, length) in enumerate(zip(centers, lengths), start=1):
             if prev_center is None:
                 dy = 0
             else:
                 dy = int(cy - prev_center)
-            metrics.append([idx, dy])
+            metrics.append([idx, dy, int(length)])
             prev_center = cy
 
         return metrics
@@ -665,28 +676,40 @@ class PanelBoardSearch:
     @staticmethod
     def _is_valid_table_spacing(
         metrics: list[list[int]],
+        mask_width: int,
         spacing_tol_px: int = 4,
         min_repeats: int = 5,
+        min_len_frac: float = 0.5,
     ) -> bool:
         """
-        Given [[line_idx, dy], ...], decide if this looks like a valid table:
-        True if there are at least `min_repeats` spacing values (dy) that are
-        similar to each other within ±spacing_tol_px.
+        Given [[line_idx, dy, length], ...], decide if this looks like a valid table.
 
-        - Ignores dy == 0 (first line, or merged spans).
+        True if there are at least `min_repeats` spacing values (dy) that are
+        similar to each other within ±spacing_tol_px, and whose corresponding
+        line lengths are at least `min_len_frac * mask_width`.
+
+        - Ignores dy == 0 (first line or merged spans).
         """
-        # collect all non-zero spacings
-        spacings = [dy for _, dy in metrics if dy > 0]
-        if len(spacings) < min_repeats:
+        min_len_px = int(mask_width * min_len_frac)
+
+        # Filter to lines with non-zero spacing AND sufficiently long
+        filtered = [
+            (idx, dy, length)
+            for (idx, dy, length) in metrics
+            if dy > 0 and length >= min_len_px
+        ]
+
+        if len(filtered) < min_repeats:
             return False
 
-        spacings.sort()
+        # Only need the spacings of those qualifying lines
+        spacings = sorted(dy for (_, dy, _) in filtered)
         n = len(spacings)
 
-        # sliding window: for each spacing, count how many are within ±tol
+        # Sliding window: find a cluster of at least min_repeats spacings within ±tol
         for i in range(n):
             base = spacings[i]
-            count = 1  # include spacings[i] itself
+            count = 1  # include spacings[i]
             j = i + 1
             while j < n and abs(spacings[j] - base) <= spacing_tol_px:
                 count += 1
