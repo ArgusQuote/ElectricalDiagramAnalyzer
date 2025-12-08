@@ -208,7 +208,7 @@ class BreakerTableAnalyzer:
 
     def _prep(self, img: np.ndarray) -> np.ndarray:
         """
-        Same prep you had before: grayscale + CLAHE + min-height upscale.
+        Same prep as before: grayscale + CLAHE + min-height upscale.
         """
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)

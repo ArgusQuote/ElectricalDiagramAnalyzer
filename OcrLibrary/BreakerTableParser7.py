@@ -193,7 +193,7 @@ class HeaderBandScanner:
         band_ocr   = gray_ocr[y1:y2, :]
         band_lines = gray_lines[y1:y2, :]
 
-        # --- 1b) save RAW cropped band to debug folder so you can see exactly what we used ---
+        # --- 1b) save RAW cropped band to debug folder ---
         if self.debug:
             base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
             debug_img_raw_path = os.path.join(debug_dir, f"{base}_parser_header_band_raw.png")

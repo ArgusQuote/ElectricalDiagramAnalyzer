@@ -301,7 +301,7 @@ class breakerSelector:
                 return { 15: [22], 20: [22], 25: [22], 30: [22], 40: [22], 50: [22], 60: [22], 70: [22], 80: [22], 90: [22], 100: [22], 110: [22], 125: [22], 150: [22], 175: [22], 200: [22],}
             elif self.poles == 3:
                 return { 15: [22], 20: [22], 25: [22], 30: [22], 40: [22], 50: [22], 60: [22], 70: [22], 80: [22], 90: [22], 100: [22],}
-        # QO and QOB mapping (updated)
+        # QO and QOB mapping
         elif self.breakerType in ["QO", "QOB"]:
             if self.poles == 1:
                 return { 10: [10], 15: [10], 20: [10], 25: [10], 30: [10], 35: [10], 40: [10], 45: [10], 50: [10], 60: [10], 70: [10],}
@@ -309,7 +309,7 @@ class breakerSelector:
                 return { 10: [10], 15: [10], 20: [10], 25: [10], 30: [10], 35: [10], 40: [10], 45: [10], 50: [10], 60: [10], 70: [10], 80: [10], 90: [10], 100: [10], 110: [10], 125: [10], 150: [10], 175: [10], 200: [10],}
             elif self.poles == 3:
                 return { 10: [10], 15: [10], 20: [10], 25: [10], 30: [10], 35: [10], 40: [10], 45: [10], 50: [10], 60: [10], 70: [10], 80: [10], 90: [10], 100: [10],}
-        # HOM mapping (new)
+        # HOM mapping
         elif self.breakerType == "HOM":
             if self.poles == 1:
                 return { 15: [10], 20: [10], 25: [10], 30: [10], 40: [10], 50: [10],}
@@ -1267,7 +1267,7 @@ class transformer():
         if transformerType != 'WATCHDOG' and temperature in (None, ""):
             temperature = transformerConfig.get('temperature')
 
-        # Re-validate temperature using ints (you already converted to int above when present)
+        # Re-validate temperature using ints
         if 'temperatureOptions' in transformerConfig:
             if temperature not in transformerConfig['temperatureOptions']:
                 return f"Invalid temperature for {transformerType}."
@@ -1509,7 +1509,7 @@ class nqPanelboard():
             # unpack the two‐step kits list
             _hiddenMainBreakerKits = parts[3:-1]
             barrierKit             = parts[-1]
-            # still expose Frames for your rules engine
+            # still expose Frames for rules engine
             mccbFrames = allowedMainBreakers
 
         else:
@@ -1839,7 +1839,6 @@ class nfPanelboard():
         output["Ground Bar Kit"] = groundBarKit
 
         # --- ALWAYS INCLUDE BOTH NEUTRALS ---
-        # your original neutralMap from NQ
         neutralMap = {
             100: "NFN1CU", 250: "NFN2CU", 400: "NFN6CU", 600: "NFN6CU"
         }
@@ -2203,7 +2202,7 @@ class iLinePanelboard():
         else:
             config_sources = [self.allowedConfigurationsBreaker]
 
-        # --- Build lookup key exactly as in your flat tables ---
+        # --- Build lookup key exactly as in flat tables ---
         if enclosure == 'NEMA3R':
             # all NEMA3R keys omit the trimStyle element
             key = (typeOfMain, amperage, spaces, enclosure, material)
@@ -2232,7 +2231,7 @@ class iLinePanelboard():
             "Trim":     ("Included with NEMA3R" if enclosure=='NEMA3R' else trimCode)
         }
 
-        # --- SPD (unchanged) ---
+        # --- SPD ---
         if spd is not None:
             spd_map = spdLookup.get(voltage, {})
             result["SPD"] = spd_map.get(spd,
@@ -2281,7 +2280,6 @@ class iLinePanelboard():
 # Start SPD
 class externalSpd():
     def __init__(self):
-        # Initialize EasyOCR reader
         self.bool = False
 
     # Function to generate external SPD part numbers
@@ -2337,7 +2335,6 @@ class externalSpd():
 import math
 class blanks():
     def __init__(self):
-        # Initialize EasyOCR reader
         self.bool = False
 
     # Function to generate Blanks/Filler plates part numbers
@@ -2423,7 +2420,6 @@ class blanks():
 # Start MCCB
 class mccb():
     def __init__(self):
-        # Initialize EasyOCR reader
         self.bool = False
 
     # Function to generate MCCB part numbers
@@ -2493,9 +2489,9 @@ class mccb():
             return result
 
         DENYLIST = {
-            "HDA261256",  # remove
-            "HLA261001",  # remove
-            "HLA261005",  # remove
+            "HDA261256",
+            "HLA261001",
+            "HLA261005",
         }
         candidate = result if isinstance(result, str) else (result.get("Part Number") if isinstance(result, dict) else None)
         if candidate in DENYLIST:

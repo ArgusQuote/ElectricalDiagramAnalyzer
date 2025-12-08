@@ -26,7 +26,7 @@ def apply_interrupting_rating_defaults(raw: dict) -> dict:
     Apply default interrupting rating when not detected or set to NONE.
     Returns the modified dictionary with notes about defaults applied.
     """
-    raw = raw.copy()  # Don't modify the original
+    raw = raw.copy()
     notes = raw.setdefault("_notes", [])
     
     # Check if interrupting rating is missing, None, or "NONE"
@@ -214,7 +214,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
             out[k] = v
     return out
 
-# allow a few common alias keys if Anvil ever sends them
 _DEFAULT_KEY_ALIASES = {
     "material": "bussing_material",
     "allowPlugOn": "allow_plug_on_breakers",
@@ -283,7 +282,7 @@ def _scrub_none_tokens(obj):
 
 def _safe_int(v, default=0):
     try:
-        if v in (None, "", "NONE"):  # after _scrub_none_tokens this will usually be None
+        if v in (None, "", "NONE"):
             return default
         return int(float(str(v)))
     except Exception:
@@ -386,7 +385,7 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool]:
             return {
                 "QO": {1,2,3}, "QOB": {1,2,3},
                 "QO-VH": {1,2,3}, "QOB-VH": {1,2,3},
-                "QOH": {1,2},     # no 3P
+                "QOH": {1,2},
                 "QH": {1,2,3}, "QHB": {1,2,3},
             }[base]
 
@@ -884,7 +883,7 @@ class PanelboardEngine(BaseEngine):
 
         def _attempt_lc(family: str):
             attrs = {
-                "loadCenterType": family,  # "QO" or "Homeline"
+                "loadCenterType": family,
                 "enclosure": ("NEMA3R" if str(raw.get("enclosure","")).upper() == "NEMA3R" else "NEMA1"),
                 "phasing": "1PHASE",
                 "typeOfMain": _lc_type_of_main_from_raw(raw),
@@ -1663,7 +1662,7 @@ class PanelboardEngine(BaseEngine):
                     "QOB":     {1,2,3},
                     "QO-VH":   {1,2,3},
                     "QOB-VH":  {1,2,3},
-                    "QOH":     {1,2},   # no 3P
+                    "QOH":     {1,2},
                     "QH":      {1,2,3},
                     "QHB":     {1,2,3},
                     "HOM":     {1,2},
@@ -1742,7 +1741,7 @@ class PanelboardEngine(BaseEngine):
 
             frame_letter, ir_ladder = _base_to_frame_and_ir(base, rating_voltage)
 
-            desired_ir = raw_ir  # already set above based on FULLY_RATED vs SERIES_RATED
+            desired_ir = raw_ir
 
             if ir_ladder:
                 ir = next((k for k in sorted(ir_ladder) if k >= desired_ir), ir_ladder[-1])
@@ -2098,7 +2097,7 @@ class PanelboardEngine(BaseEngine):
 
         side_deficit_inches = 0.0
 
-        allow_sqd_spd = bool(raw.get("_allowSqdSpd", True))   # ← new gate
+        allow_sqd_spd = bool(raw.get("_allowSqdSpd", True))
         iline_spd_present = allow_sqd_spd and (bool(raw.get("spd")) or bool(panel_result.get("SPD")))
 
         if iline_spd_present:
@@ -2379,7 +2378,7 @@ class PanelboardEngine(BaseEngine):
                 f"Side-capacity bottleneck detected. Consider increasing by ~{needed_extra_spaces} spaces."
             )
             panel_result["_side_deficit_spaces"] = needed_extra_spaces
-        # Uniform overflow flag for reviewers
+        # Uniform overflow flag
         if side_deficit_inches > 0 or raw.get("_overcapacity_spaces"):
             panel_result.setdefault("Notes", []).append(
                 "too many breakers detected. user review required."
