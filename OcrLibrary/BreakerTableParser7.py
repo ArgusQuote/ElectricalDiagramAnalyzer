@@ -858,10 +858,68 @@ class HeaderBandScanner:
             else:
                 info["role"] = None
 
+        # ---------- Normalize multiple CKT columns (one primary per side) ----------
+        # We can have up to TWO real CKT columns: one on the left, one on the right.
+        ckt_candidates = [
+            info
+            for info in col_infos
+            if (not info["has_notes"])
+               and info["score"]["ckt"] > 0
+               and (info.get("ignoredReason") is None)
+        ]
+
+        if ckt_candidates:
+            # Use geometry to split into left/right
+            global_left = min(c["x_left"] for c in ckt_candidates)
+            global_right = max(c["x_right"] for c in ckt_candidates)
+            center_x = 0.5 * (global_left + global_right)
+
+            for info in ckt_candidates:
+                col_center = 0.5 * (info["x_left"] + info["x_right"])
+                info["ckt_side"] = "left" if col_center < center_x else "right"
+
+            def _has_number_assoc(texts: List[str]) -> bool:
+                # Same idea as has_ckt_number_assoc: '#', NO, NUMBER, etc.
+                for t in texts or []:
+                    tu = t.strip().upper()
+                    if tu in ("#", "NO", "NO.", "NUMBER", "NUM", "NUM.", "NBR", "NBR."):
+                        return True
+                return False
+
+            def _rank_ckt(info: Dict) -> tuple:
+                # Higher CKT score first, then prefer the one that has "#/NO/NUMBER",
+                # then slightly favor the left-most within that side.
+                has_num = 1 if _has_number_assoc(info["texts"]) else 0
+                return (
+                    info["score"]["ckt"],
+                    has_num,
+                    -info["x_left"],
+                )
+
+            primary_ckt_indices = set()
+
+            # Pick best per side (left + right)
+            for side in ("left", "right"):
+                side_list = [c for c in ckt_candidates if c["ckt_side"] == side]
+                if not side_list:
+                    continue
+                primary = max(side_list, key=_rank_ckt)
+                primary_ckt_indices.add(primary["index"])
+
+            # Winners keep/receive role='ckt'; others are demoted to secondaryCkt
+            for info in ckt_candidates:
+                if info["index"] in primary_ckt_indices:
+                    if info["role"] is None:
+                        info["role"] = "ckt"
+                else:
+                    if info["role"] == "ckt":
+                        info["role"] = None
+                    if not info.get("ignoredReason"):
+                        info["ignoredReason"] = "secondaryCkt"
+
         # ---------- Hero candidates: only pure trip/poles columns ----------
         # We NEVER allow a column that has any ckt/description signal to become
         # trip/poles/combo. That enforces "NAME beats BKR", "CKT beats everything",
-        # etc.
         hero_candidates = [
             info
             for info in col_infos
@@ -1002,6 +1060,7 @@ class HeaderBandScanner:
             role = info.get("role")
             ignored_reason = info.get("ignoredReason")
 
+            # First column seen for a role wins in the roles map
             if role and role not in role_to_index:
                 role_to_index[role] = info["index"]
 
@@ -1010,7 +1069,7 @@ class HeaderBandScanner:
                     "index": info["index"],
                     "x_left": info["x_left"],
                     "x_right": info["x_right"],
-                    "texts": info["texts"],  # now per-word
+                    "texts": info["texts"],  # per-word
                     "role": role,
                     "ignoredReason": ignored_reason,
                 }
