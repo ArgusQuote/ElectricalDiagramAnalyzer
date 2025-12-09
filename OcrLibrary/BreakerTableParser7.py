@@ -15,7 +15,7 @@ PARSER_VERSION = "BreakerParser7"
 _HDR_OCR_SCALE        = 2.0
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
 _HDR_MIN_CONF         = 0.50
-
+ 
 def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
     """
     Recreate the same gray image that BreakerTableAnalyzer12 uses:

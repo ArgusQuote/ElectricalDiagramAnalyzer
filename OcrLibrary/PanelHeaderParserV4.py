@@ -633,7 +633,7 @@ class PanelParser:
             self._write_overlay_with_band(image_path, prep_full, (y1, by2), items, ranked_map, chosen_map)
 
         return result
-
+ 
     # --------- Helpers ---------
     def _scan_main_mode(self, items: List[dict]) -> Optional[str]:
         txt = " ".join(str(it.get("text","")) for it in items).upper()
@@ -775,6 +775,48 @@ class PanelParser:
                 return _mk_val_by_rects([rect], [text], [conf],
                                         conf_hint=float(conf or 0.8),
                                         shape=0.99, ctx=0.45)
+
+        # Handles OCR where the panel label *and* the name are fused into a single token.
+        for ln in top:
+            for (r, t, c) in ln["tokens"]:
+                raw = (t or "").strip()
+                if not raw:
+                    continue
+                up = raw.upper()
+                # Only care about tokens that clearly contain a panel label
+                if "PANEL" not in up and "PNL" not in up:
+                    continue
+
+                # Strip the leading label block: PANEL, PANELBOARD, PNL (+ punctuation)
+                rest = re.sub(r'^[I1]?\s*(?:PANEL(?:BOARD)?|PNL)\b[:\s\-]*', '', raw, flags=re.I)
+                # Drop parenthetical annotations like "(NEW)", "(EXISTING)"
+                rest = re.sub(r'\([^)]*\)', '', rest)
+                rest = rest.strip()
+                if not rest:
+                    continue
+
+                # Only take the first chunk to avoid "LP-1A NORMAL POWER"
+                first = rest.split()[0].strip(" -:")
+                if not first:
+                    continue
+                first_up = first.upper()
+
+                if first_up in self._NAME_STOPWORDS or _looks_like_header_word(first_up):
+                    continue
+                # Require at least one letter so we don't pick bare "2"
+                if not _has_letter(first):
+                    continue
+                # Short, ID-shaped: LP-1, P6, LP1A, etc.
+                if not re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,12}", first_up):
+                    continue
+
+                # Build a synthetic NAME candidate using the original bbox
+                return _mk_val_by_rects(
+                    [r], [first], [c],
+                    conf_hint=float(c or 0.8),
+                    shape=0.98,
+                    ctx=0.42,
+                )
 
         # ===== PASS 0: SINGLE-TOKEN "…Panel: NAME" =====
         for ln in top:
