@@ -13,7 +13,7 @@ except Exception:
 PARSER_VERSION = "BreakerParser7"
 
 _HDR_OCR_SCALE        = 2.0
-_HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/()."
+_HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
 _HDR_MIN_CONF         = 0.50
 
 def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
@@ -597,21 +597,29 @@ class HeaderBandScanner:
             """
             Stricter fuzzy match specifically for hero words (trip/poles).
 
-            We *really* only want near-exact matches here to avoid things like
-            'WIRE' being treated as 'LOAD' or 'POLE'.
+              - After the standard fuzzy match on the whole token, we also allow
+                a hero word that is "buried" in the OCR token with a tiny bit of
+                junk on the edge, e.g.:
+                  AMPS!  -> AMPS
+                  POLET  -> POLE
+                by checking letter-only prefix/suffix matches with <=1 extra char.
             """
             w = norm_word(word)
             if not w:
                 return False
+
+            # Letters-only version of the OCR token
+            w_letters = "".join(ch for ch in w if ch.isalpha())
 
             for t in targets:
                 t_norm = norm_word(t)
                 if not t_norm:
                     continue
 
-                # Hero matching thresholds:
-                # - very short tokens (<=4): need ~0.90+
-                # - longer tokens: allow a bit more noise (~0.75+)
+                # Letters-only version of the target hero word
+                t_letters = "".join(ch for ch in t_norm if ch.isalpha())
+
+                # --- primary: whole-token fuzzy ratio (existing behavior) ---
                 if len(t_norm) <= 4:
                     threshold = 0.90
                 else:
@@ -619,6 +627,16 @@ class HeaderBandScanner:
 
                 if SequenceMatcher(a=w, b=t_norm).ratio() >= threshold:
                     return True
+
+                # --- NEW: "hero buried at edge" fallback ---
+                # Allow cases like "AMPS!" or "POLET" where the core hero word
+                # is at the start or end with at most one extra letter.
+                if w_letters and t_letters:
+                    if (
+                        (w_letters.startswith(t_letters) or w_letters.endswith(t_letters))
+                        and abs(len(w_letters) - len(t_letters)) <= 1
+                    ):
+                        return True
 
             return False
 
@@ -675,6 +693,17 @@ class HeaderBandScanner:
                         continue
 
                     word_entries.append((raw, is_sentence_like))
+
+            # --- Detect "strong" CKT label (e.g. 'CKT #', 'CKT NO.', 'CKT NUMBER') ---
+            has_ckt_core = any(
+                _is_like(t, ["CKT", "CCT"], base_threshold=0.95) for t in texts
+            )
+            has_ckt_number_assoc = False
+            for t in texts:
+                tu = t.strip().upper()
+                if tu in ("#", "NO", "NO.", "NUMBER", "NUM", "NUM.", "NBR", "NBR."):
+                    has_ckt_number_assoc = True
+                    break
 
             # Base structure for this column
             has_notes = False
@@ -770,6 +799,14 @@ class HeaderBandScanner:
                 elif w_norm == "P":
                     hero_poles_rank = max(hero_poles_rank, 1)
 
+            # Extra boost for "CKT + number-ish" labels ---
+            # Example headers:
+            #   "CKT #"
+            #   "CKT NO."
+            #   "CKT NUMBER"
+            # This makes that column win over a plain "CKT" / "CKT TAG" column.
+            if has_ckt_core and has_ckt_number_assoc:
+                score["ckt"] += 2
             has_ckt_signal = score["ckt"] > 0
             has_desc_signal = score["description"] > 0
 

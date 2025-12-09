@@ -8,7 +8,7 @@ try:
 except Exception:
     _HAS_OCR = False
 
-
+ 
 class PanelParser:
     """
     Panel Header Parser V4 (revised association)
@@ -639,9 +639,8 @@ class PanelParser:
         txt = " ".join(str(it.get("text","")) for it in items).upper()
         has_mlo = bool(re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txt))
         has_mcb = bool(re.search(r"\b(MCB|MAIN\s*(BREAKER|DEVICE))\b", txt))
-        # If both appear somewhere on the page, defer to the chosen MAIN token later
-        if has_mlo and has_mcb:
-            return None
+
+        # MLO always wins if present anywhere
         if has_mlo:
             return "MLO"
         if has_mcb:
