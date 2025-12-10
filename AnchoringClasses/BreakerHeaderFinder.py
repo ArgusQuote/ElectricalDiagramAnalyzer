@@ -668,16 +668,51 @@ class BreakerHeaderFinder:
             header_text_y=header_text_y,
         )
 
-        # line ABOVE = header_y_abs
-        if header_y_above is not None:
-            self.header_y_abs = header_y_above
-        else:
-            self.header_y_abs = header_text_y
+        # ------------------------------------------------------------------
+        # Decide HEADER TOP (self.header_y_abs)
+        #   1) Prefer snapped line above if present.
+        #   2) If NO top line but bottom line exists below header_text_y,
+        #      synthesize a top line at the same distance above as bottom is below:
+        #         dy = header_bottom_y - header_text_y
+        #         header_top = header_text_y - dy
+        #   3) If we have neither, fall back to header_text_y.
+        # ------------------------------------------------------------------
+        header_top: int
 
-        # ensure we always have a usable header band thickness
+        if header_y_above is not None:
+            # normal case: use real structural line above
+            header_top = int(header_y_above)
+            self.snap_note = self.snap_note or "header_top_from_snap_above"
+        else:
+            # no top line; can we mirror from a good bottom line?
+            if header_bottom_y is not None and header_bottom_y > header_text_y:
+                dy = header_bottom_y - header_text_y
+                mirrored_top = header_text_y - dy
+
+                # clamp to page
+                if mirrored_top < 0:
+                    mirrored_top = 0
+
+                header_top = int(mirrored_top)
+                self.snap_note = self.snap_note or "header_top_symmetric_from_bottom"
+            else:
+                # nothing to snap to – just use the text line
+                header_top = int(header_text_y)
+                self.snap_note = self.snap_note or "header_top_from_text_line"
+
+        self.header_y_abs = header_top
+
+        # ------------------------------------------------------------------
+        # Decide HEADER BOTTOM (self.header_bottom_y_abs)
+        #   - Prefer snapped line below if it's meaningfully below top.
+        #   - Otherwise synthesize a minimum-height band under header_top.
+        # ------------------------------------------------------------------
         min_band_height = max(40, int(0.03 * H))  # ~3% of page height, at least 40 px
 
-        if header_bottom_y is not None and header_bottom_y > self.header_y_abs + 4:
+        if (
+            header_bottom_y is not None
+            and header_bottom_y > self.header_y_abs + 4
+        ):
             # good structural line below header
             self.header_bottom_y_abs = int(header_bottom_y)
         else:

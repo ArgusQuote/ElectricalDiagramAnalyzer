@@ -1351,16 +1351,22 @@ class BreakerFooterFinder:
             chosen_size: Optional[int] = None
             chosen_vals: Optional[set[int]] = None
 
-            # search largest first so we don't stop at 18 when 42/84 exist
-            for size in self.PANEL_SIZE_ORDER:
-                needed = self.PANEL_FOOTER_MAP[size]
-                present = values_present & needed
-
-                # require at least 2 numbers from this 4-number window
-                if len(present) >= 2:
-                    chosen_size = size
-                    chosen_vals = present
+            for val in sorted(values_present, reverse=True):
+                # find which panel size window this value belongs to
+                for size in self.PANEL_SIZE_ORDER:
+                    if val in self.PANEL_FOOTER_MAP[size]:
+                        chosen_size = size
+                        # record all values we saw from that window (for logging)
+                        chosen_vals = values_present & self.PANEL_FOOTER_MAP[size]
+                        break
+                if chosen_size is not None:
                     break
+
+            if chosen_size is None and self.debug:
+                print(
+                    "[BreakerFooterFinder] No matching panel size for footer tokens; "
+                    f"values_present={sorted(values_present)}"
+                )
 
             if chosen_size is not None and chosen_vals:
                 size_cands = [
