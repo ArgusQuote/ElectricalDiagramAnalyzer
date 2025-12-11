@@ -40,8 +40,8 @@ def reset_name_deduper():
     _NAME_COUNTS.clear()
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
-from OcrLibrary.PanelHeaderParserV5   import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParser8   import BreakerTableParser, PARSER_VERSION
+from OcrLibrary.PanelHeaderParserV6   import PanelParser as PanelHeaderParser
+from OcrLibrary.BreakerTableParser9   import BreakerTableParser, PARSER_VERSION
 
 class BreakerTablePipeline:
     def __init__(self, *, debug: bool = True):

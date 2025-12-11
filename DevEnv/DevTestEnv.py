@@ -110,7 +110,6 @@ def main():
         print("name    :", (hdr_res or {}).get("name"))
         print("attrs   :", (hdr_res or {}).get("attrs"))
         hdr_breakers = ((hdr_res or {}).get("attrs") or {}).get("detected_breakers") or []
-        print(f"\n--- Breakers found in HEADER attrs: {len(hdr_breakers)} ---")
 
         # ---- Table summary (tally only) ----
         print("\n=== TABLE PARSER (summary) ===")
