@@ -511,8 +511,10 @@ def _routing_bump_message(raw: dict) -> str | None:
     if routing.get("forcedFamily") != "I-LINE":
         return None
 
-    t = routing.get("trigger")
-    if not t:
+    t = routing.get("trigger") or {}
+    poles = t.get("poles")
+    amps  = t.get("amperage")
+    if not poles or not amps:
         return None
 
     nq = routing.get("nq") or {}
@@ -522,13 +524,26 @@ def _routing_bump_message(raw: dict) -> str | None:
     nf_max  = nf.get("maxAmp")
     nq_base = nq.get("base")
 
-    return (
-        f"A branch breaker was detected at {t.get('amperage')}A ({t.get('poles')}P). "
-        f"NQ max: {nq_max if nq_max is not None else 'N/A'}A"
-        f"{(' (family ' + str(nq_base) + ')') if nq_base else ''}. "
-        f"NF max: {nf_max if nf_max is not None else 'N/A'}A. "
-        f"System bumped panel selection to I-LINE."
-    )
+    parts = []
+    parts.append(f"A branch breaker was detected at {amps}A ({poles}P).")
+
+    # NQ detail
+    if nq.get("allowed") is False:
+        if nq_max is not None:
+            base_txt = f" (family {nq_base})" if nq_base else ""
+            parts.append(f"NQ limit for {poles}P is {nq_max}A{base_txt}.")
+        elif nq.get("reason"):
+            parts.append(f"NQ rejected: {nq['reason']}.")
+
+    # NF detail
+    if nf.get("allowed") is False:
+        if nf_max is not None:
+            parts.append(f"NF limit for {poles}P is {nf_max}A.")
+        elif nf.get("reason"):
+            parts.append(f"NF rejected: {nf['reason']}.")
+
+    parts.append("System bumped panel selection to I-LINE.")
+    return " ".join(parts)
 
 @register_engine("panelboard")
 class PanelboardEngine(BaseEngine):
@@ -2381,7 +2396,7 @@ class PanelboardEngine(BaseEngine):
                         if k not in ("Part Number", "Interrupting Rating"):
                             entry[k] = v
                     placed_units += 1
-                    break
+                    continue
 
                 # ---- NO-PROGRESS ESCAPE ----
                 if not found:
@@ -2832,3 +2847,27 @@ class TransformerEngine(BaseEngine):
             "error": "Invalid transformer configuration.",
             "_debug": {"attempts": attempts_meta[:10]}
         }
+
+payload = {
+  "items": [{
+    "type": "panelboard",
+    "name": "TEST ILINE DUPES",
+    "attrs": {
+      "amperage": 150,
+      "voltage": 208,
+      "spaces": 18,
+      "intRating": 22,
+      "panelRatingType": "FULLY_RATED",
+      "enclosure": "NEMA1",
+      "material": "ALUMINUM",
+      "detected_breakers": [
+        {"poles": 1, "amperage": 20, "count": 8, "specialFeatures": ""},
+        {"poles": 1, "amperage": 30, "count": 7, "specialFeatures": ""},
+        {"poles": 1, "amperage": 80, "count": 3, "specialFeatures": ""},
+      ]
+    }
+  }]
+}
+
+out = process_job(payload)
+print(out["TEST ILINE DUPES"]["Branch Breakers (I-LINE)"])

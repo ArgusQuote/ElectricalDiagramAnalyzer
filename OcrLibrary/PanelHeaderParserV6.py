@@ -311,9 +311,27 @@ class PanelParser:
                 chosen_map["AIC"] = best
 
         # ===== Unit-first amps role assignment (explicit A/AMPS drive detection; labels split roles) =====
-        # Gather explicit-unit amps candidates (###A / ### AMPS) from BUS pool (BUS and MAIN share the same objects)
-        unit_amps = [c for c in (value_cands.get("BUS") or []) if bool(c.get("has_unit"))]
-        unit_amps.sort(key=lambda c: (-float(c.get("conf",0.0)), c["y1"], c["x1"]))
+        # Gather explicit-unit amps candidates from BOTH BUS and MAIN pools
+        # (because _collect_value_candidates() can classify a token as MAIN-only or BUS-only)
+        _unit_pool = (value_cands.get("BUS") or []) + (value_cands.get("MAIN") or [])
+
+        # De-dupe (BUS and MAIN pools may contain separate dict copies of the same token)
+        unit_amps = []
+        _seen = set()
+        for c in _unit_pool:
+            if not bool(c.get("has_unit")):
+                continue
+            k = (
+                int(c.get("x1", -1)), int(c.get("y1", -1)),
+                int(c.get("x2", -1)), int(c.get("y2", -1)),
+                str(c.get("text", "")).strip().upper(),
+            )
+            if k in _seen:
+                continue
+            _seen.add(k)
+            unit_amps.append(c)
+
+        unit_amps.sort(key=lambda c: (-float(c.get("conf", 0.0)), c["y1"], c["x1"]))
 
         def _role_affinity(c):
             return (self._label_affinity("BUS", c, labels_map),
