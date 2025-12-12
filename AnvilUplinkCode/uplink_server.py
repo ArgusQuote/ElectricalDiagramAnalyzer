@@ -105,7 +105,7 @@ _log_run_fingerprint("init")
 from PageFilter.PageFilterV2 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv6 import BreakerTablePipeline, API_VERSION
-import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
+import RulesEngine.RulesEngine3 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
 ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
