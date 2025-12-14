@@ -8,7 +8,7 @@ try:
 except Exception:
     _HAS_OCR = False
 
- 
+
 class PanelParser:
     """
     Panel Header Parser V4 (revised association)
@@ -628,7 +628,8 @@ class PanelParser:
                 m = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", t_fix)
                 if m:
                     val = int(m.group(1).replace(",", ""))
-                    int_rating_ka = max(1, val // 1000)
+                    if (val % 1000) == 0:
+                        int_rating_ka = max(1, val // 1000)
                 else:
                     # discrete small kA fallback (e.g. chosen token is just "65")
                     SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
@@ -1303,23 +1304,25 @@ class PanelParser:
                         "ctx": ctx,
                     })
             else:
-                AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A
+                AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A, 29,000A
                 if AIC:
                     val = int(AIC.group(1).replace(",", ""))
                     if 10000 <= val <= 100000:
-                        shape = 0.85 + (0.10 if "," in AIC.group(1) else 0.0)
-                        ctx = 0.08 if re.search(r"\b(SYMMETRICAL|AIC|A\.?\s*I\.?\s*C\.?|SCCR)\b", txt) else 0.0
-                        out["AIC"].append({
-                            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                            "xc": xc, "yc": yc,
-                            "conf": conf,
-                            "text": raw,
-                            "shape": min(1.0, shape),
-                            "ctx": ctx,
-                        })
+                        # ---- Reject non-thousand-rounded values like 29,114 ----
+                        if (val % 1000) != 0:
+                            pass
+                        else:
+                            shape = 0.85 + (0.10 if "," in AIC.group(1) else 0.0)
+                            ctx = 0.08 if re.search(r"\b(SYMMETRICAL|AIC|A\.?\s*I\.?\s*C\.?|SCCR)\b", txt) else 0.0
+                            out["AIC"].append({
+                                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                                "xc": xc, "yc": yc,
+                                "conf": conf,
+                                "text": raw,
+                                "shape": min(1.0, shape),
+                                "ctx": ctx,
+                            })
                 else:
-                    # === NEW: discrete small kA values just to the right of an AIC/SCCR label ===
-                    # Use permitted kA set and forbid "A"/"AMPS" units so we don't confuse with bus/main amps.
                     SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
                     # Look for a plain 2–3 digit number
                     m_small = re.search(r'(?<!\d)(\d{2,3})(?!\d)', txtD)
