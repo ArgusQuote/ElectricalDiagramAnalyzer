@@ -84,7 +84,7 @@ class output(outputTemplate):
 
   def _fmt_attr_chip(self, label: str, value) -> Component:
     """Single-line chip: 'Label: value' (no stacked text)."""
-    txt = "NONE" if value in (None, "", "NONE") else str(value)
+    txt = "-" if value in (None, "", "NONE") else str(value)
     lab = Label(text=f"{label}: {txt}", foreground="theme:Background")
     lab.width = "18%"      # helps distribute across the bar
     return lab
@@ -217,23 +217,36 @@ class output(outputTemplate):
     return dg
 
   def _make_attr_grid(self, designation: str) -> DataGrid:
-    """One-row grid with inline 'Label: value' cells for Bus/Volts/IR/Spaces/Main."""
+    """One-row grid with inline 'Amps / Volts / Main Amps / IR / Spaces' to match Detected Items."""
     attrs = self._panel_quick_attrs(designation) or {}
+  
     def _i(v):
-      try: return int(str(v).strip())
-      except: return None
+      try:
+        return int(str(v).strip())
+      except:
+        return None
+  
     def _ka(v):
       try:
-        if v is None or str(v).strip().upper() == "NONE": return "NONE"
+        if v is None or str(v).strip().upper() == "NONE":
+          return "-"
         return f"{int(str(v).strip())}K"
-      except: return "NONE"
+      except:
+        return "-"
   
+    amps_i  = _i(attrs.get('amperage'))
+    volt_i  = _i(attrs.get('voltage'))
+    main_i  = _i(attrs.get('mainBreakerAmperage'))
+    ir_txt  = _ka(attrs.get('intRating'))
+    space_i = _i(attrs.get('spaces'))
+  
+    # Match Detected Items column order and label text
     cells = [
-      f"Bus: {(_i(attrs.get('amperage')) or 'NONE')}A",
-      f"Volts: {(_i(attrs.get('voltage')) or 'NONE')}V",
-      f"IR: {_ka(attrs.get('intRating'))}",
-      f"Spaces: {(_i(attrs.get('spaces')) or 'NONE')}ckt",
-      f"Main: {(_i(attrs.get('mainBreakerAmperage')) or 'NONE') if _i(attrs.get('mainBreakerAmperage')) else 'NONE'}",
+      f"Bus Amps: {f'{amps_i}A' if amps_i is not None else '-'}",
+      f"Volts: {f'{volt_i}V' if volt_i is not None else '-'}",
+      f"Main Amps: {f'{main_i}' if main_i is not None else '-'}",
+      f"Int Rating: {ir_txt}",
+      f"Spaces: {f'{space_i}ckt' if space_i is not None else '-'}",
     ]
   
     dg = DataGrid()
@@ -241,7 +254,7 @@ class output(outputTemplate):
     dg.show_header = False
     dg.show_page_controls = False
     dg.rows_per_page = 1
-    dg.role = "attr-grid"            # <<< not 'bom-grid' so we avoid zebra/borders
+    dg.role = "attr-grid"
     dg.background = "transparent"
     dg.foreground = "theme:Background"
     dg.columns = [
@@ -252,7 +265,7 @@ class output(outputTemplate):
       {"id":"c5","title":"","data_key":"c5"},
     ]
   
-    row = DataRowPanel()  # no zebra role
+    row = DataRowPanel()
     for i, text in enumerate(cells, start=1):
       lab = Label(text=text, bold=True, foreground="theme:Background")
       lab.font_size = 16
@@ -264,7 +277,7 @@ class output(outputTemplate):
     def _missing(v):
       if v is None: return True
       s = str(v).strip().upper()
-      return (s == "" or s == "NONE" or s == "X")
+      return (s == "" or s == "NONE" or s == "X" or s == "-")
     attrs = self._panel_quick_attrs(designation) or {}
     keys = ("amperage", "voltage", "intRating", "spaces", "mainBreakerAmperage")
     return all(_missing(attrs.get(k)) for k in keys)
@@ -536,27 +549,50 @@ class output(outputTemplate):
       return ""
     return ""
 
+  def _format_mm_ss(self, ms: int) -> str:
+    """Return 'M:SS' from milliseconds (no hours, no ms)."""
+    try:
+      total_s = max(0, int(round(int(ms) / 1000)))
+    except Exception:
+      total_s = 0
+    mins, secs = divmod(total_s, 60)
+    return f"{mins}:{secs:02d}"
+  
+  def _parse_cycle_time_str_to_ms(self, s: str) -> int:
+    """
+    Parse 'HH:MM:SS:ms' like '00:06:56:403' to milliseconds.
+    If parsing fails, return 0.
+    """
+    try:
+      hh, mm, ss, ms = [int(p) for p in str(s).strip().split(":")]
+      return ((hh*3600 + mm*60 + ss) * 1000) + ms
+    except Exception:
+      return 0
+  
   def _set_ttp_label(self):
     lbl = getattr(self, "label_ttp", None)
     if not isinstance(lbl, Label):
       return
-
-    s = (self.result.get("cycle_time_str") or "").strip()
-    if s:
-      lbl.text = f"Processed in {s}"
-      return
-
+  
+    # Priority: timestamps > numeric ms > string
     start_ms = self.result.get("noticed_ts_ms")
     end_ms   = self.result.get("parse_done_ts_ms")
     if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)):
-      lbl.text = f"Processed in {self._format_duration_ms(int(end_ms - start_ms))}"
+      ms = max(0, int(end_ms - start_ms))
+      lbl.text = f"Processed in {self._format_mm_ss(ms)}"
       return
-
+  
     ct = self.result.get("cycle_time_ms")
     if isinstance(ct, (int, float)):
-      lbl.text = f"Processed in {self._format_duration_ms(int(ct))}"
+      lbl.text = f"Processed in {self._format_mm_ss(int(ct))}"
       return
-
+  
+    s = (self.result.get("cycle_time_str") or "").strip()
+    if s:
+      ms = self._parse_cycle_time_str_to_ms(s)
+      lbl.text = f"Processed in {self._format_mm_ss(ms)}"
+      return
+  
     lbl.text = ""
 
   def _extract_panels(self) -> list:
@@ -611,32 +647,30 @@ class output(outputTemplate):
     return out
 
   def _iter_designations_in_panel_order(self, rows_by_des: dict):
-    """
-    Yield designations in the same order as the top panel table (self._panel_order),
-    then append any designations not present in that list, preserving their insertion order.
-    """
-    # Build a normalized lookup from rows_by_des
-    def _norm(s): return str(s or "").strip().upper()
-    by_norm = {}
-    for k in rows_by_des.keys():
-      nk = _norm(k)
-      # Keep first occurrence if duplicates
-      if nk not in by_norm:
-        by_norm[nk] = k
-
-    seen = set()
-    # self._panel_order is a list of (original, normalized) tuples
-    panel_order = getattr(self, "_panel_order", []) or []
-    for orig, nk in panel_order:
-      if nk in by_norm and nk not in seen:
-        seen.add(nk)
-        yield by_norm[nk]   # yield the actual key present in rows_by_des
-
-    # Append leftovers (preserve dict insertion order)
-    for k in rows_by_des.keys():
-      nk = _norm(k)
-      if nk not in seen:
-        yield k
+      def _norm(s): return str(s or "").strip().upper()
+  
+      # bucket all keys by normalized name, preserving insertion order
+      buckets = {}
+      for k in rows_by_des.keys():
+          nk = _norm(k)
+          buckets.setdefault(nk, []).append(k)
+  
+      seen = set()
+      panel_order = getattr(self, "_panel_order", []) or []
+  
+      # consume in the same visual order, but don't collapse duplicates
+      for orig, nk in panel_order:
+          lst = buckets.get(nk, [])
+          if lst:
+              k = lst.pop(0)                # take the next duplicate
+              seen.add((nk, k))
+              yield k
+  
+      # then yield any leftovers (still preserves dict insertion)
+      for nk, lst in buckets.items():
+          for k in lst:
+              if (nk, k) not in seen:
+                  yield k
 
   def _render_panel_table(self):
       dg = getattr(self, "data_grid_2", None)
@@ -656,10 +690,10 @@ class output(outputTemplate):
   
       dg.columns = [
           {"id": "name",          "title": "Name",                "data_key": "name"},
-          {"id": "amperage",      "title": "Amps",                "data_key": "amperage"},
+          {"id": "amperage",      "title": "Bus Amps",                "data_key": "amperage"},
           {"id": "voltage",       "title": "Volts",               "data_key": "voltage"},
-          {"id": "main_brk_amps", "title": "Main Breaker Amps",   "data_key": "main_brk_amps"},
-          {"id": "int_rating",    "title": "Interrupting Rating", "data_key": "int_rating"},
+          {"id": "main_brk_amps", "title": "Main Amps",   "data_key": "main_brk_amps"},
+          {"id": "int_rating",    "title": "Int Rating", "data_key": "int_rating"},
           {"id": "spaces",        "title": "Spaces",              "data_key": "spaces"},
           {"id": "preview",       "title": "View Item",                "data_key": "preview"}
       ]
@@ -671,18 +705,18 @@ class output(outputTemplate):
       # Header row
       hdr = DataRowPanel(role="custom-grid-header")
       hdr.add_component(Label(text="Name",                bold=True), column="name")
-      hdr.add_component(Label(text="Amps",                bold=True, align="center"), column="amperage")
+      hdr.add_component(Label(text="Bus Amps",                bold=True, align="center"), column="amperage")
       hdr.add_component(Label(text="Volts",               bold=True, align="center"), column="voltage")
-      hdr.add_component(Label(text="Main Breaker Amps",   bold=True, align="center"), column="main_brk_amps")
-      hdr.add_component(Label(text="Interrupting Rating", bold=True, align="center"), column="int_rating")
+      hdr.add_component(Label(text="Main Amps",   bold=True, align="center"), column="main_brk_amps")
+      hdr.add_component(Label(text="Int Rating", bold=True, align="center"), column="int_rating")
       hdr.add_component(Label(text="Spaces",              bold=True, align="center"), column="spaces")
       hdr.add_component(Label(text="View Item",           bold=True, align="center"), column="preview")
       dg.add_component(hdr, slot="header")
   
       def _fmt(v):
-          if v in (None, ""): return "NONE"
+          if v in (None, ""): return "-"
           s = str(v)
-          return "NONE" if s.upper() == "NONE" else s
+          return "-" if s.upper() == "NONE" else s
   
       rows = self._extract_panels()
       if not rows:
