@@ -1,5 +1,8 @@
-# OcrLibrary/BreakerTableParserAPIv6.py
+# OcrLibrary/BreakerTableParserAPIv7.py
 import sys, os, inspect
+import re
+import cv2
+import copy
 
 _THIS_FILE  = os.path.abspath(__file__)
 _OCRLIB_DIR = os.path.dirname(_THIS_FILE)
@@ -7,7 +10,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "API_4"
+API_VERSION = "API_7"
 API_ORIGIN  = __file__
 
 SNAP_MAP = {
@@ -141,6 +144,179 @@ class BreakerTablePipeline:
             return False
         return (n % 10) in (0, 5)
 
+    def _ensure_dir(self, p: str) -> str:
+        os.makedirs(p, exist_ok=True)
+        return p
+
+    def _scale_box(self, box, src_w, src_h, dst_w, dst_h):
+        # box = [x1,y1,x2,y2]
+        if not box or src_w <= 0 or src_h <= 0:
+            return None
+        try:
+            x1, y1, x2, y2 = [int(v) for v in box]
+        except Exception:
+            return None
+        sx = float(dst_w) / float(src_w)
+        sy = float(dst_h) / float(src_h)
+        return [int(round(x1*sx)), int(round(y1*sy)), int(round(x2*sx)), int(round(y2*sy))]
+
+    def _draw_box(self, vis, box, color_bgr, label=None, *, fill_alpha: float = 0.0, thickness: int = 2):
+        if not box or len(box) != 4:
+            return
+        H, W = vis.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in box]
+        x1 = max(0, min(W-1, x1)); x2 = max(0, min(W-1, x2))
+        y1 = max(0, min(H-1, y1)); y2 = max(0, min(H-1, y2))
+        if x2 <= x1 or y2 <= y1:
+            return
+
+        # optional faint fill
+        if fill_alpha and fill_alpha > 0.0:
+            a = float(max(0.0, min(1.0, fill_alpha)))
+            overlay = vis.copy()
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color_bgr, -1)
+            cv2.addWeighted(overlay, a, vis, 1.0 - a, 0, dst=vis)
+
+        # outline
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color_bgr, int(thickness))
+
+        if label:
+            cv2.putText(
+                vis, str(label),
+                (x1, max(12, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color_bgr,
+                1,
+                cv2.LINE_AA,
+            )
+
+    def _build_review_overlay(self, *, image_path, analyzer_result, header_result, parser_result, dedup_name):
+        """
+        Writes ONE combined review overlay:
+          - Magenta: winning header attrs
+          - Green: trip columns (or combo columns if combined)
+          - Blue: poles columns (separated)
+        Returns absolute filepath or None.
+        """
+        ar = analyzer_result or {}
+        gray = ar.get("gray")
+        if gray is None or not hasattr(gray, "shape"):
+            return None
+
+        H, W = gray.shape[:2]
+        vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # Where to save (job_root/pdf_images/review_overlays/)
+        norm_img = os.path.abspath(image_path).replace("\\", "/")
+
+        rel_path = None
+        out_path = None
+
+        if "/pdf_images/" in norm_img:
+            job_root = norm_img.split("/pdf_images/")[0]
+            review_dir = self._ensure_dir(os.path.join(job_root, "pdf_images", "review_overlays"))
+            safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
+            fname = f"{safe_base}_review_overlay.png"
+            out_path = os.path.join(review_dir, fname)
+            rel_path = f"pdf_images/review_overlays/{fname}"
+        else:
+            # fallback if we can't infer job_root
+            src_dir = os.path.dirname(os.path.abspath(image_path))
+            review_dir = self._ensure_dir(os.path.join(src_dir, "review_overlays"))
+            safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
+            fname = f"{safe_base}_review_overlay.png"
+            out_path = os.path.join(review_dir, fname)
+            rel_path = f"review_overlays/{fname}"
+
+        # --- Magenta header attrs ---
+        # EXPECTATION: header parser returns:
+        # header_result["winningBoxes"] = {"name":[x1,y1,x2,y2], "voltage":[...], ...}
+        # header_result["boxImageShape"] = {"w": <int>, "h": <int>}  (shape used for those coords)
+        hdr = header_result if isinstance(header_result, dict) else {}
+        winning = hdr.get("winningBoxes") if isinstance(hdr.get("winningBoxes"), dict) else {}
+        shape = hdr.get("boxImageShape") if isinstance(hdr.get("boxImageShape"), dict) else {}
+        src_w = int(shape.get("w") or W)
+        src_h = int(shape.get("h") or H)
+
+        MAGENTA = (255, 0, 255)  # BGR
+        for k, box in winning.items():
+            if not isinstance(box, (list, tuple)) or len(box) != 4:
+                continue
+            scaled = self._scale_box(box, src_w, src_h, W, H)
+            self._draw_box(vis, scaled, MAGENTA, label=k, fill_alpha=0.0, thickness=3)
+
+        # --- Column overlays (from Parser9 normalized columns) ---
+        prs = parser_result if isinstance(parser_result, dict) else {}
+        hscan = prs.get("headerScan") if isinstance(prs.get("headerScan"), dict) else {}
+        norm = hscan.get("normalizedColumns") if isinstance(hscan.get("normalizedColumns"), dict) else {}
+        layout = (norm.get("layout") or "unknown").lower()
+        cols = norm.get("columns") or []
+
+        header_bottom_y = ar.get("header_bottom_y")
+        footer_y = ar.get("footer_y")
+
+        y_top = 0
+        y_bot = H - 1
+        if isinstance(header_bottom_y, (int, float)):
+            y_top = max(0, min(H - 1, int(header_bottom_y)))
+        if isinstance(footer_y, (int, float)):
+            y_bot = max(y_top + 1, min(H - 1, int(footer_y)))
+
+        GREEN = (0, 255, 0)      # trip OR combined
+        BLUE  = (255, 0, 0)      # poles
+
+        def draw_col(col, color, label):
+            try:
+                x1 = int(col.get("x_left", 0))
+                x2 = int(col.get("x_right", 0))
+            except Exception:
+                return
+            if x2 <= x1 + 1:
+                return
+            self._draw_box(
+                vis,
+                [x1, y_top, x2, y_bot],
+                color,
+                label=label,
+                fill_alpha=0.12,   # faint fill
+                thickness=3
+            )
+
+        for col in cols:
+            role = col.get("role")
+            if layout == "combined":
+                if role == "combo":
+                    draw_col(col, GREEN, "COMBO")
+            elif layout == "separated":
+                if role == "trip":
+                    draw_col(col, GREEN, "TRIP")
+                elif role == "poles":
+                    draw_col(col, BLUE, "POLES")
+            else:
+                # unknown layout: still show anything we have
+                if role == "combo":
+                    draw_col(col, GREEN, "COMBO")
+                elif role == "trip":
+                    draw_col(col, GREEN, "TRIP")
+                elif role == "poles":
+                    draw_col(col, BLUE, "POLES")
+
+        # Save one combined file for the UI
+        safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
+        out_path = os.path.join(review_dir, f"{safe_base}_review_overlay.png")
+        try:
+            ok = cv2.imwrite(out_path, vis)
+            if not ok:
+                if self.debug:
+                    print(f"[WARN] cv2.imwrite returned False for: {out_path}")
+                return None
+            return rel_path
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Failed to write review overlay: {e}")
+            return None
+
     def _ensure_analyzer(self):
         if self._analyzer is None:
             self._analyzer = BreakerTableAnalyzer(debug=self.debug)
@@ -202,6 +378,7 @@ class BreakerTablePipeline:
                 header_result = None
                 if self.debug:
                     print(f"[WARN] Header parser failed: {e}")
+        header_result_raw = copy.deepcopy(header_result) if isinstance(header_result, dict) else None
 
         # --- 2b) Apply de-duped display name as early as possible ---
         try:
@@ -221,6 +398,7 @@ class BreakerTablePipeline:
         # --- 3) Header validity check (but DO NOT skip the table parser) ---
         should_run_parser = run_parser
         panel_status = None
+        header_invalid = False
         try:
             _dn, volts, bus_amps, main_amps, _spaces_unused = self._extract_panel_keys(
                 analyzer_result, header_result, None
@@ -232,8 +410,7 @@ class BreakerTablePipeline:
 
             if volts_invalid or bus_invalid or main_invalid:
                 panel_status = f"unable to detect key information on panel ({dedup_name})"
-                header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
-                # NOTE: we still run the ALT table parser; just change the message:
+                header_invalid = True
                 if self.debug:
                     miss = []
                     if volts_invalid: miss.append(f"volts={volts!r}")
@@ -261,6 +438,27 @@ class BreakerTablePipeline:
         # Ensure the table parser result advertises the deduped name for the UI
         if isinstance(parser_result, dict):
             parser_result["name"] = dedup_name
+
+        review_overlay_path = None
+        try:
+            review_overlay_path = self._build_review_overlay(
+                image_path=img,
+                analyzer_result=analyzer_result,
+                header_result=(header_result_raw or header_result),
+                parser_result=parser_result,
+                dedup_name=dedup_name,
+            )
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Review overlay generation failed: {e}")
+
+        # expose to UI
+        if isinstance(parser_result, dict):
+            parser_result["reviewOverlayPath"] = review_overlay_path
+        if isinstance(header_result, dict):
+            header_result["reviewOverlayPath"] = review_overlay_path
+        if header_invalid:
+            header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
 
         # --- optional legacy prints (only if table parser ran) ---
         if self.debug and parser_result is not None:

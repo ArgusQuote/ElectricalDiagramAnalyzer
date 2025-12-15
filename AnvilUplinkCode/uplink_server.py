@@ -104,7 +104,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV2 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv6 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
 import RulesEngine.RulesEngine3 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
@@ -978,37 +978,45 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
 
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
-    """Return absolute paths to all overlay PNGs for this job."""
     if not job_id:
         return []
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    overlay_dir = (job_root / "pdf_images" / "magenta_overlays")
+    overlay_dir = (job_root / "pdf_images" / "review_overlays")
     if not overlay_dir.is_dir():
         return []
-    return [str(p.resolve()) for p in sorted(overlay_dir.glob("*.png"))]
+    return [str(p.relative_to(job_root)) for p in sorted(overlay_dir.glob("*.png"))]
 
 @anvil.server.callable
 def vm_fetch_image(job_id: str, source_path: str):
     """
-    Return the cropped PNG for a given panel as BlobMedia, enforcing that the file
-    lives under this job folder.
+    Return an image as BlobMedia.
+    Accepts either:
+      - absolute paths inside this job folder, OR
+      - job-relative paths like: 'pdf_images/review_overlays/foo.png'
     """
     if not job_id or not source_path:
         raise RuntimeError("job_id and source_path are required")
 
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    p = Path(source_path).resolve()
+
+    raw = str(source_path).strip().replace("\\", "/")
+    p_in = Path(raw)
+
+    # If client sent a relative path, interpret it under the job folder.
+    if not p_in.is_absolute():
+        p = (job_root / p_in).resolve()
+    else:
+        p = p_in.resolve()
 
     # Security: ensure requested file is inside this job folder
     if not str(p).startswith(str(job_root)):
-        raise RuntimeError("Invalid image path for this job")
+        raise RuntimeError(f"Invalid image path for this job: {raw}")
 
     if not p.is_file():
         raise RuntimeError(f"Image not found: {p}")
 
     ctype = "image/png" if p.suffix.lower() == ".png" else "application/octet-stream"
-    data = p.read_bytes()
-    return BlobMedia(ctype, data, name=p.name)
+    return BlobMedia(ctype, p.read_bytes(), name=p.name)
 
 @anvil.server.callable
 def vm_set_watchdog_timeout(minutes: int) -> dict:

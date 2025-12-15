@@ -1,4 +1,4 @@
-# OcrLibrary/PanelHeaderParserV4.py
+# OcrLibrary/PanelHeaderParserV6.py
 import os, re, cv2, json, numpy as np
 from typing import Dict, List, Tuple, Optional
 
@@ -678,6 +678,26 @@ class PanelParser:
             "name": name,
             "attrs": attrs,
         }
+
+        # ---- expose winning boxes for downstream review overlays ----
+        def _rect4(it):
+            return [int(it["x1"]), int(it["y1"]), int(it["x2"]), int(it["y2"])]
+
+        winning = {}
+        if chosen_map.get("NAME"):
+            winning["name"] = _rect4(chosen_map["NAME"])
+        if chosen_map.get("VOLTAGE"):
+            winning["voltage"] = _rect4(chosen_map["VOLTAGE"])
+        if chosen_map.get("BUS"):
+            winning["bus"] = _rect4(chosen_map["BUS"])
+        if chosen_map.get("MAIN"):
+            winning["main"] = _rect4(chosen_map["MAIN"])
+        if chosen_map.get("AIC"):
+            winning["aic"] = _rect4(chosen_map["AIC"])
+
+        # coords are in the coordinate system of prep_full (after _prep_for_ocr resize)
+        result["winningBoxes"] = winning
+        result["boxImageShape"] = {"w": int(W), "h": int(H)}
 
         # ===== Debug overlay =====
         if self.debug:
