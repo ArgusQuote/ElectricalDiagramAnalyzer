@@ -2847,27 +2847,3 @@ class TransformerEngine(BaseEngine):
             "error": "Invalid transformer configuration.",
             "_debug": {"attempts": attempts_meta[:10]}
         }
-
-payload = {
-  "items": [{
-    "type": "panelboard",
-    "name": "TEST ILINE DUPES",
-    "attrs": {
-      "amperage": 150,
-      "voltage": 208,
-      "spaces": 18,
-      "intRating": 22,
-      "panelRatingType": "FULLY_RATED",
-      "enclosure": "NEMA1",
-      "material": "ALUMINUM",
-      "detected_breakers": [
-        {"poles": 1, "amperage": 20, "count": 8, "specialFeatures": ""},
-        {"poles": 1, "amperage": 30, "count": 7, "specialFeatures": ""},
-        {"poles": 1, "amperage": 80, "count": 3, "specialFeatures": ""},
-      ]
-    }
-  }]
-}
-
-out = process_job(payload)
-print(out["TEST ILINE DUPES"]["Branch Breakers (I-LINE)"])
