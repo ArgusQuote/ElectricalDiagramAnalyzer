@@ -8,11 +8,11 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV19 import PanelBoardSearch
 
 # Inputs/Outputs
-INPUT_PDF = Path("~/Documents/Diagrams/ELECTRICAL SET (Mark Up)_electrical_filtered.pdf").expanduser()
-OUT_DIR   = Path("~/Documents/Diagrams/CaseStudy_VectorCrop_Run6").expanduser()
+INPUT_PDF = Path("~/Documents/pdfToScan/C.pdf").expanduser()
+OUT_DIR   = Path("~/Documents/pdfScanTest").expanduser()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 finder = PanelBoardSearch(
