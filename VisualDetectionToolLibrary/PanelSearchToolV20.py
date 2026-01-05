@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import cv2
 import fitz  # PyMuPDF
-import json 
-import shutil   # <-- add this
+import json
+import shutil
 
 
 class PanelBoardSearch:
@@ -14,7 +14,7 @@ class PanelBoardSearch:
     (so coordinates match the PDF page), then:
       1) Write a vector-only PDF for each table via clip.
       2) Render a high-DPI PNG from the same clip.
-    Always writes a magenta overlay per source page for QA.
+    Always writes an artifacts overlay per source page for QA.
 
     Public API:
         crops = PanelBoardSearch(...).readPdf("/path/to.pdf")
@@ -63,17 +63,14 @@ class PanelBoardSearch:
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
 
         # subdirs
-        self.magenta_dir = Path(self.output_dir) / "magenta_overlays"
-        self.magenta_dir.mkdir(parents=True, exist_ok=True)
+        self.artifacts_dir = Path(self.output_dir) / "artifacts_overlays"
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.vec_dir = Path(self.output_dir) / "cropped_tables_pdf"
         self.vec_dir.mkdir(parents=True, exist_ok=True)
 
-        # <<< NEW: raster outputs >>>
+        # where raster crops go
         self.raster_dir = Path(self.output_dir) / "raster_images"
         self.raster_dir.mkdir(parents=True, exist_ok=True)
-        self.raster_overlay_dir = Path(self.output_dir) / "raster_overlays"
-        self.raster_overlay_dir.mkdir(parents=True, exist_ok=True)
-        # <<< END NEW >>>
 
         # knobs
         self.dpi = dpi
@@ -161,7 +158,8 @@ class PanelBoardSearch:
             sel_ws = self._selected_ws_mask(labels, keep_ids)
             contours, hier = cv2.findContours(sel_ws, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
-            magenta = det_bgr.copy()
+            # "magenta" image is now our generic artifacts overlay
+            overlay_img = det_bgr.copy()
             saved_idx = 0
             candidates: list[fitz.Rect] = []
 
@@ -201,7 +199,8 @@ class PanelBoardSearch:
                     if not _box_passes(x, y, w, h):
                         continue
 
-                    cv2.drawContours(magenta, [cnt], -1, (255, 0, 255), 5)
+                    # was magenta (255, 0, 255); now GREEN for void/table regions
+                    cv2.drawContours(overlay_img, [cnt], -1, (0, 255, 0), 5)
 
                     # pad & map detection bbox → PDF clip
                     y0 = max(0, y - self.pad); x0 = max(0, x - self.pad)
@@ -222,7 +221,8 @@ class PanelBoardSearch:
                     w, h = x1 - x0, y1 - y0
                     if not _box_passes(x0, y0, w, h):
                         continue
-                    cv2.rectangle(magenta, (x0, y0), (x1, y1), (255, 0, 255), 5)
+                    # was magenta; now GREEN
+                    cv2.rectangle(overlay_img, (x0, y0), (x1, y1), (0, 255, 0), 5)
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
                     pr = page.rect
                     clip = fitz.Rect(
@@ -256,9 +256,9 @@ class PanelBoardSearch:
                 cv2.imwrite(str(png_path), png)
                 all_pngs.append(str(png_path))
 
-            # Per-page overlay
-            ov_path = self.magenta_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
-            cv2.imwrite(str(ov_path), magenta)
+            # Per-page overlay (voids only for now, rasters added later)
+            ov_path = self.artifacts_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
+            cv2.imwrite(str(ov_path), overlay_img)
 
             if self.verbose:
                 print(f"[INFO] Page {pidx+1}: saved {saved_idx} crop(s)")
@@ -280,16 +280,14 @@ class PanelBoardSearch:
         if self.enforce_one_box and all_pngs:
             all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
-        # <<< NEW: final pass – extract rasters + raster-only overlays >>>
-        self._extract_rasters_and_overlays(pdf_path)
-        # <<< END NEW >>>
+        # final raster pass — crop rasters + augment artifacts overlay
+        self._extract_rasters_and_augment_magenta(pdf_path)
 
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
             print(f"      Vector PDFs → {self.vec_dir}")
-            print(f"      Overlays    → {self.magenta_dir}")
+            print(f"      Overlays    → {self.artifacts_dir}")
             print(f"      Raster PNGs → {self.raster_dir}")
-            print(f"      Raster overlays → {self.raster_overlay_dir}")
 
         return all_pngs
 
@@ -338,23 +336,22 @@ class PanelBoardSearch:
             return cv2.cvtColor(buf, cv2.COLOR_GRAY2BGR)
         return cv2.cvtColor(buf, cv2.COLOR_RGB2BGR)
 
-    # <<< NEW: tiny helpers reused from the working overlay script >>>
-    def _page_to_bgr_image(self, page: fitz.Page, zoom: float = 2.0):
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat, alpha=False)
-        img = self._pix_to_bgr(pix)
-        return img, mat
-
     @staticmethod
-    def _rect_to_pix_rect(page: fitz.Page, rect: fitz.Rect,
-                          mat: fitz.Matrix, zoom: float) -> fitz.Rect:
+    def _rect_to_pix_rect(page: fitz.Page,
+                          rect: fitz.Rect,
+                          mat: fitz.Matrix,
+                          zoom: float) -> fitz.Rect:
+        """
+        Map a rectangle from PDF coordinate space to pixmap coordinate space,
+        honoring page.rotation. Works for rot=0 and rot=270.
+        """
         rot = page.rotation % 360
 
-        # no rotation: old behavior
+        # Normal pages
         if rot == 0:
             return rect * mat
 
-        # handle 270° pages (the ones that were off)
+        # 270° rotation explicitly
         if rot == 270:
             mbox = page.mediabox
             w0 = mbox.width  # unrotated width
@@ -362,6 +359,7 @@ class PanelBoardSearch:
             xs = [rect.x0, rect.x1, rect.x1, rect.x0]
             ys = [rect.y0, rect.y0, rect.y1, rect.y1]
 
+            # (x, y) -> (y, w0 - x)
             xps = [y for x, y in zip(xs, ys)]
             yps = [w0 - x for x, y in zip(xs, ys)]
 
@@ -370,9 +368,8 @@ class PanelBoardSearch:
 
             return fitz.Rect(minx * zoom, miny * zoom, maxx * zoom, maxy * zoom)
 
-        # everything else, treat like 0°
+        # Fallback: treat other rotations like 0°
         return rect * mat
-    # <<< END NEW >>>
 
     @staticmethod
     def _binarize_ink(gray: np.ndarray, close_px: int = 3, dilate_px: int = 3) -> np.ndarray:
@@ -513,7 +510,6 @@ class PanelBoardSearch:
         boxes.sort(key=lambda b: (b[1], b[0]))
         return boxes
 
-
     @staticmethod
     def _nms_keep_larger(boxes, iou_thr=0.5):
         if len(boxes) <= 1:
@@ -524,7 +520,6 @@ class PanelBoardSearch:
             if all(PanelBoardSearch._iou(box, k) <= iou_thr for k in keep):
                 keep.append(box)
         return keep
-
 
     @staticmethod
     def _iou(a, b):
@@ -542,12 +537,6 @@ class PanelBoardSearch:
 
     # ---------------- Horizontal-line debug masks ----------------
     def _save_horizontal_line_masks(self, image_paths: list[str]) -> tuple[list[str], list[str]]:
-        """
-        For each final crop PNG, create:
-          - a binarized mask that shows only horizontal lines
-          - line spacing metrics
-          - a 'valid_table' flag based on spacing regularity
-        """
         debug_dir = Path(self.output_dir) / "debug_horizontal_lines"
         if self.debug:
             debug_dir.mkdir(parents=True, exist_ok=True)
@@ -619,14 +608,13 @@ class PanelBoardSearch:
             31,
             10,
         )
-
         H, W = gray.shape
         hk = max(W // 80, 5)
         kh = cv2.getStructuringElement(cv2.MORPH_RECT, (hk, 1))
         horiz = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kh)
         _, horiz_bin = cv2.threshold(horiz, 0, 255, cv2.THRESH_BINARY)
         return horiz_bin
-    
+
     @staticmethod
     def _extract_horizontal_line_metrics(mask: np.ndarray) -> list[list[int]]:
         if mask.ndim == 3:
@@ -708,13 +696,13 @@ class PanelBoardSearch:
 
         return False
 
-    # <<< NEW: final raster pass >>>
-    def _extract_rasters_and_overlays(self, pdf_path: str):
+    # ----- Raster cropping + overlay augmentation -----
+    def _extract_rasters_and_augment_magenta(self, pdf_path: str):
         """
         Second pass over the PDF:
           - crop each embedded raster image to raster_images/
-          - write a raster-only overlay per page to raster_overlays/
-        Does NOT change any of the table-detection outputs.
+          - draw RED boxes for rasters directly on the existing artifacts
+            overlay PNGs (one per page).
         """
         try:
             doc = fitz.open(pdf_path)
@@ -723,20 +711,26 @@ class PanelBoardSearch:
                 print(f"[WARN] Could not reopen PDF for raster pass: {pdf_path} ({e})")
             return
 
-        zoom = 2.0  # same flavor as your overlay script
+        base = Path(pdf_path).stem
+        zoom = self.dpi / 72.0
+        det_mat = fitz.Matrix(zoom, zoom)
 
-        for page_index in range(len(doc)):
-            page = doc[page_index]
-            img, mat = self._page_to_bgr_image(page, zoom=zoom)
-            h, w = img.shape[:2]
-            overlay = img.copy()
+        for pidx, page in enumerate(doc):
+            # render at detection DPI so coords match artifacts overlay
+            pix = page.get_pixmap(matrix=det_mat, alpha=False)
+            page_img = self._pix_to_bgr(pix)
+            H, W = page_img.shape[:2]
+
+            ov_path = self.artifacts_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
+            overlay = cv2.imread(str(ov_path), cv2.IMREAD_COLOR)
+            if overlay is None or overlay.shape[:2] != (H, W):
+                overlay = page_img.copy()
 
             try:
                 images = page.get_images(full=True)
             except Exception as e:
                 if self.verbose:
-                    print(f"[WARN] raster pass {Path(pdf_path).name} page {page_index+1}: "
-                          f"get_images() failed: {e}")
+                    print(f"[WARN] raster pass {base} page {pidx+1}: get_images() failed: {e}")
                 images = []
 
             raster_idx = 0
@@ -747,52 +741,49 @@ class PanelBoardSearch:
                     rects = page.get_image_rects(xref)
                 except Exception as e:
                     if self.verbose:
-                        print(f"[WARN] raster pass {Path(pdf_path).name} page {page_index+1}: "
+                        print(f"[WARN] raster pass {base} page {pidx+1}: "
                               f"get_image_rects({xref}) failed: {e}")
                     continue
 
                 for r in rects:
                     rect_obj = fitz.Rect(r)
-                    r_pix = self._rect_to_pix_rect(page, rect_obj, mat, zoom)
+                    r_pix = self._rect_to_pix_rect(page, rect_obj, det_mat, zoom)
+
                     x0 = int(r_pix.x0)
                     y0 = int(r_pix.y0)
                     x1 = int(r_pix.x1)
                     y1 = int(r_pix.y1)
 
-                    x0 = max(0, min(w - 1, x0))
-                    y0 = max(0, min(h - 1, y0))
-                    x1 = max(0, min(w,     x1))
-                    y1 = max(0, min(h,     y1))
+                    x0 = max(0, min(W - 1, x0))
+                    y0 = max(0, min(H - 1, y0))
+                    x1 = max(0, min(W,     x1))
+                    y1 = max(0, min(H,     y1))
 
                     if x1 <= x0 or y1 <= y0:
                         continue
 
-                    # crop raster
-                    crop = img[y0:y1, x0:x1].copy()
+                    crop = page_img[y0:y1, x0:x1].copy()
                     if crop.size == 0:
                         continue
 
                     raster_idx += 1
-                    r_name = f"{Path(pdf_path).stem}_page{page_index+1:03d}_raster{raster_idx:02d}.png"
+                    r_name = f"{base}_page{pidx+1:03d}_raster{raster_idx:02d}.png"
                     r_path = self.raster_dir / r_name
                     cv2.imwrite(str(r_path), crop)
 
-                    # draw overlay box
+                    # draw RED rectangle on artifacts overlay (rasters)
                     cv2.rectangle(
                         overlay,
                         (x0, y0),
                         (x1 - 1, y1 - 1),
-                        (255, 0, 0),  # blue-ish in BGR
+                        (0, 0, 255),  # RED in BGR
                         2,
                     )
 
             if raster_idx > 0:
-                ov_name = f"{Path(pdf_path).stem}_page{page_index+1:03d}_raster_overlay.png"
-                ov_path = self.raster_overlay_dir / ov_name
                 cv2.imwrite(str(ov_path), overlay)
                 if self.verbose:
-                    print(f"[INFO] Raster pass page {page_index+1}: "
-                          f"{raster_idx} raster(s), overlay → {ov_path}")
+                    print(f"[INFO] Raster pass page {pidx+1}: "
+                          f"{raster_idx} raster(s), overlay updated")
 
         doc.close()
-    # <<< END NEW >>>
