@@ -1120,104 +1120,6 @@ class SeparatedLayoutParser:
         self.debug = bool(debug)
         self.reader = reader
 
-    def _infer_body_rows_from_tokens(
-        self,
-        tokens_by_col_index: Dict[int, List[Dict]],
-        body_y_top: int,
-        body_y_bottom: int,
-    ):
-        """
-        OLD: token-clustering-based row inference. Currently unused by parse(),
-        which now relies on horizontal row-divider lines. Kept for possible
-        future fallback / experiments.
-        """
-        ys = []
-
-        for col_tokens in tokens_by_col_index.values():
-            for tok in (col_tokens or []):
-                try:
-                    x1, y1, x2, y2 = tok["box_page"]
-                except Exception:
-                    continue
-                y_center = 0.5 * (y1 + y2)
-                # Keep only tokens that are actually within the body band
-                if y_center < body_y_top or y_center > body_y_bottom:
-                    continue
-                ys.append(float(y_center))
-
-        if not ys:
-            if self.debug:
-                print("[SeparatedLayoutParser] No token Y-centers found; no body rows inferred.")
-            return []
-
-        ys.sort()
-
-        # If there is only one y center, treat the entire band as one row
-        if len(ys) == 1:
-            return [(int(body_y_top), int(body_y_bottom))]
-
-        # Compute gaps between successive centers
-        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
-        gaps_sorted = sorted(gaps)
-        # Simple median
-        mid = len(gaps_sorted) // 2
-        if len(gaps_sorted) % 2 == 0:
-            median_gap = 0.5 * (gaps_sorted[mid - 1] + gaps_sorted[mid])
-        else:
-            median_gap = gaps_sorted[mid]
-
-        # Define a max gap threshold to decide "new row" vs "same row"
-        body_height = max(1, body_y_bottom - body_y_top)
-        # Clamp the threshold into a reasonable range
-        min_gap = 5.0
-        max_gap = max(20.0, 0.15 * body_height)
-        gap_threshold = max(min_gap, min(median_gap * 1.5, max_gap))
-
-        if self.debug:
-            print(
-                f"[SeparatedLayoutParser] token Y-centers: count={len(ys)}, "
-                f"median_gap={median_gap:.2f}, gap_threshold={gap_threshold:.2f}"
-            )
-
-        # Cluster ys by gap_threshold
-        clusters = [[ys[0]]]
-        for y in ys[1:]:
-            if y - clusters[-1][-1] <= gap_threshold:
-                clusters[-1].append(y)
-            else:
-                clusters.append([y])
-
-        # Compute cluster centers
-        centers = [int(round(sum(c) / len(c))) for c in clusters]
-        centers.sort()
-
-        if self.debug:
-            print(
-                f"[SeparatedLayoutParser] inferred row centers={centers} "
-                f"(body_y_top={body_y_top}, body_y_bottom={body_y_bottom})"
-            )
-
-        # Convert centers into row bands [top, bottom)
-        row_spans = []
-        for idx, c in enumerate(centers):
-            if idx == 0:
-                top = body_y_top
-            else:
-                top = int((centers[idx - 1] + c) / 2)
-
-            if idx + 1 < len(centers):
-                bottom = int((c + centers[idx + 1]) / 2)
-            else:
-                bottom = body_y_bottom
-
-            if bottom > top + 3:
-                row_spans.append((top, bottom))
-
-        if self.debug:
-            print(f"[SeparatedLayoutParser] inferred {len(row_spans)} body row bands from tokens.")
-
-        return row_spans
-
     def _row_text_for_column(self, row_top: int, row_bottom: int, col_tokens):
         """
         For a given column + row band, stitch together all tokens that fall
@@ -1250,7 +1152,6 @@ class SeparatedLayoutParser:
             List of y-centers (ints) in STRIP-LOCAL coordinates.
         """
         import cv2
-        import numpy as np  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -1341,7 +1242,6 @@ class SeparatedLayoutParser:
         Returns:
             List of (row_top, row_bottom) in STRIP-LOCAL coordinates.
         """
-        import cv2  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -1594,7 +1494,6 @@ class SeparatedLayoutParser:
         """
         import os
         import cv2
-        from typing import Dict
 
         # --- image sources ---
         raw_gray = analyzer_result.get("gray")
@@ -2031,196 +1930,6 @@ class CombinedLayoutParser:
         self.debug = bool(debug)
         self.reader = reader  # shared EasyOCR instance (same as header)
 
-    def _infer_body_rows_from_tokens(
-        self,
-        tokens_by_col_index: Dict[int, List[Dict]],
-        body_y_top: int,
-        body_y_bottom: int,
-    ):
-        """
-        Infer body row bands purely from OCR token positions (gridless body),
-        instead of using horizontal grid lines.
-
-        Shared logic with SeparatedLayoutParser but kept separate for clarity.
-        """
-        ys = []
-
-        for col_tokens in tokens_by_col_index.values():
-            for tok in (col_tokens or []):
-                try:
-                    x1, y1, x2, y2 = tok["box_page"]
-                except Exception:
-                    continue
-                y_center = 0.5 * (y1 + y2)
-                if y_center < body_y_top or y_center > body_y_bottom:
-                    continue
-                ys.append(float(y_center))
-
-        if not ys:
-            if self.debug:
-                print("[CombinedLayoutParser] No token Y-centers found; no body rows inferred.")
-            return []
-
-        ys.sort()
-
-        if len(ys) == 1:
-            return [(int(body_y_top), int(body_y_bottom))]
-
-        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
-        gaps_sorted = sorted(gaps)
-        mid = len(gaps_sorted) // 2
-        if len(gaps_sorted) % 2 == 0:
-            median_gap = 0.5 * (gaps_sorted[mid - 1] + gaps_sorted[mid])
-        else:
-            median_gap = gaps_sorted[mid]
-
-        body_height = max(1, body_y_bottom - body_y_top)
-        min_gap = 5.0
-        max_gap = max(20.0, 0.15 * body_height)
-        gap_threshold = max(min_gap, min(median_gap * 1.5, max_gap))
-
-        if self.debug:
-            print(
-                f"[CombinedLayoutParser] token Y-centers: count={len(ys)}, "
-                f"median_gap={median_gap:.2f}, gap_threshold={gap_threshold:.2f}"
-            )
-
-        clusters = [[ys[0]]]
-        for y in ys[1:]:
-            if y - clusters[-1][-1] <= gap_threshold:
-                clusters[-1].append(y)
-            else:
-                clusters.append([y])
-
-        centers = [int(round(sum(c) / len(c))) for c in clusters]
-        centers.sort()
-
-        if self.debug:
-            print(
-                f"[CombinedLayoutParser] inferred row centers={centers} "
-                f"(body_y_top={body_y_top}, body_y_bottom={body_y_bottom})"
-            )
-
-        row_spans = []
-        for idx, c in enumerate(centers):
-            if idx == 0:
-                top = body_y_top
-            else:
-                top = int((centers[idx - 1] + c) / 2)
-
-            if idx + 1 < len(centers):
-                bottom = int((c + centers[idx + 1]) / 2)
-            else:
-                bottom = body_y_bottom
-
-            if bottom > top + 3:
-                row_spans.append((top, bottom))
-
-        if self.debug:
-            print(f"[CombinedLayoutParser] inferred {len(row_spans)} body row bands from tokens.")
-
-        return row_spans
-
-    def _ocr_body_column(
-        self,
-        gray_body,
-        body_y_top: int,
-        body_y_bottom: int,
-        x_left: int,
-        x_right: int,
-    ):
-        """
-        OCR a single combo body strip and return tokens in PAGE coordinates.
-
-        UPDATED:
-          - No splitting into halves; OCR the full strip at once.
-        """
-        import cv2
-
-        if gray_body is None or self.reader is None:
-            return []
-
-        H, W = gray_body.shape[:2]
-        body_y_top = max(0, min(H - 1, int(body_y_top)))
-        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
-        x_left = max(0, min(W - 1, int(x_left)))
-        x_right = max(x_left + 1, min(W, int(x_right)))
-
-        band = gray_body[body_y_top:body_y_bottom, x_left:x_right]
-        if band.size == 0:
-            return []
-
-        H_band, W_band = band.shape[:2]
-        if H_band <= 0:
-            return []
-
-        # Up-res entire band
-        band_up = cv2.resize(
-            band,
-            None,
-            fx=_HDR_OCR_SCALE,
-            fy=_HDR_OCR_SCALE,
-            interpolation=cv2.INTER_CUBIC,
-        )
-
-        try:
-            dets = self.reader.readtext(
-                band_up,
-                detail=1,
-                paragraph=False,
-                allowlist=_HDR_OCR_ALLOWLIST,
-                mag_ratio=1.0,
-                contrast_ths=0.05,
-                adjust_contrast=0.7,
-                text_threshold=0.4,
-                low_text=0.25,
-            )
-        except Exception:
-            dets = []
-
-        tokens = []
-
-        for box, txt, conf in dets:
-            try:
-                conf_f = float(conf or 0.0)
-            except Exception:
-                conf_f = 0.0
-
-            if conf_f < _HDR_MIN_CONF:
-                continue
-
-            # OCR box is in upscaled band coordinates → map back to band
-            pts_local = [
-                (
-                    int(p[0] / _HDR_OCR_SCALE),
-                    int(p[1] / _HDR_OCR_SCALE),
-                )
-                for p in box
-            ]
-            xs = [p[0] for p in pts_local]
-            ys = [p[1] for p in pts_local]
-
-            x1_band = max(0, min(W_band - 1, min(xs)))
-            x2_band = max(0, min(W_band - 1, max(xs)))
-            y1_band = max(0, min(H_band - 1, min(ys)))
-            y2_band = max(0, min(H_band - 1, max(ys)))
-
-            # Map band coords into PAGE coords
-            x1_page = x_left + x1_band
-            x2_page = x_left + x2_band
-            y1_page = body_y_top + y1_band
-            y2_page = body_y_top + y2_band
-
-            tokens.append(
-                {
-                    "text": str(txt or "").strip(),
-                    "conf": conf_f,
-                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                }
-            )
-
-        return tokens
-
     def _row_text_for_column(self, row_top: int, row_bottom: int, col_tokens):
         """
         For a given column + row band, stitch together all tokens that fall
@@ -2253,7 +1962,6 @@ class CombinedLayoutParser:
             List of y-centers (ints) in STRIP-LOCAL coordinates.
         """
         import cv2
-        import numpy as np  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -2331,8 +2039,7 @@ class CombinedLayoutParser:
         Given a combo body-strip in GRAY (gridless), use the detected long
         horizontal lines to define row bands in STRIP-LOCAL coordinates.
 
-        NEW BEHAVIOR:
-          - We treat regions:
+          - Regions:
                 top_of_strip → first_line,
                 each line_i → line_{i+1},
                 last_line → bottom_of_strip
@@ -2343,7 +2050,6 @@ class CombinedLayoutParser:
         Returns:
             List of (row_top, row_bottom) in STRIP-LOCAL coordinates.
         """
-        import cv2  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -2807,7 +2513,6 @@ class CombinedLayoutParser:
         """
         import os
         import cv2
-        from typing import Dict, Optional
 
         # --- image sources ---
         raw_gray = analyzer_result.get("gray")
@@ -3317,7 +3022,7 @@ class BreakerTableParser:
 
     def _print_terminal_summary(self, analyzer_result: Dict, result: Dict) -> None:
         """
-        Print a simple, human-readable summary that mirrors the final JSON, per panel:
+        Print a simple summary that mirrors the final JSON, per panel:
 
           Panel name - LIA
           Amps - 125A, main breaker amps - Unknown, volts - 480V, spaces - 42

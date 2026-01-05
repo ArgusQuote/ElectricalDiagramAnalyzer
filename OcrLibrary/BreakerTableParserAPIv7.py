@@ -127,7 +127,6 @@ class BreakerTablePipeline:
             return None
         if isinstance(v, int):
             return v if v in VALID_VOLTAGES else None
-        import re
         s = str(v)
         m_pair = re.search(r'(?<!\d)(120|208|240|277|480|600)\s*[Y/]\s*(120|208|240|277|480|600)(?!\d)', s, flags=re.I)
         if m_pair:

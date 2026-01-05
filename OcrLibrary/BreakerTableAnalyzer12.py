@@ -46,8 +46,6 @@ class SimpleHFResult:
 
 class BreakerTableAnalyzer:
     """
-    SUPER-SIMPLIFIED analyzer:
-
       1) Read image and prep gray.
       2) Use BreakerHeaderFinder to get:
            - header_y
@@ -208,7 +206,7 @@ class BreakerTableAnalyzer:
 
     def _prep(self, img: np.ndarray) -> np.ndarray:
         """
-        Same prep as before: grayscale + CLAHE + min-height upscale.
+        Grayscale + CLAHE + min-height upscale.
         """
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
@@ -310,7 +308,7 @@ class BreakerTableAnalyzer:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python BreakerTableAnalyzer9.py /path/to/panel.png")
+        print("Usage: python BreakerTableAnalyzer12.py /path/to/panel.png")
         sys.exit(1)
 
     path = sys.argv[1]

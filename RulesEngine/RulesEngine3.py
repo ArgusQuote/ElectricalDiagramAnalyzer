@@ -1047,7 +1047,6 @@ class PanelboardEngine(BaseEngine):
             voltage=_safe_int(panelAttrs.get("voltage"), 0),
         )
 
-        original_spaces = spaces
         screened_spaces = max(spaces, auto_spaces)
 
         allow_nq, allow_nf, routing = _family_screen(raw, prefer_plug_on=bool(raw.get("allowPlugOn", True)))

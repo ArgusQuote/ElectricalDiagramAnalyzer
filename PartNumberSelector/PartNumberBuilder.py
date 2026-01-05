@@ -118,7 +118,6 @@ class Disconnect():
         poles = attributes.get("poles")
         voltage = attributes.get("voltage")
         amps = attributes.get("amps")
-        neutral = attributes.get("neutral")
         enclosure = attributes.get("enclosure", "").upper()
         groundRequired = attributes.get("groundRequired", False)
         solidNeutral = attributes.get("solidNeutral", False)
@@ -395,9 +394,6 @@ class breakerSelector:
 
 # Start E-Frame Breakers
 class eFrameBreaker():
-    def __init__(self):
-        # Initialize EasyOCR reader
-        self.bool = False
 
     # Function to generate NF E‐Frame Breakers
     def generateEBreakerPartNumber(self, attributes):
@@ -461,9 +457,6 @@ class eFrameBreaker():
 
 # Start Loadcenters
 class loadcenter():
-    def __init__(self):
-        # Initialize EasyOCR reader
-        self.bool = False
 
     # Helper function: Generate the additional ground bar kit for HOM load centers
     def generateHomGroundBar(self, homPartNumber, groundBarRequired):
@@ -629,18 +622,6 @@ class loadcenter():
         groundBar = attributes.get("groundBar")
         specialApplication = attributes.get("specialApplication")
         quikGrip = attributes.get("quikGrip")
-        busMaterial = attributes.get("busMaterial", "Aluminum")
-
-        # Combined mappings for part number components
-        mappings = {
-            'typeMap': {'Homeline': 'HOM', 'QO': 'QO'},
-            'mainsTypeMap': {'MAIN BREAKER': 'M', 'MAIN LUGS': 'L'},
-            'mainsRatingMap': {70: '70', 100: '100', 125: '125', 150: '150', 200: '200', 225: '225'},
-            'poleSpacesMap': {4: '24', 8: '48', 12: '612', 16: '816', 24: '1224', 32: '1632', 40: '2040', 48: '2448', 60: '3060', 80: '4080', 84: '4284', 120: '60120'},
-            'plugOnNeutralMap': {True: 'P', False: ''},
-            'suffixMap': {'Flush': 'F', 'Included': 'C', 'Surface': 'S', 'Combination': 'C', 'Value Pack': 'VP', 'Arc Fault Value Pack': 'A', 'Ground Bar': 'G', 'Feed-Thru Lugs': 'FT', 'Quik-Grip': 'Q'},
-            'busMaterialMap': {'Aluminum': '', 'Copper': 'CU'}
-        }
 
         # HOM Section - Generate Box and Interior Part Number
         if loadCenterType in ['Homeline', 'HOM']:
@@ -985,9 +966,7 @@ class loadcenter():
 
 # Start Transformers
 class transformer():
-    def __init__(self):
-        # Initialize EasyOCR reader
-        self.bool = False
+
     # Function to generate part number for transformers
     def generateTransformerPartNumber(self, attributes):
         transformerType = attributes.get("transformerType")
@@ -1423,10 +1402,6 @@ class nqPanelboard():
         (125, 600, 72, '3PHASE', 208): ('NQ472L6C', 80, ['LG', 'LJ', 'LL'], 'NQMB6PPL', 'NQPPLLLC'),
         (125, 600, 84, '3PHASE', 208): ('NQ484L6C', 86, ['LG', 'LJ', 'LL'], 'NQMB6PPL', 'NQPPLLLC'),
 }
-    
-    def __init__(self):
-        # Initialize EasyOCR reader
-        self.bool = False
 
     def generateNqPanelboardPartNumber(self, attributes):
         amperage = int(attributes.get("amperage"))
@@ -1641,9 +1616,6 @@ class nfPanelboard():
         (125, 600, 54, '3PHASE', (208, 240, 480)): ('NF454L6C', 80, ['LG', 'LJ', 'LL', 'LR'], 'N600MPPL', 'NFPPLLLC'),
         (125, 600, 66, '3PHASE', (208, 240, 480)): ('NF466L6C', 86, ['LG', 'LJ', 'LL', 'LR'], 'N600MPPL', 'NFPPLLLC'),
     }
-
-    def __init__(self):
-        self.bool = False
 
     # Helper to bump amperage up to next available neutral
     def _bump_neutral(self, size_map, target):
@@ -2121,10 +2093,6 @@ class iLinePanelboard():
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCR-U', 'HCR548612U', 'HCR86TFD', 'HC4486DB'),
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCR-U', 'HCR548612U', 'HCR86TSD', 'HC4486DB'),
     }
-        
-    def __init__(self):
-            # Initialize EasyOCR reader
-            self.bool = False
 
     def generateILinePanelboardPartNumber(self, attributes):
         panelType = attributes.get("panelType")
@@ -2279,8 +2247,6 @@ class iLinePanelboard():
 
 # Start SPD
 class externalSpd():
-    def __init__(self):
-        self.bool = False
 
     # Function to generate external SPD part numbers
     def generateExternalSpdPartNumber(self, attributes):
@@ -2334,8 +2300,6 @@ class externalSpd():
 # Start Blanks
 import math
 class blanks():
-    def __init__(self):
-        self.bool = False
 
     # Function to generate Blanks/Filler plates part numbers
     def generateFillerPlatePartNumber(self, attributes):
@@ -2419,8 +2383,6 @@ class blanks():
 
 # Start MCCB
 class mccb():
-    def __init__(self):
-        self.bool = False
 
     # Function to generate MCCB part numbers
     def generateMccbPartNumber(self, attributes):
