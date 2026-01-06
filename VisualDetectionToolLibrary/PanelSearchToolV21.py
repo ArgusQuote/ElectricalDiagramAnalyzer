@@ -14,7 +14,9 @@ class PanelBoardSearch:
     (so coordinates match the PDF page), then:
       1) Write a vector-only PDF for each table via clip.
       2) Render a high-DPI PNG from the same clip.
-    Always writes an artifacts overlay per source page for QA.
+    Always writes a magenta overlay per source page for QA.
+      - Green boxes: detected panel/table regions (voids)
+      - Red boxes: raster images that are NOT inside those voids
 
     Public API:
         crops = PanelBoardSearch(...).readPdf("/path/to.pdf")
@@ -63,8 +65,8 @@ class PanelBoardSearch:
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
 
         # subdirs
-        self.artifacts_dir = Path(self.output_dir) / "artifacts_overlays"
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.magenta_dir = Path(self.output_dir) / "magenta_overlays"
+        self.magenta_dir.mkdir(parents=True, exist_ok=True)
         self.vec_dir = Path(self.output_dir) / "cropped_tables_pdf"
         self.vec_dir.mkdir(parents=True, exist_ok=True)
 
@@ -128,6 +130,9 @@ class PanelBoardSearch:
         rend_mat = fitz.Matrix(self.render_dpi / 72.0, self.render_dpi / 72.0)
         cs       = fitz.csGRAY if self.render_colorspace == "gray" else fitz.csRGB
 
+        # track void/table boxes per page in detection pixel coords
+        page_void_boxes: dict[int, list[tuple[int, int, int, int]]] = {}
+
         # Turn AA OFF for detection so lines are crisp (prevents “hole” fill-in)
         try:
             fitz.TOOLS.set_aa_level(0)
@@ -136,6 +141,9 @@ class PanelBoardSearch:
 
         for pidx in range(len(doc)):
             page = doc[pidx]
+
+            # list of panel/table void boxes for this page in detection pixels
+            void_boxes: list[tuple[int, int, int, int]] = []
 
             # 1) Detection bitmap (AA=0)
             pix = page.get_pixmap(matrix=det_mat, alpha=False)
@@ -158,7 +166,7 @@ class PanelBoardSearch:
             sel_ws = self._selected_ws_mask(labels, keep_ids)
             contours, hier = cv2.findContours(sel_ws, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
-            # "magenta" image is now our generic artifacts overlay
+            # base overlay image
             overlay_img = det_bgr.copy()
             saved_idx = 0
             candidates: list[fitz.Rect] = []
@@ -199,12 +207,16 @@ class PanelBoardSearch:
                     if not _box_passes(x, y, w, h):
                         continue
 
-                    # was magenta (255, 0, 255); now GREEN for void/table regions
-                    cv2.drawContours(overlay_img, [cnt], -1, (0, 255, 0), 5)
+                    # GREEN for void/table regions
+                    cv2.drawContours(overlay_img, [cnt], -1, (0, 255, 0), 8)
 
                     # pad & map detection bbox → PDF clip
                     y0 = max(0, y - self.pad); x0 = max(0, x - self.pad)
                     y1 = min(H, y + h + self.pad); x1 = min(W, x + w + self.pad)
+
+                    # remember this void box (in detection pixel coords)
+                    void_boxes.append((x0, y0, x1, y1))
+
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
                     pr = page.rect
                     clip = fitz.Rect(
@@ -221,8 +233,12 @@ class PanelBoardSearch:
                     w, h = x1 - x0, y1 - y0
                     if not _box_passes(x0, y0, w, h):
                         continue
-                    # was magenta; now GREEN
-                    cv2.rectangle(overlay_img, (x0, y0), (x1, y1), (0, 255, 0), 5)
+                    # GREEN fallback boxes
+                    cv2.rectangle(overlay_img, (x0, y0), (x1, y1), (0, 255, 0), 8)
+
+                    # remember this void box as well
+                    void_boxes.append((x0, y0, x1, y1))
+
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
                     pr = page.rect
                     clip = fitz.Rect(
@@ -257,8 +273,11 @@ class PanelBoardSearch:
                 all_pngs.append(str(png_path))
 
             # Per-page overlay (voids only for now, rasters added later)
-            ov_path = self.artifacts_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
+            ov_path = self.magenta_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
             cv2.imwrite(str(ov_path), overlay_img)
+
+            # store void boxes for this page
+            page_void_boxes[pidx] = void_boxes
 
             if self.verbose:
                 print(f"[INFO] Page {pidx+1}: saved {saved_idx} crop(s)")
@@ -280,13 +299,14 @@ class PanelBoardSearch:
         if self.enforce_one_box and all_pngs:
             all_pngs = self._enforce_one_box_on_paths(all_pngs)
 
-        # final raster pass — crop rasters + augment artifacts overlay
-        self._extract_rasters_and_augment_magenta(pdf_path)
+        # final raster pass — crop rasters + augment overlays,
+        # but DO NOT mark rasters that overlap detected panel voids
+        self._extract_rasters_and_augment_magenta(pdf_path, page_void_boxes)
 
         if self.verbose:
             print(f"[DONE] Outputs → {self.output_dir}")
             print(f"      Vector PDFs → {self.vec_dir}")
-            print(f"      Overlays    → {self.artifacts_dir}")
+            print(f"      Overlays    → {self.magenta_dir}")
             print(f"      Raster PNGs → {self.raster_dir}")
 
         return all_pngs
@@ -697,12 +717,18 @@ class PanelBoardSearch:
         return False
 
     # ----- Raster cropping + overlay augmentation -----
-    def _extract_rasters_and_augment_magenta(self, pdf_path: str):
+    def _extract_rasters_and_augment_magenta(
+        self,
+        pdf_path: str,
+        page_void_boxes: dict[int, list[tuple[int, int, int, int]]],
+    ):
         """
         Second pass over the PDF:
           - crop each embedded raster image to raster_images/
-          - draw RED boxes for rasters directly on the existing artifacts
-            overlay PNGs (one per page).
+          - draw RED boxes for rasters directly on the existing magenta
+            overlay PNGs (one per page),
+            BUT skip rasters whose bbox overlaps a detected panel/table
+            void region (green) with IoU > 0.5.
         """
         try:
             doc = fitz.open(pdf_path)
@@ -716,12 +742,15 @@ class PanelBoardSearch:
         det_mat = fitz.Matrix(zoom, zoom)
 
         for pidx, page in enumerate(doc):
-            # render at detection DPI so coords match artifacts overlay
+            # render at detection DPI so coords match overlays
             pix = page.get_pixmap(matrix=det_mat, alpha=False)
             page_img = self._pix_to_bgr(pix)
             H, W = page_img.shape[:2]
 
-            ov_path = self.artifacts_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
+            # void/panel boxes for this page in detection pixel coords
+            void_boxes = page_void_boxes.get(pidx, [])
+
+            ov_path = self.magenta_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
             overlay = cv2.imread(str(ov_path), cv2.IMREAD_COLOR)
             if overlay is None or overlay.shape[:2] != (H, W):
                 overlay = page_img.copy()
@@ -762,6 +791,15 @@ class PanelBoardSearch:
                     if x1 <= x0 or y1 <= y0:
                         continue
 
+                    # skip rasters that overlap a detected panel/table
+                    skip_as_panel = False
+                    for vb in void_boxes:
+                        if self._iou((x0, y0, x1, y1), vb) > 0.5:
+                            skip_as_panel = True
+                            break
+                    if skip_as_panel:
+                        continue
+
                     crop = page_img[y0:y1, x0:x1].copy()
                     if crop.size == 0:
                         continue
@@ -771,13 +809,13 @@ class PanelBoardSearch:
                     r_path = self.raster_dir / r_name
                     cv2.imwrite(str(r_path), crop)
 
-                    # draw RED rectangle on artifacts overlay (rasters)
+                    # draw RED rectangle for rasters
                     cv2.rectangle(
                         overlay,
                         (x0, y0),
                         (x1 - 1, y1 - 1),
                         (0, 0, 255),  # RED in BGR
-                        2,
+                        8,
                     )
 
             if raster_idx > 0:
