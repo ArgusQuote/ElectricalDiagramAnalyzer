@@ -976,6 +976,61 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "deferred_render": True
     }
 
+def _natural_key(p: Path):
+    # Sort like page2 before page10
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
+
+@anvil.server.callable
+def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
+    """
+    Returns job-relative PNG paths for FULL-PAGE magenta overlays.
+    Looks in common directories first, then falls back to any PNG containing 'magenta'
+    (excluding pdf_images/review_overlays).
+    """
+    if not job_id:
+        return []
+
+    job_root = (BASE_JOBS_DIR / job_id).resolve()
+    pdf_images = (job_root / "pdf_images")
+    if not pdf_images.is_dir():
+        return []
+
+    # 1) Preferred / common directories (adjust if your generator uses a specific one)
+    candidate_dirs = [
+        pdf_images / "magenta_overlays",
+        pdf_images / "magenta_overlay",
+        pdf_images / "page_overlays",
+        pdf_images / "full_overlays",
+        pdf_images / "overlays",
+    ]
+
+    found: list[Path] = []
+    for d in candidate_dirs:
+        if d.is_dir():
+            found.extend(list(d.glob("*.png")))
+
+    # 2) Fallback: search for filenames containing "magenta" anywhere under pdf_images,
+    # but EXCLUDE review_overlays (those are your per-panel items)
+    if not found:
+        for p in pdf_images.rglob("*.png"):
+            if "review_overlays" in p.parts:
+                continue
+            if "magenta" in p.name.lower():
+                found.append(p)
+
+    # Deduplicate + sort
+    uniq = {}
+    for p in found:
+        try:
+            rp = p.relative_to(job_root)
+        except Exception:
+            continue
+        uniq[str(rp).replace("\\", "/")] = p
+
+    rel_paths = list(uniq.keys())
+    rel_paths.sort(key=lambda s: _natural_key(Path(s)))
+    return rel_paths
+
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
     if not job_id:
