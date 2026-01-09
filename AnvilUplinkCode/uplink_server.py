@@ -288,8 +288,24 @@ def _status_paths(dir_path: Path):
     return {"status": dir_path / "status.json", "result": dir_path / "result.json"}
 
 def _status_write(dir_path: Path, state: str, **extras):
+    """
+    Write status.json while preserving existing fields unless explicitly overwritten.
+    This prevents losing owner_id/owner_email on error/timeouts.
+    """
     paths = _status_paths(dir_path)
-    payload = {"state": state, **extras, "ts": datetime.now(timezone.utc).isoformat()}
+
+    prev = {}
+    try:
+        prev = _json_read_or_none(paths["status"]) or {}
+    except Exception:
+        prev = {}
+
+    # Merge: previous -> extras -> required fields
+    payload = dict(prev)
+    payload.update(extras or {})
+    payload["state"] = state
+    payload["ts"] = datetime.now(timezone.utc).isoformat()
+
     with open(paths["status"], "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
 
@@ -362,6 +378,95 @@ def _coerce_types(overrides: dict) -> dict:
 
 def _normalize_ui_overrides(overrides: dict | None) -> dict:
     return _deep_merge(_DEFAULT_OVERRIDES, _coerce_types(overrides or {}))
+
+# Delete unused images and folders for storage
+def _rel(p: Path, root: Path) -> str:
+    return str(p.relative_to(root)).replace("\\", "/")
+
+def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = False) -> set[str]:
+    """
+    Return a set of job-relative file paths to keep.
+    Everything else in the job folder will be deleted.
+    """
+    keep: set[str] = set()
+
+    # Always keep status/result
+    keep.add("status.json")
+    keep.add("result.json")
+
+    pdf_images = job_dir / "pdf_images"
+    if not pdf_images.is_dir():
+        return keep
+
+    # 1) Keep REVIEW overlays (per-panel overlays)
+    review_dir = pdf_images / "review_overlays"
+    if review_dir.is_dir():
+        for p in review_dir.rglob("*"):
+            if p.is_file():
+                keep.add(_rel(p, job_dir))
+
+    # 2) Keep MAGENTA overlays exactly like vm_list_magenta_overlay_images()
+    candidate_dirs = [
+        pdf_images / "magenta_overlays",
+        pdf_images / "magenta_overlay",
+        pdf_images / "page_overlays",
+        pdf_images / "full_overlays",
+        pdf_images / "overlays",
+    ]
+
+    found: list[Path] = []
+    for d in candidate_dirs:
+        if d.is_dir():
+            found.extend(list(d.glob("*.png")))
+
+    # Fallback: any png containing "magenta" (excluding review_overlays)
+    if not found:
+        for p in pdf_images.rglob("*.png"):
+            if "review_overlays" in p.parts:
+                continue
+            if "magenta" in p.name.lower():
+                found.append(p)
+
+    for p in found:
+        if p.is_file():
+            keep.add(_rel(p, job_dir))
+
+    # Optional: keep original uploaded pdf(s)
+    if keep_pdf:
+        up = job_dir / "uploaded_pdfs"
+        if up.is_dir():
+            for p in up.rglob("*.pdf"):
+                keep.add(_rel(p, job_dir))
+
+    return keep
+
+def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
+    """
+    Delete everything in job_dir except keep_relpaths.
+    Then remove empty directories.
+    """
+    job_dir = Path(job_dir).resolve()
+
+    # 1) Delete files not in keep list
+    for p in job_dir.rglob("*"):
+        if not p.is_file():
+            continue
+        rel = _rel(p, job_dir)
+        if rel not in keep_relpaths:
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+    # 2) Remove empty directories (bottom-up)
+    for d in sorted([x for x in job_dir.rglob("*") if x.is_dir()], reverse=True):
+        try:
+            next(d.iterdir())
+        except StopIteration:
+            try:
+                d.rmdir()
+            except Exception:
+                pass
 
 @anvil.server.callable
 def vm_get_default_overrides() -> dict:
@@ -801,8 +906,8 @@ def _process_job(job_id: str):
             "job_id": job_id,
             "job_dir": str(job_dir),
             "saved_pdf": first_pdf,
-            "output_dir": str(job_dir / "pdf_images"),
-            "images": imgs,
+            "output_dir": "",
+            "images": [],
             "image_count": len(imgs),
             "components": components,
             "rules_result": rules_result,
@@ -817,6 +922,14 @@ def _process_job(job_id: str):
         _status_write(job_dir, "done", result_path=str(_status_paths(job_dir)["result"]), progress=100.0)
         _jobs_upsert(job_id, state="done", updated_at=_now_utc(), result_json=result)
         print(f">>> worker done: {job_id}")
+
+        # ---- AUTO CLEANUP (keep only what UI uses) ----
+        try:
+            keep = _collect_keep_relpaths(job_dir, keep_pdf=False)  # set True if you want to keep the original PDF
+            _cleanup_job_dir(job_dir, keep)
+            print(f">>> cleanup complete: kept {len(keep)} files")
+        except Exception as ce:
+            print(f">>> cleanup failed: {ce}")
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -864,6 +977,10 @@ def _dequeue_loop(idx: int):
         # Write an error status/result snapshot with message
         msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
         _status_write(job_dir, "error", error=msg)
+        try:
+            _cleanup_job_dir(job_dir, {"status.json"})
+        except Exception:
+            pass
         _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
 
         # Try graceful term then hard kill
@@ -1112,16 +1229,11 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
     if job_node and job_node != NODE_ID:
         node_hint.update({"job_node_id": job_node})
 
-    if not job_email:
-        # legacy/missing – backfill with the caller and continue
-        st["owner_email"] = req_email
-        st["owner_id"] = req_email
-        _status_write(job_dir, st.get("state", "unknown"),
-                      **{k: v for k, v in st.items() if k not in ("state", "ts")})
-        job_email = req_email
-        print(f">>> vm_get_job_status backfilled owner_email for {job_id}")
+    if not req_email or not job_email:
+        return {"state": "not_found", **node_hint}
 
-    if job_email != req_email:
+    # ENFORCE OWNERSHIP
+    if req_email != job_email:
         return {"state": "not_found", **node_hint}
 
     state = (st.get("state") or "unknown").lower()
@@ -1135,7 +1247,8 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         return {"state": "error", "error": st.get("error") or "Unknown error", **node_hint}
 
     out = {"state": state, **node_hint}
-    for k in ("step", "image_count", "chosen", "ui_overrides", "noticed_ts_ms", "cycle_time_str", "cycle_time_ms", "progress"):
+    for k in ("step", "image_count", "ui_overrides", "noticed_ts_ms",
+              "cycle_time_str", "cycle_time_ms", "progress"):
         if k in st:
             out[k] = st[k]
 
@@ -1148,26 +1261,51 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
 
 @anvil.server.callable
 def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
-    """List jobs owned by this user."""
+    """
+    List jobs owned by this user (disk-backed).
+    Includes job_name + submitted_at if present in job_note.
+    """
+    owner_id = str(owner_id or "").strip().lower()
+    if not owner_id:
+        return []
+
+    def _safe_iso(dt_s):
+        if not isinstance(dt_s, str) or not dt_s.strip():
+            return ""
+        return dt_s.strip()
+
     rows = []
     for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
         if not d.is_dir():
             continue
-        st = _json_read_or_none(_status_paths(d)["status"])
-        if not st:
+
+        st = _json_read_or_none(_status_paths(d)["status"]) or {}
+        st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+        if st_owner != owner_id:
             continue
-        if str(st.get("owner_id") or "").strip().lower() != str(owner_id or "").strip().lower():
-            continue
+        state = (st.get("state") or "unknown").lower()
+        if state == "error":
+            continue  # failed jobs never appear for anyone
+
+        meta = _parse_job_note(st.get("job_note") or "")
+        job_name = (meta.get("job_name") or "").strip() or d.name
+        submitted_at_utc = (meta.get("submitted_at_utc") or "").strip()
+
         rows.append({
             "job_id": d.name,
-            "state": st.get("state"),
-            "created_at": st.get("created_at"),
-            "image_count": st.get("image_count"),
-            "progress": st.get("progress", 0.0),
-            "step": st.get("step"),
+            "job_name": job_name,
+            "submitted_at_utc": submitted_at_utc,
+            "created_at": _safe_iso(st.get("created_at")),
+            "state": (st.get("state") or "unknown"),
+            "step": (st.get("step") or ""),
+            "progress": float(st.get("progress", 0.0) or 0.0),
+            "image_count": int(st.get("image_count", 0) or 0),
+            "cycle_time_str": (st.get("cycle_time_str") or ""),
         })
+
         if len(rows) >= int(limit):
             break
+
     return rows
 
 @anvil.server.callable

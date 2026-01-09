@@ -22,6 +22,24 @@ if str(REPO_ROOT) not in sys.path:
 BASE_JOBS_DIR = Path.home() / "jobs"
 BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
+# ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
+PANEL_FINDER_DEFAULTS = {
+    # Same knobs you use in your dev env script
+    "render_dpi": 1400,
+    "aa_level": 8,
+    "render_colorspace": "gray",
+    "min_void_area_fr": 0.004,
+    "min_void_w_px": 90,
+    "min_void_h_px": 90,
+    "max_void_area_fr": 0.30,
+    "void_w_fr_range": (0.20, 0.60),
+    "void_h_fr_range": (0.15, 0.55),
+    "min_whitespace_area_fr": 0.01,
+    "margin_shave_px": 6,
+    "pad": 6,
+    "verbose": True,
+}
+
 # Keep legacy dir around (not used directly)
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
@@ -36,6 +54,14 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTHONHASHSEED", "0")
+
+# ---------- WATCHDOG CONFIG ----------
+WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "15"))  # dial in prod
+WATCHDOG_KILL_GRACE_SEC = int(os.environ.get("WATCHDOG_KILL_GRACE_SEC", "3"))
+WATCHDOG_ERROR_MSG = (
+  "This job took over {mins} minutes to process. "
+  "Please trim the PDF to only relevant pages and try again."
+)
 
 def _set_runtime_determinism():
     # OpenCV: cap threads if available
@@ -76,10 +102,10 @@ _set_runtime_determinism()
 _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
-from PageFilter.PageFilter import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv2 import BreakerTablePipeline, API_VERSION
-import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
+from PageFilter.PageFilterV2 import PageFilter
+from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
+from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
+import RulesEngine.RulesEngine3 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
 ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
@@ -109,7 +135,7 @@ def _warmup_ocr_once():
                 run_parser=False,
                 run_header=True,
             )
-            print(">>> OCR warmup complete (analyzer + header)")
+            print(f">>> OCR warmup complete (analyzer + header) | API_VERSION={API_VERSION}")
         finally:
             try:
                 os.remove(tmp_path)
@@ -365,6 +391,12 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
             rect_h_fr_range=(0.20, 0.60),
             min_rectangularity=0.70,
             min_rect_count=2,
+            # A bit more permissive area cut
+            min_whitespace_area_fr=0.004,
+            use_ghostscript_letter=True,       # turn GS letter step on/off
+            letter_orientation="landscape",    # "portrait" or "landscape"
+            gs_use_cropbox=True,               # True: fit what's inside CropBox; False: use MediaBox
+            gs_compat="1.7"                    # PDF compatibility level            
         )
         kept_pages, dropped_pages, filtered_pdf, log_json = pf.readPdf(str(saved_pdf))
         print(f">>> PageFilter: kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")
@@ -379,24 +411,24 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
 
-    # --- 2) Run the panel finder on the chosen PDF ---
+    # --- 2) Run the panel finder (PanelSearchToolV18) on the chosen PDF ---
     local_finder = PanelBoardSearch(
         output_dir=str(img_dir),
         dpi=dpi,
-        min_void_area_fr=0.004,
-        min_void_w_px=90,
-        min_void_h_px=90,
-        # ↓ tighten these three to kill giant/near-page blobs
-        max_void_area_fr=0.30,          # was 0.30
-        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
-        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
-        min_whitespace_area_fr=0.01,
-        margin_shave_px=6,
-        pad=6,
-        debug=False,
-        verbose=True,
-        save_masked_shape_crop=False,
-        replace_multibox=True,
+        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match your dev env
+        render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
+        aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
+        render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
+        min_void_area_fr=PANEL_FINDER_DEFAULTS["min_void_area_fr"],
+        min_void_w_px=PANEL_FINDER_DEFAULTS["min_void_w_px"],
+        min_void_h_px=PANEL_FINDER_DEFAULTS["min_void_h_px"],
+        max_void_area_fr=PANEL_FINDER_DEFAULTS["max_void_area_fr"],
+        void_w_fr_range=PANEL_FINDER_DEFAULTS["void_w_fr_range"],
+        void_h_fr_range=PANEL_FINDER_DEFAULTS["void_h_fr_range"],
+        min_whitespace_area_fr=PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"],
+        margin_shave_px=PANEL_FINDER_DEFAULTS["margin_shave_px"],
+        pad=PANEL_FINDER_DEFAULTS["pad"],
+        verbose=PANEL_FINDER_DEFAULTS["verbose"],
     )
 
     try:
@@ -570,7 +602,7 @@ def _btp_run_once(
     debug: bool = True
 ) -> dict:
     """
-    Construct a BreakerTablePipeline and run it for this image.
+    Construct a BreakerTablePipeline (v6) and run it for this image.
     (No global caching; per your request.)
     """
     pipe = BreakerTablePipeline(debug=debug)
@@ -580,6 +612,18 @@ def _btp_run_once(
         run_parser=run_parser,
         run_header=run_header,
     )
+
+def _run_job_target(job_id: str):
+  """
+  Subprocess entrypoint that runs the actual job logic.
+  Keeping this thin ensures termination is clean.
+  """
+  try:
+    _process_job(job_id)
+  except Exception as e:
+    # _process_job already writes status on exceptions, but as a backstop:
+    job_dir = BASE_JOBS_DIR / job_id
+    _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
 
 # ---------- Core job processing ----------
 def _process_job(job_id: str):
@@ -782,25 +826,62 @@ def _process_job(job_id: str):
 
 # ---------- Worker pool ----------
 def _dequeue_loop(idx: int):
-    threading.current_thread().name = f"pool-worker-{idx}"
-    while not _STOP.is_set():
-        try:
-            job_id, owner_id = _JOB_Q.get(timeout=0.5)
-        except Empty:
-            continue
+  threading.current_thread().name = f"pool-worker-{idx}"
+  mp = get_context("spawn")  # safer than fork for libs like torch/opencv
 
-        # enforce per-user cap
-        if not _enter_inflight(owner_id):
-            # requeue after a tiny delay
-            threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
-            _JOB_Q.task_done()
-            continue
+  while not _STOP.is_set():
+    try:
+      job_id, owner_id = _JOB_Q.get(timeout=0.5)
+    except Empty:
+      continue
 
+    # enforce per-user cap
+    if not _enter_inflight(owner_id):
+      threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
+      _JOB_Q.task_done()
+      continue
+
+    proc = None
+    try:
+      # Spawn child process for this job
+      proc = mp.Process(target=_run_job_target, args=(job_id,), daemon=True)
+      proc.start()
+
+      # Watchdog wait
+      timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
+      proc.join(timeout=timeout_sec)
+
+      if proc.is_alive():
+        # Timed out: mark canceled/error, terminate child, clean up
+        job_dir = BASE_JOBS_DIR / job_id
+        # Mark cancel file so future reads show canceled intent
         try:
-            _process_job(job_id)
-        finally:
-            _leave_inflight(owner_id)
-            _JOB_Q.task_done()
+          with open(_cancel_path(job_dir), "w") as f:
+            f.write("1")
+        except Exception:
+          pass
+
+        # Write an error status/result snapshot with message
+        msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
+        _status_write(job_dir, "error", error=msg)
+        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
+
+        # Try graceful term then hard kill
+        try:
+          proc.terminate()
+        except Exception:
+          pass
+        proc.join(timeout=WATCHDOG_KILL_GRACE_SEC)
+        if proc.is_alive():
+          try:
+            proc.kill()  # Python 3.9+ on POSIX
+          except Exception:
+            pass
+          proc.join(timeout=1)
+
+    finally:
+      _leave_inflight(owner_id)
+      _JOB_Q.task_done()
 
 for i in range(MAX_WORKERS):
     t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
@@ -895,39 +976,122 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "deferred_render": True
     }
 
+def _natural_key(p: Path):
+    # Sort like page2 before page10
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
+
+@anvil.server.callable
+def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
+    """
+    Returns job-relative PNG paths for FULL-PAGE magenta overlays.
+    Looks in common directories first, then falls back to any PNG containing 'magenta'
+    (excluding pdf_images/review_overlays).
+    """
+    if not job_id:
+        return []
+
+    job_root = (BASE_JOBS_DIR / job_id).resolve()
+    pdf_images = (job_root / "pdf_images")
+    if not pdf_images.is_dir():
+        return []
+
+    # 1) Preferred / common directories (adjust if your generator uses a specific one)
+    candidate_dirs = [
+        pdf_images / "magenta_overlays",
+        pdf_images / "magenta_overlay",
+        pdf_images / "page_overlays",
+        pdf_images / "full_overlays",
+        pdf_images / "overlays",
+    ]
+
+    found: list[Path] = []
+    for d in candidate_dirs:
+        if d.is_dir():
+            found.extend(list(d.glob("*.png")))
+
+    # 2) Fallback: search for filenames containing "magenta" anywhere under pdf_images,
+    # but EXCLUDE review_overlays (those are your per-panel items)
+    if not found:
+        for p in pdf_images.rglob("*.png"):
+            if "review_overlays" in p.parts:
+                continue
+            if "magenta" in p.name.lower():
+                found.append(p)
+
+    # Deduplicate + sort
+    uniq = {}
+    for p in found:
+        try:
+            rp = p.relative_to(job_root)
+        except Exception:
+            continue
+        uniq[str(rp).replace("\\", "/")] = p
+
+    rel_paths = list(uniq.keys())
+    rel_paths.sort(key=lambda s: _natural_key(Path(s)))
+    return rel_paths
+
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
-    """Return absolute paths to all overlay PNGs for this job."""
     if not job_id:
         return []
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    overlay_dir = (job_root / "pdf_images" / "magenta_overlays")
+    overlay_dir = (job_root / "pdf_images" / "review_overlays")
     if not overlay_dir.is_dir():
         return []
-    return [str(p.resolve()) for p in sorted(overlay_dir.glob("*.png"))]
+    return [str(p.relative_to(job_root)) for p in sorted(overlay_dir.glob("*.png"))]
 
 @anvil.server.callable
 def vm_fetch_image(job_id: str, source_path: str):
     """
-    Return the cropped PNG for a given panel as BlobMedia, enforcing that the file
-    lives under this job folder.
+    Return an image as BlobMedia.
+    Accepts either:
+      - absolute paths inside this job folder, OR
+      - job-relative paths like: 'pdf_images/review_overlays/foo.png'
     """
     if not job_id or not source_path:
         raise RuntimeError("job_id and source_path are required")
 
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    p = Path(source_path).resolve()
+
+    raw = str(source_path).strip().replace("\\", "/")
+    p_in = Path(raw)
+
+    # If client sent a relative path, interpret it under the job folder.
+    if not p_in.is_absolute():
+        p = (job_root / p_in).resolve()
+    else:
+        p = p_in.resolve()
 
     # Security: ensure requested file is inside this job folder
     if not str(p).startswith(str(job_root)):
-        raise RuntimeError("Invalid image path for this job")
+        raise RuntimeError(f"Invalid image path for this job: {raw}")
 
     if not p.is_file():
         raise RuntimeError(f"Image not found: {p}")
 
     ctype = "image/png" if p.suffix.lower() == ".png" else "application/octet-stream"
-    data = p.read_bytes()
-    return BlobMedia(ctype, data, name=p.name)
+    return BlobMedia(ctype, p.read_bytes(), name=p.name)
+
+@anvil.server.callable
+def vm_set_watchdog_timeout(minutes: int) -> dict:
+  """
+  Set the watchdog timeout (minutes) at runtime.
+  Persists only for this process lifetime.
+  """
+  global WATCHDOG_TIMEOUT_MIN
+  try:
+    m = int(minutes)
+    if m < 1 or m > 60:
+      raise ValueError("minutes must be between 1 and 60")
+    WATCHDOG_TIMEOUT_MIN = m
+    return {"ok": True, "watchdog_min": WATCHDOG_TIMEOUT_MIN}
+  except Exception as e:
+    return {"ok": False, "error": str(e), "watchdog_min": WATCHDOG_TIMEOUT_MIN}
+
+@anvil.server.callable
+def vm_get_watchdog_timeout() -> int:
+  return int(WATCHDOG_TIMEOUT_MIN)
 
 @anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
