@@ -8,11 +8,11 @@ import cv2
 import numpy as np
 
 # ================== CONFIG ==================
-SOURCE_DIR = Path("~/Documents/pdfToScan").expanduser().resolve()
-OUTPUT_DIR = Path("~/Documents/output_buckets6").expanduser().resolve()
+SOURCE_DIR = Path("~/Documents/BadExample").expanduser().resolve()
+OUTPUT_DIR = Path("~/Documents/BadOutput").expanduser().resolve()
 OVERLAY_DIR = OUTPUT_DIR / "overlays"
 
-MAX_PAGES_OVERLAY = 1    # how many pages per PDF to render with overlays
+MAX_PAGES_OVERLAY = 3    # how many pages per PDF to render with overlays
 ZOOM = 2.0               # zoom factor for rendering overlays
 # ============================================
 
