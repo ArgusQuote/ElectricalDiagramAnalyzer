@@ -1,0 +1,198 @@
+---
+description: Complete project directory and file structure reference
+globs: 
+alwaysApply: false
+---
+
+# Project Structure Reference
+
+This document provides a comprehensive view of all directories and files in the ElectricalDiagramAnalyzer project.
+
+## Directory Tree
+
+```
+ElectricalDiagramAnalyzer/
+├── .cursor/
+│   └── rules/
+│       ├── cursor-rules.mdc           # How to create/edit Cursor rules
+│       ├── rules-index.mdc            # Central index of all rules (always applied)
+│       ├── self-improve.mdc           # Guidelines for improving rules
+│       ├── docs/
+│       │   ├── application-overview.mdc   # High-level architecture
+│       │   ├── ocr-library.mdc            # OCR parsing components
+│       │   ├── page-filter.mdc            # PDF page filtering
+│       │   ├── panel-detection.mdc        # Visual panel detection
+│       │   ├── rules-engine.mdc           # Business rules & part numbers
+│       │   └── uplink-server.mdc          # Anvil backend server
+│       └── reference/
+│           └── project-structure.mdc      # This file
+│
+├── .vscode/
+│   ├── launch.json                    # VS Code debug configurations
+│   └── settings.json                  # VS Code workspace settings
+│
+├── AnchoringClasses/                  # Header/footer boundary detection
+│   ├── __init__.py
+│   ├── BreakerFooterFinder.py         # Footer row detection (panel size)
+│   └── BreakerHeaderFinder.py         # Header row detection (column labels)
+│
+├── AnvilUplinkCode/                   # Backend server (Anvil platform)
+│   ├── uplink_server.py               # ★ Main server - job queue, API, pipeline
+│   └── uplink_server_bkup.py          # Backup of server code
+│
+├── Backups/                           # Historical backups (reference only)
+│   ├── About                          # Anvil UI component backups
+│   ├── Feedback_api
+│   ├── FeedbackDialog
+│   ├── Instructions
+│   ├── Lead_handling
+│   ├── Login
+│   ├── Output
+│   ├── Processing
+│   ├── Server
+│   ├── SignupModal
+│   ├── Submit_for_detection
+│   ├── Tos_api
+│   ├── TOSDialog
+│   ├── Upload
+│   ├── server_backup.py
+│   └── uplink_server_bkup_*.py        # Multiple dated server backups
+│
+├── DevEnv/                            # Development/testing scripts
+│   ├── DevEnvBreakerTableAnalyzerV12andHigher.py  # Analyzer testing
+│   ├── DevEnvDeleteLines.py           # Line removal utility
+│   ├── DevEnvPanaelSearchToolSimple.py  # Panel search testing
+│   ├── DevEnvWhiteSpaceFinder.py      # Whitespace detection testing
+│   ├── PageFilterDevEnv.py            # Page filter testing
+│   ├── PdfAnalyzer.py                 # PDF analysis utility
+│   └── PdfInspector.py                # PDF inspection utility
+│
+├── MISC/                              # Miscellaneous utilities & configs
+│   ├── breaker_labels_config.jsonc    # Breaker label patterns (copy)
+│   ├── OcrRules.py                    # OCR rules/patterns
+│   ├── pagemixer.py                   # Page mixing utility
+│   └── requirements.txt               # Python dependencies
+│
+├── OcrLibrary/                        # OCR parsing and table extraction
+│   ├── __init__.py
+│   ├── breaker_labels_config.jsonc    # Breaker label recognition patterns
+│   ├── labels_config.jsonc            # General label patterns
+│   │
+│   │   # Pipeline API (entry points)
+│   ├── BreakerTableParserAPIv2.py     # Legacy pipeline API
+│   ├── BreakerTableParserAPIv3.py     # ★ Current pipeline API (BreakerTablePipeline)
+│   ├── BreakerTableParserAPIv4.py     # Experimental
+│   ├── BreakerTableParserAPIv5.py     # Experimental
+│   │
+│   │   # Table Structure Analysis
+│   ├── BreakerTableAnalyzer6.py       # Legacy analyzer
+│   ├── BreakerTableAnalyzer10.py      # Legacy analyzer
+│   ├── BreakerTableAnalyzer11.py      # Legacy analyzer
+│   ├── BreakerTableAnalyzer12.py      # ★ Current analyzer (BreakerTableAnalyzer)
+│   │
+│   │   # Breaker Row Parsing
+│   ├── BreakerTableParser4.py         # Legacy parser
+│   ├── BreakerTableParser5.py         # ★ Current parser (BreakerTableParser)
+│   ├── BreakerTableParser6.py         # Experimental parser
+│   ├── BreakerTableParserALTModuleized.py  # Alternative parser
+│   │
+│   │   # Header Parsing
+│   └── PanelHeaderParserV4.py         # ★ Current header parser (PanelParser)
+│
+├── PageFilter/                        # PDF page filtering
+│   ├── PageFilter.py                  # Legacy page filter
+│   └── PageFilterV2.py                # ★ Current filter (PageFilter class)
+│
+├── PartNumberSelector/                # Part number generation
+│   ├── __init__.py
+│   └── PartNumberBuilder.py           # ★ All builder classes:
+│                                      #   - Disconnect
+│                                      #   - breakerSelector
+│                                      #   - nqPanelboard, nfPanelboard
+│                                      #   - iLinePanelboard
+│                                      #   - loadcenter
+│                                      #   - mccb
+│                                      #   - transformer
+│                                      #   - blanks
+│
+├── RulesEngine/                       # Business logic
+│   ├── __init__.py
+│   └── RulesEngine2.py                # ★ Main rules engine (process_job)
+│
+├── VisualDetectionToolLibrary/        # Panel/table detection from PDFs
+│   ├── __init__.py
+│   ├── PanelSearchToolV15.py          # Legacy versions (V15-V20)
+│   ├── PanelSearchToolV17.py
+│   ├── PanelSearchToolV18.py
+│   ├── PanelSearchToolV19.py
+│   ├── PanelSearchToolV20.py
+│   └── PanelSearchToolV21.py          # Latest version (PanelBoardSearch)
+│                                      # NOTE: Server currently imports V11 (from cache)
+│
+└── easyocrdump.json                   # EasyOCR model cache/dump
+```
+
+## File Naming Conventions
+
+### Version Suffixes
+Files with version numbers (e.g., `V21`, `V12`) indicate iteration history:
+- ★ marks indicate **currently active** versions
+- Higher numbers are typically newer iterations
+- Check `uplink_server.py` imports for **actually used** versions
+
+### Current Active Versions (per uplink_server.py imports)
+| Component | Active Version | File |
+|-----------|----------------|------|
+| Page Filter | V2 | `PageFilter/PageFilterV2.py` |
+| Panel Detection | V11 (cached) | `VisualDetectionToolLibrary/PanelSearchToolV11` |
+| OCR Pipeline | v3 | `OcrLibrary/BreakerTableParserAPIv3.py` |
+| Rules Engine | 2 | `RulesEngine/RulesEngine2.py` |
+
+> **Note**: The server imports `PanelSearchToolV11` from cache (`.pyc`), though `V21` is the latest `.py` file. This may be intentional for stability or may need updating.
+
+## Module Dependencies
+
+```
+uplink_server.py
+├── PageFilter.PageFilterV2.PageFilter
+├── VisualDetectionToolLibrary.PanelSearchToolV11.PanelBoardSearch
+├── OcrLibrary.BreakerTableParserAPIv3.BreakerTablePipeline
+│   ├── OcrLibrary.BreakerTableAnalyzer12.BreakerTableAnalyzer
+│   │   ├── AnchoringClasses.BreakerHeaderFinder
+│   │   └── AnchoringClasses.BreakerFooterFinder
+│   ├── OcrLibrary.BreakerTableParser5.BreakerTableParser
+│   └── OcrLibrary.PanelHeaderParserV4.PanelParser
+└── RulesEngine.RulesEngine2
+    └── PartNumberSelector.PartNumberBuilder.*
+```
+
+## Key Entry Points
+
+| Task | File | Class/Function |
+|------|------|----------------|
+| Start server | `AnvilUplinkCode/uplink_server.py` | `anvil.server.wait_forever()` |
+| Submit job | `uplink_server.py` | `vm_submit_for_detection()` |
+| Filter PDF | `PageFilter/PageFilterV2.py` | `PageFilter.readPdf()` |
+| Detect panels | `VisualDetectionToolLibrary/PanelSearchToolV*.py` | `PanelBoardSearch.readPdf()` |
+| Run OCR | `OcrLibrary/BreakerTableParserAPIv3.py` | `BreakerTablePipeline.run()` |
+| Apply rules | `RulesEngine/RulesEngine2.py` | `process_job(payload)` |
+
+## Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `MISC/requirements.txt` | Python package dependencies |
+| `OcrLibrary/labels_config.jsonc` | Label recognition patterns |
+| `OcrLibrary/breaker_labels_config.jsonc` | Breaker-specific patterns |
+| `.vscode/settings.json` | Editor settings |
+| `.vscode/launch.json` | Debug configurations |
+
+## Related Documentation
+
+- [Application Overview](mdc:.cursor/rules/docs/application-overview.mdc) - System architecture
+- [Rules Index](mdc:.cursor/rules/rules-index.mdc) - All documentation files
+- [Uplink Server](mdc:.cursor/rules/docs/uplink-server.mdc) - Server API details
+- [Panel Detection](mdc:.cursor/rules/docs/panel-detection.mdc) - Detection algorithm
+- [OCR Library](mdc:.cursor/rules/docs/ocr-library.mdc) - OCR components
+- [Page Filter](mdc:.cursor/rules/docs/page-filter.mdc) - PDF filtering
+- [Rules Engine](mdc:.cursor/rules/docs/rules-engine.mdc) - Business logic

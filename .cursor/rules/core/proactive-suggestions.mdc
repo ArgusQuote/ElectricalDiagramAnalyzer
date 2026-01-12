@@ -1,0 +1,218 @@
+---
+description: When AI identifies a better approach than requested, present alternatives with pros/cons before implementing
+globs: **/*
+alwaysApply: true
+---
+
+# Proactive Suggestion Protocol
+
+When implementing user requests, the AI should actively evaluate if there's a better approach and present alternatives before proceeding.
+
+## When to Suggest Alternatives
+
+**Trigger conditions for presenting alternative approaches:**
+
+| Trigger | Example |
+|---------|---------|
+| **Architectural concerns** | User asks for quick fix that creates tech debt |
+| **Performance implications** | Requested approach has known performance issues |
+| **Maintainability issues** | Solution would be hard to maintain/extend |
+| **Existing patterns violated** | Request contradicts established codebase patterns |
+| **Better tool/library exists** | A simpler or more robust solution is available |
+| **Security concerns** | Requested approach has security implications |
+| **Scalability issues** | Solution won't scale with expected growth |
+
+## How to Present Alternatives
+
+### Format Template
+
+When suggesting an alternative, use this format:
+
+```markdown
+## 💡 Alternative Approach Suggestion
+
+I can implement your request as described, but I've identified an alternative that may work better:
+
+### Your Approach
+**Description:** [Brief description of what user asked for]
+
+**Pros:**
+- [Pro 1]
+- [Pro 2]
+
+**Cons:**
+- [Con 1]
+- [Con 2]
+
+### Suggested Alternative
+**Description:** [Brief description of alternative]
+
+**Pros:**
+- [Pro 1]
+- [Pro 2]
+
+**Cons:**
+- [Con 1]
+- [Con 2]
+
+### Recommendation
+[Clear recommendation with reasoning]
+
+**Which approach would you like me to implement?**
+1. Your original approach
+2. The suggested alternative
+3. A hybrid approach (describe if applicable)
+```
+
+## Example Scenarios
+
+### Scenario 1: Quick Fix vs Proper Solution
+
+**User Request:** "Add a try/except around this function to ignore errors"
+
+**Response:**
+```markdown
+## 💡 Alternative Approach Suggestion
+
+### Your Approach
+**Description:** Wrap function in try/except to suppress all errors
+
+**Pros:**
+- Quick to implement
+- Immediate fix for the crash
+
+**Cons:**
+- Hides root cause of errors
+- Makes debugging harder
+- May mask other bugs
+
+### Suggested Alternative
+**Description:** Add specific error handling with logging, fix root cause
+
+**Pros:**
+- Errors are logged for debugging
+- Only expected errors are handled
+- Root cause gets fixed
+
+**Cons:**
+- Takes longer to implement
+- Requires understanding the error
+
+### Recommendation
+I recommend the specific error handling approach. The current error appears 
+to be caused by [X], which we should fix directly.
+
+**Which approach would you like?**
+```
+
+### Scenario 2: Duplicate Code vs Refactor
+
+**User Request:** "Copy PanelSearchToolV21 and make a V22 with this change"
+
+**Response:**
+```markdown
+## 💡 Alternative Approach Suggestion
+
+### Your Approach
+**Description:** Create complete copy of V21 as V22 with modifications
+
+**Pros:**
+- Safe - doesn't touch working code
+- Quick to implement
+- Easy rollback
+
+**Cons:**
+- Creates ~800 lines of duplicate code
+- Bug fixes need to be applied to both files
+- Maintenance burden increases
+
+### Suggested Alternative
+**Description:** Modify V21 in place with the new feature, using a parameter 
+to control behavior if backward compatibility is needed
+
+**Pros:**
+- No code duplication
+- Single place to maintain
+- Cleaner codebase
+
+**Cons:**
+- Risk of regression (mitigated by testing)
+- Slightly more complex implementation
+
+### Recommendation
+Since the change is [small/targeted], I recommend modifying V21 directly. 
+We can add a parameter flag if you need to toggle between old/new behavior.
+
+**Which approach would you like?**
+```
+
+### Scenario 3: Wrong Tool for the Job
+
+**User Request:** "Use regex to parse this JSON response"
+
+**Response:**
+```markdown
+## 💡 Alternative Approach Suggestion
+
+### Your Approach
+**Description:** Parse JSON using regex patterns
+
+**Pros:**
+- No additional imports needed (if re is imported)
+
+**Cons:**
+- Regex can't properly handle nested JSON
+- Brittle - breaks with formatting changes
+- Hard to maintain
+
+### Suggested Alternative
+**Description:** Use Python's built-in `json` module
+
+**Pros:**
+- Handles all valid JSON correctly
+- Built into Python (no dependencies)
+- Industry standard approach
+- Proper error handling
+
+**Cons:**
+- None significant
+
+### Recommendation
+Strongly recommend using `json.loads()`. It's simpler, more reliable, and 
+the standard approach.
+
+**Which approach would you like?**
+```
+
+## When NOT to Suggest Alternatives
+
+**Skip the alternative presentation when:**
+
+- User explicitly says they want a specific approach
+- The request is simple and straightforward
+- User has already considered and rejected alternatives
+- Time is explicitly critical (production emergency)
+- The alternative would only be marginally better
+
+## Behavior After User Decision
+
+| User Choice | AI Action |
+|-------------|-----------|
+| **Accepts alternative** | Implement the suggested approach |
+| **Keeps original** | Implement exactly as requested without further pushback |
+| **Asks for hybrid** | Discuss and implement combined approach |
+| **Asks for more info** | Provide additional details, examples, or comparisons |
+
+## Important Guidelines
+
+1. **Don't be preachy** - Present alternatives once, respect user's decision
+2. **Be concise** - Keep comparisons brief and actionable
+3. **Show respect** - User may have context you don't have
+4. **Stay helpful** - The goal is to help, not to lecture
+5. **Know when to stop** - If user insists, implement their request
+
+## Related Documentation
+
+- [code-reusability.mdc](mdc:.cursor/rules/core/code-reusability.mdc) - DRY principles
+- [documentation-standards.mdc](mdc:.cursor/rules/core/documentation-standards.mdc) - Documentation requirements
+- [potential-problems.mdc](mdc:.cursor/rules/potential-problems.mdc) - Known issues to watch for

@@ -1,0 +1,385 @@
+---
+description: Documentation for OCR parsing components in OcrLibrary and AnchoringClasses
+globs: 
+  - OcrLibrary/**/*
+  - AnchoringClasses/**/*
+alwaysApply: false
+---
+
+# OCR Library Documentation
+
+## Directory Structure
+
+```
+OcrLibrary/
+├── BreakerTableParserAPIv3.py    # Main pipeline entry point
+├── BreakerTableAnalyzer12.py     # Table structure analysis
+├── BreakerTableParser5.py        # Breaker row parsing
+├── PanelHeaderParserV4.py        # Panel header text extraction
+├── labels_config.jsonc           # Label recognition patterns
+└── breaker_labels_config.jsonc
+
+AnchoringClasses/
+├── BreakerHeaderFinder.py        # Header boundary detection
+└── BreakerFooterFinder.py        # Footer boundary detection
+```
+
+## Pipeline Overview
+
+```
+Panel Image (PNG)
+       │
+       ▼
+┌──────────────────────────────────────┐
+│       BreakerTablePipeline           │
+│   (BreakerTableParserAPIv3.py)       │
+├──────────────────────────────────────┤
+│                                      │
+│  1. BreakerTableAnalyzer.analyze()   │
+│     ├─ BreakerHeaderFinder           │
+│     └─ BreakerFooterFinder           │
+│                                      │
+│  2. PanelHeaderParser.parse_panel()  │
+│     → Panel name, voltage, amps      │
+│                                      │
+│  3. BreakerTableParser.parse_from_*  │
+│     → Breaker rows with details      │
+│                                      │
+└──────────────────────────────────────┘
+       │
+       ▼
+Structured Component Data
+```
+
+## BreakerTablePipeline (API Entry Point)
+
+**File**: `OcrLibrary/BreakerTableParserAPIv3.py`
+
+### Class: `BreakerTablePipeline`
+
+```python
+class BreakerTablePipeline:
+    def __init__(self, *, debug: bool = True):
+        self.debug = bool(debug)
+        self._analyzer = None
+        self._header_parser = None
+
+    def run(
+        self,
+        image_path: str,
+        *,
+        run_analyzer: bool = True,
+        run_parser: bool = True,
+        run_header: bool = True,
+    ) -> dict:
+        """
+        Main entry point. Returns structured result dict.
+        """
+```
+
+### Output Schema
+
+```python
+{
+    "results": {
+        "header": {
+            "name": "DP-1",
+            "attrs": {
+                "amperage": 400,
+                "voltage": 208,
+                "intRating": 22,
+                "mainBreakerAmperage": 400,
+                "spaces": 42,
+                "detected_breakers": [...]  # From header area
+            }
+        },
+        "parser": {
+            "spaces": 42,
+            "detected_breakers": [
+                {"ckt": "1", "description": "LIGHTING", "amperage": 20, "poles": 1},
+                {"ckt": "2", "description": "RECEPTACLES", "amperage": 20, "poles": 1},
+                # ...
+            ]
+        }
+    }
+}
+```
+
+### Validation Constants
+
+```python
+SNAP_MAP = {16: 18, 20: 18, 28: 30, 32: 30, 40: 42, ...}
+VALID_VOLTAGES = {120, 208, 240, 480, 600}
+AMP_MIN = 100
+AMP_MAX = 1200
+```
+
+---
+
+## BreakerTableAnalyzer
+
+**File**: `OcrLibrary/BreakerTableAnalyzer12.py`
+
+### Purpose
+Analyzes table structure to find:
+- Header row position
+- Footer row position (panel size indicator)
+- Grid line structure
+
+### Class: `BreakerTableAnalyzer`
+
+```python
+class BreakerTableAnalyzer:
+    def __init__(self, debug: bool = False):
+        self.reader = easyocr.Reader(["en"], gpu=False)
+        self._header_finder = BreakerHeaderFinder(...)
+        self._footer_finder = BreakerFooterFinder(...)
+
+    def analyze(self, image_path: str) -> dict:
+        """
+        Returns:
+        {
+            "src_path": str,
+            "header_y": int,           # Top of header band
+            "header_bottom_y": int,    # Bottom of header band
+            "footer_y": int,           # Footer line position
+            "footer_token_val": int,   # e.g., 84, 42, 30
+            "panel_size": int,         # Canonical size
+            "debug_dir": str,
+        }
+        """
+```
+
+### Image Preprocessing
+
+```python
+def _prep(self, img: np.ndarray) -> np.ndarray:
+    # 1. Convert to grayscale
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # 2. Apply CLAHE for contrast enhancement
+    g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
+    # 3. Upscale if height < 1600px
+    if H < 1600:
+        scale = 1600.0 / H
+        g = cv2.resize(g, ..., interpolation=cv2.INTER_CUBIC)
+    return g
+```
+
+---
+
+## BreakerHeaderFinder
+
+**File**: `AnchoringClasses/BreakerHeaderFinder.py`
+
+### Purpose
+Finds the header row containing column labels (CKT, DESCRIPTION, TRIP, POLES).
+
+### Class: `BreakerHeaderFinder`
+
+```python
+class BreakerHeaderFinder:
+    CATEGORY_ALIASES = {
+        "ckt": {"CKT", "CCT"},
+        "description": {
+            "CIRCUITDESCRIPTION", "DESCRIPTION", "LOADDESCRIPTION",
+            "DESIGNATION", "LOADDESIGNATION", "NAME",
+        },
+        "trip": {"TRIP", "AMPS", "AMP", "BREAKER", "BKR", "SIZE"},
+        "poles": {"POLES", "POLE", "P"},
+    }
+    EXCLUDE = {"LOADCLASSIFICATION", "CLASSIFICATION"}
+
+    def analyze_rows(self, gray: np.ndarray) -> HeaderResult:
+        """
+        Returns HeaderResult dataclass with:
+        - header_y: Top of header band (snapped to horizontal line)
+        - header_bottom_y: Bottom of header band
+        - centers: Row center positions (empty in current impl)
+        """
+```
+
+### Algorithm
+
+1. Crop top 50% of page, skip top 15% of that
+2. OCR the band with multiple magnification passes
+3. Group tokens by Y-bin (14px bins)
+4. Score each line for header tokens (CKT=4, DESC=4, POLES=3, TRIP=1)
+5. Pick line with highest score
+6. Snap header_y to nearest horizontal grid line above
+7. Snap header_bottom_y to nearest horizontal grid line below
+
+### Debug Output
+
+When `debug=True`:
+- Blue boxes: Header anchor token
+- Cyan line: HEADER_Y (snapped)
+- Orange line: HEADER_BOTTOM_Y
+- Magenta boxes: Other header tokens
+- Red boxes: Excluded tokens
+
+---
+
+## BreakerFooterFinder
+
+**File**: `AnchoringClasses/BreakerFooterFinder.py`
+
+### Purpose
+Finds the footer row containing panel size indicators (e.g., 84, 42, 30).
+
+### Class: `BreakerFooterFinder`
+
+```python
+class BreakerFooterFinder:
+    PANEL_FOOTER_MAP = {
+        84: {84, 83, 82, 81},
+        72: {72, 71, 70, 69},
+        66: {66, 65, 64, 63},
+        54: {54, 53, 52, 51},
+        42: {42, 41, 40, 39},
+        30: {30, 29, 28, 27},
+        18: {18, 17, 16, 15},
+    }
+
+    def find_footer(self, analyzer_result: dict) -> FooterResult:
+        """
+        Returns FooterResult dataclass with:
+        - footer_y: Footer line position
+        - token_y: Y of detected size token
+        - token_val: Detected number (e.g., 84)
+        - panel_size: Canonical size (84, 72, 66, 54, 42, 30, 18)
+        - cct_cols: List of (x_left, x_right) for CKT columns
+        """
+```
+
+### Algorithm
+
+1. Crop header band using header_y and header_bottom_y
+2. Detect vertical grid lines (column separators)
+3. OCR each column, score for CKT/DESCRIPTION/TRIP/POLES
+4. For CKT columns, scan body (below header) for numeric tokens
+5. Match numbers against PANEL_FOOTER_MAP
+6. Require ≥2 numbers from same size window
+7. Snap footer_y to nearest horizontal line below token
+
+---
+
+## PanelHeaderParser
+
+**File**: `OcrLibrary/PanelHeaderParserV4.py`
+
+### Purpose
+Extracts panel metadata from the header text block:
+- Panel name (e.g., "DP-1", "PANEL L")
+- Voltage (120/208/240/480/600)
+- Bus amperage
+- Main breaker amperage
+- Interrupting rating (kAIC)
+
+### Key Methods
+
+```python
+class PanelParser:
+    def parse_panel(self, image_path: str) -> dict:
+        """
+        Returns:
+        {
+            "name": "DP-1",
+            "attrs": {
+                "amperage": 400,
+                "voltage": 208,
+                "intRating": 22,
+                "mainBreakerAmperage": 400,
+            }
+        }
+        """
+```
+
+---
+
+## BreakerTableParser
+
+**File**: `OcrLibrary/BreakerTableParser5.py`
+
+### Purpose
+Parses individual breaker rows from the table body.
+
+### Class: `BreakerTableParser`
+
+```python
+class BreakerTableParser:
+    def parse_from_analyzer(self, analyzer_result: dict) -> dict:
+        """
+        Uses analyzer output to:
+        1. Crop table body (header_bottom_y to footer_y)
+        2. Detect grid lines (rows/columns)
+        3. OCR each cell
+        4. Assemble breaker records
+
+        Returns:
+        {
+            "spaces": 42,
+            "detected_breakers": [
+                {
+                    "ckt": "1",
+                    "description": "LIGHTING",
+                    "amperage": 20,
+                    "poles": 1,
+                    "count": 1
+                },
+                ...
+            ]
+        }
+        """
+```
+
+### Breaker Record Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ckt` | str | Circuit number (1, 3, 5, etc.) |
+| `description` | str | Load description text |
+| `amperage` | int | Trip rating (15-1200A) |
+| `poles` | int | 1, 2, or 3 poles |
+| `count` | int | Quantity if aggregated |
+| `phase` | str | Phase assignment (A, B, C, AB, BC, AC) |
+
+---
+
+## OCR Configuration
+
+EasyOCR settings used throughout:
+
+```python
+reader.readtext(
+    image,
+    detail=1,
+    paragraph=False,
+    allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/",
+    mag_ratio=1.6,          # or 2.0 for second pass
+    contrast_ths=0.05,
+    adjust_contrast=0.7,
+    text_threshold=0.4,
+    low_text=0.25,
+)
+```
+
+---
+
+## Common Issues and Solutions
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Header not found | Low contrast, unusual fonts | Adjust CLAHE, add to CATEGORY_ALIASES |
+| Wrong panel size | OCR misread | Check footer token candidates, adjust confidence threshold |
+| Missing breakers | Grid lines not detected | Tune morphology kernel sizes |
+| Duplicate names | Multiple panels same name | `_dedupe_name()` adds suffix "(2)", "(3)" |
+
+---
+
+## Related Documentation
+
+- [Application Overview](mdc:.cursor/rules/docs/application-overview.mdc) - High-level system architecture
+- [Uplink Server](mdc:.cursor/rules/docs/uplink-server.mdc) - How OCR is called from the server (`_btp_run_once`)
+- [Panel Detection](mdc:.cursor/rules/docs/panel-detection.mdc) - Panel detection that runs before OCR
+- [Rules Engine](mdc:.cursor/rules/docs/rules-engine.mdc) - Business rules that consume OCR output
+- [Project Structure](mdc:.cursor/rules/reference/project-structure.mdc) - Complete file listing

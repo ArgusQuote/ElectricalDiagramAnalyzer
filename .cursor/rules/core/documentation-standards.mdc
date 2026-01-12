@@ -1,0 +1,138 @@
+---
+description: Documentation standards and post-implementation checklist for maintaining project documentation
+globs: 
+alwaysApply: true
+---
+
+# Documentation Standards
+
+This rule enforces documentation-first development. After any code change, verify documentation is updated.
+
+## Post-Implementation Checklist
+
+After any code change, verify:
+
+| Change Type | Required Action |
+|-------------|-----------------|
+| **New file** | Add to [project-structure.mdc](mdc:.cursor/rules/reference/project-structure.mdc), note key exports/interfaces |
+| **New/modified reusable function** | Update [documentation-router.mdc](mdc:.cursor/rules/docs/documentation-router.mdc) + category file in `docs/` |
+| **New pattern** | Add to relevant `docs/*.mdc` file with example, anti-patterns, cross-references |
+| **Bug fix** | Document in `common-errors/{error-type}.mdc` with root cause and prevention |
+| **Config change** | Update relevant documentation, migrate docs if needed |
+
+## Auto-Update Triggers
+
+Always check these conditions:
+
+| Condition | Action |
+|-----------|--------|
+| New reusable function | Update [documentation-router.mdc](mdc:.cursor/rules/docs/documentation-router.mdc) + category file |
+| Modified function signature | Update existing documentation |
+| Fixed a bug | Update `common-errors/{error-type}.mdc` |
+| New system or module | Update [project-structure.mdc](mdc:.cursor/rules/reference/project-structure.mdc) |
+
+## Documentation Writing Standards
+
+### General Principles
+
+- **Be concise** - No redundant information
+- **Focus on WHY, not WHAT** - Code shows what, docs explain why
+- **Be actionable** - Tell readers what to do, include examples, link to details
+
+### Class Documentation
+
+Include:
+- **Brief description** - One sentence purpose
+- **Responsibilities** - Bullet list of what it handles
+- **Dependencies** - What it uses (e.g., `Used by: uplink_server.py`)
+- **Usage example** - Minimal working example
+
+```python
+class BreakerTableAnalyzer:
+    """
+    Analyzes table structure to find header/footer boundaries.
+    
+    Responsibilities:
+    - Detect header row position (column labels)
+    - Detect footer row position (panel size indicator)
+    - Identify grid line structure
+    
+    Dependencies: EasyOCR, OpenCV, BreakerHeaderFinder, BreakerFooterFinder
+    Used by: BreakerTablePipeline
+    """
+```
+
+### Function Documentation
+
+Include:
+- **Brief description** - One sentence
+- **Args** - Parameter names, types, descriptions
+- **Returns** - Type and description
+- **Raises** - Exceptions that may be raised
+
+```python
+def analyze(self, image_path: str) -> dict:
+    """
+    Analyze table structure from panel image.
+    
+    Args:
+        image_path: Path to PNG image of panel schedule
+        
+    Returns:
+        Dict with header_y, footer_y, panel_size, debug_dir
+        
+    Raises:
+        FileNotFoundError: If image_path doesn't exist
+        ValueError: If no valid header found
+    """
+```
+
+## What NOT to Document
+
+Skip documentation for:
+- Self-explanatory code (clear variable names, obvious logic)
+- Standard library usage
+- Trivial getters/setters
+- Temporary or experimental code (in `DevEnv/`)
+
+## Cross-Reference Format
+
+Use these formats consistently:
+
+**Link to rule file:**
+```markdown
+See: [rule-name.mdc](mdc:.cursor/rules/path/rule-name.mdc)
+```
+
+**Link to source file:**
+```markdown
+Related: `path/to/file.py`
+```
+
+**Multiple references:**
+```markdown
+## Related Documentation
+- [OCR Library](mdc:.cursor/rules/docs/ocr-library.mdc) - Parsing pipeline
+- [Panel Detection](mdc:.cursor/rules/docs/panel-detection.mdc) - Detection algorithm
+Related: `OcrLibrary/BreakerTableAnalyzer12.py`, `AnchoringClasses/BreakerHeaderFinder.py`
+```
+
+## End-of-Task Reflection (AI)
+
+After completing any major task, run this checklist internally:
+
+| Question | If Yes |
+|----------|--------|
+| Did I fix a bug? | Update `common-errors/{type}.mdc` |
+| Did I create something reusable? | Update [documentation-router.mdc](mdc:.cursor/rules/docs/documentation-router.mdc) |
+| Did I discover a pattern? | Add to relevant `docs/*.mdc` |
+| Did I struggle to find existing code? | Improve docs based on what I found |
+| Did I almost make a mistake the docs warned about? | Docs work as intended |
+| Did I make a mistake docs should have warned about? | Add warning to prevent future mistakes |
+
+## Quick Links
+
+- [Documentation Router](mdc:.cursor/rules/docs/documentation-router.mdc) - Function/class lookup
+- [Project Structure](mdc:.cursor/rules/reference/project-structure.mdc) - File locations
+- [Rules Index](mdc:.cursor/rules/rules-index.mdc) - All documentation files
+- Common Errors: `.cursor/rules/common-errors/`

@@ -1,0 +1,301 @@
+---
+description: Known potential problems, technical debt, and issues in the ElectricalDiagramAnalyzer codebase
+globs:
+alwaysApply: false
+---
+
+# Potential Problems & Technical Debt
+
+This document tracks known issues, inconsistencies, and technical debt in the codebase. Review before making changes to understand existing problems.
+
+## 🔴 Critical Issues
+
+### 1. Missing Source File: `BreakerTableAnalyzer5.py`
+
+**Status:** CRITICAL - May cause import failures on fresh clone
+
+**Location:** `OcrLibrary/`
+
+**Description:**
+The file `OcrLibrary/BreakerTableParserAPIv3.py` imports from `BreakerTableAnalyzer5`:
+
+```python
+# Line 47 of BreakerTableParserAPIv3.py
+from OcrLibrary.BreakerTableAnalyzer5 import BreakerTableAnalyzer, ANALYZER_VERSION
+```
+
+However, `BreakerTableAnalyzer5.py` **does not exist** in the repository. Only a bytecode cache file exists (`__pycache__/BreakerTableAnalyzer5.cpython-310.pyc`).
+
+**Impact:**
+- Works on existing deployments with cached `.pyc` files
+- **Will fail on fresh clones or after cache clearing**
+- Source code is lost/unavailable for review or modification
+
+**Fix Required:**
+1. Either restore `BreakerTableAnalyzer5.py` from backup or version control
+2. Or update `BreakerTableParserAPIv3.py` to use an existing analyzer (e.g., `BreakerTableAnalyzer12`)
+
+**Related Files:**
+- `OcrLibrary/BreakerTableParserAPIv3.py` (line 47)
+- `OcrLibrary/__pycache__/BreakerTableAnalyzer5.cpython-310.pyc` (cached but no source)
+
+---
+
+### 2. Version Mismatch: PanelSearchTool Import
+
+**Status:** CRITICAL - Using outdated version (V11) when V21 is available
+
+**Location:** `AnvilUplinkCode/uplink_server.py`
+
+**Description:**
+The production server imports an outdated version of `PanelBoardSearch`:
+
+```python
+# Line 88 of uplink_server.py
+from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
+```
+
+Available versions in `VisualDetectionToolLibrary/`:
+- `PanelSearchToolV15.py`
+- `PanelSearchToolV17.py`
+- `PanelSearchToolV18.py`
+- `PanelSearchToolV19.py`
+- `PanelSearchToolV20.py`
+- `PanelSearchToolV21.py` ← **Latest**
+
+**Impact:**
+- Production code is 10 versions behind
+- Missing bug fixes and improvements from V12-V21
+- Only `DevEnv/DevEnvPanaelSearchToolSimple.py` uses the latest V21
+
+**Fix Required:**
+Update import in `uplink_server.py`:
+```python
+from VisualDetectionToolLibrary.PanelSearchToolV21 import PanelBoardSearch
+```
+
+**Testing:** Thoroughly test after update as API may have changed between versions.
+
+---
+
+## 🟠 Moderate Issues
+
+### 3. Hardcoded Path: `/home/paperspace/`
+
+**Status:** MODERATE - Prevents running on other machines
+
+**Description:**
+Multiple files contain hardcoded paths that will fail on any system other than the original deployment:
+
+```python
+# AnvilUplinkCode/uplink_server.py (line 17)
+REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
+```
+
+**Affected Files (production):**
+- `AnvilUplinkCode/uplink_server.py` - **Line 17**
+- `OcrLibrary/BreakerTableParserAPIv3.py` - Line 362 (fallback image path in `__main__`)
+- `OcrLibrary/BreakerTableParserAPIv2.py` - Line 419
+- `OcrLibrary/BreakerTableParserAPIv4.py` - Line 809
+
+**Affected Files (backups - not critical):**
+- All `Backups/uplink_server_*.py` files
+
+**Fix Required:**
+Replace hardcoded path with dynamic resolution:
+```python
+# Better approach:
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# Or use environment variable:
+REPO_ROOT = Path(os.environ.get("REPO_ROOT", Path(__file__).resolve().parent.parent))
+```
+
+---
+
+### 4. Stale Bytecode Cache Files
+
+**Status:** MODERATE - Potential for running outdated code
+
+**Description:**
+The `__pycache__` directories contain `.pyc` files for modules that no longer have source files:
+
+**OcrLibrary/__pycache__:**
+- `BreakerTableAnalyzer3.cpython-310.pyc` - No source file
+- `BreakerTableAnalyzer4.cpython-310.pyc` - No source file
+- `BreakerTableAnalyzer5.cpython-310.pyc` - No source file (CRITICAL - still imported)
+- `BreakerTableAnalyzer9.cpython-310.pyc` - No source file
+- `BreakerTableParserALT.cpython-310.pyc` - No source file
+- `BreakerTableParserAPI.cpython-310.pyc` - No source file
+
+**Impact:**
+- Python may import from cached `.pyc` instead of source
+- Makes debugging impossible for cached-only modules
+- Fresh deployments will fail for any imports of these modules
+
+**Fix Required:**
+1. Clear all `__pycache__` directories
+2. Update imports to use existing source files
+3. Add `__pycache__/` to `.gitignore` if not already
+
+---
+
+### 5. Inconsistent GPU Settings in EasyOCR
+
+**Status:** MODERATE - May cause failures on CPU-only systems
+
+**Description:**
+EasyOCR reader initialization is inconsistent across files:
+
+**Hardcoded to GPU (may fail on CPU systems):**
+```python
+# OcrLibrary/BreakerTableParser5.py (multiple locations)
+self.reader = easyocr.Reader(['en'], gpu=True)  # Lines 523, 1465, 2225, 2313, 2503
+```
+
+**Hardcoded to CPU (safe but slower):**
+```python
+# OcrLibrary/BreakerTableAnalyzer12.py
+self.reader = easyocr.Reader(["en"], gpu=False)  # Line 77
+```
+
+**Impact:**
+- Code with `gpu=True` will crash on systems without CUDA
+- No fallback mechanism in most cases
+
+**Recommended Pattern:**
+```python
+import torch
+_USE_GPU = torch.cuda.is_available()
+self.reader = easyocr.Reader(['en'], gpu=_USE_GPU)
+```
+
+---
+
+## 🟡 Low Priority Issues
+
+### 6. Broad Exception Handling
+
+**Status:** LOW - May hide bugs during development
+
+**Description:**
+There are **541 `except Exception` blocks** across 47 files. Many silently swallow errors:
+
+```python
+# Common pattern throughout codebase
+try:
+    # some operation
+except Exception:
+    pass  # or: return None
+```
+
+**Highest Concentration:**
+- `OcrLibrary/BreakerTableParser5.py` - 35 instances
+- `OcrLibrary/BreakerTableParser6.py` - 26 instances
+- `AnvilUplinkCode/uplink_server.py` - 26 instances
+
+**Impact:**
+- Errors are silently ignored
+- Debugging becomes difficult
+- Production issues may go unnoticed
+
+**Recommended Pattern:**
+```python
+import logging
+logger = logging.getLogger(__name__)
+
+try:
+    # some operation
+except Exception as e:
+    logger.warning(f"Operation failed: {e}", exc_info=True)
+    # handle gracefully
+```
+
+---
+
+### 7. Print-Based Error Reporting
+
+**Status:** LOW - Not suitable for production logging
+
+**Description:**
+Errors are reported via `print()` statements rather than proper logging:
+
+```python
+# Common pattern
+print(f"[WARN] Header parser failed: {e}")
+print(f">>> ERROR analyzing image {idx + 1}: {e}")
+```
+
+**Files Using Print for Errors:**
+34 files use `print(.*[Ee]rror` or `print(.*[Ff]ail` patterns.
+
+**Impact:**
+- No log levels (INFO, WARN, ERROR)
+- No timestamps in logs
+- Cannot route errors to different handlers
+- Difficult to filter logs in production
+
+**Recommended:**
+Implement Python `logging` module throughout.
+
+---
+
+### 8. Module-Level State (Name De-duplication)
+
+**Status:** LOW - May cause subtle bugs in long-running processes
+
+**Location:** `OcrLibrary/BreakerTableParserAPIv3.py`
+
+**Description:**
+Panel name de-duplication uses module-level state:
+
+```python
+# Lines 30-40 of BreakerTableParserAPIv3.py
+_NAME_COUNTS = {}
+
+def _dedupe_name(raw_name: str | None) -> str:
+    base = (str(raw_name or "").strip()) or "(unnamed)"
+    key = _norm_name(base)
+    cnt = _NAME_COUNTS.get(key, 0) + 1
+    _NAME_COUNTS[key] = cnt
+    return base if cnt == 1 else f"{base} ({cnt})"
+```
+
+**Impact:**
+- State persists across jobs in long-running server
+- Panel names may get unexpected suffixes: "Panel A (2)", "Panel A (3)"...
+- `reset_name_deduper()` exists but may not be called between jobs
+
+**Fix:**
+Call `reset_name_deduper()` at the start of each job in `uplink_server.py`.
+
+---
+
+## Summary Table
+
+| Issue | Severity | Location | Effort to Fix |
+|-------|----------|----------|---------------|
+| Missing BreakerTableAnalyzer5.py | 🔴 Critical | OcrLibrary/ | Medium |
+| PanelSearchTool V11 vs V21 | 🔴 Critical | uplink_server.py | Low + Testing |
+| Hardcoded paths | 🟠 Moderate | Multiple | Low |
+| Stale bytecode cache | 🟠 Moderate | __pycache__/ | Low |
+| Inconsistent GPU settings | 🟠 Moderate | OcrLibrary/ | Medium |
+| Broad exception handling | 🟡 Low | 47 files | High |
+| Print-based logging | 🟡 Low | 34 files | High |
+| Module-level state | 🟡 Low | BreakerTableParserAPIv3.py | Low |
+
+---
+
+## When to Update This Document
+
+Update this document when:
+- A new systematic issue is discovered
+- An issue is resolved (move to "Resolved" section or remove)
+- A workaround is found for an issue
+- Severity changes based on new information
+
+## Related Documentation
+
+- [Rules Index](mdc:.cursor/rules/rules-index.mdc) - All documentation files
+- [OCR Library](mdc:.cursor/rules/docs/ocr-library.mdc) - OCR parsing docs
+- [Uplink Server](mdc:.cursor/rules/docs/uplink-server.mdc) - Server documentation
+- [Common Errors](mdc:.cursor/rules/common-errors/) - Error documentation templates
