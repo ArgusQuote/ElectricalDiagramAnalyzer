@@ -22,24 +22,6 @@ if str(REPO_ROOT) not in sys.path:
 BASE_JOBS_DIR = Path.home() / "jobs"
 BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
-PANEL_FINDER_DEFAULTS = {
-    # Same knobs you use in your dev env script
-    "render_dpi": 1400,
-    "aa_level": 8,
-    "render_colorspace": "gray",
-    "min_void_area_fr": 0.004,
-    "min_void_w_px": 90,
-    "min_void_h_px": 90,
-    "max_void_area_fr": 0.30,
-    "void_w_fr_range": (0.20, 0.60),
-    "void_h_fr_range": (0.15, 0.55),
-    "min_whitespace_area_fr": 0.01,
-    "margin_shave_px": 6,
-    "pad": 6,
-    "verbose": True,
-}
-
 # Keep legacy dir around (not used directly)
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
@@ -103,9 +85,9 @@ _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV2 import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
-import RulesEngine.RulesEngine3 as RE2  # must expose process_job(payload)
+from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
+from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
+import RulesEngine.RulesEngine2 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
 ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
@@ -135,7 +117,7 @@ def _warmup_ocr_once():
                 run_parser=False,
                 run_header=True,
             )
-            print(f">>> OCR warmup complete (analyzer + header) | API_VERSION={API_VERSION}")
+            print(">>> OCR warmup complete (analyzer + header)")
         finally:
             try:
                 os.remove(tmp_path)
@@ -288,24 +270,8 @@ def _status_paths(dir_path: Path):
     return {"status": dir_path / "status.json", "result": dir_path / "result.json"}
 
 def _status_write(dir_path: Path, state: str, **extras):
-    """
-    Write status.json while preserving existing fields unless explicitly overwritten.
-    This prevents losing owner_id/owner_email on error/timeouts.
-    """
     paths = _status_paths(dir_path)
-
-    prev = {}
-    try:
-        prev = _json_read_or_none(paths["status"]) or {}
-    except Exception:
-        prev = {}
-
-    # Merge: previous -> extras -> required fields
-    payload = dict(prev)
-    payload.update(extras or {})
-    payload["state"] = state
-    payload["ts"] = datetime.now(timezone.utc).isoformat()
-
+    payload = {"state": state, **extras, "ts": datetime.now(timezone.utc).isoformat()}
     with open(paths["status"], "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
 
@@ -379,95 +345,6 @@ def _coerce_types(overrides: dict) -> dict:
 def _normalize_ui_overrides(overrides: dict | None) -> dict:
     return _deep_merge(_DEFAULT_OVERRIDES, _coerce_types(overrides or {}))
 
-# Delete unused images and folders for storage
-def _rel(p: Path, root: Path) -> str:
-    return str(p.relative_to(root)).replace("\\", "/")
-
-def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = False) -> set[str]:
-    """
-    Return a set of job-relative file paths to keep.
-    Everything else in the job folder will be deleted.
-    """
-    keep: set[str] = set()
-
-    # Always keep status/result
-    keep.add("status.json")
-    keep.add("result.json")
-
-    pdf_images = job_dir / "pdf_images"
-    if not pdf_images.is_dir():
-        return keep
-
-    # 1) Keep REVIEW overlays (per-panel overlays)
-    review_dir = pdf_images / "review_overlays"
-    if review_dir.is_dir():
-        for p in review_dir.rglob("*"):
-            if p.is_file():
-                keep.add(_rel(p, job_dir))
-
-    # 2) Keep MAGENTA overlays exactly like vm_list_magenta_overlay_images()
-    candidate_dirs = [
-        pdf_images / "magenta_overlays",
-        pdf_images / "magenta_overlay",
-        pdf_images / "page_overlays",
-        pdf_images / "full_overlays",
-        pdf_images / "overlays",
-    ]
-
-    found: list[Path] = []
-    for d in candidate_dirs:
-        if d.is_dir():
-            found.extend(list(d.glob("*.png")))
-
-    # Fallback: any png containing "magenta" (excluding review_overlays)
-    if not found:
-        for p in pdf_images.rglob("*.png"):
-            if "review_overlays" in p.parts:
-                continue
-            if "magenta" in p.name.lower():
-                found.append(p)
-
-    for p in found:
-        if p.is_file():
-            keep.add(_rel(p, job_dir))
-
-    # Optional: keep original uploaded pdf(s)
-    if keep_pdf:
-        up = job_dir / "uploaded_pdfs"
-        if up.is_dir():
-            for p in up.rglob("*.pdf"):
-                keep.add(_rel(p, job_dir))
-
-    return keep
-
-def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
-    """
-    Delete everything in job_dir except keep_relpaths.
-    Then remove empty directories.
-    """
-    job_dir = Path(job_dir).resolve()
-
-    # 1) Delete files not in keep list
-    for p in job_dir.rglob("*"):
-        if not p.is_file():
-            continue
-        rel = _rel(p, job_dir)
-        if rel not in keep_relpaths:
-            try:
-                p.unlink()
-            except Exception:
-                pass
-
-    # 2) Remove empty directories (bottom-up)
-    for d in sorted([x for x in job_dir.rglob("*") if x.is_dir()], reverse=True):
-        try:
-            next(d.iterdir())
-        except StopIteration:
-            try:
-                d.rmdir()
-            except Exception:
-                pass
-
 @anvil.server.callable
 def vm_get_default_overrides() -> dict:
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
@@ -516,24 +393,24 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
 
-    # --- 2) Run the panel finder (PanelSearchToolV18) on the chosen PDF ---
+    # --- 2) Run the panel finder on the chosen PDF ---
     local_finder = PanelBoardSearch(
         output_dir=str(img_dir),
         dpi=dpi,
-        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match your dev env
-        render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
-        aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
-        render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
-        min_void_area_fr=PANEL_FINDER_DEFAULTS["min_void_area_fr"],
-        min_void_w_px=PANEL_FINDER_DEFAULTS["min_void_w_px"],
-        min_void_h_px=PANEL_FINDER_DEFAULTS["min_void_h_px"],
-        max_void_area_fr=PANEL_FINDER_DEFAULTS["max_void_area_fr"],
-        void_w_fr_range=PANEL_FINDER_DEFAULTS["void_w_fr_range"],
-        void_h_fr_range=PANEL_FINDER_DEFAULTS["void_h_fr_range"],
-        min_whitespace_area_fr=PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"],
-        margin_shave_px=PANEL_FINDER_DEFAULTS["margin_shave_px"],
-        pad=PANEL_FINDER_DEFAULTS["pad"],
-        verbose=PANEL_FINDER_DEFAULTS["verbose"],
+        min_void_area_fr=0.004,
+        min_void_w_px=90,
+        min_void_h_px=90,
+        # ↓ tighten these three to kill giant/near-page blobs
+        max_void_area_fr=0.30,          # was 0.30
+        void_w_fr_range=(0.20, 0.60),   # was (0.10, 0.60)
+        void_h_fr_range=(0.20, 0.55),   # was (0.10, 0.60)
+        min_whitespace_area_fr=0.01,
+        margin_shave_px=6,
+        pad=6,
+        debug=False,
+        verbose=True,
+        save_masked_shape_crop=False,
+        replace_multibox=True,
     )
 
     try:
@@ -707,7 +584,7 @@ def _btp_run_once(
     debug: bool = True
 ) -> dict:
     """
-    Construct a BreakerTablePipeline (v6) and run it for this image.
+    Construct a BreakerTablePipeline and run it for this image.
     (No global caching; per your request.)
     """
     pipe = BreakerTablePipeline(debug=debug)
@@ -906,8 +783,8 @@ def _process_job(job_id: str):
             "job_id": job_id,
             "job_dir": str(job_dir),
             "saved_pdf": first_pdf,
-            "output_dir": "",
-            "images": [],
+            "output_dir": str(job_dir / "pdf_images"),
+            "images": imgs,
             "image_count": len(imgs),
             "components": components,
             "rules_result": rules_result,
@@ -922,14 +799,6 @@ def _process_job(job_id: str):
         _status_write(job_dir, "done", result_path=str(_status_paths(job_dir)["result"]), progress=100.0)
         _jobs_upsert(job_id, state="done", updated_at=_now_utc(), result_json=result)
         print(f">>> worker done: {job_id}")
-
-        # ---- AUTO CLEANUP (keep only what UI uses) ----
-        try:
-            keep = _collect_keep_relpaths(job_dir, keep_pdf=False)  # set True if you want to keep the original PDF
-            _cleanup_job_dir(job_dir, keep)
-            print(f">>> cleanup complete: kept {len(keep)} files")
-        except Exception as ce:
-            print(f">>> cleanup failed: {ce}")
 
     except Exception as e:
         tb = traceback.format_exc()
@@ -977,10 +846,6 @@ def _dequeue_loop(idx: int):
         # Write an error status/result snapshot with message
         msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
         _status_write(job_dir, "error", error=msg)
-        try:
-            _cleanup_job_dir(job_dir, {"status.json"})
-        except Exception:
-            pass
         _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
 
         # Try graceful term then hard kill
@@ -1093,102 +958,39 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "deferred_render": True
     }
 
-def _natural_key(p: Path):
-    # Sort like page2 before page10
-    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
-
-@anvil.server.callable
-def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
-    """
-    Returns job-relative PNG paths for FULL-PAGE magenta overlays.
-    Looks in common directories first, then falls back to any PNG containing 'magenta'
-    (excluding pdf_images/review_overlays).
-    """
-    if not job_id:
-        return []
-
-    job_root = (BASE_JOBS_DIR / job_id).resolve()
-    pdf_images = (job_root / "pdf_images")
-    if not pdf_images.is_dir():
-        return []
-
-    # 1) Preferred / common directories (adjust if your generator uses a specific one)
-    candidate_dirs = [
-        pdf_images / "magenta_overlays",
-        pdf_images / "magenta_overlay",
-        pdf_images / "page_overlays",
-        pdf_images / "full_overlays",
-        pdf_images / "overlays",
-    ]
-
-    found: list[Path] = []
-    for d in candidate_dirs:
-        if d.is_dir():
-            found.extend(list(d.glob("*.png")))
-
-    # 2) Fallback: search for filenames containing "magenta" anywhere under pdf_images,
-    # but EXCLUDE review_overlays (those are your per-panel items)
-    if not found:
-        for p in pdf_images.rglob("*.png"):
-            if "review_overlays" in p.parts:
-                continue
-            if "magenta" in p.name.lower():
-                found.append(p)
-
-    # Deduplicate + sort
-    uniq = {}
-    for p in found:
-        try:
-            rp = p.relative_to(job_root)
-        except Exception:
-            continue
-        uniq[str(rp).replace("\\", "/")] = p
-
-    rel_paths = list(uniq.keys())
-    rel_paths.sort(key=lambda s: _natural_key(Path(s)))
-    return rel_paths
-
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
+    """Return absolute paths to all overlay PNGs for this job."""
     if not job_id:
         return []
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    overlay_dir = (job_root / "pdf_images" / "review_overlays")
+    overlay_dir = (job_root / "pdf_images" / "magenta_overlays")
     if not overlay_dir.is_dir():
         return []
-    return [str(p.relative_to(job_root)) for p in sorted(overlay_dir.glob("*.png"))]
+    return [str(p.resolve()) for p in sorted(overlay_dir.glob("*.png"))]
 
 @anvil.server.callable
 def vm_fetch_image(job_id: str, source_path: str):
     """
-    Return an image as BlobMedia.
-    Accepts either:
-      - absolute paths inside this job folder, OR
-      - job-relative paths like: 'pdf_images/review_overlays/foo.png'
+    Return the cropped PNG for a given panel as BlobMedia, enforcing that the file
+    lives under this job folder.
     """
     if not job_id or not source_path:
         raise RuntimeError("job_id and source_path are required")
 
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-
-    raw = str(source_path).strip().replace("\\", "/")
-    p_in = Path(raw)
-
-    # If client sent a relative path, interpret it under the job folder.
-    if not p_in.is_absolute():
-        p = (job_root / p_in).resolve()
-    else:
-        p = p_in.resolve()
+    p = Path(source_path).resolve()
 
     # Security: ensure requested file is inside this job folder
     if not str(p).startswith(str(job_root)):
-        raise RuntimeError(f"Invalid image path for this job: {raw}")
+        raise RuntimeError("Invalid image path for this job")
 
     if not p.is_file():
         raise RuntimeError(f"Image not found: {p}")
 
     ctype = "image/png" if p.suffix.lower() == ".png" else "application/octet-stream"
-    return BlobMedia(ctype, p.read_bytes(), name=p.name)
+    data = p.read_bytes()
+    return BlobMedia(ctype, data, name=p.name)
 
 @anvil.server.callable
 def vm_set_watchdog_timeout(minutes: int) -> dict:
@@ -1229,11 +1031,16 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
     if job_node and job_node != NODE_ID:
         node_hint.update({"job_node_id": job_node})
 
-    if not req_email or not job_email:
-        return {"state": "not_found", **node_hint}
+    if not job_email:
+        # legacy/missing – backfill with the caller and continue
+        st["owner_email"] = req_email
+        st["owner_id"] = req_email
+        _status_write(job_dir, st.get("state", "unknown"),
+                      **{k: v for k, v in st.items() if k not in ("state", "ts")})
+        job_email = req_email
+        print(f">>> vm_get_job_status backfilled owner_email for {job_id}")
 
-    # ENFORCE OWNERSHIP
-    if req_email != job_email:
+    if job_email != req_email:
         return {"state": "not_found", **node_hint}
 
     state = (st.get("state") or "unknown").lower()
@@ -1247,8 +1054,7 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         return {"state": "error", "error": st.get("error") or "Unknown error", **node_hint}
 
     out = {"state": state, **node_hint}
-    for k in ("step", "image_count", "ui_overrides", "noticed_ts_ms",
-              "cycle_time_str", "cycle_time_ms", "progress"):
+    for k in ("step", "image_count", "chosen", "ui_overrides", "noticed_ts_ms", "cycle_time_str", "cycle_time_ms", "progress"):
         if k in st:
             out[k] = st[k]
 
@@ -1261,51 +1067,26 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
 
 @anvil.server.callable
 def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
-    """
-    List jobs owned by this user (disk-backed).
-    Includes job_name + submitted_at if present in job_note.
-    """
-    owner_id = str(owner_id or "").strip().lower()
-    if not owner_id:
-        return []
-
-    def _safe_iso(dt_s):
-        if not isinstance(dt_s, str) or not dt_s.strip():
-            return ""
-        return dt_s.strip()
-
+    """List jobs owned by this user."""
     rows = []
     for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
         if not d.is_dir():
             continue
-
-        st = _json_read_or_none(_status_paths(d)["status"]) or {}
-        st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
-        if st_owner != owner_id:
+        st = _json_read_or_none(_status_paths(d)["status"])
+        if not st:
             continue
-        state = (st.get("state") or "unknown").lower()
-        if state == "error":
-            continue  # failed jobs never appear for anyone
-
-        meta = _parse_job_note(st.get("job_note") or "")
-        job_name = (meta.get("job_name") or "").strip() or d.name
-        submitted_at_utc = (meta.get("submitted_at_utc") or "").strip()
-
+        if str(st.get("owner_id") or "").strip().lower() != str(owner_id or "").strip().lower():
+            continue
         rows.append({
             "job_id": d.name,
-            "job_name": job_name,
-            "submitted_at_utc": submitted_at_utc,
-            "created_at": _safe_iso(st.get("created_at")),
-            "state": (st.get("state") or "unknown"),
-            "step": (st.get("step") or ""),
-            "progress": float(st.get("progress", 0.0) or 0.0),
-            "image_count": int(st.get("image_count", 0) or 0),
-            "cycle_time_str": (st.get("cycle_time_str") or ""),
+            "state": st.get("state"),
+            "created_at": st.get("created_at"),
+            "image_count": st.get("image_count"),
+            "progress": st.get("progress", 0.0),
+            "step": st.get("step"),
         })
-
         if len(rows) >= int(limit):
             break
-
     return rows
 
 @anvil.server.callable

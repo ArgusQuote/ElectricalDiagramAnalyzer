@@ -9,9 +9,9 @@ from difflib import SequenceMatcher
 import re
 
 # Same values you use in HeaderBandScanner
-_HDR_OCR_SCALE = 2.0           # or whatever you use there
-_HDR_OCR_ALLOWLIST = None      # or your actual allowlist
-_HDR_MIN_CONF = 0.35           # or your actual threshold
+_HDR_OCR_SCALE = 2.0
+_HDR_OCR_ALLOWLIST = None
+_HDR_MIN_CONF = 0.35
 
 @dataclass
 class FooterResult:
@@ -311,25 +311,6 @@ class BreakerFooterFinder:
 
         footer_line_y = y1_band + best_down_rel
 
-        # optional: dump mask overlay for debugging
-        if self.debug and self.debug_dir:
-            try:
-                os.makedirs(self.debug_dir, exist_ok=True)
-                vis = cv2.cvtColor(horiz, cv2.COLOR_GRAY2BGR)
-                Hb, Wb = vis.shape[:2]
-
-                # token baseline in band coords
-                y_rel = max(0, min(Hb - 1, y_rel_start))
-                cv2.line(vis, (0, y_rel), (Wb - 1, y_rel), (255, 0, 0), 1)      # token baseline
-                cv2.line(vis, (0, best_down_rel), (Wb - 1, best_down_rel), (0, 255, 255), 1)  # snapped footer
-
-                mask_name = f"footer_horiz_mask_overlay_y{y1_band}_{y2_band}.png"
-                mask_path = os.path.join(self.debug_dir, mask_name)
-                cv2.imwrite(mask_path, vis)
-                print(f"[BreakerFooterFinder] Saved footer horiz mask overlay: {mask_path}")
-            except Exception as e:
-                print(f"[BreakerFooterFinder] Failed to write footer horiz mask overlay: {e}")
-
         return int(footer_line_y)
 
     def _score_header_columns(self, column_groups: List[Dict]) -> Dict:
@@ -341,6 +322,19 @@ class BreakerFooterFinder:
           layout: 'combined'   -> trip + poles live in same "hero" column (per side)
                   'separated'  -> trip and poles live in different hero columns (per side)
                   'unknown'    -> anything else / insufficient signal
+
+        Hero-word priorities (for breaking ties between hero columns):
+
+          Trip heroes (highest → lowest):
+            AMP/AMPS  >  TRIP/TRIPPING  >  LOAD  >  SIZE  >  BREAKER/BKR/BRKR/CB
+
+          Poles heroes:
+            POLE/POLES/PO/PO. (strong)  >  bare 'P' (weak)
+
+        IMPORTANT:
+          - CKT/CCT and DESCRIPTION/NAME always outrank trip/poles for a column.
+            If a column has any ckt/description signal, it will NEVER be
+            assigned as trip/poles/combo.
         """
         def norm_word(s: str) -> str:
             """
@@ -380,7 +374,10 @@ class BreakerFooterFinder:
         def _is_like(word: str, targets: List[str], base_threshold: float = 0.78) -> bool:
             """
             General fuzzy match `word` against a list of canonical `targets`.
-            Uses norm_word() on both sides and SequenceMatcher ratio.
+
+            - Uses norm_word() on both sides.
+            - Uses SequenceMatcher ratio.
+            - Slightly stricter threshold for very short targets.
             """
             w = norm_word(word)
             if not w:
@@ -405,19 +402,30 @@ class BreakerFooterFinder:
         def _hero_match(word: str, targets: List[str]) -> bool:
             """
             Stricter fuzzy match specifically for hero words (trip/poles).
+
+              - After the standard fuzzy match on the whole token, we also allow
+                a hero word that is "buried" in the OCR token with a tiny bit of
+                junk on the edge, e.g.:
+                  AMPS!  -> AMPS
+                  POLET  -> POLE
+                by checking letter-only prefix/suffix matches with <=1 extra char.
             """
             w = norm_word(word)
             if not w:
                 return False
+
+            # Letters-only version of the OCR token
+            w_letters = "".join(ch for ch in w if ch.isalpha())
 
             for t in targets:
                 t_norm = norm_word(t)
                 if not t_norm:
                     continue
 
-                # Hero matching thresholds:
-                # - very short tokens (<=4): need ~0.90+
-                # - longer tokens: allow a bit more noise (~0.75+)
+                # Letters-only version of the target hero word
+                t_letters = "".join(ch for ch in t_norm if ch.isalpha())
+
+                # --- primary: whole-token fuzzy ratio (existing behavior) ---
                 if len(t_norm) <= 4:
                     threshold = 0.90
                 else:
@@ -425,6 +433,16 @@ class BreakerFooterFinder:
 
                 if SequenceMatcher(a=w, b=t_norm).ratio() >= threshold:
                     return True
+
+                # --- NEW: "hero buried at edge" fallback ---
+                # Allow cases like "AMPS!" or "POLET" where the core hero word
+                # is at the start or end with at most one extra letter.
+                if w_letters and t_letters:
+                    if (
+                        (w_letters.startswith(t_letters) or w_letters.endswith(t_letters))
+                        and abs(len(w_letters) - len(t_letters)) <= 1
+                    ):
+                        return True
 
             return False
 
@@ -462,6 +480,7 @@ class BreakerFooterFinder:
                         texts.append(raw_clean)
 
                 # Treat long, multi-word chunks as sentence-like notes
+                # Example: "(d) PROVIDE WITH SHUNT TRIP BREAKER." -> many words -> sentence-like
                 is_sentence_like = len(pieces) >= 3
 
                 for raw in pieces:
@@ -473,22 +492,35 @@ class BreakerFooterFinder:
                     if not w_norm:
                         continue
 
-                    # Skip pure-numeric tokens (no letters)
+                    # Skip pure-numeric tokens (no letters) so "3.3", "20", "202" etc
+                    # do not drive header role scoring. Mixed tokens like "tr1p" or "20A"
+                    # still participate because they have letters.
                     if not any(ch.isalpha() for ch in w_norm):
                         continue
 
                     word_entries.append((raw, is_sentence_like))
+
+            # --- Detect "strong" CKT label (e.g. 'CKT #', 'CKT NO.', 'CKT NUMBER') ---
+            has_ckt_core = any(
+                _is_like(t, ["CKT", "CCT"], base_threshold=0.95) for t in texts
+            )
+            has_ckt_number_assoc = False
+            for t in texts:
+                tu = t.strip().upper()
+                if tu in ("#", "NO", "NO.", "NUMBER", "NUM", "NUM.", "NBR", "NBR."):
+                    has_ckt_number_assoc = True
+                    break
 
             # Base structure for this column
             has_notes = False
             score = {
                 "ckt": 0,
                 "description": 0,
-                "trip": 0,
+                "trip": 0,   # kept for debugging / future use
                 "poles": 0,
             }
-            hero_trip_rank = 0
-            hero_poles_rank = 0
+            hero_trip_rank = 0  # 0 = no trip hero; 1..5 = increasing strength
+            hero_poles_rank = 0  # 0 = no poles hero; 1..4 = increasing strength
 
             if not word_entries:
                 col_infos.append(
@@ -504,7 +536,7 @@ class BreakerFooterFinder:
                         "hero_poles_rank": hero_poles_rank,
                         "has_ckt_signal": False,
                         "has_desc_signal": False,
-                        "role": None,
+                        "role": None,  # final role filled later
                     }
                 )
                 continue
@@ -515,7 +547,8 @@ class BreakerFooterFinder:
                 if not w_norm:
                     continue
 
-                # notes / remarks
+                # --- notes / remarks (only ignore on NOTES-like; ABC/phase is allowed) ---
+                # We *do* want sentence-like chunks to still trip the "notes" flag.
                 if _is_like(
                     w_raw,
                     ["NOTE", "NOTES", "REMARK", "REMARKS", "COMMENT", "COMMENTS"],
@@ -523,18 +556,20 @@ class BreakerFooterFinder:
                 ):
                     has_notes = True
 
+                # If this word came from a sentence-like chunk, don't let it
+                # drive header-role scoring (treat as inline note only).
                 if is_sentence_like:
                     continue
 
-                # CKT / CCT / NO.
+                # --- CKT / CCT / NO. (very strict; basically exact) ---
                 if _is_like(
                     w_raw,
                     ["CKT", "CCT", "NO", "NO."],
-                    base_threshold=0.95,
+                    base_threshold=0.95,  # high threshold; 3-char token must be almost exact
                 ):
                     score["ckt"] += 3
 
-                # DESCRIPTION / DESIGNATION / NAME
+                # --- DESCRIPTION / DESIGNATION / NAME (looser; allow ~2–3 errors) ---
                 if _is_like(
                     w_raw,
                     [
@@ -545,11 +580,13 @@ class BreakerFooterFinder:
                         "LOAD DESIGNATION",
                         "NAME",
                     ],
-                    base_threshold=0.70,
+                    base_threshold=0.70,  # long words; 0.70 ~ up to ~3 mismatches
                 ):
                     score["description"] += 3
 
-                # Trip hero ranks
+                # ---------- Trip hero ranks ----------
+                # Priority:
+                #   AMP/AMPS (5) > TRIP/TRIPPING (4) > LOAD (3) > SIZE (2) > BREAKER/BKR/BRKR/CB (1)
                 if _hero_match(w_raw, ["AMP", "AMPS"]):
                     hero_trip_rank = max(hero_trip_rank, 5)
                 elif _hero_match(w_raw, ["TRIP", "TRIPPING"]):
@@ -561,12 +598,21 @@ class BreakerFooterFinder:
                 elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
                     hero_trip_rank = max(hero_trip_rank, 1)
 
-                # Poles hero ranks
+                # ---------- Poles hero ranks ----------
+                #   POLE/POLES/PO/PO. (4) > bare 'P' (1)
                 if _hero_match(w_raw, ["POLE", "POLES", "PO.", "PO"]):
                     hero_poles_rank = max(hero_poles_rank, 4)
                 elif w_norm == "P":
                     hero_poles_rank = max(hero_poles_rank, 1)
 
+            # Extra boost for "CKT + number-ish" labels ---
+            # Example headers:
+            #   "CKT #"
+            #   "CKT NO."
+            #   "CKT NUMBER"
+            # This makes that column win over a plain "CKT" / "CKT TAG" column.
+            if has_ckt_core and has_ckt_number_assoc:
+                score["ckt"] += 2
             has_ckt_signal = score["ckt"] > 0
             has_desc_signal = score["description"] > 0
 
@@ -583,7 +629,7 @@ class BreakerFooterFinder:
                     "hero_poles_rank": hero_poles_rank,
                     "has_ckt_signal": has_ckt_signal,
                     "has_desc_signal": has_desc_signal,
-                    "role": None,
+                    "role": None,  # filled later
                 }
             )
 
@@ -604,17 +650,82 @@ class BreakerFooterFinder:
             best_role = None
             best_score_val = 0
 
+            # Only compete ckt vs description here; trip/poles/combo handled via hero logic
             for r in ("ckt", "description"):
                 if s[r] > best_score_val:
                     best_score_val = s[r]
                     best_role = r
 
+            # Threshold of 2 keeps us from random noise, but:
+            # even if we don't cross 2, the presence of ANY ckt/desc
+            # will still block trip/poles later via has_ckt_signal/has_desc_signal.
             if best_role is not None and best_score_val >= 2:
                 info["role"] = best_role
             else:
                 info["role"] = None
 
-        # Hero candidates: only pure trip/poles columns
+        # ---------- Normalize multiple CKT columns (one primary per side) ----------
+        # We can have up to TWO real CKT columns: one on the left, one on the right.
+        ckt_candidates = [
+            info
+            for info in col_infos
+            if (not info["has_notes"])
+               and info["score"]["ckt"] > 0
+               and (info.get("ignoredReason") is None)
+        ]
+
+        if ckt_candidates:
+            # Use geometry to split into left/right
+            global_left = min(c["x_left"] for c in ckt_candidates)
+            global_right = max(c["x_right"] for c in ckt_candidates)
+            center_x = 0.5 * (global_left + global_right)
+
+            for info in ckt_candidates:
+                col_center = 0.5 * (info["x_left"] + info["x_right"])
+                info["ckt_side"] = "left" if col_center < center_x else "right"
+
+            def _has_number_assoc(texts: List[str]) -> bool:
+                # Same idea as has_ckt_number_assoc: '#', NO, NUMBER, etc.
+                for t in texts or []:
+                    tu = t.strip().upper()
+                    if tu in ("#", "NO", "NO.", "NUMBER", "NUM", "NUM.", "NBR", "NBR."):
+                        return True
+                return False
+
+            def _rank_ckt(info: Dict) -> tuple:
+                # Higher CKT score first, then prefer the one that has "#/NO/NUMBER",
+                # then slightly favor the left-most within that side.
+                has_num = 1 if _has_number_assoc(info["texts"]) else 0
+                return (
+                    info["score"]["ckt"],
+                    has_num,
+                    -info["x_left"],
+                )
+
+            primary_ckt_indices = set()
+
+            # Pick best per side (left + right)
+            for side in ("left", "right"):
+                side_list = [c for c in ckt_candidates if c["ckt_side"] == side]
+                if not side_list:
+                    continue
+                primary = max(side_list, key=_rank_ckt)
+                primary_ckt_indices.add(primary["index"])
+
+            # Winners keep/receive role='ckt'; others are demoted to secondaryCkt
+            for info in ckt_candidates:
+                if info["index"] in primary_ckt_indices:
+                    if info["role"] is None:
+                        info["role"] = "ckt"
+                else:
+                    if info["role"] == "ckt":
+                        info["role"] = None
+                    if not info.get("ignoredReason"):
+                        info["ignoredReason"] = "secondaryCkt"
+
+        # ---------- Hero candidates: only pure trip/poles columns ----------
+        # We NEVER allow a column that has any ckt/description signal to become
+        # trip/poles/combo. That enforces "NAME beats BKR", "CKT beats everything",
         hero_candidates = [
             info
             for info in col_infos
@@ -625,6 +736,7 @@ class BreakerFooterFinder:
         ]
 
         if not hero_candidates:
+            # nothing to do for trip/poles
             role_to_index: Dict[str, int] = {}
             summaries: List[Dict] = []
             for info in col_infos:
@@ -648,7 +760,7 @@ class BreakerFooterFinder:
                 "layout": "unknown",
             }
 
-        # Determine left/right side using geometric center
+        # ---------- Determine left/right side using geometric center ----------
         global_left = min(info["x_left"] for info in hero_candidates)
         global_right = max(info["x_right"] for info in hero_candidates)
         center_x = 0.5 * (global_left + global_right)
@@ -657,7 +769,7 @@ class BreakerFooterFinder:
             col_center = 0.5 * (info["x_left"] + info["x_right"])
             info["side"] = "left" if col_center < center_x else "right"
 
-        # Pick best hero trip/poles per side
+        # ---------- Pick best hero trip/poles per side ----------
         best_trip_col = {"left": None, "right": None}
         best_trip_rank = {"left": 0, "right": 0}
         best_poles_col = {"left": None, "right": None}
@@ -676,7 +788,7 @@ class BreakerFooterFinder:
                 best_poles_rank[side] = hp
                 best_poles_col[side] = info
 
-        # Panel-level layout decision
+        # ---------- Panel-level layout decision ----------
         combo_side_exists = False
         for side in ("left", "right"):
             tcol = best_trip_col[side]
@@ -701,8 +813,11 @@ class BreakerFooterFinder:
         else:
             layout = "unknown"
 
-        # Hero-based assignment for trip/poles/combo
+        # ---------- Hero-based assignment for trip/poles/combo (per side) ----------
+        # We never override an existing 'ckt' or 'description' role.
+
         if layout == "combined":
+            # Per side: if best trip and poles are same col, mark as combo
             for side in ("left", "right"):
                 tcol = best_trip_col[side]
                 pcol = best_poles_col[side]
@@ -717,6 +832,21 @@ class BreakerFooterFinder:
                         tcol["role"] = "combo"
 
         elif layout == "separated":
+            # One trip + one poles per side (up to 2 of each overall)
+            for side in ("left", "right"):
+                tcol = best_trip_col[side]
+                if tcol is not None and best_trip_rank[side] > 0:
+                    if tcol["role"] is None:
+                        tcol["role"] = "trip"
+
+                pcol = best_poles_col[side]
+                if pcol is not None and best_poles_rank[side] > 0:
+                    # Don't override a trip column with poles on the same side
+                    if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
+                        pcol["role"] = "poles"
+
+        else:  # layout == "unknown"
+            # Still pick best trip + best poles per side if present
             for side in ("left", "right"):
                 tcol = best_trip_col[side]
                 if tcol is not None and best_trip_rank[side] > 0:
@@ -727,19 +857,8 @@ class BreakerFooterFinder:
                 if pcol is not None and best_poles_rank[side] > 0:
                     if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
                         pcol["role"] = "poles"
-        else:
-            for side in ("left", "right"):
-                tcol = best_trip_col[side]
-                if tcol is not None and best_trip_rank[side] > 0:
-                    if tcol["role"] is None:
-                        tcol["role"] = "trip"
 
-                pcol = best_poles_col[side]
-                if pcol is not None and best_poles_rank[side] > 0:
-                    if pcol["role"] is None and (tcol is None or pcol["index"] != tcol["index"]):
-                        pcol["role"] = "poles"
-
-        # Build roles map + summaries
+        # ---------- Build roles map + summaries ----------
         role_to_index: Dict[str, int] = {}
         summaries: List[Dict] = []
 
@@ -747,6 +866,7 @@ class BreakerFooterFinder:
             role = info.get("role")
             ignored_reason = info.get("ignoredReason")
 
+            # First column seen for a role wins in the roles map
             if role and role not in role_to_index:
                 role_to_index[role] = info["index"]
 
@@ -755,7 +875,7 @@ class BreakerFooterFinder:
                     "index": info["index"],
                     "x_left": info["x_left"],
                     "x_right": info["x_right"],
-                    "texts": info["texts"],
+                    "texts": info["texts"],  # per-word
                     "role": role,
                     "ignoredReason": ignored_reason,
                 }
@@ -1231,16 +1351,22 @@ class BreakerFooterFinder:
             chosen_size: Optional[int] = None
             chosen_vals: Optional[set[int]] = None
 
-            # search largest first so we don't stop at 18 when 42/84 exist
-            for size in self.PANEL_SIZE_ORDER:
-                needed = self.PANEL_FOOTER_MAP[size]
-                present = values_present & needed
-
-                # require at least 2 numbers from this 4-number window
-                if len(present) >= 2:
-                    chosen_size = size
-                    chosen_vals = present
+            for val in sorted(values_present, reverse=True):
+                # find which panel size window this value belongs to
+                for size in self.PANEL_SIZE_ORDER:
+                    if val in self.PANEL_FOOTER_MAP[size]:
+                        chosen_size = size
+                        # record all values we saw from that window (for logging)
+                        chosen_vals = values_present & self.PANEL_FOOTER_MAP[size]
+                        break
+                if chosen_size is not None:
                     break
+
+            if chosen_size is None and self.debug:
+                print(
+                    "[BreakerFooterFinder] No matching panel size for footer tokens; "
+                    f"values_present={sorted(values_present)}"
+                )
 
             if chosen_size is not None and chosen_vals:
                 size_cands = [

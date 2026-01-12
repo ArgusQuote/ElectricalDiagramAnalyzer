@@ -7,7 +7,7 @@ if project_root not in sys.path:
 
 from PartNumberSelector.PartNumberBuilder import mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer as TransformerBuilder, loadcenter
 import math 
-
+ 
 INTERRUPTING_RATINGS = {
     'B': { 240:[25,65,100], 480:[18,35,65], 600:[14,18,25,65] },
     'H': { 240:[25,65,100,125,200], 480:[18,35,65,100,200], 600:[14,18,25,50,100] },
@@ -316,6 +316,8 @@ def process_job(payload) -> dict:
             results[f"item_{idx+1}"] = {"error": "Item must be a dict with keys: type, name, attrs"}
             continue
 
+        top_notes = itm.get("notes") or itm.get("Notes")
+        
         # Apply defaults AFTER scrubbing None tokens
         raw_attrs = itm.get("attrs", {}) or {}
         raw_attrs = _scrub_none_tokens(raw_attrs)
@@ -336,6 +338,14 @@ def process_job(payload) -> dict:
             continue
 
         raw_name = str(itm.get("name", "") or "").strip()
+
+        top_notes = itm.get("notes") or itm.get("Notes")
+        if top_notes:
+            if not isinstance(top_notes, list):
+                top_notes = [str(top_notes)]
+            raw_attrs.setdefault("_notes", [])
+            raw_attrs["_notes"].extend([str(n) for n in top_notes if n is not None])
+
         name = "name not detected" if _is_none_token(raw_name) or raw_name == "" else raw_name
 
         EngineCls = ENGINE_REGISTRY.get(etype)
@@ -363,32 +373,35 @@ def process_job(payload) -> dict:
         results[name] = out
     return results
 
-def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool]:
+def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | None]:
     det = raw.get("detected_breakers", []) or []
     if not det:
-        return True, True
+        return True, True, None
 
     voltage     = _safe_int(raw.get("voltage"), 0)
     rating_type = (raw.get("panelRatingType") or "FULLY_RATED").upper()
     panel_k     = _safe_int(raw.get("intRating"), 0)
     allow_plug  = bool(raw.get("allowPlugOn", prefer_plug_on))
 
+    def nf_max_amp(poles: int) -> int:
+        if poles == 1: return 70
+        if poles in (2, 3): return 125
+        return 0
+
     def nf_ok(poles: int, amps: int) -> bool:
-        if poles == 1:
-            return 15 <= amps <= 70
-        if poles in (2,3):
-            return 15 <= amps <= 125
+        if poles == 1: return 15 <= amps <= 70
+        if poles in (2, 3): return 15 <= amps <= 125
         return False
 
-    def choose_nq_base(poles: int) -> str | None:
-        def supported_poles(base: str) -> set[int]:
-            return {
-                "QO": {1,2,3}, "QOB": {1,2,3},
-                "QO-VH": {1,2,3}, "QOB-VH": {1,2,3},
-                "QOH": {1,2},
-                "QH": {1,2,3}, "QHB": {1,2,3},
-            }[base]
+    def supported_poles(base: str) -> set[int]:
+        return {
+            "QO": {1,2,3}, "QOB": {1,2,3},
+            "QO-VH": {1,2,3}, "QOB-VH": {1,2,3},
+            "QOH": {1,2},
+            "QH": {1,2,3}, "QHB": {1,2,3},
+        }[base]
 
+    def choose_nq_base(poles: int) -> str | None:
         if rating_type == "SERIES_RATED":
             ladder = (["QO","QO-VH","QH","QHB"] if allow_plug
                     else ["QOB","QOB-VH","QOH","QH","QHB"])
@@ -397,16 +410,13 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool]:
                     return b
             return ladder[-1]
 
-        # FULLY_RATED
-        # Treat 208V as 240V for NQ; QO-VH is effectively 22k @ 240V.
-        # If requested ≥25k at 240V (i.e., 208V jobs), bump to H-family.
-        desired_at_240 = (panel_k if (voltage == 208 or voltage == 240) else panel_k)
+        desired_at_240 = panel_k if (voltage == 208 or voltage == 240) else panel_k
         if desired_at_240 >= 65:
             base = "QH"
         elif desired_at_240 >= 42:
             base = "QOH"
         elif (voltage in (208, 240)) and desired_at_240 >= 25:
-            base = "QH"  # 25-41k needs H-family at 240V
+            base = "QH"
         elif desired_at_240 >= 22:
             base = "QO-VH" if allow_plug else "QOB-VH"
         else:
@@ -429,33 +439,28 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool]:
     allow_nq = True
     allow_nf = True
 
+    routing = {
+        "forcedFamily": None,     # will be set to "I-LINE" if both fail
+        "trigger": None,          # the first breaker that forces the decision
+        "nq": {"allowed": True, "reason": None, "maxAmp": None, "base": None},
+        "nf": {"allowed": True, "reason": None, "maxAmp": None},
+    }
+
     for br in det:
         poles = _safe_int(br.get("poles"), 0)
         amps  = _safe_int(br.get("amperage"), 0)
 
+        # ---- NQ screening (dynamic max amp from breakerSelector tables) ----
         if allow_nq:
             v = 240 if voltage == 208 else voltage
             if v > 240:
                 allow_nq = False
+                routing["nq"] = {"allowed": False, "reason": f"Voltage {voltage}V not supported for NQ", "maxAmp": None, "base": None}
             else:
                 base = choose_nq_base(poles)
-                # If base is QOH and poles==3, try escalating to a supported base (QH/QHB) instead of killing NQ
-                if base == "QOH" and poles == 3:
+                if base is None:
                     allow_nq = False
-                    for alt in ("QH", "QHB"):
-                        req_k_alt = panel_k if rating_type == "FULLY_RATED" else default_k.get(alt, panel_k)
-                        tmp = breakerSelector({
-                            "breakerType": alt,
-                            "poles":       poles,
-                            "amperage":    amps,
-                            "interruptionRating": req_k_alt,
-                            "specialFeatures": "",
-                            "iline":       False,
-                        })
-                        valid_amps = sorted(tmp.getAmperageOptionsByPoles().keys())
-                        if any(a >= amps for a in valid_amps):
-                            allow_nq = True
-                            break
+                    routing["nq"] = {"allowed": False, "reason": f"No valid NQ breaker family for {poles}P", "maxAmp": None, "base": None}
                 else:
                     req_k = panel_k if rating_type == "FULLY_RATED" else default_k.get(base, panel_k)
                     tmp = breakerSelector({
@@ -467,15 +472,78 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool]:
                         "iline":       False,
                     })
                     valid_amps = sorted(tmp.getAmperageOptionsByPoles().keys())
-                    allow_nq = any(a >= amps for a in valid_amps)
+                    max_cap = (valid_amps[-1] if valid_amps else None)
 
+                    ok = any(a >= amps for a in valid_amps)
+                    if not ok:
+                        allow_nq = False
+                        routing["nq"] = {
+                            "allowed": False,
+                            "reason": f"Branch {poles}P {amps}A exceeds NQ capability for selected family",
+                            "maxAmp": max_cap,
+                            "base": base,
+                        }
+
+        # ---- NF screening (hard max; matches your nf_ok rules) ----
         if allow_nf:
-            allow_nf = nf_ok(poles, amps)
+            ok = nf_ok(poles, amps)
+            if not ok:
+                allow_nf = False
+                routing["nf"] = {
+                    "allowed": False,
+                    "reason": f"Branch {poles}P {amps}A exceeds NF capability",
+                    "maxAmp": nf_max_amp(poles),
+                }
 
-        if not (allow_nq or allow_nf):
+        # record the first breaker that eliminates BOTH
+        if (not allow_nq) and (not allow_nf) and routing["trigger"] is None:
+            routing["trigger"] = {"poles": poles, "amperage": amps}
             break
 
-    return allow_nq, allow_nf
+    if not (allow_nq or allow_nf):
+        routing["forcedFamily"] = "I-LINE"
+        return False, False, routing
+
+    return allow_nq, allow_nf, routing
+
+def _routing_bump_message(raw: dict) -> str | None:
+    routing = raw.get("_routing") or {}
+    if routing.get("forcedFamily") != "I-LINE":
+        return None
+
+    t = routing.get("trigger") or {}
+    poles = t.get("poles")
+    amps  = t.get("amperage")
+    if not poles or not amps:
+        return None
+
+    nq = routing.get("nq") or {}
+    nf = routing.get("nf") or {}
+
+    nq_max  = nq.get("maxAmp")
+    nf_max  = nf.get("maxAmp")
+    nq_base = nq.get("base")
+
+    parts = []
+    parts.append(f"A branch breaker was detected at {amps}A ({poles}P).")
+
+    # NQ detail
+    if nq.get("allowed") is False:
+        if nq_max is not None:
+            base_txt = f" (family {nq_base})" if nq_base else ""
+            parts.append(f"NQ limit for {poles}P is {nq_max}A{base_txt}.")
+        elif nq.get("reason"):
+            parts.append(f"NQ rejected: {nq['reason']}.")
+
+    # NF detail
+    if nf.get("allowed") is False:
+        if nf_max is not None:
+            parts.append(f"NF limit for {poles}P is {nf_max}A.")
+        elif nf.get("reason"):
+            parts.append(f"NF rejected: {nf['reason']}.")
+
+    parts.append("System bumped panel selection to I-LINE.")
+    return " ".join(parts)
 
 @register_engine("panelboard")
 class PanelboardEngine(BaseEngine):
@@ -979,10 +1047,10 @@ class PanelboardEngine(BaseEngine):
             voltage=_safe_int(panelAttrs.get("voltage"), 0),
         )
 
-        original_spaces = spaces
         screened_spaces = max(spaces, auto_spaces)
 
-        allow_nq, allow_nf = _family_screen(raw, prefer_plug_on=bool(raw.get("allowPlugOn", True)))
+        allow_nq, allow_nf, routing = _family_screen(raw, prefer_plug_on=bool(raw.get("allowPlugOn", True)))
+        raw["_routing"] = routing
 
         nq = nqPanelboard(); nf = nfPanelboard(); il = iLinePanelboard()
 
@@ -1165,16 +1233,18 @@ class PanelboardEngine(BaseEngine):
             if panelAttrs.get("_resize_note"):
                 panel.setdefault("Notes", []).append(panelAttrs["_resize_note"])
 
-            panel = self._build_iline_branch_breakers(
-                panel,
-                raw,
-                raw.get("detected_breakers", [])
+        panel = self._build_iline_branch_breakers(panel, raw, raw.get("detected_breakers", []))
+
+        if int(panelAttrs.get("spaces", 0)) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
+            panel.setdefault("Notes", []).append(
+                "Requested breaker counts exceed the largest I-LINE interior (108 spaces). User review required."
             )
-            if int(panelAttrs.get("spaces", 0)) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
-                panel.setdefault("Notes", []).append(
-                    "Requested breaker counts exceed the largest I-LINE interior (108 spaces). User review required."
-                )
-            return panel
+
+        msg = _routing_bump_message(raw)
+        if msg:
+            panel.setdefault("Notes", []).append(msg)
+
+        return panel
 
     def _build_main_breaker(self, raw):
         panelAttrs = raw.copy()
@@ -1226,7 +1296,8 @@ class PanelboardEngine(BaseEngine):
             " spaces=", spaces,
             " bus_amps=", bus_amps)
 
-        allow_nq, allow_nf = _family_screen(raw, prefer_plug_on=bool(raw.get("allowPlugOn", True)))
+        allow_nq, allow_nf, routing = _family_screen(raw, prefer_plug_on=bool(raw.get("allowPlugOn", True)))
+        raw["_routing"] = routing
 
         nq_builder = nqPanelboard()
         nf_builder = nfPanelboard()
@@ -1298,11 +1369,15 @@ class PanelboardEngine(BaseEngine):
                 panel = self._build_iline_breaker(raw2)
                 panel = self._build_iline_branch_breakers(panel, raw2, raw2.get("detected_breakers", []))
 
-                # Hard-ceiling overflow note at 108
                 if int(raw2["spaces"]) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
                     panel.setdefault("Notes", []).append(
                         "Requested breaker counts exceed the largest I-LINE interior (108 spaces). User review required."
                     )
+
+                msg = _routing_bump_message(raw)
+                if msg:
+                    panel.setdefault("Notes", []).append(msg)
+
                 return panel
 
         _, best_maxA, best_fam, best_params = min(candidates, key=lambda x: (x[0], x[1]))
@@ -2320,7 +2395,7 @@ class PanelboardEngine(BaseEngine):
                         if k not in ("Part Number", "Interrupting Rating"):
                             entry[k] = v
                     placed_units += 1
-                    break
+                    continue
 
                 # ---- NO-PROGRESS ESCAPE ----
                 if not found:

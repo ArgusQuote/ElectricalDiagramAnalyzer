@@ -1,0 +1,254 @@
+---
+description: Documentation for the Anvil Uplink server API and job processing system
+globs: AnvilUplinkCode/**/*
+alwaysApply: false
+---
+
+# Uplink Server Documentation
+
+## File Location
+- **Primary**: `AnvilUplinkCode/uplink_server.py`
+- **Backup**: `AnvilUplinkCode/uplink_server_bkup.py`
+
+## Purpose
+The uplink server is the backend processing engine that:
+- Connects to Anvil platform via Uplink protocol
+- Manages job queue and worker pool
+- Orchestrates PDF → OCR → Rules pipeline
+- Provides API endpoints for job management
+
+## Configuration Constants
+
+```python
+REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer")
+BASE_JOBS_DIR = Path.home() / "jobs"
+
+MAX_WORKERS = 3           # Concurrent worker threads
+MAX_INFLIGHT_PER_USER = 1 # Jobs per user limit
+
+WATCHDOG_TIMEOUT_MIN = 15 # Job timeout (minutes)
+WATCHDOG_KILL_GRACE_SEC = 3
+```
+
+## Public API Functions (Anvil Callable)
+
+### `vm_submit_for_detection(media, ui_overrides, job_note, owner_email)`
+Submit a PDF for processing.
+
+**Parameters**:
+- `media`: Anvil BlobMedia (uploaded PDF)
+- `ui_overrides`: Dict of user preferences (materials, styles)
+- `job_note`: String with metadata (`job_name=X | submitted_at_utc=Y`)
+- `owner_email`: User email for job ownership
+
+**Returns**:
+```python
+{
+    "ok": True,
+    "job_id": "MyProject__20250111_120000",
+    "job_dir": "/home/user/jobs/MyProject__...",
+    "saved_pdf": "/path/to/uploaded.pdf",
+    "state": "queued",
+    # ...
+}
+```
+
+### `vm_get_job_status(job_id, owner_email)`
+Poll job status.
+
+**States**: `queued` → `running` → `done` | `error` | `canceled`
+
+**Returns** (when done):
+```python
+{
+    "state": "done",
+    "result": {
+        "components": [...],
+        "rules_result": {...},
+        "images": ["/path/to/panel1.png", ...],
+        "cycle_time_str": "00:02:15:123"
+    }
+}
+```
+
+### `vm_cancel_job(job_id, owner_id)`
+Cancel a queued or running job.
+
+### `vm_list_jobs(owner_id, limit=50)`
+List jobs for a user.
+
+### `vm_fetch_image(job_id, source_path)`
+Retrieve a panel image as BlobMedia.
+
+### `vm_get_default_overrides()` / `vm_set_watchdog_timeout(minutes)`
+Configuration helpers.
+
+## Internal Functions
+
+### Job Processing
+
+#### `_process_job(job_id)`
+Main worker function that executes the pipeline:
+
+1. **Read status** from `status.json`
+2. **Render PDF** → call `render_pdf_to_images()`
+3. **Parse each image** → call `_btp_run_once()` (BreakerTablePipeline)
+4. **Merge components** → `_merge_component_from_btp()`
+5. **Run rules** → `RE2.process_job(payload)`
+6. **Write results** → `result.json`, `status.json`
+
+#### `render_pdf_to_images(saved_pdf, img_dir, dpi=400)`
+Combines PageFilter + PanelBoardSearch:
+```python
+# 1. Filter pages
+pf = PageFilter(output_dir=..., dpi=400, use_ocr=True, ...)
+kept_pages, dropped_pages, filtered_pdf, log_json = pf.readPdf(pdf_path)
+
+# 2. Detect panels
+finder = PanelBoardSearch(output_dir=img_dir, dpi=dpi, ...)
+crops = finder.readPdf(filtered_pdf)
+```
+
+#### `_btp_run_once(image_path, ...)`
+Runs the OCR pipeline on a single panel image:
+```python
+pipe = BreakerTablePipeline(debug=debug)
+return pipe.run(
+    image_path,
+    run_analyzer=True,
+    run_parser=True,
+    run_header=True,
+)
+```
+
+### Component Mapping
+
+#### `_merge_component_from_btp(result_dict, src_img)`
+Transforms BreakerTablePipeline output → component schema for RulesEngine:
+```python
+# Input: pipeline result
+stages = result_dict.get("results") or {}
+hdr = stages.get("header") or {}
+prs = stages.get("parser") or {}
+
+# Output: component dict
+{
+    "type": "panelboard",
+    "name": hdr.get("name"),
+    "source": src_img,
+    "attrs": {
+        "amperage": ...,
+        "spaces": ...,
+        "voltage": ...,
+        "intRating": ...,
+        "mainBreakerAmperage": ...,
+        "detected_breakers": [...]
+    }
+}
+```
+
+#### `_count_would_skip_breakers(breakers, panel_limit)`
+Validation: counts breakers that would fail (non-numeric, out of range, exceeds panel limit).
+
+**2-strikes rule**: If 2+ breakers fail validation, all breaker data is suppressed with a note.
+
+### Job Queue System
+
+```python
+_JOB_Q: Queue[tuple[str,str]] = Queue()  # (job_id, owner_id)
+_INFLIGHT_BY_USER: dict[str, int] = {}
+_WORKERS: list[threading.Thread] = []
+_STOP = threading.Event()
+
+def _dequeue_loop(idx):
+    # Worker loop: get job from queue, spawn subprocess, watchdog
+    proc = mp.Process(target=_run_job_target, args=(job_id,))
+    proc.start()
+    proc.join(timeout=WATCHDOG_TIMEOUT_MIN * 60)
+    if proc.is_alive():
+        # Kill and mark error
+```
+
+### UI Overrides
+
+Default configuration merged with user overrides:
+```python
+_DEFAULT_OVERRIDES = {
+    "panelboards": {
+        "bussing_material": "ALUMINUM",
+        "allow_plug_on_breakers": True,
+        "rating_type": "FULLY_RATED",
+        "allow_feed_thru_lugs": True,
+        "default_trim_style": "FLUSH",
+        "enclosure": "NEMA1",
+        "allow_square_d_spd": True,
+    },
+    # transformers, disconnects...
+}
+```
+
+## Status/Result File Format
+
+### `status.json`
+```json
+{
+    "state": "running",
+    "step": "parsing",
+    "image_count": 5,
+    "progress": 45.0,
+    "noticed_ts_ms": 1704988800000,
+    "owner_email": "user@example.com",
+    "ts": "2025-01-11T12:00:00+00:00"
+}
+```
+
+### `result.json`
+```json
+{
+    "ok": true,
+    "job_id": "...",
+    "images": ["..."],
+    "components": [{...}, ...],
+    "rules_result": {
+        "panels": [{
+            "name": "DP-1",
+            "parts": [
+                {"partNumber": "NQ430L2C", "qty": 1, "type": "panelboard"},
+                {"partNumber": "QOB220", "qty": 10, "type": "breaker"},
+                ...
+            ]
+        }]
+    },
+    "cycle_time_str": "00:01:30:500"
+}
+```
+
+## Imports from Other Modules
+
+```python
+from PageFilter.PageFilterV2 import PageFilter
+from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
+from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline, API_VERSION
+import RulesEngine.RulesEngine2 as RE2
+```
+
+> **Note**: The server imports `PanelSearchToolV11` (from bytecode cache), while `V21` is the latest source file in the repository. Check if this is intentional for stability or needs updating.
+
+## Environment Variables
+
+```bash
+ANVIL_UPLINK_KEY      # Required: Anvil connection key
+WATCHDOG_TIMEOUT_MIN  # Optional: Job timeout (default: 15)
+WATCHDOG_KILL_GRACE_SEC  # Optional: Kill grace period (default: 3)
+```
+
+---
+
+## Related Documentation
+
+- [Application Overview](mdc:.cursor/rules/docs/application-overview.mdc) - High-level system architecture
+- [Page Filter](mdc:.cursor/rules/docs/page-filter.mdc) - PDF page filtering (`PageFilterV2`)
+- [Panel Detection](mdc:.cursor/rules/docs/panel-detection.mdc) - Visual panel detection (`PanelBoardSearch`)
+- [OCR Library](mdc:.cursor/rules/docs/ocr-library.mdc) - OCR pipeline (`BreakerTablePipeline`)
+- [Rules Engine](mdc:.cursor/rules/docs/rules-engine.mdc) - Business rules (`process_job`)
+- [Project Structure](mdc:.cursor/rules/reference/project-structure.mdc) - Complete file listing

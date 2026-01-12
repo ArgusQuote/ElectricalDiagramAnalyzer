@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableAnalyzer9.py
+# OcrLibrary/BreakerTableAnalyzer12.py
 from __future__ import annotations
 import os
 import cv2
@@ -14,17 +14,15 @@ except Exception:
 
 import sys
 
-# ---------- PATH SETUP ----------
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# NEW: header/footer anchoring classes
 from AnchoringClasses.BreakerHeaderFinder import BreakerHeaderFinder, HeaderResult
 from AnchoringClasses.BreakerFooterFinder import BreakerFooterFinder, FooterResult
 
-ANALYZER_VERSION = "Analyzer9_header_footer_only"
+ANALYZER_VERSION = "Analyzer12"
 ANALYZER_ORIGIN  = __file__
 
 
@@ -48,8 +46,6 @@ class SimpleHFResult:
 
 class BreakerTableAnalyzer:
     """
-    SUPER-SIMPLIFIED analyzer:
-
       1) Read image and prep gray.
       2) Use BreakerHeaderFinder to get:
            - header_y
@@ -74,7 +70,7 @@ class BreakerTableAnalyzer:
         # OCR reader shared by header + footer
         if _HAS_OCR:
             try:
-                self.reader = easyocr.Reader(["en"], gpu=False)
+                self.reader = easyocr.Reader(["en"], gpu=True)
             except Exception:
                 self.reader = None
 
@@ -91,8 +87,6 @@ class BreakerTableAnalyzer:
 
         # optional external override for where debug images go
         self.debug_root_dir: Optional[str] = None
-
-    # ============== public ==============
 
     def analyze(self, image_path: str) -> Dict:
         """
@@ -164,10 +158,8 @@ class BreakerTableAnalyzer:
             "src_dir":         src_dir,
             "debug_dir":       debug_dir,
             "gray":            gray,     # raw gray used for line masks
-            "gridless_gray":   None,     # you can plug a degridded image later if you want
             "header_y":        header_y,
             "header_bottom_y": header_bottom_y,
-            "footer_struct_y": None,     # not used in this minimal flow
         }
 
         # ---------- FOOTER ----------
@@ -208,14 +200,13 @@ class BreakerTableAnalyzer:
             "footer_token_val": footer_token_val,
             "panel_size":       panel_size,
             "debug_dir":        debug_dir,
+            "gray":             gray,
         }
         return out
 
-    # ============== internals ==============
-
     def _prep(self, img: np.ndarray) -> np.ndarray:
         """
-        Same prep you had before: grayscale + CLAHE + min-height upscale.
+        Grayscale + CLAHE + min-height upscale.
         """
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
@@ -315,10 +306,9 @@ class BreakerTableAnalyzer:
         print(f"[BreakerTableAnalyzer] Saved header+footer overlay -> {out_path}")
 
 
-# Optional: quick CLI hook
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python BreakerTableAnalyzer9.py /path/to/panel.png")
+        print("Usage: python BreakerTableAnalyzer12.py /path/to/panel.png")
         sys.exit(1)
 
     path = sys.argv[1]

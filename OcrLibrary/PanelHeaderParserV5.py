@@ -253,6 +253,53 @@ class PanelParser:
             ranked_map[role] = ranked
             chosen_map[role] = self._pick_role(role, ranked)
 
+        # ---- AIC FALLBACK: if nothing chosen, scan whole band for kA-like tokens (22K, 22KAIC, 22AIC, etc.) ----
+        if not chosen_map.get("AIC"):
+            SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
+            best = None
+
+            for it in items:
+                raw = str(it.get("text", "") or "")
+                if not raw:
+                    continue
+
+                up = self._normalize_digits(raw.upper())
+                # Remove spaces so we can catch "22 K", "22KAIC", "JAC:22K", etc.
+                t_nos = re.sub(r"\s+", "", up)
+
+                # Match 2–3 digit kA-style values with K/KA/AIC/KAIC suffix
+                mk = re.search(r'(?<!\d)(\d{2,3})(?:KAIC|AIC|KA|K)\b', t_nos)
+                if not mk:
+                    continue
+
+                val = int(mk.group(1))
+
+                # Be conservative: only accept typical interrupt ratings
+                if val not in SMALL_KA and not (10 <= val <= 100):
+                    continue
+
+                cand = {
+                    "x1": it["x1"], "y1": it["y1"], "x2": it["x2"], "y2": it["y2"],
+                    "xc": it["xc"], "yc": it["yc"],
+                    "conf": float(it.get("conf", 0.5)),
+                    "text": raw,
+                    "shape": 0.82,  # decent but not perfect (fallback)
+                    "ctx": 0.05,
+                    "rank": 0.60,   # mid-level rank so debug output is sensible
+                }
+
+                if best is None:
+                    best = cand
+                else:
+                    # Prefer higher OCR confidence; on tie, take the one higher up on the page
+                    if cand["conf"] > best["conf"] or (
+                        cand["conf"] == best["conf"] and cand["y1"] < best["y1"]
+                    ):
+                        best = cand
+
+            if best is not None:
+                chosen_map["AIC"] = best
+
         # ===== Unit-first amps role assignment (explicit A/AMPS drive detection; labels split roles) =====
         # Gather explicit-unit amps candidates (###A / ### AMPS) from BUS pool (BUS and MAIN share the same objects)
         unit_amps = [c for c in (value_cands.get("BUS") or []) if bool(c.get("has_unit"))]
@@ -262,37 +309,60 @@ class PanelParser:
             return (self._label_affinity("BUS", c, labels_map),
                     self._label_affinity("MAIN", c, labels_map))
 
+        has_main_label = bool(labels_map.get("MAIN"))
+
         if len(unit_amps) >= 2:
             # Pick one for BUS and one for MAIN using label affinity; break ties by y/x
-            # Compute preference score: aff_role - aff_other
             scored = []
             for c in unit_amps:
                 aff_b, aff_m = _role_affinity(c)
                 scored.append((c, aff_b - aff_m, aff_b, aff_m))
+
             # Best BUS-leaning
-            bus_pick  = sorted(scored, key=lambda t: (-(t[1]), -t[2], t[0]["y1"], t[0]["x1"]))[0][0]
+            bus_pick  = sorted(
+                scored,
+                key=lambda t: (-(t[1]), -t[2], t[0]["y1"], t[0]["x1"])
+            )[0][0]
+
             # Exclude that candidate and pick MAIN-leaning
             scored_main = [t for t in scored if t[0] is not bus_pick]
-            main_pick = sorted(scored_main, key=lambda t: (-(t[3]-t[2]), -t[3], t[0]["y1"], t[0]["x1"]))[0][0]
+            main_pick = sorted(
+                scored_main,
+                key=lambda t: (-(t[3] - t[2]), -t[3], t[0]["y1"], t[0]["x1"])
+            )[0][0]
+
             chosen_map["BUS"]  = bus_pick
             chosen_map["MAIN"] = main_pick
 
         elif len(unit_amps) == 1:
             only = unit_amps[0]
-            if (main_mode or "").upper() == "MLO":
+            mode_upper = (main_mode or "").upper()
+
+            if mode_upper == "MLO":
+                # MLO: panel has no main device → only BUS rating is meaningful.
                 chosen_map["BUS"]  = only
                 chosen_map["MAIN"] = None
-            elif (main_mode or "").upper() == "MCB":
+
+            elif mode_upper == "MCB":
+                # Explicit main breaker mode: allow BUS and MAIN to share the same value.
                 chosen_map["BUS"]  = only
                 chosen_map["MAIN"] = only
+
             else:
-                aff_b, aff_m = _role_affinity(only)
-                if aff_m > aff_b + 0.08:
-                    chosen_map["MAIN"] = only
-                    chosen_map["BUS"]  = chosen_map.get("BUS") or None
-                else:
+                # No explicit mode. If there is *no* MAIN label anywhere,
+                # treat this single amps token as BUS-only – do NOT invent a MAIN.
+                if not has_main_label:
                     chosen_map["BUS"]  = only
-                    chosen_map["MAIN"] = chosen_map.get("MAIN") or None
+                    chosen_map["MAIN"] = None
+                else:
+                    # There is a MAIN label somewhere: use affinity to decide role.
+                    aff_b, aff_m = _role_affinity(only)
+                    if aff_m > aff_b + 0.08:
+                        chosen_map["MAIN"] = only
+                        chosen_map["BUS"]  = chosen_map.get("BUS") or None
+                    else:
+                        chosen_map["BUS"]  = only
+                        chosen_map["MAIN"] = chosen_map.get("MAIN") or None
 
         else:
             # No explicit-unit amps → keep ranked picks but still apply mode enforcement
@@ -1142,15 +1212,65 @@ class PanelParser:
                             "ctx": ctx
                         })
 
-        # De-dup by (role,text,near-x)
-        for role in out.keys():
-            merged = []
-            for c in sorted(out[role], key=lambda d: (d["y1"], d["x1"])):
-                if merged and c["text"] == merged[-1]["text"] and abs(c["xc"]-merged[-1]["xc"]) < 18:
-                    if c["conf"] > merged[-1]["conf"]: merged[-1] = c
+        # De-dup near-identical detections from multi-pass OCR
+        def _amps_value(text: str) -> Optional[int]:
+            t = self._normalize_digits(str(text).upper())
+            m = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", t)
+            return int(m.group(1)) if m else None
+
+        def _iou(a: dict, b: dict) -> float:
+            ax1, ay1, ax2, ay2 = a["x1"], a["y1"], a["x2"], a["y2"]
+            bx1, by1, bx2, by2 = b["x1"], b["y1"], b["x2"], b["y2"]
+            inter_x1 = max(ax1, bx1)
+            inter_y1 = max(ay1, by1)
+            inter_x2 = min(ax2, bx2)
+            inter_y2 = min(ay2, by2)
+            if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+                return 0.0
+            inter = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+            area_a = max(1, (ax2 - ax1) * (ay2 - ay1))
+            area_b = max(1, (bx2 - bx1) * (by2 - by1))
+            return inter / float(area_a + area_b - inter)
+
+        for role, lst in out.items():
+            if not lst:
+                continue
+
+            merged: List[dict] = []
+            # sort top-to-bottom, left-to-right for deterministic merging
+            for c in sorted(lst, key=lambda d: (d["y1"], d["x1"])):
+                if not merged:
+                    merged.append(c)
+                    continue
+
+                last = merged[-1]
+
+                # For BUS/MAIN/AIC, consider duplicates when:
+                #   - bboxes strongly overlap, AND
+                #   - numeric value matches.
+                if role in ("BUS", "MAIN", "AIC"):
+                    same_place = _iou(c, last) >= 0.70
+                    n_c = _amps_value(c.get("text", ""))
+                    n_l = _amps_value(last.get("text", ""))
+                    same_num = (n_c is not None and n_c == n_l)
+                    is_dup = same_place and same_num
+                else:
+                    # For NAME/VOLTAGE we keep the old, stricter rule:
+                    # same text and very close x-center.
+                    is_dup = (
+                        c["text"] == last["text"]
+                        and abs(c["xc"] - last["xc"]) < 18
+                    )
+
+                if is_dup:
+                    # Keep the higher-confidence version
+                    if float(c.get("conf", 0.0)) > float(last.get("conf", 0.0)):
+                        merged[-1] = c
                 else:
                     merged.append(c)
+
             out[role] = merged
+
         return out
 
     def _score_candidates(self, role: str, cands: list, labels_map: dict, band_top: int, main_mode: Optional[str] = None) -> list:

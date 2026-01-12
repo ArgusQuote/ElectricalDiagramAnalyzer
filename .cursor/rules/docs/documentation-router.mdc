@@ -1,0 +1,84 @@
+---
+description: Quick lookup table for finding documentation on functions, classes, and patterns
+globs: 
+alwaysApply: false
+---
+
+# Documentation Router
+
+Quick reference for locating documentation on key components. Use this as a starting point when looking for how something works.
+
+## Class Quick Reference
+
+| Class | Location | Documentation | Purpose |
+|-------|----------|---------------|---------|
+| `PanelBoardSearch` | `VisualDetectionToolLibrary/PanelSearchToolV21.py` | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | Detect panel tables in PDF pages |
+| `BreakerTablePipeline` | `OcrLibrary/BreakerTableParserAPIv3.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Main OCR pipeline entry point |
+| `BreakerTableAnalyzer` | `OcrLibrary/BreakerTableAnalyzer12.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Analyze table structure (header/footer) |
+| `BreakerTableParser` | `OcrLibrary/BreakerTableParser5.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Parse breaker rows from table |
+| `PanelParser` | `OcrLibrary/PanelHeaderParserV4.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Extract panel header metadata |
+| `BreakerHeaderFinder` | `AnchoringClasses/BreakerHeaderFinder.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Find header row with column labels |
+| `BreakerFooterFinder` | `AnchoringClasses/BreakerFooterFinder.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Find footer row with panel size |
+| `PageFilter` | `PageFilter/PageFilterV2.py` | [page-filter.mdc](mdc:.cursor/rules/docs/page-filter.mdc) | Filter PDF pages by content type |
+
+## Function Quick Reference
+
+| Function | Location | Documentation | Purpose |
+|----------|----------|---------------|---------|
+| `process_job` | `RulesEngine/RulesEngine2.py` | [rules-engine.mdc](mdc:.cursor/rules/docs/rules-engine.mdc) | Apply business rules to parsed data |
+| `vm_submit_for_detection` | `AnvilUplinkCode/uplink_server.py` | [uplink-server.mdc](mdc:.cursor/rules/docs/uplink-server.mdc) | API endpoint for job submission |
+| `vm_get_queue_position` | `AnvilUplinkCode/uplink_server.py` | [uplink-server.mdc](mdc:.cursor/rules/docs/uplink-server.mdc) | Check job queue status |
+| `readPdf` | `PageFilter/PageFilterV2.py` | [page-filter.mdc](mdc:.cursor/rules/docs/page-filter.mdc) | Entry point for page filtering |
+| `readPdf` | `VisualDetectionToolLibrary/PanelSearchToolV21.py` | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | Entry point for panel detection |
+| `run` | `OcrLibrary/BreakerTableParserAPIv3.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Entry point for OCR pipeline |
+
+## Pattern Quick Reference
+
+| Pattern | Domain Rule | Example Location | Description |
+|---------|-------------|------------------|-------------|
+| OCR preprocessing | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | `BreakerTableAnalyzer12._prep()` | CLAHE contrast, grayscale, upscaling |
+| Grid line detection | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | `PanelBoardSearch._find_tables()` | Morphological ops to find table lines |
+| Header token matching | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | `BreakerHeaderFinder.CATEGORY_ALIASES` | Fuzzy match column headers |
+| Panel size detection | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | `BreakerFooterFinder.PANEL_FOOTER_MAP` | Map OCR numbers to panel sizes |
+| Version file naming | [project-structure.mdc](mdc:.cursor/rules/reference/project-structure.mdc) | `PanelSearchToolV21.py` | Versioned files for iteration history |
+
+## Pipeline Flow
+
+```
+PDF Input
+    │
+    ▼
+PageFilter.readPdf()          → Filter electrical sheets
+    │
+    ▼
+PanelBoardSearch.readPdf()    → Detect panel table regions
+    │
+    ▼
+BreakerTablePipeline.run()    → OCR and parse tables
+    ├── BreakerTableAnalyzer  → Find header/footer
+    ├── PanelHeaderParser     → Extract panel metadata
+    └── BreakerTableParser    → Parse breaker rows
+    │
+    ▼
+process_job()                 → Apply business rules
+    │
+    ▼
+Structured Output
+```
+
+## Adding New Entries
+
+When adding a new reusable function or class:
+
+1. Add entry to appropriate table above
+2. Create/update the referenced documentation file in `docs/`
+3. Include: params, returns, small example, cross-references
+
+See: [documentation-standards.mdc](mdc:.cursor/rules/core/documentation-standards.mdc) for documentation writing guidelines.
+
+## Related Documentation
+
+- [Application Overview](mdc:.cursor/rules/docs/application-overview.mdc) - System architecture
+- [Project Structure](mdc:.cursor/rules/reference/project-structure.mdc) - File locations
+- [Potential Problems](mdc:.cursor/rules/potential-problems.mdc) - Known issues and technical debt
+- [Rules Index](mdc:.cursor/rules/rules-index.mdc) - All documentation files

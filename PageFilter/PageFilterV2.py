@@ -324,7 +324,6 @@ class PageFilter:
             for i in range(len(doc)):
                 page_no = i + 1
                 if i in selected_indexes:
-                    # ✅ FIXED: Only GS does resize/orientation
                     if self.use_ghostscript_letter:
                         out.insert_pdf(doc, from_page=i, to_page=i)
                     else:
@@ -388,7 +387,6 @@ class PageFilter:
                     decision, reason = "DROP", "No qualifying footprints"
 
             if decision == "KEEP":
-                # ✅ FIXED: Only GS does resizing/orientation
                 if self.use_ghostscript_letter:
                     out.insert_pdf(doc, from_page=i, to_page=i)
                 else:
@@ -556,7 +554,7 @@ class PageFilter:
                 tags_set.add(bucket)
                 total += bucket_score
 
-        # -------- 2) Fuzzy token backup (new) --------
+        # -------- 2) Fuzzy token backup --------
         tokens = self._extract_alpha_tokens(text_norm)  # now alphanum tokens
         has = lambda tgt, d: self._has_token_like(tokens, target=tgt, max_dist=d)
 

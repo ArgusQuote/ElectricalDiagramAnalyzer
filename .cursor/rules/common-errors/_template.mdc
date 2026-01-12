@@ -1,0 +1,55 @@
+---
+description: Template for documenting common errors - copy this file to create new error documentation
+globs: 
+alwaysApply: false
+---
+
+# Error Documentation Template
+
+Use this template when documenting a new error. Copy this file and rename to `{error-type}.mdc`.
+
+## Error: [Error Name]
+
+**Summary**: One-sentence description of the error
+
+**Root Cause**: Why this error occurs (the underlying reason)
+
+**Symptoms**: 
+- How the error manifests
+- Error messages seen
+- Unexpected behavior observed
+
+**Prevention**: 
+- How to avoid this error in the future
+- Code patterns that prevent it
+
+**Fix**: 
+- Step-by-step resolution
+- Code changes needed
+
+**Example**:
+```python
+# Before (causes error)
+problematic_code()
+
+# After (fixed)
+corrected_code()
+```
+
+**Related**:
+- [relevant-doc.mdc](mdc:.cursor/rules/docs/relevant-doc.mdc)
+- `path/to/related/file.py`
+
+---
+
+## Documentation Guidelines
+
+When documenting an error:
+
+1. **Be specific** - Include actual error messages and stack traces
+2. **Show context** - What was the code trying to do?
+3. **Root cause matters** - Don't just describe symptoms
+4. **Prevention first** - How can this be avoided?
+5. **Include examples** - Show before/after code
+
+See: [documentation-standards.mdc](mdc:.cursor/rules/core/documentation-standards.mdc)

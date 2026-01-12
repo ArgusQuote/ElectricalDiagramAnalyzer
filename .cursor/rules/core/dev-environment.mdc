@@ -1,0 +1,47 @@
+---
+description: Development environment setup requirements
+globs: 
+alwaysApply: true
+---
+
+# Development Environment Setup
+
+This rule ensures the correct Python environment is activated before running any Python code.
+
+## Virtual Environment Activation
+
+**ALWAYS run this command before executing any Python code:**
+
+```bash
+source /home/marco/venv/bin/activate
+```
+
+## When This Applies
+
+| Action | Requires Activation |
+|--------|---------------------|
+| Running Python scripts | ✅ Yes |
+| Running pytest/tests | ✅ Yes |
+| Installing pip packages | ✅ Yes |
+| Running the uplink server | ✅ Yes |
+| Running DevEnv scripts | ✅ Yes |
+
+## Quick Reference
+
+```bash
+# Activate the virtual environment
+source /home/marco/venv/bin/activate
+
+# Verify activation (should show venv path)
+which python
+# Expected: /home/marco/venv/bin/python
+
+# Deactivate when done (optional)
+deactivate
+```
+
+## Important Notes
+
+- The virtual environment contains all project dependencies (EasyOCR, OpenCV, PyMuPDF, etc.)
+- Running Python without activation will result in missing module errors
+- Always activate before any `python` or `pip` commands

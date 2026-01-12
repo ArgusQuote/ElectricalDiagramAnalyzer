@@ -1,0 +1,154 @@
+---
+description: Common OCR-related errors and their solutions
+globs: 
+  - OcrLibrary/**/*
+  - AnchoringClasses/**/*
+alwaysApply: false
+---
+
+# OCR Errors
+
+Common errors encountered during OCR processing and table parsing.
+
+---
+
+## Error: Header Not Found
+
+**Summary**: BreakerHeaderFinder cannot locate the header row containing column labels.
+
+**Root Cause**: 
+- Low image contrast makes text unreadable
+- Unusual fonts not recognized by EasyOCR
+- Header text uses unexpected terminology
+
+**Symptoms**:
+- `header_y` returns None or 0
+- Empty or incorrect table parsing results
+- Debug images show no blue/cyan header markers
+
+**Prevention**:
+- Ensure CLAHE preprocessing is applied
+- Keep `CATEGORY_ALIASES` updated with new terminology
+- Use multi-pass OCR with different `mag_ratio` values
+
+**Fix**:
+1. Check debug output for what tokens were detected
+2. Add missing aliases to `BreakerHeaderFinder.CATEGORY_ALIASES`
+3. Adjust `text_threshold` or `mag_ratio` in OCR settings
+
+**Example**:
+```python
+# Add new header terminology
+CATEGORY_ALIASES = {
+    "ckt": {"CKT", "CCT", "CIRCUIT"},  # Added "CIRCUIT"
+    "description": {"DESCRIPTION", "LOAD", "NAME"},
+    # ...
+}
+```
+
+**Related**:
+- [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) - Header finder documentation
+- `AnchoringClasses/BreakerHeaderFinder.py`
+
+---
+
+## Error: Wrong Panel Size Detected
+
+**Summary**: BreakerFooterFinder returns incorrect panel size (e.g., 42 instead of 84).
+
+**Root Cause**:
+- OCR misreads numbers (8 as 3, 4 as 1)
+- Multiple size candidates found
+- Footer tokens outside expected region
+
+**Symptoms**:
+- `panel_size` doesn't match visual inspection
+- Breaker count mismatch
+- Missing breakers in output
+
+**Prevention**:
+- Require multiple confirming tokens (currently >=2)
+- Use `PANEL_FOOTER_MAP` with tolerance ranges
+- Check OCR confidence scores
+
+**Fix**:
+1. Enable debug mode to see detected footer tokens
+2. Verify `PANEL_FOOTER_MAP` ranges include edge cases
+3. Adjust scan region if footer is in unexpected location
+
+**Related**:
+- [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) - Footer finder documentation
+- `AnchoringClasses/BreakerFooterFinder.py`
+
+---
+
+## Error: Missing Breakers in Output
+
+**Summary**: Some breaker rows are not detected or parsed.
+
+**Root Cause**:
+- Grid lines not detected (breaks row detection)
+- OCR misses faint text
+- Row merging incorrectly combines cells
+
+**Symptoms**:
+- Fewer breakers than expected
+- Gaps in circuit numbers
+- Multi-pole breakers shown as single
+
+**Prevention**:
+- Tune morphology kernel sizes for grid detection
+- Apply contrast enhancement before OCR
+- Verify row height consistency
+
+**Fix**:
+1. Check debug images for grid line detection
+2. Adjust `cv2.getStructuringElement` kernel sizes
+3. Lower `text_threshold` for faint text
+
+**Related**:
+- [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) - Parser documentation
+- `OcrLibrary/BreakerTableParser5.py`
+
+---
+
+## Error: Duplicate Panel Names
+
+**Summary**: Multiple panels detected with the same name.
+
+**Root Cause**:
+- Same panel appears on multiple pages
+- OCR reads partial name from adjacent panel
+- Multi-section panels share name prefix
+
+**Symptoms**:
+- Panel names like "DP-1", "DP-1 (2)", "DP-1 (3)"
+- Incorrect panel-to-breaker mapping
+- Duplicate entries in output
+
+**Prevention**:
+- `_dedupe_name()` automatically adds suffixes
+- Check for page boundaries between panels
+- Use panel location (page, coordinates) as secondary key
+
+**Fix**:
+1. Review debug output to identify source pages
+2. Check if panels should be merged or kept separate
+3. Adjust name extraction region if reading adjacent text
+
+**Related**:
+- [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc)
+- `OcrLibrary/PanelHeaderParserV4.py`
+
+---
+
+## Adding New Errors
+
+When you fix an OCR bug, document it here:
+
+1. Copy error template from [_template.mdc](mdc:.cursor/rules/common-errors/_template.mdc)
+2. Fill in all sections
+3. Add cross-references to relevant code
+4. Update this file's table of contents if needed
+
+See: [documentation-standards.mdc](mdc:.cursor/rules/core/documentation-standards.mdc)

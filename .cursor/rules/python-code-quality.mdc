@@ -1,0 +1,270 @@
+---
+description: Python code quality standards - PEP 8 compliance and best practices
+globs: **/*.py
+alwaysApply: false
+---
+# Python Code Quality Standards
+
+All Python code in this project must follow PEP 8 style guidelines and these additional best practices.
+
+## PEP 8 Core Requirements
+
+### Indentation
+- Use **4 spaces** per indentation level (never tabs)
+- Continuation lines should align with the opening delimiter or use a hanging indent
+
+```python
+# ✅ Good: Aligned with opening delimiter
+def long_function_name(var_one, var_two,
+                       var_three, var_four):
+    print(var_one)
+
+# ✅ Good: Hanging indent
+def long_function_name(
+        var_one, var_two,
+        var_three, var_four):
+    print(var_one)
+
+# ❌ Bad: Arguments not aligned
+def long_function_name(var_one, var_two,
+    var_three, var_four):
+    print(var_one)
+```
+
+### Line Length
+- Maximum **79 characters** for code lines
+- Maximum **72 characters** for docstrings and comments
+- Use parentheses for implicit line continuation when possible
+
+```python
+# ✅ Good: Using parentheses for continuation
+long_string = (
+    "This is a very long string that needs to be "
+    "broken across multiple lines for readability"
+)
+
+# ✅ Good: Breaking long expressions
+if (some_condition
+        and another_condition
+        and yet_another_condition):
+    do_something()
+
+# ❌ Bad: Line too long, hard to read
+if some_condition and another_condition and yet_another_condition and even_more:
+    do_something()
+```
+
+### Imports
+- Imports should be on separate lines
+- Group imports in this order: standard library, third-party, local
+- Use absolute imports over relative imports
+
+```python
+# ✅ Good: Proper import organization
+import os
+import sys
+from typing import List, Dict, Optional
+
+import cv2
+import numpy as np
+from fitz import Document
+
+from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer
+from PageFilter.PageFilterV2 import PageFilter
+
+# ❌ Bad: Multiple imports on one line, no grouping
+import os, sys, cv2
+from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer
+import numpy as np
+```
+
+### Whitespace
+
+```python
+# ✅ Good: Proper whitespace
+spam(ham[1], {eggs: 2})
+x = 1
+y = 2
+long_variable = 3
+i = i + 1
+submitted += 1
+x = x*2 - 1
+hypot2 = x*x + y*y
+c = (a+b) * (a-b)
+
+# ❌ Bad: Extraneous whitespace
+spam( ham[ 1 ], { eggs: 2 } )
+x             = 1
+y             = 2
+long_variable = 3
+i=i+1
+submitted +=1
+```
+
+### Naming Conventions
+
+| Type | Convention | Example |
+|------|------------|---------|
+| Modules | lowercase_with_underscores | `page_filter.py` |
+| Classes | CapitalizedWords (PascalCase) | `BreakerTableAnalyzer` |
+| Functions | lowercase_with_underscores | `find_panel_headers()` |
+| Variables | lowercase_with_underscores | `panel_count` |
+| Constants | UPPERCASE_WITH_UNDERSCORES | `MAX_RETRY_COUNT` |
+| Private | leading_underscore | `_internal_method()` |
+
+```python
+# ✅ Good: Proper naming
+class PanelBoardSearch:
+    MAX_PANELS = 100
+    
+    def __init__(self):
+        self.panel_count = 0
+        self._internal_cache = {}
+    
+    def find_panels(self, pdf_path: str) -> list:
+        """Find all panels in the PDF."""
+        pass
+    
+    def _calculate_boundaries(self):
+        """Internal method for boundary calculation."""
+        pass
+
+# ❌ Bad: Inconsistent naming
+class panelBoardSearch:
+    maxPanels = 100
+    
+    def __init__(self):
+        self.PanelCount = 0
+    
+    def FindPanels(self, PdfPath):
+        pass
+```
+
+## Docstrings
+
+Use triple double-quotes for all docstrings. Follow Google style for consistency.
+
+```python
+# ✅ Good: Google-style docstring
+def process_panel_image(image: np.ndarray, threshold: float = 0.5) -> dict:
+    """Process a panel image and extract breaker information.
+    
+    Args:
+        image: NumPy array containing the panel image in BGR format.
+        threshold: Confidence threshold for detection (0.0-1.0).
+    
+    Returns:
+        Dictionary containing detected breakers with their positions
+        and labels.
+    
+    Raises:
+        ValueError: If image is empty or threshold is out of range.
+    """
+    pass
+
+# ✅ Good: Class docstring
+class BreakerTableParser:
+    """Parses breaker table data from OCR results.
+    
+    This class takes raw OCR output and structures it into
+    organized breaker data with circuit numbers, descriptions,
+    and amperage ratings.
+    
+    Attributes:
+        ocr_data: Raw OCR results from EasyOCR.
+        table_bounds: Bounding coordinates of the table region.
+    """
+    pass
+```
+
+## Type Hints
+
+Use type hints for function signatures (Python 3.9+ style preferred).
+
+```python
+# ✅ Good: With type hints
+from typing import Optional
+
+def find_header_row(
+    ocr_results: list[tuple],
+    search_region: tuple[int, int, int, int],
+    min_confidence: float = 0.8
+) -> Optional[dict]:
+    """Find the header row in OCR results."""
+    pass
+
+# ❌ Bad: No type hints
+def find_header_row(ocr_results, search_region, min_confidence=0.8):
+    pass
+```
+
+## Error Handling
+
+```python
+# ✅ Good: Specific exception handling with logging
+import logging
+
+logger = logging.getLogger(__name__)
+
+def load_pdf(path: str) -> Document:
+    """Load a PDF document."""
+    try:
+        doc = fitz.open(path)
+        return doc
+    except FileNotFoundError:
+        logger.error(f"PDF file not found: {path}")
+        raise
+    except fitz.FileDataError as e:
+        logger.error(f"Invalid PDF format: {path} - {e}")
+        raise ValueError(f"Cannot open PDF: {e}") from e
+
+# ❌ Bad: Bare except, swallowing errors
+def load_pdf(path):
+    try:
+        doc = fitz.open(path)
+        return doc
+    except:
+        return None
+```
+
+## Project-Specific Patterns
+
+### Class Versioning
+When creating new versions of existing classes, follow the established pattern:
+
+```python
+# Current: PanelSearchToolV21.py contains class PanelBoardSearch
+# If creating V22, copy and modify, keeping class name consistent
+
+# ✅ Good: Version in filename, stable class name
+# File: PanelSearchToolV22.py
+class PanelBoardSearch:
+    """Panel detection tool - V22 with improved accuracy."""
+    pass
+```
+
+### OCR Result Processing
+Follow established patterns for OCR data handling:
+
+```python
+# ✅ Good: Consistent OCR result unpacking
+for bbox, text, confidence in ocr_results:
+    if confidence >= min_confidence:
+        x_min, y_min = bbox[0]
+        x_max, y_max = bbox[2]
+        # Process text...
+```
+
+## Tools and Enforcement
+
+Consider using these tools for code quality:
+- **flake8**: PEP 8 linting
+- **black**: Automatic code formatting
+- **isort**: Import sorting
+- **mypy**: Static type checking
+
+## References
+
+- [PEP 8 – Style Guide for Python Code](https://peps.python.org/pep-0008/)
+- [PEP 257 – Docstring Conventions](https://peps.python.org/pep-0257/)
+- [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)

@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParser6.py
+# OcrLibrary/BreakerTableParser9.py
 from __future__ import annotations
 import os, re, cv2, numpy as np
 from typing import Dict, Optional, List, Tuple
@@ -10,12 +10,61 @@ try:
 except Exception:
     _HAS_OCR = False
 
-PARSER_VERSION = "BreakerParser6"
+PARSER_VERSION = "BreakerParser9"
 
-# --- simple OCR settings for header band ---
-_HDR_OCR_SCALE        = 2.0          # up-res factor for header band OCR
-_HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/()."
-_HDR_MIN_CONF         = 0.50         # minimum OCR confidence to use a token for header scoring
+_HDR_OCR_SCALE        = 2.0
+_HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
+_HDR_MIN_CONF         = 0.40
+ 
+def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
+    """
+    Recreate the same gray image that BreakerTableAnalyzer12 uses:
+
+      - BGR -> gray
+      - CLAHE
+      - upscale to min height 1600 px
+
+    This ensures header_y / footer_y coordinates still line up.
+    """
+    if not src_path:
+        return None
+
+    try:
+        img = cv2.imread(src_path, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
+        H, W = g.shape
+        if H < 1600:
+            s = 1600.0 / H
+            g = cv2.resize(
+                g,
+                (int(W * s), int(H * s)),
+                interpolation=cv2.INTER_CUBIC,
+            )
+        return g
+    except Exception:
+        return None
+
+def _ensure_gray(analyzer_result: Dict) -> Optional[np.ndarray]:
+    """
+    Make sure analyzer_result has a 'gray' image.
+
+    - If 'gray' already exists, return it.
+    - Otherwise, reconstruct it from src_path using the same prep as Analyzer12,
+      store it back into analyzer_result['gray'], and return it.
+    """
+    gray = analyzer_result.get("gray")
+    if gray is not None:
+        return gray
+
+    src_path = analyzer_result.get("src_path")
+    gray = _prep_gray_like_analyzer12(src_path)
+    if gray is not None:
+        analyzer_result["gray"] = gray
+    return gray
 
 class HeaderBandScanner:
     """
@@ -51,15 +100,16 @@ class HeaderBandScanner:
         """
         Inputs:
           analyzer_result: dict from BreakerTableAnalyzer.analyze()
-            - expects keys: gray or gridless_gray, header_y, src_path, src_dir, debug_dir
+            - expects keys: src_path, header_y, header_bottom_y
+            - if 'gray' is missing, we will rebuild it from src_path
         """
-        # --- separate gray for OCR vs line detection ---
-        raw_gray      = analyzer_result.get("gray", None)          # with grid lines
-        gridless_gray = analyzer_result.get("gridless_gray", None) # after degridding
+        # --- get gray for OCR + line detection ---
+        raw_gray = analyzer_result.get("gray")
+        if raw_gray is None:
+            raw_gray = _ensure_gray(analyzer_result)
 
-        # use gridless for OCR if available, otherwise fall back to raw
-        gray_ocr   = gridless_gray if gridless_gray is not None else raw_gray
-        gray_lines = raw_gray if raw_gray is not None else gray_ocr
+        gray_ocr   = raw_gray
+        gray_lines = raw_gray
 
         header_y        = analyzer_result.get("header_y")
         src_path        = analyzer_result.get("src_path")
@@ -143,7 +193,7 @@ class HeaderBandScanner:
         band_ocr   = gray_ocr[y1:y2, :]
         band_lines = gray_lines[y1:y2, :]
 
-        # --- 1b) save RAW cropped band to debug folder so you can see exactly what we used ---
+        # --- 1b) save RAW cropped band to debug folder ---
         if self.debug:
             base = os.path.splitext(os.path.basename(src_path or "panel"))[0]
             debug_img_raw_path = os.path.join(debug_dir, f"{base}_parser_header_band_raw.png")
@@ -547,21 +597,29 @@ class HeaderBandScanner:
             """
             Stricter fuzzy match specifically for hero words (trip/poles).
 
-            We *really* only want near-exact matches here to avoid things like
-            'WIRE' being treated as 'LOAD' or 'POLE'.
+              - After the standard fuzzy match on the whole token, we also allow
+                a hero word that is "buried" in the OCR token with a tiny bit of
+                junk on the edge, e.g.:
+                  AMPS!  -> AMPS
+                  POLET  -> POLE
+                by checking letter-only prefix/suffix matches with <=1 extra char.
             """
             w = norm_word(word)
             if not w:
                 return False
+
+            # Letters-only version of the OCR token
+            w_letters = "".join(ch for ch in w if ch.isalpha())
 
             for t in targets:
                 t_norm = norm_word(t)
                 if not t_norm:
                     continue
 
-                # Hero matching thresholds:
-                # - very short tokens (<=4): need ~0.90+
-                # - longer tokens: allow a bit more noise (~0.75+)
+                # Letters-only version of the target hero word
+                t_letters = "".join(ch for ch in t_norm if ch.isalpha())
+
+                # --- primary: whole-token fuzzy ratio (existing behavior) ---
                 if len(t_norm) <= 4:
                     threshold = 0.90
                 else:
@@ -569,6 +627,16 @@ class HeaderBandScanner:
 
                 if SequenceMatcher(a=w, b=t_norm).ratio() >= threshold:
                     return True
+
+                # --- NEW: "hero buried at edge" fallback ---
+                # Allow cases like "AMPS!" or "POLET" where the core hero word
+                # is at the start or end with at most one extra letter.
+                if w_letters and t_letters:
+                    if (
+                        (w_letters.startswith(t_letters) or w_letters.endswith(t_letters))
+                        and abs(len(w_letters) - len(t_letters)) <= 1
+                    ):
+                        return True
 
             return False
 
@@ -625,6 +693,17 @@ class HeaderBandScanner:
                         continue
 
                     word_entries.append((raw, is_sentence_like))
+
+            # --- Detect "strong" CKT label (e.g. 'CKT #', 'CKT NO.', 'CKT NUMBER') ---
+            has_ckt_core = any(
+                _is_like(t, ["CKT", "CCT"], base_threshold=0.95) for t in texts
+            )
+            has_ckt_number_assoc = False
+            for t in texts:
+                tu = t.strip().upper()
+                if tu in ("#", "NO", "NO.", "NUMBER", "NUM", "NUM.", "NBR", "NBR."):
+                    has_ckt_number_assoc = True
+                    break
 
             # Base structure for this column
             has_notes = False
@@ -701,17 +780,15 @@ class HeaderBandScanner:
 
                 # ---------- Trip hero ranks ----------
                 # Priority:
-                #   AMP/AMPS (5) > TRIP/TRIPPING (4) > LOAD (3) > SIZE (2) > BREAKER/BKR/BRKR/CB (1)
-                if _hero_match(w_raw, ["AMP", "AMPS"]):
+                #   TRIP/TRIPPING (5) > AMP/AMPS (4) > SIZE (3) > BREAKER/BKR/BRKR/CB (2)
+                if _hero_match(w_raw, ["TRIP", "TRIPPING"]):
                     hero_trip_rank = max(hero_trip_rank, 5)
-                elif _hero_match(w_raw, ["TRIP", "TRIPPING"]):
+                elif _hero_match(w_raw, ["AMP", "AMPS"]):
                     hero_trip_rank = max(hero_trip_rank, 4)
-                elif _hero_match(w_raw, ["LOAD"]):
-                    hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["SIZE"]):
-                    hero_trip_rank = max(hero_trip_rank, 2)
+                    hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
-                    hero_trip_rank = max(hero_trip_rank, 1)
+                    hero_trip_rank = max(hero_trip_rank, 2)
 
                 # ---------- Poles hero ranks ----------
                 #   POLE/POLES/PO/PO. (4) > bare 'P' (1)
@@ -720,6 +797,14 @@ class HeaderBandScanner:
                 elif w_norm == "P":
                     hero_poles_rank = max(hero_poles_rank, 1)
 
+            # Extra boost for "CKT + number-ish" labels ---
+            # Example headers:
+            #   "CKT #"
+            #   "CKT NO."
+            #   "CKT NUMBER"
+            # This makes that column win over a plain "CKT" / "CKT TAG" column.
+            if has_ckt_core and has_ckt_number_assoc:
+                score["ckt"] += 2
             has_ckt_signal = score["ckt"] > 0
             has_desc_signal = score["description"] > 0
 
@@ -771,10 +856,68 @@ class HeaderBandScanner:
             else:
                 info["role"] = None
 
+        # ---------- Normalize multiple CKT columns (one primary per side) ----------
+        # We can have up to TWO real CKT columns: one on the left, one on the right.
+        ckt_candidates = [
+            info
+            for info in col_infos
+            if (not info["has_notes"])
+               and info["score"]["ckt"] > 0
+               and (info.get("ignoredReason") is None)
+        ]
+
+        if ckt_candidates:
+            # Use geometry to split into left/right
+            global_left = min(c["x_left"] for c in ckt_candidates)
+            global_right = max(c["x_right"] for c in ckt_candidates)
+            center_x = 0.5 * (global_left + global_right)
+
+            for info in ckt_candidates:
+                col_center = 0.5 * (info["x_left"] + info["x_right"])
+                info["ckt_side"] = "left" if col_center < center_x else "right"
+
+            def _has_number_assoc(texts: List[str]) -> bool:
+                # Same idea as has_ckt_number_assoc: '#', NO, NUMBER, etc.
+                for t in texts or []:
+                    tu = t.strip().upper()
+                    if tu in ("#", "NO", "NO.", "NUMBER", "NUM", "NUM.", "NBR", "NBR."):
+                        return True
+                return False
+
+            def _rank_ckt(info: Dict) -> tuple:
+                # Higher CKT score first, then prefer the one that has "#/NO/NUMBER",
+                # then slightly favor the left-most within that side.
+                has_num = 1 if _has_number_assoc(info["texts"]) else 0
+                return (
+                    info["score"]["ckt"],
+                    has_num,
+                    -info["x_left"],
+                )
+
+            primary_ckt_indices = set()
+
+            # Pick best per side (left + right)
+            for side in ("left", "right"):
+                side_list = [c for c in ckt_candidates if c["ckt_side"] == side]
+                if not side_list:
+                    continue
+                primary = max(side_list, key=_rank_ckt)
+                primary_ckt_indices.add(primary["index"])
+
+            # Winners keep/receive role='ckt'; others are demoted to secondaryCkt
+            for info in ckt_candidates:
+                if info["index"] in primary_ckt_indices:
+                    if info["role"] is None:
+                        info["role"] = "ckt"
+                else:
+                    if info["role"] == "ckt":
+                        info["role"] = None
+                    if not info.get("ignoredReason"):
+                        info["ignoredReason"] = "secondaryCkt"
+
         # ---------- Hero candidates: only pure trip/poles columns ----------
         # We NEVER allow a column that has any ckt/description signal to become
         # trip/poles/combo. That enforces "NAME beats BKR", "CKT beats everything",
-        # etc.
         hero_candidates = [
             info
             for info in col_infos
@@ -855,7 +998,20 @@ class HeaderBandScanner:
         any_trip_hero = any(best_trip_rank[side] > 0 for side in ("left", "right"))
         any_poles_hero = any(best_poles_rank[side] > 0 for side in ("left", "right"))
 
-        if combo_side_exists:
+        # Implied-combo detection
+        # If a side has a trip hero but no poles hero, treat that side's trip column as an implied combo (trip+poles) column.
+        implied_combo_sides = set()
+        for side in ("left", "right"):
+            if best_trip_rank[side] > 0 and best_poles_rank[side] == 0:
+                implied_combo_sides.add(side)
+
+        if self.debug and implied_combo_sides:
+            print(
+                "[HeaderBandScanner] Implied combo layout on sides: "
+                f"{sorted(implied_combo_sides)}"
+            )
+
+        if combo_side_exists or implied_combo_sides:
             layout = "combined"
         elif any_trip_hero and any_poles_hero:
             layout = "separated"
@@ -866,10 +1022,14 @@ class HeaderBandScanner:
         # We never override an existing 'ckt' or 'description' role.
 
         if layout == "combined":
-            # Per side: if best trip and poles are same col, mark as combo
+            # Per side:
+            #   Case 1: explicit combo (trip & poles heroes on same column)
+            #   Case 2: implied combo (trip hero but no poles hero on that side)
             for side in ("left", "right"):
                 tcol = best_trip_col[side]
                 pcol = best_poles_col[side]
+
+                # Case 1: explicit combo
                 if (
                     tcol is not None
                     and pcol is not None
@@ -879,6 +1039,16 @@ class HeaderBandScanner:
                 ):
                     if tcol["role"] is None:
                         tcol["role"] = "combo"
+                    continue
+
+                # Case 2: implied combo (trip hero only, no poles hero)
+                if (
+                    best_trip_rank[side] > 0
+                    and best_poles_rank[side] == 0
+                    and tcol is not None
+                    and tcol["role"] is None
+                ):
+                    tcol["role"] = "combo"
 
         elif layout == "separated":
             # One trip + one poles per side (up to 2 of each overall)
@@ -915,6 +1085,7 @@ class HeaderBandScanner:
             role = info.get("role")
             ignored_reason = info.get("ignoredReason")
 
+            # First column seen for a role wins in the roles map
             if role and role not in role_to_index:
                 role_to_index[role] = info["index"]
 
@@ -923,7 +1094,7 @@ class HeaderBandScanner:
                     "index": info["index"],
                     "x_left": info["x_left"],
                     "x_right": info["x_right"],
-                    "texts": info["texts"],  # now per-word
+                    "texts": info["texts"],  # per-word
                     "role": role,
                     "ignoredReason": ignored_reason,
                 }
@@ -947,105 +1118,7 @@ class SeparatedLayoutParser:
 
     def __init__(self, *, debug: bool = False, reader=None):
         self.debug = bool(debug)
-        self.reader = reader  # shared EasyOCR instance (same as header)
-
-    def _infer_body_rows_from_tokens(
-        self,
-        tokens_by_col_index: Dict[int, List[Dict]],
-        body_y_top: int,
-        body_y_bottom: int,
-    ):
-        """
-        OLD: token-clustering-based row inference. Currently unused by parse(),
-        which now relies on horizontal row-divider lines. Kept for possible
-        future fallback / experiments.
-        """
-        ys = []
-
-        for col_tokens in tokens_by_col_index.values():
-            for tok in (col_tokens or []):
-                try:
-                    x1, y1, x2, y2 = tok["box_page"]
-                except Exception:
-                    continue
-                y_center = 0.5 * (y1 + y2)
-                # Keep only tokens that are actually within the body band
-                if y_center < body_y_top or y_center > body_y_bottom:
-                    continue
-                ys.append(float(y_center))
-
-        if not ys:
-            if self.debug:
-                print("[SeparatedLayoutParser] No token Y-centers found; no body rows inferred.")
-            return []
-
-        ys.sort()
-
-        # If there is only one y center, treat the entire band as one row
-        if len(ys) == 1:
-            return [(int(body_y_top), int(body_y_bottom))]
-
-        # Compute gaps between successive centers
-        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
-        gaps_sorted = sorted(gaps)
-        # Simple median
-        mid = len(gaps_sorted) // 2
-        if len(gaps_sorted) % 2 == 0:
-            median_gap = 0.5 * (gaps_sorted[mid - 1] + gaps_sorted[mid])
-        else:
-            median_gap = gaps_sorted[mid]
-
-        # Define a max gap threshold to decide "new row" vs "same row"
-        body_height = max(1, body_y_bottom - body_y_top)
-        # Clamp the threshold into a reasonable range
-        min_gap = 5.0
-        max_gap = max(20.0, 0.15 * body_height)
-        gap_threshold = max(min_gap, min(median_gap * 1.5, max_gap))
-
-        if self.debug:
-            print(
-                f"[SeparatedLayoutParser] token Y-centers: count={len(ys)}, "
-                f"median_gap={median_gap:.2f}, gap_threshold={gap_threshold:.2f}"
-            )
-
-        # Cluster ys by gap_threshold
-        clusters = [[ys[0]]]
-        for y in ys[1:]:
-            if y - clusters[-1][-1] <= gap_threshold:
-                clusters[-1].append(y)
-            else:
-                clusters.append([y])
-
-        # Compute cluster centers
-        centers = [int(round(sum(c) / len(c))) for c in clusters]
-        centers.sort()
-
-        if self.debug:
-            print(
-                f"[SeparatedLayoutParser] inferred row centers={centers} "
-                f"(body_y_top={body_y_top}, body_y_bottom={body_y_bottom})"
-            )
-
-        # Convert centers into row bands [top, bottom)
-        row_spans = []
-        for idx, c in enumerate(centers):
-            if idx == 0:
-                top = body_y_top
-            else:
-                top = int((centers[idx - 1] + c) / 2)
-
-            if idx + 1 < len(centers):
-                bottom = int((c + centers[idx + 1]) / 2)
-            else:
-                bottom = body_y_bottom
-
-            if bottom > top + 3:
-                row_spans.append((top, bottom))
-
-        if self.debug:
-            print(f"[SeparatedLayoutParser] inferred {len(row_spans)} body row bands from tokens.")
-
-        return row_spans
+        self.reader = reader
 
     def _row_text_for_column(self, row_top: int, row_bottom: int, col_tokens):
         """
@@ -1079,7 +1152,6 @@ class SeparatedLayoutParser:
             List of y-centers (ints) in STRIP-LOCAL coordinates.
         """
         import cv2
-        import numpy as np  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -1170,7 +1242,6 @@ class SeparatedLayoutParser:
         Returns:
             List of (row_top, row_bottom) in STRIP-LOCAL coordinates.
         """
-        import cv2  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -1416,21 +1487,21 @@ class SeparatedLayoutParser:
         Given analyzer_result + header_scan with normalizedColumns.layout == 'separated',
         we:
           - crop body strips for trip/poles columns
-          - compute row bands from horizontal row-divider lines in a reference strip
-          - OCR each trip/poles column ROW-BY-ROW using those bands
-          - associate each row's amps + poles
+          - compute row bands *independently per side* from horizontal row-divider lines
+          - OCR each trip/poles column ROW-BY-ROW using that side's bands
+          - associate each row's amps + poles per side
           - accumulate breaker counts
         """
         import os
         import cv2
-        from typing import Dict
 
         # --- image sources ---
-        raw_gray      = analyzer_result.get("gray", None)
-        gridless_gray = analyzer_result.get("gridless_gray", None)
+        raw_gray = analyzer_result.get("gray")
+        if raw_gray is None:
+            raw_gray = _ensure_gray(analyzer_result)
 
-        gray_body  = gridless_gray if gridless_gray is not None else raw_gray
-        gray_lines = raw_gray if raw_gray is not None else gray_body
+        gray_body  = raw_gray
+        gray_lines = raw_gray
 
         if gray_body is None or gray_lines is None:
             if self.debug:
@@ -1552,6 +1623,7 @@ class SeparatedLayoutParser:
                     "y_top": body_y_top,
                     "y_bottom": body_y_bottom,
                     "debugImageOverlay": None,  # filled in below when debug=True
+                    # 'side' assigned below
                 }
             )
 
@@ -1569,45 +1641,93 @@ class SeparatedLayoutParser:
                 "breakerCounts": {},
             }
 
-        # --- determine row bands (strip-local) from a reference body column ---
-        # Prefer a trip column as reference (often cleaner), else first available.
-        ref_col = None
-        for c in body_columns:
-            if c["role"] == "trip":
-                ref_col = c
-                break
-        if ref_col is None:
-            ref_col = body_columns[0]
+        # --- assign columns to left/right sides based on X center ---
+        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
+        global_left = min(c["x_left"] for c in role_cols)
+        global_right = max(c["x_right"] for c in role_cols)
+        center_x = 0.5 * (global_left + global_right)
 
-        ref_strip = gray_body[
-            ref_col["y_top"]:ref_col["y_bottom"],
-            ref_col["x_left"]:ref_col["x_right"],
-        ]
-        if ref_strip.size == 0:
-            row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
-        else:
-            row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+        for col in role_cols:
+            col_center = 0.5 * (col["x_left"] + col["x_right"])
+            col["side"] = "left" if col_center < center_x else "right"
 
-        # Convert strip-local row bands to PAGE coords for later use
-        row_spans = [
-            (body_y_top + top_s, body_y_top + bottom_s)
-            for (top_s, bottom_s) in row_bands_strip
-        ]
+        by_side = {
+            "left": {"trip": None, "poles": None},
+            "right": {"trip": None, "poles": None},
+        }
+
+        for col in role_cols:
+            side = col["side"]
+            role = col["role"]
+            # First seen per (side, role) wins
+            if by_side[side][role] is None:
+                by_side[side][role] = col["index"]
 
         if self.debug:
-            print(
-                f"[SeparatedLayoutParser] Using {len(row_spans)} row bands from "
-                f"horizontal lines."
-            )
+            print("[SeparatedLayoutParser] trip/poles columns by side:", by_side)
 
-        # --- OCR each trip/poles column ROW-BY-ROW using the same row bands ---
-        tokens_by_col_index = {}
+        # --- determine row bands *per side* from that side's reference column ---
+        row_bands_by_side = {"left": None, "right": None}
+        row_spans_by_side = {"left": [], "right": []}
+
+        for side in ("left", "right"):
+            side_cols = [c for c in role_cols if c["side"] == side]
+            if not side_cols:
+                continue
+
+            # Prefer trip column on that side as reference, else any poles column
+            ref_col = None
+            for c in side_cols:
+                if c["role"] == "trip":
+                    ref_col = c
+                    break
+            if ref_col is None:
+                for c in side_cols:
+                    if c["role"] == "poles":
+                        ref_col = c
+                        break
+
+            if ref_col is None:
+                continue  # nothing usable on this side
+
+            ref_strip = gray_body[
+                ref_col["y_top"]:ref_col["y_bottom"],
+                ref_col["x_left"]:ref_col["x_right"],
+            ]
+            if ref_strip.size == 0:
+                row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+            else:
+                row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+                if not row_bands_strip:
+                    row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+
+            row_bands_by_side[side] = row_bands_strip
+            row_spans_by_side[side] = [
+                (body_y_top + top_s, body_y_top + bottom_s)
+                for (top_s, bottom_s) in row_bands_strip
+            ]
+
+            if self.debug:
+                print(
+                    f"[SeparatedLayoutParser] Side='{side}' using "
+                    f"{len(row_spans_by_side[side])} row bands from horizontal lines."
+                )
+
+        # --- OCR each trip/poles column ROW-BY-ROW using that column's side bands ---
+        tokens_by_col_index: Dict[int, List[Dict]] = {}
+
         for col in body_columns:
             idx   = col["index"]
             x_l   = col["x_left"]
             x_r   = col["x_right"]
             y_top = col["y_top"]
             y_bot = col["y_bottom"]
+            side  = col.get("side", "left")
+
+            row_bands_strip = row_bands_by_side.get(side)
+            if not row_bands_strip:
+                tokens_by_col_index[idx] = []
+                continue
 
             strip = gray_body[y_top:y_bot, x_l:x_r]
             if strip.size == 0:
@@ -1643,7 +1763,7 @@ class SeparatedLayoutParser:
                 if not col_tokens:
                     continue
 
-                # Crop the strip again for visualization only (GRIDLESS body)
+                # Crop the strip again for visualization only
                 strip = gray_body[y_top:y_bot, x_l:x_r]
                 if strip.size == 0:
                     continue
@@ -1733,42 +1853,22 @@ class SeparatedLayoutParser:
                     )
                     col["debugImageOverlay"] = None
 
-        # --- assign columns to left/right sides based on X center ---
-        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
-        global_left = min(c["x_left"] for c in role_cols)
-        global_right = max(c["x_right"] for c in role_cols)
-        center_x = 0.5 * (global_left + global_right)
-
-        by_side = {
-            "left": {"trip": None, "poles": None},
-            "right": {"trip": None, "poles": None},
-        }
-
-        for col in role_cols:
-            col_center = 0.5 * (col["x_left"] + col["x_right"])
-            side = "left" if col_center < center_x else "right"
-            role = col["role"]
-            # First one wins per side/role (if there happen to be multiples)
-            if by_side[side][role] is None:
-                by_side[side][role] = col["index"]
-
-        if self.debug:
-            print("[SeparatedLayoutParser] trip/poles columns by side:", by_side)
-
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}
 
-        # --- walk rows and associate amps + poles per side ---
-        for row_idx, (row_top, row_bottom) in enumerate(row_spans):
-            for side in ("left", "right"):
-                trip_idx = by_side[side].get("trip")
-                poles_idx = by_side[side].get("poles")
-                if trip_idx is None or poles_idx is None:
-                    continue
+        # --- walk rows and associate amps + poles *per side* ---
+        for side in ("left", "right"):
+            trip_idx = by_side[side].get("trip")
+            poles_idx = by_side[side].get("poles")
+            side_row_spans = row_spans_by_side.get(side) or []
 
-                trip_tokens = tokens_by_col_index.get(trip_idx, [])
-                poles_tokens = tokens_by_col_index.get(poles_idx, [])
+            if trip_idx is None or poles_idx is None or not side_row_spans:
+                continue
 
+            trip_tokens = tokens_by_col_index.get(trip_idx, [])
+            poles_tokens = tokens_by_col_index.get(poles_idx, [])
+
+            for row_idx, (row_top, row_bottom) in enumerate(side_row_spans):
                 trip_text = self._row_text_for_column(row_top, row_bottom, trip_tokens)
                 poles_text = self._row_text_for_column(row_top, row_bottom, poles_tokens)
 
@@ -1784,10 +1884,10 @@ class SeparatedLayoutParser:
                 detected_breakers.append(
                     {
                         "side": side,
-                        "rowIndex": row_idx,
+                        "rowIndex": row_idx,  # index is per-side now
                         "rowTop": row_top,
                         "rowBottom": row_bottom,
-                        "amps": int(amps),
+                        "amperage": int(amps),
                         "poles": int(poles),
                         "tripText": trip_text,
                         "polesText": poles_text,
@@ -1830,196 +1930,6 @@ class CombinedLayoutParser:
         self.debug = bool(debug)
         self.reader = reader  # shared EasyOCR instance (same as header)
 
-    def _infer_body_rows_from_tokens(
-        self,
-        tokens_by_col_index: Dict[int, List[Dict]],
-        body_y_top: int,
-        body_y_bottom: int,
-    ):
-        """
-        Infer body row bands purely from OCR token positions (gridless body),
-        instead of using horizontal grid lines.
-
-        Shared logic with SeparatedLayoutParser but kept separate for clarity.
-        """
-        ys = []
-
-        for col_tokens in tokens_by_col_index.values():
-            for tok in (col_tokens or []):
-                try:
-                    x1, y1, x2, y2 = tok["box_page"]
-                except Exception:
-                    continue
-                y_center = 0.5 * (y1 + y2)
-                if y_center < body_y_top or y_center > body_y_bottom:
-                    continue
-                ys.append(float(y_center))
-
-        if not ys:
-            if self.debug:
-                print("[CombinedLayoutParser] No token Y-centers found; no body rows inferred.")
-            return []
-
-        ys.sort()
-
-        if len(ys) == 1:
-            return [(int(body_y_top), int(body_y_bottom))]
-
-        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
-        gaps_sorted = sorted(gaps)
-        mid = len(gaps_sorted) // 2
-        if len(gaps_sorted) % 2 == 0:
-            median_gap = 0.5 * (gaps_sorted[mid - 1] + gaps_sorted[mid])
-        else:
-            median_gap = gaps_sorted[mid]
-
-        body_height = max(1, body_y_bottom - body_y_top)
-        min_gap = 5.0
-        max_gap = max(20.0, 0.15 * body_height)
-        gap_threshold = max(min_gap, min(median_gap * 1.5, max_gap))
-
-        if self.debug:
-            print(
-                f"[CombinedLayoutParser] token Y-centers: count={len(ys)}, "
-                f"median_gap={median_gap:.2f}, gap_threshold={gap_threshold:.2f}"
-            )
-
-        clusters = [[ys[0]]]
-        for y in ys[1:]:
-            if y - clusters[-1][-1] <= gap_threshold:
-                clusters[-1].append(y)
-            else:
-                clusters.append([y])
-
-        centers = [int(round(sum(c) / len(c))) for c in clusters]
-        centers.sort()
-
-        if self.debug:
-            print(
-                f"[CombinedLayoutParser] inferred row centers={centers} "
-                f"(body_y_top={body_y_top}, body_y_bottom={body_y_bottom})"
-            )
-
-        row_spans = []
-        for idx, c in enumerate(centers):
-            if idx == 0:
-                top = body_y_top
-            else:
-                top = int((centers[idx - 1] + c) / 2)
-
-            if idx + 1 < len(centers):
-                bottom = int((c + centers[idx + 1]) / 2)
-            else:
-                bottom = body_y_bottom
-
-            if bottom > top + 3:
-                row_spans.append((top, bottom))
-
-        if self.debug:
-            print(f"[CombinedLayoutParser] inferred {len(row_spans)} body row bands from tokens.")
-
-        return row_spans
-
-    def _ocr_body_column(
-        self,
-        gray_body,
-        body_y_top: int,
-        body_y_bottom: int,
-        x_left: int,
-        x_right: int,
-    ):
-        """
-        OCR a single combo body strip and return tokens in PAGE coordinates.
-
-        UPDATED:
-          - No splitting into halves; OCR the full strip at once.
-        """
-        import cv2
-
-        if gray_body is None or self.reader is None:
-            return []
-
-        H, W = gray_body.shape[:2]
-        body_y_top = max(0, min(H - 1, int(body_y_top)))
-        body_y_bottom = max(body_y_top + 1, min(H, int(body_y_bottom)))
-        x_left = max(0, min(W - 1, int(x_left)))
-        x_right = max(x_left + 1, min(W, int(x_right)))
-
-        band = gray_body[body_y_top:body_y_bottom, x_left:x_right]
-        if band.size == 0:
-            return []
-
-        H_band, W_band = band.shape[:2]
-        if H_band <= 0:
-            return []
-
-        # Up-res entire band
-        band_up = cv2.resize(
-            band,
-            None,
-            fx=_HDR_OCR_SCALE,
-            fy=_HDR_OCR_SCALE,
-            interpolation=cv2.INTER_CUBIC,
-        )
-
-        try:
-            dets = self.reader.readtext(
-                band_up,
-                detail=1,
-                paragraph=False,
-                allowlist=_HDR_OCR_ALLOWLIST,
-                mag_ratio=1.0,
-                contrast_ths=0.05,
-                adjust_contrast=0.7,
-                text_threshold=0.4,
-                low_text=0.25,
-            )
-        except Exception:
-            dets = []
-
-        tokens = []
-
-        for box, txt, conf in dets:
-            try:
-                conf_f = float(conf or 0.0)
-            except Exception:
-                conf_f = 0.0
-
-            if conf_f < _HDR_MIN_CONF:
-                continue
-
-            # OCR box is in upscaled band coordinates → map back to band
-            pts_local = [
-                (
-                    int(p[0] / _HDR_OCR_SCALE),
-                    int(p[1] / _HDR_OCR_SCALE),
-                )
-                for p in box
-            ]
-            xs = [p[0] for p in pts_local]
-            ys = [p[1] for p in pts_local]
-
-            x1_band = max(0, min(W_band - 1, min(xs)))
-            x2_band = max(0, min(W_band - 1, max(xs)))
-            y1_band = max(0, min(H_band - 1, min(ys)))
-            y2_band = max(0, min(H_band - 1, max(ys)))
-
-            # Map band coords into PAGE coords
-            x1_page = x_left + x1_band
-            x2_page = x_left + x2_band
-            y1_page = body_y_top + y1_band
-            y2_page = body_y_top + y2_band
-
-            tokens.append(
-                {
-                    "text": str(txt or "").strip(),
-                    "conf": conf_f,
-                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                }
-            )
-
-        return tokens
-
     def _row_text_for_column(self, row_top: int, row_bottom: int, col_tokens):
         """
         For a given column + row band, stitch together all tokens that fall
@@ -2052,7 +1962,6 @@ class CombinedLayoutParser:
             List of y-centers (ints) in STRIP-LOCAL coordinates.
         """
         import cv2
-        import numpy as np  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -2130,8 +2039,7 @@ class CombinedLayoutParser:
         Given a combo body-strip in GRAY (gridless), use the detected long
         horizontal lines to define row bands in STRIP-LOCAL coordinates.
 
-        NEW BEHAVIOR:
-          - We treat regions:
+          - Regions:
                 top_of_strip → first_line,
                 each line_i → line_{i+1},
                 last_line → bottom_of_strip
@@ -2142,7 +2050,6 @@ class CombinedLayoutParser:
         Returns:
             List of (row_top, row_bottom) in STRIP-LOCAL coordinates.
         """
-        import cv2  # noqa: F401
 
         if strip_gray is None or strip_gray.size == 0:
             return []
@@ -2367,13 +2274,94 @@ class CombinedLayoutParser:
         if val % 5 != 0:
             return False
         return True
+    
+    def _decode_amp_digits(self, digits: str) -> Optional[int]:
+        """
+        Normalize amperage digit strings coming from combo cells.
+
+        Handles:
+          - '20'   -> 20
+          - '201'  -> 20   (slash misread as '1')
+          - '20/'  -> 20   (after char normalization -> '201')
+          - '20I'/'20L'/'20J'/'20T' -> 20  (via normalization → '201')
+          - '251'  -> 25   (one junk digit inside)
+        """
+        if not digits:
+            return None
+
+        # First try straight parse
+        try:
+            val = int(digits)
+        except ValueError:
+            val = None
+
+        if val is not None and self._is_valid_amps(val):
+            return val
+
+        # Classic "lost slash" pattern at the end, e.g.:
+        #   '201' -> '20', '151' -> '15', '251' -> '25'
+        if len(digits) >= 3 and digits.endswith("1"):
+            try:
+                val2 = int(digits[:-1])
+            except ValueError:
+                val2 = None
+            if val2 is not None and self._is_valid_amps(val2):
+                return val2
+
+        # General: remove exactly one junk digit and see if we get a valid amp
+        for i in range(len(digits)):
+            candidate = digits[:i] + digits[i + 1 :]
+            if not candidate:
+                continue
+            try:
+                val2 = int(candidate)
+            except ValueError:
+                continue
+            if self._is_valid_amps(val2):
+                return val2
+
+        return None
+
+    def _decode_pole_digits(self, digits: str) -> Optional[int]:
+        """
+        Normalize pole digit strings.
+
+        Handles ONLY:
+        - '1'    -> 1
+        - '2'    -> 2
+        - '3'    -> 3
+        - '11'   -> 1  (leading '1' is misread slash)
+        - '12'   -> 2
+        - '13'   -> 3
+
+        Anything else ('20', '15', '101', etc.) is rejected.
+        """
+        if not digits:
+            return None
+
+        # Single digit is simple
+        if len(digits) == 1:
+            try:
+                d = int(digits)
+            except ValueError:
+                return None
+            return d if d in (1, 2, 3) else None
+
+        # 2-digit pattern where leading '1' is our fake slash
+        if len(digits) == 2 and digits[0] == "1" and digits[1] in "123":
+            return int(digits[1])
+
+        # All other multi-digit cases are considered invalid for poles
+        return None
 
     def _validate_amp_pole_pair(self, amp_str: str, pole_str: str):
         """
-        Given raw amp/pole substrings (already roughly isolated by regex),
+        Given raw amp/pole substrings (already isolated by regex),
         normalize to digits and enforce:
-          - poles ∈ {1,2,3}
-          - amps % 5 == 0 and > 0
+          - poles ∈ {1,2,3} (with 11/12/13 cleanup)
+          - amps % 5 == 0 and > 0 (with '201' / extra-digit cleanup)
+
+        Always returns a 2-tuple: (amps or None, poles or None).
         """
         amp_digits = "".join(ch for ch in amp_str if ch.isdigit())
         pole_digits = "".join(ch for ch in pole_str if ch.isdigit())
@@ -2381,20 +2369,12 @@ class CombinedLayoutParser:
         if not amp_digits or not pole_digits:
             return None, None
 
-        try:
-            amps = int(amp_digits)
-        except Exception:
+        amps = self._decode_amp_digits(amp_digits)
+        if amps is None:
             return None, None
 
-        if not self._is_valid_amps(amps):
-            return None, None
-
-        try:
-            poles = int(pole_digits)
-        except Exception:
-            return None, None
-
-        if poles not in (1, 2, 3):
+        poles = self._decode_pole_digits(pole_digits)
+        if poles is None:
             return None, None
 
         return amps, poles
@@ -2403,25 +2383,21 @@ class CombinedLayoutParser:
         """
         Parse a combined 'amps/poles' text blob into a list of (amps, poles) pairs.
 
-        Examples handled:
-          20A 1P
-          20A1P
-          20 A 1 P
-          20A/1P
-          20A/1
-          20/1P
-          20/1
-          20 / 1
-          20 - 1
-          20-1
-          20A-1P
-          20A-1
-          20-1P
-          1 P 20 A
+        Handles:
+          - 20A 1P
+          - 20A1P
+          - 20 A 1 P
+          - 20A/1P
+          - 20/1
+          - 20-1
+          - 1 P 20 A
+          - 20 13  (→ 20 A / 3 P)
+          - 20 12  (→ 20 A / 2 P)
+          - 20 1 1 (→ 20 A / 1 P)
 
-        Plus "lost slash" cases like:
-          2071   -> 20/1
-          25012  -> 250/2
+        Plus "lost slash" dense-digit cases like:
+          - 2071  → 20 / 1
+          - 25012 → 250 / 2
 
         Returns:
           list of (amps:int, poles:int). Empty list if nothing valid.
@@ -2437,32 +2413,30 @@ class CombinedLayoutParser:
         if "SPARE" in raw or "SPACE" in raw:
             return []
 
-        # Numeric-ish normalization (S/Z → 5, O/Q/D/G → 0, I/L/J/| → 1)
+        # Normalize mis-OCR'd chars (S/Z→5, O/Q/D/G→0, I/L/J/|/!→1)
         norm = self._normalize_digitish_chars(raw)
 
         pairs = []
 
-        # --- 1) explicit patterns (find ALL combos in the string) ---
+        # --- 1) Explicit amp/pole regex patterns (amps-first and poles-first) ---
 
-        # amps-first: 20A 1P, 20A1P, 20A/1P, 20/1, 20-1, etc.
         amp_first_re = re.compile(
             r"""
-            (?P<amp>\d{1,4})      # 1-4 digits
+            (?P<amp>\d{1,4})      # 1-4 digits (amps)
             \s*A?                 # optional 'A'
-            \s*[/\-]?\s*          # optional separator
-            (?P<pole>[123])       # 1,2,3
+            \s*[/\-]?\s*          # optional separator '/', '-'
+            (?P<pole>\d{1,2})     # 1-2 digits (poles: 1, 2, 3, 11,12,13, etc.)
             \s*P?                 # optional 'P'
             """,
             re.VERBOSE,
         )
 
-        # poles-first: 1 P 20 A
         pole_first_re = re.compile(
             r"""
-            (?P<pole>[123])       # 1,2,3
+            (?P<pole>\d{1,2})     # 1-2 digits (poles)
             \s*P?                 # optional 'P'
-            \s*[/\-]?\s*          # optional separator
-            (?P<amp>\d{1,4})      # 1-4 digits
+            \s*[/\-]?\s*          # optional separator '/', '-'
+            (?P<amp>\d{1,4})      # 1-4 digits (amps)
             \s*A?                 # optional 'A'
             """,
             re.VERBOSE,
@@ -2477,54 +2451,54 @@ class CombinedLayoutParser:
                     pairs.append((amps, poles))
 
         if pairs:
-            # We found at least one explicit combo – use these and skip
-            # the dense-digit heuristic.
+            # Found at least one explicit combo; don't run other heuristics.
             return pairs
 
-        # --- 2) Lost-slash / dense-digit heuristic (at most one pair) ---
+        # --- 2) Dense-digit "lost slash" heuristic (single pair max) ---
 
-        # Keep only digits; ignore letters and separators
         digits = "".join(ch for ch in norm if ch.isdigit())
-        if len(digits) < 2:
-            return []
+        if len(digits) >= 2:
+            # Last digit is candidate pole; rest is amps-ish blob
+            pole_candidate = self._decode_pole_digits(digits[-1:])
+            left = digits[:-1]
+            amp_candidate = self._decode_amp_digits(left)
 
-        # Last digit must be the pole count (1,2,3)
-        last = digits[-1]
-        if last not in ("1", "2", "3"):
-            return []
+            if pole_candidate is not None and amp_candidate is not None:
+                return [(amp_candidate, pole_candidate)]
 
-        try:
-            poles = int(last)
-        except Exception:
-            return []
+        # --- 3) Token-level heuristic for split tokens like '20 13', '20 1 1' ---
 
-        left = digits[:-1]
-        if not left:
-            return []
+        tokens = [t for t in re.split(r"\s+", norm) if t]
 
-        # First, try left as-is (covers clean "20/1" -> "201", etc.)
-        try:
-            amps_val = int(left)
-        except Exception:
-            amps_val = None
+        amp_candidates = []
+        pole_candidates = []
 
-        if amps_val is not None and self._is_valid_amps(amps_val):
-            return [(amps_val, poles)]
-
-        # If that fails, assume one junk digit in the left part (e.g. 2071, 25012)
-        for i in range(len(left)):
-            candidate = left[:i] + left[i + 1 :]
-            if not candidate:
-                continue
-            try:
-                amps_val = int(candidate)
-            except Exception:
+        for tok in tokens:
+            # Skip obvious junk like bare '/', '-', etc.
+            if not any(ch.isdigit() for ch in tok):
                 continue
 
-            if self._is_valid_amps(amps_val):
-                return [(amps_val, poles)]
+            digit_str = "".join(ch for ch in tok if ch.isdigit())
+            if not digit_str:
+                continue
 
-        # Nothing matched safely
+            amp_val = self._decode_amp_digits(digit_str)
+            if amp_val is not None:
+                amp_candidates.append(amp_val)
+
+            pole_val = self._decode_pole_digits(digit_str)
+            if pole_val is not None:
+                pole_candidates.append(pole_val)
+
+        if amp_candidates and pole_candidates:
+            # Heuristic:
+            #   - Use the *largest* amp (usually the multi-digit one like 20, 30, 50)
+            #   - Use the *last* pole candidate (often from '13' or trailing '1')
+            best_amp = max(amp_candidates)
+            best_pole = pole_candidates[-1]
+            return [(best_amp, best_pole)]
+
+        # Nothing safely parsed
         return []
 
     def parse(self, analyzer_result: dict, header_scan: dict) -> dict:
@@ -2532,21 +2506,21 @@ class CombinedLayoutParser:
         Given analyzer_result + header_scan with normalizedColumns.layout == 'combined',
         we:
           - crop body strips for combo columns
-          - detect body row bands from the grid
-          - OCR each combo column
-          - for each row, parse a combined amps/poles cell
+          - compute row bands *independently per side* from horizontal row-divider lines
+          - OCR each combo column ROW-BY-ROW using that side's bands
+          - for each row+side, parse combined amps/poles text
           - accumulate breaker counts
         """
         import os
         import cv2
-        from typing import Dict
 
         # --- image sources ---
-        raw_gray      = analyzer_result.get("gray", None)
-        gridless_gray = analyzer_result.get("gridless_gray", None)
+        raw_gray = analyzer_result.get("gray")
+        if raw_gray is None:
+            raw_gray = _ensure_gray(analyzer_result)
 
-        gray_body  = gridless_gray if gridless_gray is not None else raw_gray
-        gray_lines = raw_gray if raw_gray is not None else gray_body
+        gray_body  = raw_gray
+        gray_lines = raw_gray
 
         if gray_body is None or gray_lines is None:
             if self.debug:
@@ -2643,7 +2617,6 @@ class CombinedLayoutParser:
         wanted_roles = {"combo"}
 
         body_columns = []
-        tokens_by_col_index = {}
 
         # --- collect combo body columns (geometry only) ---
         for col in cols_summary:
@@ -2669,6 +2642,7 @@ class CombinedLayoutParser:
                     "y_top": body_y_top,
                     "y_bottom": body_y_bottom,
                     "debugImageOverlay": None,  # filled when debug=True
+                    # 'side' assigned below
                 }
             )
 
@@ -2685,37 +2659,74 @@ class CombinedLayoutParser:
                 "breakerCounts": {},
             }
 
-        # --- determine row bands (strip-local) from a reference combo column ---
-        ref_col = body_columns[0]
-        ref_strip = gray_body[
-            ref_col["y_top"]:ref_col["y_bottom"],
-            ref_col["x_left"]:ref_col["x_right"],
-        ]
-        if ref_strip.size == 0:
-            # Fallback: one big band = whole body
-            row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
-        else:
-            row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+        # --- assign columns to left/right sides based on X center ---
+        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
+        global_left = min(c["x_left"] for c in role_cols)
+        global_right = max(c["x_right"] for c in role_cols)
+        center_x = 0.5 * (global_left + global_right)
 
-        # Convert strip-local row bands to PAGE coords for later use
-        row_spans = [
-            (body_y_top + top_s, body_y_top + bottom_s)
-            for (top_s, bottom_s) in row_bands_strip
-        ]
+        by_side: Dict[str, Optional[int]] = {"left": None, "right": None}
+        for col in role_cols:
+            col_center = 0.5 * (col["x_left"] + col["x_right"])
+            side = "left" if col_center < center_x else "right"
+            col["side"] = side
+            # First combo column per side wins
+            if by_side[side] is None:
+                by_side[side] = col["index"]
 
         if self.debug:
-            print(
-                f"[CombinedLayoutParser] Using {len(row_spans)} row bands from "
-                f"horizontal lines."
-            )
+            print("[CombinedLayoutParser] combo columns by side:", by_side)
 
-        # --- OCR each combo column ROW-BY-ROW using the same row bands ---
+        # --- determine row bands *per side* from that side's reference combo column ---
+        row_bands_by_side = {"left": None, "right": None}
+        row_spans_by_side = {"left": [], "right": []}
+
+        for side in ("left", "right"):
+            side_cols = [c for c in role_cols if c.get("side") == side]
+            if not side_cols:
+                continue
+
+            # Single role: combo. Use the first combo column on this side as reference.
+            ref_col = side_cols[0]
+
+            ref_strip = gray_body[
+                ref_col["y_top"]:ref_col["y_bottom"],
+                ref_col["x_left"]:ref_col["x_right"],
+            ]
+            if ref_strip.size == 0:
+                row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+            else:
+                row_bands_strip = self._compute_row_bands_in_strip(ref_strip)
+                if not row_bands_strip:
+                    row_bands_strip = [(0, ref_col["y_bottom"] - ref_col["y_top"])]
+
+            row_bands_by_side[side] = row_bands_strip
+            row_spans_by_side[side] = [
+                (body_y_top + top_s, body_y_top + bottom_s)
+                for (top_s, bottom_s) in row_bands_strip
+            ]
+
+            if self.debug:
+                print(
+                    f"[CombinedLayoutParser] Side='{side}' using "
+                    f"{len(row_spans_by_side[side])} row bands from horizontal lines."
+                )
+
+        tokens_by_col_index: Dict[int, list] = {}
+
+        # --- OCR each combo column ROW-BY-ROW using that column's side bands ---
         for col in body_columns:
             idx   = col["index"]
             x_l   = col["x_left"]
             x_r   = col["x_right"]
             y_top = col["y_top"]
             y_bot = col["y_bottom"]
+            side  = col.get("side", "left")
+
+            row_bands_strip = row_bands_by_side.get(side)
+            if not row_bands_strip:
+                tokens_by_col_index[idx] = []
+                continue
 
             strip = gray_body[y_top:y_bot, x_l:x_r]
             if strip.size == 0:
@@ -2737,20 +2748,7 @@ class CombinedLayoutParser:
                 "breakerCounts": {},
             }
 
-        if self.debug:
-            print(
-                f"[CombinedLayoutParser] Extracted {len(body_columns)} body combo columns."
-            )
-
-        if not body_columns or not tokens_by_col_index:
-            return {
-                "layout": "combined",
-                "bodyColumns": body_columns,
-                "detected_breakers": [],
-                "breakerCounts": {},
-            }
-
-        # --- Build OCR overlays for each body column (debug only, high quality only) ---
+        # --- Build OCR overlays for each body column (debug only) ---
         if self.debug:
             for col in body_columns:
                 idx   = col["index"]
@@ -2764,7 +2762,7 @@ class CombinedLayoutParser:
                 if not col_tokens:
                     continue
 
-                # Crop the strip again for visualization only (GRIDLESS body)
+                # Crop the strip again for visualization only
                 strip = gray_body[y_top:y_bot, x_l:x_r]
                 if strip.size == 0:
                     continue
@@ -2792,10 +2790,8 @@ class CombinedLayoutParser:
                     cv2.LINE_AA,
                 )
 
-                # --- NEW: detect long horizontal row-divider lines in this strip ---
+                # Draw detected row-divider lines (for debug) in BLUE
                 line_ys = self._detect_row_divider_lines_in_strip(strip)
-
-                # Draw them in BLUE across full width of the strip
                 for yc in line_ys:
                     yc_int = max(0, min(H_strip - 1, int(yc)))
                     cv2.line(
@@ -2805,7 +2801,6 @@ class CombinedLayoutParser:
                         (255, 0, 0),  # BLUE in BGR
                         1,
                     )
-                    # optional tiny label
                     cv2.putText(
                         vis,
                         "ROW",
@@ -2857,43 +2852,27 @@ class CombinedLayoutParser:
                     )
                     col["debugImageOverlay"] = None
 
-        # --- assign columns to left/right sides based on X center ---
-        role_cols = [c for c in body_columns if c["role"] in wanted_roles]
-        global_left = min(c["x_left"] for c in role_cols)
-        global_right = max(c["x_right"] for c in role_cols)
-        center_x = 0.5 * (global_left + global_right)
-
-        by_side: Dict[str, Optional[int]] = {"left": None, "right": None}
-        for col in role_cols:
-            col_center = 0.5 * (col["x_left"] + col["x_right"])
-            side = "left" if col_center < center_x else "right"
-            # First combo column per side wins
-            if by_side[side] is None:
-                by_side[side] = col["index"]
-
-        if self.debug:
-            print("[CombinedLayoutParser] combo columns by side:", by_side)
-
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}
 
-        # --- walk rows and parse combo text per side ---
-        for row_idx, (row_top, row_bottom) in enumerate(row_spans):
-            for side in ("left", "right"):
-                col_idx = by_side[side]
-                if col_idx is None:
-                    continue
+        # --- walk rows and parse combo text *per side* ---
+        for side in ("left", "right"):
+            col_idx = by_side.get(side)
+            side_row_spans = row_spans_by_side.get(side) or []
+            if col_idx is None or not side_row_spans:
+                continue
 
-                col_tokens = tokens_by_col_index.get(col_idx, [])
+            col_tokens = tokens_by_col_index.get(col_idx, [])
+
+            for row_idx, (row_top, row_bottom) in enumerate(side_row_spans):
                 combo_text = self._row_text_for_column(row_top, row_bottom, col_tokens)
-
                 combo_pairs = self._parse_combo_cell(combo_text)
                 if not combo_pairs:
                     continue
 
                 if self.debug:
                     print(
-                        f"[CombinedLayoutParser] row={row_idx} side={side} "
+                        f"[CombinedLayoutParser] side={side} row={row_idx} "
                         f"text='{combo_text}' -> {combo_pairs}"
                     )
 
@@ -2904,10 +2883,10 @@ class CombinedLayoutParser:
                     detected_breakers.append(
                         {
                             "side": side,
-                            "rowIndex": row_idx,
+                            "rowIndex": row_idx,  # per-side row index
                             "rowTop": row_top,
                             "rowBottom": row_bottom,
-                            "amps": int(amps),
+                            "amperage": int(amps),
                             "poles": int(poles),
                             "comboText": combo_text,
                         }
@@ -2969,8 +2948,10 @@ class BreakerTableParser:
         if not isinstance(analyzer_result, dict):
             analyzer_result = {}
 
-        # --- spaces: directly from analyzer 'spaces' ---
+        # --- spaces: from analyzer 'spaces', or fall back to 'panel_size' (Analyzer12) ---
         raw_spaces = analyzer_result.get("spaces")
+        if raw_spaces is None:
+            raw_spaces = analyzer_result.get("panel_size")
 
         if raw_spaces is None:
             spaces = 0
@@ -3006,16 +2987,13 @@ class BreakerTableParser:
         # --- Aggregate breaker counts (amps + poles) ---
         breaker_counts: Dict[str, int] = {}
         for br in detected_breakers:
-            amps = br.get("amps")
+            amps = br.get("amperage")
             poles = br.get("poles")
             if amps is None or poles is None:
                 continue
-            try:
-                a = int(amps)
-                p = int(poles)
-            except Exception:
-                continue
-            key = f"{p}P_{a}A"   # e.g. "1P_20A"
+            a = int(amps)
+            p = int(poles)
+            key = f"{p}P_{a}A"
             breaker_counts[key] = breaker_counts.get(key, 0) + 1
 
         if self.debug:
@@ -3044,7 +3022,7 @@ class BreakerTableParser:
 
     def _print_terminal_summary(self, analyzer_result: Dict, result: Dict) -> None:
         """
-        Print a simple, human-readable summary that mirrors the final JSON, per panel:
+        Print a simple summary that mirrors the final JSON, per panel:
 
           Panel name - LIA
           Amps - 125A, main breaker amps - Unknown, volts - 480V, spaces - 42
