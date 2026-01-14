@@ -284,8 +284,19 @@ class PanelBoardSearch:
                     if overlaps:
                         continue
                     
-                    # GREEN for nested detections (same as primary detection)
-                    cv2.rectangle(overlay_img, (abs_x0, abs_y0), (abs_x1, abs_y1), (0, 255, 0), 8)
+                    # Content validation: verify region actually contains table structure
+                    nested_crop = det_bgr[abs_y0:abs_y1, abs_x0:abs_x1]
+                    if nested_crop.size == 0:
+                        continue
+                    nested_mask = self._horizontal_line_mask(nested_crop)
+                    nested_metrics = self._extract_horizontal_line_metrics(nested_mask)
+                    if not self._is_valid_table_spacing(nested_metrics, nested_mask.shape[1], min_repeats=4):
+                        if self.verbose:
+                            print(f"[INFO] Nested candidate at ({abs_x0},{abs_y0}) rejected: no table structure")
+                        continue
+                    
+                    # YELLOW for nested detections (debug: distinguishes from primary)
+                    cv2.rectangle(overlay_img, (abs_x0, abs_y0), (abs_x1, abs_y1), (0, 255, 255), 8)
                     
                     # Add to void boxes and candidates
                     padded_x0 = max(0, abs_x0 - self.pad)
@@ -325,8 +336,20 @@ class PanelBoardSearch:
                     if overlaps:
                         continue
                     
-                    # GREEN for gap-detected panels (same as primary detection)
-                    cv2.rectangle(overlay_img, (gx, gy), (gx+gw, gy+gh), (0, 255, 0), 8)
+                    # Content validation: verify region actually contains table structure
+                    # Gap search guesses positions - we must validate before accepting
+                    gap_crop = det_bgr[gy:gy+gh, gx:gx+gw]
+                    if gap_crop.size == 0:
+                        continue
+                    gap_mask = self._horizontal_line_mask(gap_crop)
+                    gap_metrics = self._extract_horizontal_line_metrics(gap_mask)
+                    if not self._is_valid_table_spacing(gap_metrics, gap_mask.shape[1], min_repeats=4):
+                        if self.verbose:
+                            print(f"[INFO] Gap candidate at ({gx},{gy}) rejected: no table structure")
+                        continue
+                    
+                    # CYAN for gap-detected panels (debug: distinguishes from primary)
+                    cv2.rectangle(overlay_img, (gx, gy), (gx+gw, gy+gh), (255, 255, 0), 8)
                     
                     padded_x0 = max(0, gx - self.pad)
                     padded_y0 = max(0, gy - self.pad)
@@ -352,8 +375,8 @@ class PanelBoardSearch:
                     w, h = x1 - x0, y1 - y0
                     if not _box_passes(x0, y0, w, h):
                         continue
-                    # GREEN fallback boxes
-                    cv2.rectangle(overlay_img, (x0, y0), (x1, y1), (0, 255, 0), 8)
+                    # ORANGE fallback boxes (debug: distinguishes from primary)
+                    cv2.rectangle(overlay_img, (x0, y0), (x1, y1), (0, 165, 255), 8)
 
                     # remember this void box as well
                     void_boxes.append((x0, y0, x1, y1))
