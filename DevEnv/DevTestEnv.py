@@ -13,8 +13,8 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # ---------- IMPORTS ----------
-from PageFilter.PageFilter import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV22 import PanelBoardSearch
+from PageFilter.PageFilterV3 import PageFilter
+from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
 from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
 

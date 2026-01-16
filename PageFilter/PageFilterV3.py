@@ -7,7 +7,9 @@ import json
 from typing import Optional, Tuple, List, Dict, Any
 
 import numpy as np
-import fitz  # PyMuPDF
+import pypdfium2 as pdfium  # Apache 2.0 - PDF rendering
+import pikepdf              # MPL 2.0 - PDF manipulation
+from PIL import Image
 import cv2
 
 import subprocess, shutil, tempfile
@@ -227,9 +229,11 @@ class PageFilter:
         if not os.path.isfile(pdf_path):
             raise FileNotFoundError(pdf_path)
 
-        doc = fitz.open(pdf_path)
-        out = fitz.open()
-        letter_rect = fitz.paper_rect("letter")
+        # Use pypdfium2 for rendering, pikepdf for PDF manipulation
+        pdfium_doc = pdfium.PdfDocument(pdf_path)
+        pikepdf_doc = pikepdf.open(pdf_path)
+        out_pdf_obj = pikepdf.new()
+        letter_width, letter_height = 612, 792  # US Letter in points
 
         base = os.path.splitext(os.path.basename(pdf_path))[0]
         out_pdf = os.path.join(self.output_dir, base + self.out_pdf_suffix)
@@ -243,16 +247,19 @@ class PageFilter:
         logs: List[Dict[str, Any]] = []
 
         if self.verbose:
-            print(f"[INFO] Scanning {len(doc)} page(s): TallCorner OCR → Label Score (reuse) → Fallback Footprints...")
+            print(f"[INFO] Scanning {len(pdfium_doc)} page(s): TallCorner OCR → Label Score (reuse) → Fallback Footprints...")
 
         # -------- Pass A: detect E-sheets via one taller/wider corner OCR --------
         e_pages: List[int] = []
         undecided_pages: List[int] = []
         passA_hits: Dict[int, Dict[str, Any]] = {}
 
-        for i, page in enumerate(doc):
+        for i in range(len(pdfium_doc)):
             page_no = i + 1
-            ocr_hits = self._ocr_corner(page, page_index=i) if (self.use_ocr and self.reader) else []
+            pdfium_page = pdfium_doc[i]
+            page_width = pdfium_page.get_width()
+            page_height = pdfium_page.get_height()
+            ocr_hits = self._ocr_corner_pdfium(pdfium_page, page_width, page_height, page_index=i) if (self.use_ocr and self.reader) else []
             e_hits = [h for h in ocr_hits if self._looks_like_e_sheet(h["text"])]
             non_e_hits = [h for h in ocr_hits if h["conf"] >= self.non_e_conf_min and self._looks_like_non_e_sheet(h["text"])]
 
@@ -280,7 +287,9 @@ class PageFilter:
                 spans = [{"text": (h.get("text") or ""), "conf": float(h.get("conf", 0.9))} for h in passA_hits[i]["corner_hits"]]
                 score, tags = (0.0, [])
                 if spans:
-                    score, tags = self._score_label_spans(doc[i].rect, spans)
+                    pg = pdfium_doc[i]
+                    page_rect = (0, 0, pg.get_width(), pg.get_height())
+                    score, tags = self._score_label_spans(page_rect, spans)
                 label_scores[i], label_tags[i] = score, tags
                 if self.verbose:
                     print(f"  [Labels:reuse] E-page {i+1:03d}: tallx{int(self.label_tall_factor)} score={score:.2f} tags={tags}")
@@ -321,14 +330,11 @@ class PageFilter:
                         print(f"[INFO] No label hits → keeping all E-pages: {[idx+1 for idx in selected_indexes]}")
 
             # ---- Write selected pages ----
-            for i in range(len(doc)):
+            for i in range(len(pdfium_doc)):
                 page_no = i + 1
                 if i in selected_indexes:
-                    if self.use_ghostscript_letter:
-                        out.insert_pdf(doc, from_page=i, to_page=i)
-                    else:
-                        new_page = out.new_page(width=letter_rect.width, height=letter_rect.height)
-                        new_page.show_pdf_page(letter_rect, doc, i, keep_proportion=True)
+                    # Use pikepdf to copy the page
+                    out_pdf_obj.pages.append(pikepdf_doc.pages[i])
                     kept.append(page_no)
 
                     if self.debug:
@@ -356,14 +362,15 @@ class PageFilter:
                             "passA": passA_hits.get(i, {}),
                         })
 
-            return self._finalize_output(doc, out, kept, dropped, out_pdf, log_path, logs)
+            return self._finalize_output(pdfium_doc, pikepdf_doc, out_pdf_obj, kept, dropped, out_pdf, log_path, logs)
 
         # -------- No E-pages found: fallback undecided→footprints --------
         if self.verbose:
             print("[INFO] No E-sheets detected in Pass A. Running original undecided→footprints flow.")
 
-        for i, page in enumerate(doc):
+        for i in range(len(pdfium_doc)):
             page_no = i + 1
+            pdfium_page = pdfium_doc[i]
             decision: Optional[str] = None
             reason = ""
             fp_summary: Dict[str, Any] = {}
@@ -374,7 +381,7 @@ class PageFilter:
             elif passA_hits.get(i, {}).get("decision_passA") == "E":
                 decision, reason = "KEEP", "OCR corner: E match"
             else:
-                bgr = self._render_page_bgr(page)
+                bgr = self._render_page_bgr_pdfium(pdfium_page)
                 fp_ok, fp_count, fp_boxes = self._has_rectangular_footprints(bgr)
                 fp_summary = {
                     "footprints_ok": fp_ok,
@@ -387,11 +394,8 @@ class PageFilter:
                     decision, reason = "DROP", "No qualifying footprints"
 
             if decision == "KEEP":
-                if self.use_ghostscript_letter:
-                    out.insert_pdf(doc, from_page=i, to_page=i)
-                else:
-                    new_page = out.new_page(width=letter_rect.width, height=letter_rect.height)
-                    new_page.show_pdf_page(letter_rect, doc, i, keep_proportion=True)
+                # Use pikepdf to copy the page
+                out_pdf_obj.pages.append(pikepdf_doc.pages[i])
                 kept.append(page_no)
             else:
                 dropped.append(page_no)
@@ -408,7 +412,7 @@ class PageFilter:
             if self.verbose:
                 print(f"  Page {page_no:03d}: {decision} — {reason}")
 
-        return self._finalize_output(doc, out, kept, dropped, out_pdf, log_path, logs)
+        return self._finalize_output(pdfium_doc, pikepdf_doc, out_pdf_obj, kept, dropped, out_pdf, log_path, logs)
 
     # ----------------- OCR helpers -----------------
     def _init_ocr(self):
@@ -469,32 +473,33 @@ class PageFilter:
         return str(dst)
 
     @staticmethod
-    def _clip_from_frac(page: fitz.Page, frac: Tuple[float, float, float, float]) -> fitz.Rect:
-        r = page.rect
-        x0, y0, x1, y1 = frac
-        return fitz.Rect(r.x0 + r.width * x0, r.y0 + r.height * y0,
-                         r.x0 + r.width * x1, r.y0 + r.height * y1)
+    def _clip_from_frac_tuple(page_width: float, page_height: float, frac: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+        """Get clip rect as (x0, y0, x1, y1) from page dimensions and fraction tuple."""
+        x0f, y0f, x1f, y1f = frac
+        return (page_width * x0f, page_height * y0f,
+                page_width * x1f, page_height * y1f)
 
-    def _corner_rect(self, page: fitz.Page) -> fitz.Rect:
+    def _corner_rect_tuple(self, page_width: float, page_height: float) -> Tuple[float, float, float, float]:
         """
         Single, taller & slightly wider crop:
           - LEFT/BASE TOP/BOTTOM from crop_frac
           - Extends UP by (label_tall_factor - 1) * corner_height
           - Expands RIGHT by (crop_expand_right * page.width)
+        Returns (x0, y0, x1, y1) in page points.
         """
         left, top, right, bottom = self.crop_frac
-        base = self._clip_from_frac(page, (left, top, right, bottom))
-        ch = base.height
+        base_x0, base_y0, base_x1, base_y1 = self._clip_from_frac_tuple(page_width, page_height, (left, top, right, bottom))
+        ch = base_y1 - base_y0
 
         # grow up
         extra_up = max(0.0, (self.label_tall_factor - 1.0) * ch)
-        new_top = max(page.rect.y0, base.y0 - extra_up)
+        new_top = max(0, base_y0 - extra_up)
 
         # expand right
-        extra_right = max(0.0, self.crop_expand_right * page.rect.width)
-        new_right = min(page.rect.x1, base.x1 + extra_right)
+        extra_right = max(0.0, self.crop_expand_right * page_width)
+        new_right = min(page_width, base_x1 + extra_right)
 
-        return fitz.Rect(base.x0, new_top, new_right, base.y0 + ch)
+        return (base_x0, new_top, new_right, base_y0 + ch)
 
     def _save_crop_png(self, arr: np.ndarray, path: str) -> None:
         try:
@@ -505,25 +510,42 @@ class PageFilter:
         except Exception:
             pass
 
-    def _ocr_corner(self, page: fitz.Page, page_index: int) -> List[Dict[str, Any]]:
+    def _ocr_corner_pdfium(self, page, page_width: float, page_height: float, page_index: int) -> List[Dict[str, Any]]:
         """
-        OCR the single taller/wider crop; returns list of {text, conf}.
+        OCR the single taller/wider crop using pypdfium2; returns list of {text, conf}.
         """
         if not (self.use_ocr and self.reader):
             return []
-        clip = self._corner_rect(page)
-        pix = page.get_pixmap(matrix=fitz.Matrix(self.ocr_zoom, self.ocr_zoom), clip=clip, alpha=False)
-        arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+        clip = self._corner_rect_tuple(page_width, page_height)
+        clip_x0, clip_y0, clip_x1, clip_y1 = clip
+        
+        # Render full page at OCR zoom, then crop
+        bitmap = page.render(scale=self.ocr_zoom)
+        pil_img = bitmap.to_pil()
+        
+        # Calculate crop in pixels
+        px0 = int(clip_x0 * self.ocr_zoom)
+        py0 = int(clip_y0 * self.ocr_zoom)
+        px1 = int(clip_x1 * self.ocr_zoom)
+        py1 = int(clip_y1 * self.ocr_zoom)
+        
+        cropped = pil_img.crop((px0, py0, px1, py1))
+        arr = np.array(cropped)
+        
+        # Convert RGB to BGR for OpenCV compatibility
+        if len(arr.shape) == 3 and arr.shape[2] >= 3:
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        
         if self.save_crop_pngs:
             out_path = os.path.join(self.crops_dir, f"page_{page_index+1:03d}_tallcorner_x{int(self.label_tall_factor)}.png")
-            self._save_crop_png(arr if arr.shape[2] != 4 else cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR), out_path)
+            self._save_crop_png(arr, out_path)
 
         results = self.reader.readtext(arr, detail=1, paragraph=False,
                                        allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- .")
         return [{"text": (t or "").strip(), "conf": float(c)} for (_b, t, c) in results]
 
     # ----------------- Label scoring helpers -----------------
-    def _score_label_spans(self, page_rect: fitz.Rect, spans: List[Dict[str, Any]]) -> Tuple[float, List[str]]:
+    def _score_label_spans(self, page_rect: Tuple[float, float, float, float], spans: List[Dict[str, Any]]) -> Tuple[float, List[str]]:
         """
         Score intent phrases using:
         1) existing regex + confidence weighting (unchanged),
@@ -703,18 +725,22 @@ class PageFilter:
         return bool(self.PATTERN_NON_E.match(norm))
 
     # ----------------- Rendering for footprint -----------------
-    def _render_page_bgr(self, page: fitz.Page) -> np.ndarray:
-        scale = self.dpi / 72.0  # PDF points → inches
+    def _render_page_bgr_pdfium(self, page) -> np.ndarray:
+        """Render a pypdfium2 page to BGR numpy array."""
+        page_width = page.get_width()
+        page_height = page.get_height()
+        scale = self.dpi / 72.0  # PDF points → pixels
         if self.longest_cap_px is not None:
-            w_pt, h_pt = page.rect.width, page.rect.height
-            w_px, h_px = w_pt * scale, h_pt * scale
+            w_px, h_px = page_width * scale, page_height * scale
             longest = max(w_px, h_px)
             if longest > self.longest_cap_px:
                 scale *= (self.longest_cap_px / longest)
-        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-        arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-        if arr.shape[2] == 4:
-            arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+        bitmap = page.render(scale=scale)
+        pil_img = bitmap.to_pil()
+        arr = np.array(pil_img)
+        # Convert RGB to BGR for OpenCV
+        if len(arr.shape) == 3 and arr.shape[2] >= 3:
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
         return arr
 
     # ----------------- Footprint detector -----------------
@@ -816,7 +842,7 @@ class PageFilter:
         return (False, found, boxes)
 
     # ----------------- Finalize -----------------
-    def _finalize_output(self, doc, out, kept, dropped, out_pdf, log_path, logs):
+    def _finalize_output(self, pdfium_doc, pikepdf_doc, out_pdf_obj, kept, dropped, out_pdf, log_path, logs):
         """
         Save filtered pages. If Ghostscript is enabled:
         - write an intermediate "<base>_raw.pdf"
@@ -826,11 +852,12 @@ class PageFilter:
         - write final directly to "<base>.pdf"
         """
         # Nothing to save?
-        if len(out) == 0:
+        if len(out_pdf_obj.pages) == 0:
             if self.verbose:
                 print("[WARN] No pages kept — nothing saved")
             try:
-                doc.close()
+                pdfium_doc.close()
+                pikepdf_doc.close()
             except Exception:
                 pass
             return kept, dropped, None, None
@@ -843,10 +870,10 @@ class PageFilter:
         # ----- Save intermediate / final depending on GS -----
         if self.use_ghostscript_letter:
             # 1) Write raw (vector-preserving, no resize)
-            out.save(raw_pdf)
-            out.close()
+            out_pdf_obj.save(raw_pdf)
+            out_pdf_obj.close()
             if self.verbose:
-                print(f"[OK] Saved intermediate (raw) → {raw_pdf}  (kept {len(kept)}/{len(doc)})")
+                print(f"[OK] Saved intermediate (raw) → {raw_pdf}  (kept {len(kept)}/{len(pdfium_doc)})")
 
             # 2) Ghostscript → final (no '_gs' in name)
             try:
@@ -867,10 +894,10 @@ class PageFilter:
                 final_pdf = raw_pdf
         else:
             # GS disabled → write directly to the final path
-            out.save(final_pdf)
-            out.close()
+            out_pdf_obj.save(final_pdf)
+            out_pdf_obj.close()
             if self.verbose:
-                print(f"[OK] Saved filtered PDF → {final_pdf}  (kept {len(kept)}/{len(doc)})")
+                print(f"[OK] Saved filtered PDF → {final_pdf}  (kept {len(kept)}/{len(pdfium_doc)})")
 
         # ----- Debug log -----
         log_json_path = None
@@ -884,9 +911,10 @@ class PageFilter:
             except Exception:
                 pass
 
-        # Close source doc
+        # Close source docs
         try:
-            doc.close()
+            pdfium_doc.close()
+            pikepdf_doc.close()
         except Exception:
             pass
 

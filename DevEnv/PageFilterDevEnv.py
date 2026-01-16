@@ -32,7 +32,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # Imports from your project
-from PageFilter.PageFilterV2 import PageFilter
+from PageFilter.PageFilterV3 import PageFilter
 
 # ----- Defaults (same locations you used) -----
 DEFAULT_INPUT_PDF = Path("~/Documents/Diagrams/ELECTRICAL SET (Mark Up).pdf").expanduser()
