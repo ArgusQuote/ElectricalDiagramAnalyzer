@@ -8,11 +8,11 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from VisualDetectionToolLibrary.PanelSearchToolV22 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV24 import PanelBoardSearch
 
 # Inputs/Outputs
-INPUT_PDF = Path("~/Documents/pdfToScan/generic3.pdf").expanduser()
-OUT_DIR   = Path("~/Documents/pdfScanTest0").expanduser()
+INPUT_PDF = Path("~/Documents/pdfToScan/O.pdf").expanduser()
+OUT_DIR   = Path("~/Documents/TestScan20").expanduser()
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 finder = PanelBoardSearch(
@@ -31,10 +31,7 @@ finder = PanelBoardSearch(
     margin_shave_px=6,
     pad=6,
     verbose=True,
-    debug=False
-    # one-box settings (defaults are fine, but you can loosen slightly if needed):
-    # onebox_min_rel_area=0.02, onebox_max_rel_area=0.75,
-    # onebox_aspect_range=(0.4, 3.0), onebox_min_side_px=80,
+    debug=False,
 )
 
 

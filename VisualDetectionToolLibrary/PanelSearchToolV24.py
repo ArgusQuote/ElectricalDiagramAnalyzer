@@ -7,6 +7,17 @@ import fitz  # PyMuPDF
 import json
 import shutil
 
+# #region agent log
+_DBG_LOG = "/home/marco/ElectricalDiagramAnalyzer/.cursor/debug.log"
+def _dbg(hyp, loc, msg, data):
+    try:
+        with open(_DBG_LOG, "a") as f:
+            f.write(json.dumps({"hypothesisId": hyp, "location": loc, "message": msg, "data": data}) + "\n")
+    except Exception as e:
+        print(f"[DBG ERROR] {e}")
+_dbg("INIT", "module_load", "PanelSearchToolV24 loaded", {"timestamp": "startup"})
+# #endregion
+
 
 class PanelBoardSearch:
     """
@@ -17,6 +28,21 @@ class PanelBoardSearch:
     Always writes a magenta overlay per source page for QA.
       - Green boxes: detected panel/table regions (all detection methods)
       - Red boxes: raster images that are NOT inside those voids
+
+    V24 Changes (from V23):
+      - Added NMS deduplication on candidates before export to prevent
+        duplicate detection of the same panel by multiple detection methods.
+      - All detection method overlays now use green color consistently.
+      - Fixed coordinate consistency bug: overlap checks now use separate
+        unpadded_boxes list (vs void_boxes which contains padded coords).
+        This ensures IoU comparisons are fair across detection methods.
+      - Lowered NMS IoU threshold from 0.5 to 0.3 to match per-method overlap checks.
+      - Added debug output showing candidates before NMS when verbose=True.
+
+    V23 Changes (from V22):
+      - Added border-region panel search to detect panels touching page borders
+        that weren't detected as holes (e.g., panels merged with drawing frame).
+      - Border-detected panels now use green color (consistent with other methods).
 
     V22 Changes:
       - Added _clear_border_ink() to prevent panels near page borders from
@@ -186,6 +212,8 @@ class PanelBoardSearch:
             overlay_img = det_bgr.copy()
             saved_idx = 0
             candidates: list[fitz.Rect] = []
+            # Track UNPADDED boxes for overlap comparison (separate from void_boxes which is padded for export)
+            unpadded_boxes: list[tuple[int, int, int, int]] = []
 
             def _box_passes(x, y, w, h, border_allowed=False):
                 area = w * h
@@ -234,11 +262,17 @@ class PanelBoardSearch:
                     # GREEN for void/table regions
                     cv2.drawContours(overlay_img, [cnt], -1, (0, 255, 0), 8)
 
+                    # Store UNPADDED box for overlap comparison
+                    unpadded_boxes.append((x, y, x + w, y + h))
+                    # #region agent log
+                    _dbg("A", "primary:258", "PRIMARY detected", {"page": pidx+1, "box": [x, y, x+w, y+h], "unpadded_count": len(unpadded_boxes)})
+                    # #endregion
+
                     # pad & map detection bbox → PDF clip
                     y0 = max(0, y - self.pad); x0 = max(0, x - self.pad)
                     y1 = min(H, y + h + self.pad); x1 = min(W, x + w + self.pad)
 
-                    # remember this void box (in detection pixel coords)
+                    # remember this void box (padded, in detection pixel coords)
                     void_boxes.append((x0, y0, x1, y1))
 
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
@@ -278,12 +312,27 @@ class PanelBoardSearch:
                     if not _box_passes(abs_x0, abs_y0, nw, nh):
                         continue
                     
-                    # Check overlap with already-detected candidates
+                    # Check overlap with already-detected candidates (using unpadded coords for fair comparison)
+                    # Use BOTH IoU and containment ratio
                     overlaps = False
-                    for existing in void_boxes:
-                        if self._iou((abs_x0, abs_y0, abs_x1, abs_y1), existing) > 0.3:
+                    # #region agent log
+                    max_iou_nested = 0
+                    max_contain_nested = 0
+                    # #endregion
+                    new_box = (abs_x0, abs_y0, abs_x1, abs_y1)
+                    for existing in unpadded_boxes:
+                        iou_val = self._iou(new_box, existing)
+                        contain_val = self._containment_ratio(new_box, existing)
+                        # #region agent log
+                        max_iou_nested = max(max_iou_nested, iou_val)
+                        max_contain_nested = max(max_contain_nested, contain_val)
+                        # #endregion
+                        if iou_val > 0.3 or contain_val > 0.5:
                             overlaps = True
                             break
+                    # #region agent log
+                    _dbg("B", "nested:305", "NESTED overlap check", {"page": pidx+1, "new_box": list(new_box), "max_iou": max_iou_nested, "max_contain": max_contain_nested, "overlaps": overlaps, "existing_count": len(unpadded_boxes)})
+                    # #endregion
                     if overlaps:
                         continue
                     
@@ -298,10 +347,13 @@ class PanelBoardSearch:
                             print(f"[INFO] Nested candidate at ({abs_x0},{abs_y0}) rejected: no table structure")
                         continue
                     
-                    # YELLOW for nested detections (debug: distinguishes from primary)
-                    cv2.rectangle(overlay_img, (abs_x0, abs_y0), (abs_x1, abs_y1), (0, 255, 255), 8)
+                    # GREEN for nested detections (consistent with other methods)
+                    cv2.rectangle(overlay_img, (abs_x0, abs_y0), (abs_x1, abs_y1), (0, 255, 0), 8)
                     
-                    # Add to void boxes and candidates
+                    # Store unpadded for future overlap checks
+                    unpadded_boxes.append((abs_x0, abs_y0, abs_x1, abs_y1))
+                    
+                    # Add to void boxes and candidates (padded)
                     padded_x0 = max(0, abs_x0 - self.pad)
                     padded_y0 = max(0, abs_y0 - self.pad)
                     padded_x1 = min(W, abs_x1 + self.pad)
@@ -330,10 +382,14 @@ class PanelBoardSearch:
                     if not _box_passes(gx, gy, gw, gh):
                         continue
                     
-                    # Check overlap with already-detected
+                    # Check overlap with already-detected (using unpadded coords for fair comparison)
+                    # Use BOTH IoU and containment ratio
                     overlaps = False
-                    for existing in void_boxes:
-                        if self._iou((gx, gy, gx+gw, gy+gh), existing) > 0.3:
+                    new_box = (gx, gy, gx+gw, gy+gh)
+                    for existing in unpadded_boxes:
+                        iou_val = self._iou(new_box, existing)
+                        contain_val = self._containment_ratio(new_box, existing)
+                        if iou_val > 0.3 or contain_val > 0.5:
                             overlaps = True
                             break
                     if overlaps:
@@ -351,8 +407,11 @@ class PanelBoardSearch:
                             print(f"[INFO] Gap candidate at ({gx},{gy}) rejected: no table structure")
                         continue
                     
-                    # CYAN for gap-detected panels (debug: distinguishes from primary)
-                    cv2.rectangle(overlay_img, (gx, gy), (gx+gw, gy+gh), (255, 255, 0), 8)
+                    # GREEN for gap-detected panels (consistent with other methods)
+                    cv2.rectangle(overlay_img, (gx, gy), (gx+gw, gy+gh), (0, 255, 0), 8)
+                    
+                    # Store unpadded for future overlap checks
+                    unpadded_boxes.append((gx, gy, gx+gw, gy+gh))
                     
                     padded_x0 = max(0, gx - self.pad)
                     padded_y0 = max(0, gy - self.pad)
@@ -383,12 +442,30 @@ class PanelBoardSearch:
                     if not _box_passes(bx, by, bw, bh, border_allowed=True):
                         continue
                     
-                    # Check overlap with already-detected void boxes
+                    # Check overlap with already-detected (using unpadded coords for fair comparison)
+                    # Use BOTH IoU and containment ratio - reject if new box is mostly inside existing
                     overlaps = False
-                    for existing in void_boxes:
-                        if self._iou((bx, by, bx+bw, by+bh), existing) > 0.3:
+                    # #region agent log
+                    max_iou_border = 0
+                    max_contain_border = 0
+                    all_ious_border = []
+                    # #endregion
+                    new_box = (bx, by, bx+bw, by+bh)
+                    for existing in unpadded_boxes:
+                        iou_val = self._iou(new_box, existing)
+                        contain_val = self._containment_ratio(new_box, existing)
+                        # #region agent log
+                        max_iou_border = max(max_iou_border, iou_val)
+                        max_contain_border = max(max_contain_border, contain_val)
+                        if iou_val > 0.05 or contain_val > 0.3: all_ious_border.append({"existing": list(existing), "iou": round(iou_val, 3), "containment": round(contain_val, 3)})
+                        # #endregion
+                        # Reject if IoU > 0.3 OR if new box is >50% contained in existing
+                        if iou_val > 0.3 or contain_val > 0.5:
                             overlaps = True
                             break
+                    # #region agent log
+                    _dbg("C", "border:430", "BORDER overlap check", {"page": pidx+1, "new_box": list(new_box), "max_iou": round(max_iou_border, 3), "max_contain": round(max_contain_border, 3), "overlaps": overlaps, "existing_count": len(unpadded_boxes), "ious": all_ious_border})
+                    # #endregion
                     if overlaps:
                         continue
                     
@@ -405,6 +482,9 @@ class PanelBoardSearch:
                     
                     # GREEN for border-detected panels (same as primary detection)
                     cv2.rectangle(overlay_img, (bx, by), (bx+bw, by+bh), (0, 255, 0), 8)
+                    
+                    # Store unpadded for future overlap checks
+                    unpadded_boxes.append((bx, by, bx+bw, by+bh))
                     
                     padded_x0 = max(0, bx - self.pad)
                     padded_y0 = max(0, by - self.pad)
@@ -436,8 +516,9 @@ class PanelBoardSearch:
                     # ORANGE fallback boxes (debug: distinguishes from primary)
                     cv2.rectangle(overlay_img, (x0, y0), (x1, y1), (0, 165, 255), 8)
 
-                    # remember this void box as well
-                    void_boxes.append((x0, y0, x1, y1))
+                    # remember unpadded for overlap checks and padded for export
+                    unpadded_boxes.append((x0, y0, x1, y1))
+                    void_boxes.append((x0, y0, x1, y1))  # fallback doesn't add extra padding
 
                     x0f, y0f, x1f, y1f = x0 / W, y0 / H, x1 / W, y1 / H
                     pr = page.rect
@@ -449,7 +530,36 @@ class PanelBoardSearch:
                     )
                     candidates.append(clip)
 
+            # ---- V24: Deduplicate candidates using NMS before export ----
+            # This prevents the same panel from being exported multiple times
+            # when detected by different methods with slightly different coordinates
+            # NOTE: Using iou_thr=0.3 to match the overlap checks in detection methods
+            if len(candidates) > 1:
+                # Convert fitz.Rect to tuples for NMS
+                rect_tuples = [(c.x0, c.y0, c.x1, c.y1) for c in candidates]
+                
+                # #region agent log
+                _dbg("D", "nms:490", "NMS input", {"page": pidx+1, "count": len(rect_tuples), "boxes": [[round(r[0],1), round(r[1],1), round(r[2],1), round(r[3],1)] for r in rect_tuples]})
+                # #endregion
+                
+                if self.verbose:
+                    print(f"[DEBUG] Page {pidx+1}: {len(rect_tuples)} candidates before NMS:")
+                    for i, rt in enumerate(rect_tuples):
+                        print(f"        [{i}] ({rt[0]:.1f}, {rt[1]:.1f}, {rt[2]:.1f}, {rt[3]:.1f})")
+                
+                deduped_tuples = self._nms_keep_larger(rect_tuples, iou_thr=0.3)
+                # #region agent log
+                _dbg("D", "nms:500", "NMS output", {"page": pidx+1, "count": len(deduped_tuples), "boxes": [[round(r[0],1), round(r[1],1), round(r[2],1), round(r[3],1)] for r in deduped_tuples]})
+                # #endregion
+                # Convert back to fitz.Rect
+                candidates = [fitz.Rect(*t) for t in deduped_tuples]
+                if self.verbose and len(deduped_tuples) < len(rect_tuples):
+                    print(f"[INFO] Page {pidx+1}: deduplicated {len(rect_tuples)} -> {len(deduped_tuples)} candidates")
+
             # ---- Export vector PDF + hi-DPI PNG for each candidate ----
+            # #region agent log
+            _dbg("D", "export:515", "FINAL candidates for export", {"page": pidx+1, "count": len(candidates), "boxes": [[round(c.x0,1), round(c.y0,1), round(c.x1,1), round(c.y1,1)] for c in candidates]})
+            # #endregion
             for clip in candidates:
                 saved_idx += 1
 
@@ -530,6 +640,12 @@ class PanelBoardSearch:
         median_w = sorted(widths)[len(widths)//2]
         median_h = sorted(heights)[len(heights)//2]
         
+        # Size bounds for filtering (50%-150% of median, same as border detection)
+        min_w = int(median_w * 0.5)
+        max_w = int(median_w * 1.5)
+        min_h = int(median_h * 0.5)
+        max_h = int(median_h * 1.5)
+        
         gap_candidates = []
         
         # For each X position, check if there are panels at all Y positions
@@ -568,6 +684,13 @@ class PanelBoardSearch:
                         abs_y = search_y0 + by0
                         abs_w = bx1 - bx0
                         abs_h = by1 - by0
+                        
+                        # Filter by expected panel size (reject oversized boxes)
+                        if abs_w < min_w or abs_w > max_w:
+                            continue
+                        if abs_h < min_h or abs_h > max_h:
+                            continue
+                        
                         gap_candidates.append((abs_x, abs_y, abs_w, abs_h))
         
         return gap_candidates
@@ -1041,6 +1164,11 @@ class PanelBoardSearch:
         boxes = sorted(boxes, key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
         keep = []
         for box in boxes:
+            # #region agent log
+            ious_for_box = [(round(PanelBoardSearch._iou(box, k), 3), list(k)) for k in keep]
+            max_iou = max([iou for iou, _ in ious_for_box], default=0)
+            _dbg("E", "nms_fn:1105", "NMS checking box", {"box": list(box), "vs_kept": len(keep), "max_iou": max_iou, "threshold": iou_thr, "will_keep": max_iou <= iou_thr})
+            # #endregion
             if all(PanelBoardSearch._iou(box, k) <= iou_thr for k in keep):
                 keep.append(box)
         return keep
@@ -1058,6 +1186,22 @@ class PanelBoardSearch:
         area_b = (bx2-bx1) * (by2-by1)
         denom = (area_a + area_b - inter)
         return inter / float(denom) if denom > 0 else 0.0
+
+    @staticmethod
+    def _containment_ratio(new_box, existing_box):
+        """
+        Calculate what fraction of new_box is contained within existing_box.
+        Returns value 0-1 where 1 means new_box is fully inside existing_box.
+        """
+        ax1, ay1, ax2, ay2 = new_box
+        bx1, by1, bx2, by2 = existing_box
+        inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
+        inter_x2, inter_y2 = min(ax2, bx2), min(ay2, by2)
+        if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+            return 0.0
+        inter = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+        area_new = (ax2 - ax1) * (ay2 - ay1)
+        return inter / float(area_new) if area_new > 0 else 0.0
 
     # ---------------- Horizontal-line debug masks ----------------
     def _save_horizontal_line_masks(self, image_paths: list[str]) -> tuple[list[str], list[str]]:

@@ -18,6 +18,11 @@ class PanelBoardSearch:
       - Green boxes: detected panel/table regions (all detection methods)
       - Red boxes: raster images that are NOT inside those voids
 
+    V23 Changes (from V22):
+      - Added border-region panel search to detect panels touching page borders
+        that weren't detected as holes (e.g., panels merged with drawing frame).
+      - Border-detected panels now use green color (consistent with other methods).
+
     V22 Changes:
       - Added _clear_border_ink() to prevent panels near page borders from
         merging with the border during binarization.
@@ -298,8 +303,8 @@ class PanelBoardSearch:
                             print(f"[INFO] Nested candidate at ({abs_x0},{abs_y0}) rejected: no table structure")
                         continue
                     
-                    # YELLOW for nested detections (debug: distinguishes from primary)
-                    cv2.rectangle(overlay_img, (abs_x0, abs_y0), (abs_x1, abs_y1), (0, 255, 255), 8)
+                    # GREEN for nested detections (consistent with other methods)
+                    cv2.rectangle(overlay_img, (abs_x0, abs_y0), (abs_x1, abs_y1), (0, 255, 0), 8)
                     
                     # Add to void boxes and candidates
                     padded_x0 = max(0, abs_x0 - self.pad)
@@ -351,8 +356,8 @@ class PanelBoardSearch:
                             print(f"[INFO] Gap candidate at ({gx},{gy}) rejected: no table structure")
                         continue
                     
-                    # CYAN for gap-detected panels (debug: distinguishes from primary)
-                    cv2.rectangle(overlay_img, (gx, gy), (gx+gw, gy+gh), (255, 255, 0), 8)
+                    # GREEN for gap-detected panels (consistent with other methods)
+                    cv2.rectangle(overlay_img, (gx, gy), (gx+gw, gy+gh), (0, 255, 0), 8)
                     
                     padded_x0 = max(0, gx - self.pad)
                     padded_y0 = max(0, gy - self.pad)
@@ -530,6 +535,12 @@ class PanelBoardSearch:
         median_w = sorted(widths)[len(widths)//2]
         median_h = sorted(heights)[len(heights)//2]
         
+        # Size bounds for filtering (50%-150% of median, same as border detection)
+        min_w = int(median_w * 0.5)
+        max_w = int(median_w * 1.5)
+        min_h = int(median_h * 0.5)
+        max_h = int(median_h * 1.5)
+        
         gap_candidates = []
         
         # For each X position, check if there are panels at all Y positions
@@ -568,6 +579,13 @@ class PanelBoardSearch:
                         abs_y = search_y0 + by0
                         abs_w = bx1 - bx0
                         abs_h = by1 - by0
+                        
+                        # Filter by expected panel size (reject oversized boxes)
+                        if abs_w < min_w or abs_w > max_w:
+                            continue
+                        if abs_h < min_h or abs_h > max_h:
+                            continue
+                        
                         gap_candidates.append((abs_x, abs_y, abs_w, abs_h))
         
         return gap_candidates
