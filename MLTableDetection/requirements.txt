@@ -1,0 +1,47 @@
+# MLTableDetection dependencies
+# Install with: pip install -r MLTableDetection/requirements.txt
+
+# =============================================================================
+# PRIMARY: Table Transformer (MIT License - Commercial Friendly)
+# =============================================================================
+# Pretrained on 1M+ table images, works zero-shot or with minimal fine-tuning
+transformers>=4.30.0    # Hugging Face Transformers
+torch>=2.0.0            # PyTorch backend
+torchvision>=0.15.0     # Vision utilities
+
+# =============================================================================
+# ALTERNATIVE: Detectron2 (Apache 2.0 License - Commercial Friendly)
+# =============================================================================
+# Uncomment if you need Detectron2 for custom training
+# See: https://detectron2.readthedocs.io/en/latest/tutorials/install.html
+# detectron2             # Install separately - requires specific PyTorch version
+
+# =============================================================================
+# PDF Processing (already in main project)
+# =============================================================================
+pypdfium2>=4.0.0        # PDF rendering
+pikepdf>=8.0.0          # PDF manipulation
+
+# =============================================================================
+# Image Processing (already in main project)
+# =============================================================================
+opencv-python>=4.8.0    # OpenCV
+numpy>=1.24.0           # NumPy
+Pillow>=10.0.0          # PIL
+
+# =============================================================================
+# Annotation Tools (optional, only needed for labeling/fine-tuning)
+# =============================================================================
+# label-studio>=1.9.0   # Annotation UI
+
+# =============================================================================
+# LICENSE SUMMARY
+# =============================================================================
+# - Table Transformer (microsoft/table-transformer-detection): MIT License
+# - Detectron2: Apache 2.0 License
+# - transformers: Apache 2.0 License
+# - torch/torchvision: BSD License
+# - All other deps: Various permissive licenses (MIT, BSD, Apache 2.0)
+#
+# ALL DEPENDENCIES ARE COMMERCIAL-FRIENDLY
+# =============================================================================
