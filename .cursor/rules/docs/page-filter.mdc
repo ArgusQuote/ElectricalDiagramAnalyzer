@@ -7,8 +7,8 @@ alwaysApply: false
 # PageFilter Documentation
 
 ## File Location
-- **Current**: `PageFilter/PageFilterV2.py`
-- **Legacy**: `PageFilter/PageFilter.py`
+- **Latest**: `PageFilter/PageFilterV3.py`
+- **Previous**: `PageFilter/PageFilterV2.py`
 
 ## Purpose
 
@@ -251,7 +251,7 @@ filter_debug/
 ## Usage Example
 
 ```python
-from PageFilter.PageFilterV2 import PageFilter
+from PageFilter.PageFilterV3 import PageFilter
 
 pf = PageFilter(
     output_dir="/path/to/output",

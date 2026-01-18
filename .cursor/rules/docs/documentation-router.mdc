@@ -12,14 +12,14 @@ Quick reference for locating documentation on key components. Use this as a star
 
 | Class | Location | Documentation | Purpose |
 |-------|----------|---------------|---------|
-| `PanelBoardSearch` | `VisualDetectionToolLibrary/PanelSearchToolV21.py` | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | Detect panel tables in PDF pages |
+| `PanelBoardSearch` | `VisualDetectionToolLibrary/PanelSearchToolV24.py` | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | Detect panel tables in PDF pages |
 | `BreakerTablePipeline` | `OcrLibrary/BreakerTableParserAPIv3.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Main OCR pipeline entry point |
 | `BreakerTableAnalyzer` | `OcrLibrary/BreakerTableAnalyzer12.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Analyze table structure (header/footer) |
 | `BreakerTableParser` | `OcrLibrary/BreakerTableParser5.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Parse breaker rows from table |
 | `PanelParser` | `OcrLibrary/PanelHeaderParserV4.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Extract panel header metadata |
 | `BreakerHeaderFinder` | `AnchoringClasses/BreakerHeaderFinder.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Find header row with column labels |
 | `BreakerFooterFinder` | `AnchoringClasses/BreakerFooterFinder.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Find footer row with panel size |
-| `PageFilter` | `PageFilter/PageFilterV2.py` | [page-filter.mdc](mdc:.cursor/rules/docs/page-filter.mdc) | Filter PDF pages by content type |
+| `PageFilter` | `PageFilter/PageFilterV3.py` | [page-filter.mdc](mdc:.cursor/rules/docs/page-filter.mdc) | Filter PDF pages by content type |
 
 ## Function Quick Reference
 
@@ -28,8 +28,8 @@ Quick reference for locating documentation on key components. Use this as a star
 | `process_job` | `RulesEngine/RulesEngine2.py` | [rules-engine.mdc](mdc:.cursor/rules/docs/rules-engine.mdc) | Apply business rules to parsed data |
 | `vm_submit_for_detection` | `AnvilUplinkCode/uplink_server.py` | [uplink-server.mdc](mdc:.cursor/rules/docs/uplink-server.mdc) | API endpoint for job submission |
 | `vm_get_queue_position` | `AnvilUplinkCode/uplink_server.py` | [uplink-server.mdc](mdc:.cursor/rules/docs/uplink-server.mdc) | Check job queue status |
-| `readPdf` | `PageFilter/PageFilterV2.py` | [page-filter.mdc](mdc:.cursor/rules/docs/page-filter.mdc) | Entry point for page filtering |
-| `readPdf` | `VisualDetectionToolLibrary/PanelSearchToolV21.py` | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | Entry point for panel detection |
+| `readPdf` | `PageFilter/PageFilterV3.py` | [page-filter.mdc](mdc:.cursor/rules/docs/page-filter.mdc) | Entry point for page filtering |
+| `readPdf` | `VisualDetectionToolLibrary/PanelSearchToolV24.py` | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | Entry point for panel detection |
 | `run` | `OcrLibrary/BreakerTableParserAPIv3.py` | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | Entry point for OCR pipeline |
 
 ## Pattern Quick Reference
@@ -40,7 +40,7 @@ Quick reference for locating documentation on key components. Use this as a star
 | Grid line detection | [panel-detection.mdc](mdc:.cursor/rules/docs/panel-detection.mdc) | `PanelBoardSearch._find_tables()` | Morphological ops to find table lines |
 | Header token matching | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | `BreakerHeaderFinder.CATEGORY_ALIASES` | Fuzzy match column headers |
 | Panel size detection | [ocr-library.mdc](mdc:.cursor/rules/docs/ocr-library.mdc) | `BreakerFooterFinder.PANEL_FOOTER_MAP` | Map OCR numbers to panel sizes |
-| Version file naming | [project-structure.mdc](mdc:.cursor/rules/reference/project-structure.mdc) | `PanelSearchToolV21.py` | Versioned files for iteration history |
+| Version file naming | [project-structure.mdc](mdc:.cursor/rules/reference/project-structure.mdc) | `PanelSearchToolV24.py` | Versioned files for iteration history |
 
 ## Pipeline Flow
 

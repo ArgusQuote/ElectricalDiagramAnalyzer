@@ -35,7 +35,7 @@ The **ElectricalDiagramAnalyzer** is a PDF analysis system that:
            ┌────────────────────────┼────────────────────────┐
            ▼                        ▼                        ▼
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│   PageFilterV2   │    │ PanelSearchToolV21│   │ BreakerTableAPI  │
+│   PageFilterV3   │    │ PanelSearchToolV24│   │ BreakerTableAPI  │
 │  (PDF Filtering) │    │ (Panel Detection) │   │   (OCR Parsing)  │
 └──────────────────┘    └──────────────────┘    └──────────────────┘
            │                        │                        │
@@ -61,13 +61,13 @@ The **ElectricalDiagramAnalyzer** is a PDF analysis system that:
 - PDF saved to `uploaded_pdfs/`
 - Job queued for worker processing
 
-### 2. Page Filtering (`PageFilterV2.PageFilter`)
+### 2. Page Filtering (`PageFilterV3.PageFilter`)
 - OCR scans title blocks for "E" sheet markers (electrical drawings)
 - Filters out non-electrical pages (P=plumbing, M=mechanical, etc.)
 - Falls back to footprint detection for undecided pages
 - Outputs filtered PDF
 
-### 3. Panel Detection (`PanelSearchToolV21.PanelBoardSearch`)
+### 3. Panel Detection (`PanelSearchToolV24.PanelBoardSearch`)
 - Renders PDF pages at high DPI
 - Detects "void" regions (panel schedules) using whitespace analysis
 - Crops individual panel images

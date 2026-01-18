@@ -41,46 +41,9 @@ However, `BreakerTableAnalyzer5.py` **does not exist** in the repository. Only a
 
 ---
 
-### 2. Version Mismatch: PanelSearchTool Import
-
-**Status:** CRITICAL - Using outdated version (V11) when V21 is available
-
-**Location:** `AnvilUplinkCode/uplink_server.py`
-
-**Description:**
-The production server imports an outdated version of `PanelBoardSearch`:
-
-```python
-# Line 88 of uplink_server.py
-from VisualDetectionToolLibrary.PanelSearchToolV11 import PanelBoardSearch
-```
-
-Available versions in `VisualDetectionToolLibrary/`:
-- `PanelSearchToolV15.py`
-- `PanelSearchToolV17.py`
-- `PanelSearchToolV18.py`
-- `PanelSearchToolV19.py`
-- `PanelSearchToolV20.py`
-- `PanelSearchToolV21.py` ← **Latest**
-
-**Impact:**
-- Production code is 10 versions behind
-- Missing bug fixes and improvements from V12-V21
-- Only `DevEnv/DevEnvPanaelSearchToolSimple.py` uses the latest V21
-
-**Fix Required:**
-Update import in `uplink_server.py`:
-```python
-from VisualDetectionToolLibrary.PanelSearchToolV21 import PanelBoardSearch
-```
-
-**Testing:** Thoroughly test after update as API may have changed between versions.
-
----
-
 ## 🟠 Moderate Issues
 
-### 3. Hardcoded Path: `/home/paperspace/`
+### 2. Hardcoded Path: `/home/paperspace/`
 
 **Status:** MODERATE - Prevents running on other machines
 
@@ -112,7 +75,7 @@ REPO_ROOT = Path(os.environ.get("REPO_ROOT", Path(__file__).resolve().parent.par
 
 ---
 
-### 4. Stale Bytecode Cache Files
+### 3. Stale Bytecode Cache Files
 
 **Status:** MODERATE - Potential for running outdated code
 
@@ -139,7 +102,7 @@ The `__pycache__` directories contain `.pyc` files for modules that no longer ha
 
 ---
 
-### 5. Inconsistent GPU Settings in EasyOCR
+### 4. Inconsistent GPU Settings in EasyOCR
 
 **Status:** MODERATE - May cause failures on CPU-only systems
 
@@ -173,7 +136,7 @@ self.reader = easyocr.Reader(['en'], gpu=_USE_GPU)
 
 ## 🟡 Low Priority Issues
 
-### 6. Broad Exception Handling
+### 5. Broad Exception Handling
 
 **Status:** LOW - May hide bugs during development
 
@@ -212,7 +175,7 @@ except Exception as e:
 
 ---
 
-### 7. Print-Based Error Reporting
+### 6. Print-Based Error Reporting
 
 **Status:** LOW - Not suitable for production logging
 
@@ -239,7 +202,7 @@ Implement Python `logging` module throughout.
 
 ---
 
-### 8. Module-Level State (Name De-duplication)
+### 7. Module-Level State (Name De-duplication)
 
 **Status:** LOW - May cause subtle bugs in long-running processes
 
@@ -275,13 +238,31 @@ Call `reset_name_deduper()` at the start of each job in `uplink_server.py`.
 | Issue | Severity | Location | Effort to Fix |
 |-------|----------|----------|---------------|
 | Missing BreakerTableAnalyzer5.py | 🔴 Critical | OcrLibrary/ | Medium |
-| PanelSearchTool V11 vs V21 | 🔴 Critical | uplink_server.py | Low + Testing |
 | Hardcoded paths | 🟠 Moderate | Multiple | Low |
 | Stale bytecode cache | 🟠 Moderate | __pycache__/ | Low |
 | Inconsistent GPU settings | 🟠 Moderate | OcrLibrary/ | Medium |
 | Broad exception handling | 🟡 Low | 47 files | High |
 | Print-based logging | 🟡 Low | 34 files | High |
 | Module-level state | 🟡 Low | BreakerTableParserAPIv3.py | Low |
+
+---
+
+## ✅ Resolved Issues
+
+### PanelSearchTool Version Mismatch (Resolved January 2026)
+
+**Original Issue:** Server was importing `PanelSearchToolV11` from bytecode cache when V21 was the latest source file.
+
+**Resolution:** 
+- Server now imports `PanelSearchToolV24` (saved) / `PanelSearchToolV25` (pending save)
+- Old V15-V20 source files have been cleaned up
+- Only V24 and V25 remain in `VisualDetectionToolLibrary/`
+
+**Current State:**
+```python
+# uplink_server.py (line 106)
+from VisualDetectionToolLibrary.PanelSearchToolV24 import PanelBoardSearch
+```
 
 ---
 
