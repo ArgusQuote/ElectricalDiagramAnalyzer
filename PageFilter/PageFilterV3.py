@@ -84,7 +84,7 @@ class PageFilter:
         save_crop_pngs: bool = True,
         out_pdf_suffix: str = "_electrical_filtered.pdf",
         use_ghostscript_letter: bool = True,
-        letter_orientation: str = "portrait",   # or "landscape"
+        letter_orientation: str = "landscape",   # or "landscape"
         gs_use_cropbox: bool = True,
         gs_compat: str = "1.7",       
         # Back-compat sink: accept legacy kwargs without error

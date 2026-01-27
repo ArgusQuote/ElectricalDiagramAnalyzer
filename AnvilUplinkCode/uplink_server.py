@@ -102,8 +102,8 @@ _set_runtime_determinism()
 _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
-from PageFilter.PageFilterV2 import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV18 import PanelBoardSearch
+from PageFilter.PageFilterV3 import PageFilter
+from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
 import RulesEngine.RulesEngine3 as RE2  # must expose process_job(payload)
 
