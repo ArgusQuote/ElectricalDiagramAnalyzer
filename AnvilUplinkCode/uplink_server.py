@@ -383,7 +383,7 @@ def _normalize_ui_overrides(overrides: dict | None) -> dict:
 def _rel(p: Path, root: Path) -> str:
     return str(p.relative_to(root)).replace("\\", "/")
 
-def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = False) -> set[str]:
+def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
     """
     Return a set of job-relative file paths to keep.
     Everything else in the job folder will be deleted.
@@ -925,7 +925,7 @@ def _process_job(job_id: str):
 
         # ---- AUTO CLEANUP (keep only what UI uses) ----
         try:
-            keep = _collect_keep_relpaths(job_dir, keep_pdf=False)  # set True if you want to keep the original PDF
+            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)  # set True if you want to keep the original PDF
             _cleanup_job_dir(job_dir, keep)
             print(f">>> cleanup complete: kept {len(keep)} files")
         except Exception as ce:
