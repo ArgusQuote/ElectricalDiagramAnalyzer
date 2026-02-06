@@ -321,6 +321,21 @@ class BreakerHeaderFinder:
             10,
         )
 
+        # ------------------------------------------------------------
+        # Center-only gap bridge (ONLY inside middle band of the page)
+        # ------------------------------------------------------------
+        center_lo = int(W * 0.35)
+        center_hi = int(W * 0.65)
+
+        gap_bridge = int(max(15, min(90, W * 0.04)))  # ~4% width, clamped
+        Kgap = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_bridge, 1))
+
+        bw2 = bw.copy()
+        center = bw[:, center_lo:center_hi]
+        center_closed = cv2.morphologyEx(center, cv2.MORPH_CLOSE, Kgap, iterations=1)
+        bw2[:, center_lo:center_hi] = center_closed
+        bw = bw2
+
         # emphasize HORIZONTAL structures: wide kernel, height=1
         klen_target = int(W * 0.70)          # ~70% of page width
         klen = int(min(W - 2, max(70, klen_target)))  # clamp to [70, W-2]
