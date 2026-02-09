@@ -152,25 +152,46 @@ def fine_tune_tatr(
     
     # Check for COCO format or convert from YOLO
     train_dir = Path(train_data_dir)
-    coco_path = train_dir / "annotations.json"
     
-    if not coco_path.exists():
+    # Try multiple annotation file locations
+    coco_path = None
+    possible_paths = [
+        train_dir / "annotations.json",
+        train_dir / "annotations" / "annotations_coco.json",
+        train_dir / "annotations" / "annotations.json",
+    ]
+    for p in possible_paths:
+        if p.exists():
+            coco_path = p
+            break
+    
+    if coco_path is None:
         # Try to convert from YOLO format
         if (train_dir / "images").exists() and (train_dir / "labels").exists():
             if verbose:
                 print("[INFO] Converting YOLO format to COCO...")
+            coco_path = train_dir / "annotations.json"
             convert_yolo_to_coco(str(train_dir), str(coco_path))
         else:
             raise FileNotFoundError(
-                f"No annotations.json found and no YOLO format detected in {train_dir}"
+                f"No COCO annotations found and no YOLO format detected in {train_dir}\n"
+                f"Looked for: {[str(p) for p in possible_paths]}"
             )
     
     # Load annotations
     with open(coco_path) as f:
         coco_data = json.load(f)
     
+    # Normalize category IDs to 0-indexed (TATR expects 0 for "table")
+    # Build mapping from original category_id to 0-indexed
+    category_ids = sorted(set(ann["category_id"] for ann in coco_data["annotations"]))
+    cat_id_map = {old_id: new_id for new_id, old_id in enumerate(category_ids)}
+    
     if verbose:
-        print(f"[INFO] Loaded {len(coco_data['images'])} images")
+        print(f"[INFO] Found annotations at: {coco_path}")
+        print(f"[INFO] Loaded {len(coco_data['images'])} images, {len(coco_data['annotations'])} annotations")
+        if len(cat_id_map) > 0 and list(cat_id_map.keys()) != list(cat_id_map.values()):
+            print(f"[INFO] Remapping category IDs: {cat_id_map}")
         print(f"[INFO] Loading model: {model_name}")
     
     # Load processor and model
@@ -179,10 +200,11 @@ def fine_tune_tatr(
     
     # Create simple dataset
     class TableDataset(torch.utils.data.Dataset):
-        def __init__(self, coco_data, images_dir, processor):
+        def __init__(self, coco_data, images_dir, processor, cat_id_map):
             self.coco_data = coco_data
             self.images_dir = Path(images_dir)
             self.processor = processor
+            self.cat_id_map = cat_id_map
             
             # Build image_id -> annotations mapping
             self.img_to_anns = {}
@@ -216,11 +238,12 @@ def fine_tune_tatr(
                     w / img_info["width"],
                     h / img_info["height"],
                 ])
-                labels.append(ann["category_id"])
+                # Map category_id to 0-indexed
+                labels.append(self.cat_id_map.get(ann["category_id"], 0))
             
             target = {
                 "boxes": torch.tensor(boxes, dtype=torch.float32),
-                "labels": torch.tensor(labels, dtype=torch.int64),
+                "class_labels": torch.tensor(labels, dtype=torch.int64),
             }
             
             # Process image
@@ -234,7 +257,7 @@ def fine_tune_tatr(
     
     # Create datasets
     images_dir = train_dir / "images"
-    train_dataset = TableDataset(coco_data, images_dir, processor)
+    train_dataset = TableDataset(coco_data, images_dir, processor, cat_id_map)
     
     if verbose:
         print(f"[INFO] Training on {len(train_dataset)} images")
@@ -252,9 +275,24 @@ def fine_tune_tatr(
         push_to_hub=False,
     )
     
-    # Custom collate function
+    # Custom collate function - handles variable image sizes by padding
     def collate_fn(batch):
-        pixel_values = torch.stack([item["pixel_values"] for item in batch])
+        # Get max height and width
+        pixel_values_list = [item["pixel_values"] for item in batch]
+        max_h = max(pv.shape[1] for pv in pixel_values_list)
+        max_w = max(pv.shape[2] for pv in pixel_values_list)
+        
+        # Pad all images to max size
+        padded = []
+        for pv in pixel_values_list:
+            c, h, w = pv.shape
+            pad_h = max_h - h
+            pad_w = max_w - w
+            # Pad with zeros (right and bottom)
+            padded_pv = torch.nn.functional.pad(pv, (0, pad_w, 0, pad_h), value=0)
+            padded.append(padded_pv)
+        
+        pixel_values = torch.stack(padded)
         labels = [item["labels"] for item in batch]
         return {"pixel_values": pixel_values, "labels": labels}
     
@@ -463,11 +501,12 @@ def main():
     )
     parser.add_argument(
         "--data", "-d",
+        default=os.path.expanduser("~/Documents/TableAnnotations"),
         help="Training data directory (YOLO or COCO format)"
     )
     parser.add_argument(
         "--output", "-o",
-        default="models/tatr_finetuned",
+        default=os.path.expanduser("~/Documents/TableAnnotations/models"),
         help="Output directory for fine-tuned model"
     )
     parser.add_argument(
@@ -505,9 +544,12 @@ def main():
         generate_colab_notebook()
         return 0
     
-    if not args.data:
-        print("[ERROR] --data argument required for training")
-        print("        Or use --colab-notebook to generate a Colab notebook")
+    # Expand user paths
+    data_path = os.path.expanduser(args.data)
+    output_path = os.path.expanduser(args.output)
+    
+    if not os.path.exists(data_path):
+        print(f"[ERROR] Data directory not found: {data_path}")
         return 1
     
     # Check GPU
@@ -518,8 +560,8 @@ def main():
     
     try:
         model_path = fine_tune_tatr(
-            train_data_dir=args.data,
-            output_dir=args.output,
+            train_data_dir=data_path,
+            output_dir=output_path,
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,

@@ -1,0 +1,276 @@
+---
+description: General error diagnosis and fixing skill
+globs: **/*
+alwaysApply: false
+---
+
+# @fix-error - Error Diagnosis Skill
+
+Invoke with `@fix-error` when encountering any error. This skill provides a systematic approach to diagnosis.
+
+## Diagnostic Framework
+
+### Step 1: Classify the Error
+
+| Error Type | Indicators | Jump To |
+|------------|------------|---------|
+| Import Error | `ModuleNotFoundError`, `ImportError` | [Import Errors](#import-errors) |
+| Runtime Error | `Exception`, `Error` during execution | [Runtime Errors](#runtime-errors) |
+| OCR Error | Wrong detection, missing data | Use `@debug-ocr` |
+| Detection Error | Wrong regions, missing panels | Use `@debug-detection` |
+| Part Number Error | Invalid/missing parts | Use `@add-part-number` |
+
+### Step 2: Gather Context
+
+```bash
+# Check if virtual environment is active
+which python
+# Expected: /home/marco/venv/bin/python
+
+# If not active:
+source /home/marco/venv/bin/activate
+```
+
+---
+
+## Import Errors
+
+### ModuleNotFoundError
+
+**Common Causes:**
+1. Virtual environment not activated
+2. Missing source file (only .pyc exists)
+3. Incorrect import path
+
+**Diagnosis:**
+
+```python
+# Check if file exists
+import os
+module_path = "OcrLibrary/BreakerTableAnalyzer5.py"
+print(os.path.exists(module_path))  # Should be True
+```
+
+**Known Issue:** `BreakerTableAnalyzer5.py` is missing (only .pyc exists).
+
+**Fix:**
+```python
+# Update import in BreakerTableParserAPIv3.py
+# FROM:
+from OcrLibrary.BreakerTableAnalyzer5 import BreakerTableAnalyzer
+
+# TO:
+from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer
+```
+
+---
+
+### ImportError: cannot import name
+
+**Common Causes:**
+1. Class/function renamed
+2. Circular import
+3. File has syntax error
+
+**Diagnosis:**
+
+```python
+# Try importing the module directly
+import OcrLibrary.BreakerTableAnalyzer12
+print(dir(OcrLibrary.BreakerTableAnalyzer12))
+```
+
+---
+
+## Runtime Errors
+
+### cv2.error: (-215:Assertion failed) !_src.empty()
+
+**Cause:** OpenCV received empty/None image
+
+**Fix:**
+```python
+img = cv2.imread(path)
+if img is None:
+    raise FileNotFoundError(f"Could not read image: {path}")
+```
+
+---
+
+### fitz.FileDataError
+
+**Cause:** PDF file corrupted or invalid
+
+**Fix:**
+```python
+try:
+    doc = fitz.open(pdf_path)
+except fitz.FileDataError as e:
+    print(f"Invalid PDF: {e}")
+    # Try to repair or skip
+```
+
+---
+
+### KeyError in dictionary access
+
+**Cause:** Missing expected key in data structure
+
+**Fix:**
+```python
+# Instead of:
+value = data["key"]
+
+# Use:
+value = data.get("key")  # Returns None if missing
+# Or:
+value = data.get("key", default_value)
+```
+
+---
+
+### TypeError: 'NoneType' object is not subscriptable
+
+**Cause:** Trying to index into None
+
+**Diagnosis:**
+```python
+# Find which variable is None
+print(f"result: {result}")
+print(f"result['key']: {result.get('key') if result else 'result is None'}")
+```
+
+**Fix:** Add None checks before accessing.
+
+---
+
+## Path Errors
+
+### Hardcoded Path Failures
+
+**Known Issue:** `/home/paperspace/` hardcoded in several files.
+
+**Files affected:**
+- `AnvilUplinkCode/uplink_server.py` (line 17)
+- `OcrLibrary/BreakerTableParserAPIv3.py` (line 362)
+
+**Fix:**
+```python
+# Replace hardcoded:
+REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer")
+
+# With dynamic:
+REPO_ROOT = Path(__file__).resolve().parent.parent
+```
+
+---
+
+## Memory Errors
+
+### Out of Memory on PDF Processing
+
+**Cause:** High DPI + large pages
+
+**Fix:**
+```python
+# Lower DPI settings
+PanelBoardSearch(
+    dpi=300,        # Down from 400
+    render_dpi=800,  # Down from 1200
+)
+```
+
+---
+
+## GPU Errors
+
+### CUDA out of memory / CUDA not available
+
+**Cause:** EasyOCR trying to use unavailable GPU
+
+**Fix:**
+```python
+import torch
+_USE_GPU = torch.cuda.is_available()
+self.reader = easyocr.Reader(['en'], gpu=_USE_GPU)
+```
+
+---
+
+## Debugging Techniques
+
+### Enable Verbose Logging
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Add Trace Points
+
+```python
+def problematic_function(data):
+    print(f"[DEBUG] Input: {data}")
+    result = process(data)
+    print(f"[DEBUG] Output: {result}")
+    return result
+```
+
+### Use Debug Mode
+
+Most components support `debug=True`:
+
+```python
+pipe = BreakerTablePipeline(debug=True)
+finder = PanelBoardSearch(output_dir=..., debug=True)
+pf = PageFilter(output_dir=..., debug=True)
+```
+
+---
+
+## Quick Reference: Common Fixes
+
+| Error | Quick Fix |
+|-------|-----------|
+| Module not found | Activate venv: `source /home/marco/venv/bin/activate` |
+| Empty image | Check file path exists before cv2.imread |
+| Wrong import | Check file exists, update version number |
+| Key error | Use `.get()` instead of `[]` |
+| None subscript | Add `if x is not None` check |
+| Path error | Use `Path(__file__).resolve()` |
+| Memory error | Lower DPI settings |
+| GPU error | Set `gpu=False` or check `torch.cuda.is_available()` |
+
+---
+
+## Escalation Path
+
+If the error persists after basic diagnosis:
+
+1. **Check known issues:** See `context/known-issues.mdc`
+2. **Enable full debug:** Set `debug=True` on all components
+3. **Isolate the problem:** Run components individually
+4. **Check recent changes:** `git diff`, `git log`
+5. **Clear cache:** Delete `__pycache__` directories
+
+```bash
+find /home/marco/ElectricalDiagramAnalyzer -type d -name __pycache__ -exec rm -rf {} +
+```
+
+---
+
+## Document New Errors
+
+After fixing an error, update `context/known-issues.mdc`:
+
+```markdown
+### Error: [Error Name]
+
+**Summary:** Brief description
+
+**Root Cause:** Why it happens
+
+**Fix:** How to resolve it
+
+**Related:** Files/modules affected
+```

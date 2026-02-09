@@ -1,0 +1,198 @@
+---
+description: System architecture, data flow, and component relationships
+globs:
+alwaysApply: false
+---
+
+# System Architecture
+
+## Purpose
+
+The **ElectricalDiagramAnalyzer** extracts electrical panel schedules from PDF drawings, uses OCR to read breaker configurations, applies business rules, and generates Square D part numbers.
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Anvil Web Platform                               │
+│                    (Frontend / User Interface)                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼ (Anvil Uplink)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      uplink_server.py                                    │
+│           (Job Queue + Worker Pool + API Gateway)                        │
+├─────────────────────────────────────────────────────────────────────────┤
+│  vm_submit_for_detection()  →  Queue Job  →  Worker Process             │
+│  vm_get_job_status()        ←  Read status.json / result.json           │
+│  vm_cancel_job()            →  Write .cancel marker                      │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+           ┌────────────────────────┼────────────────────────┐
+           ▼                        ▼                        ▼
+┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│   PageFilterV3   │    │ PanelSearchToolV24│   │ BreakerTableAPI  │
+│  (PDF Filtering) │    │ (Panel Detection) │   │   (OCR Parsing)  │
+└──────────────────┘    └──────────────────┘    └──────────────────┘
+           │                        │                        │
+           └────────────────────────┼────────────────────────┘
+                                    ▼
+                        ┌──────────────────┐
+                        │  RulesEngine2.py │
+                        │ (Part Selection) │
+                        └──────────────────┘
+                                    │
+                                    ▼
+                        ┌──────────────────┐
+                        │ PartNumberBuilder │
+                        │ (Part Catalogs)   │
+                        └──────────────────┘
+```
+
+## Processing Pipeline
+
+### 1. Job Submission (`vm_submit_for_detection`)
+- User uploads PDF via Anvil
+- Server creates job directory: `~/jobs/<job_name>__<timestamp>/`
+- PDF saved to `uploaded_pdfs/`
+- Job queued for worker processing
+
+### 2. Page Filtering (`PageFilterV3.PageFilter`)
+- OCR scans title blocks for "E" sheet markers (electrical drawings)
+- Filters out non-electrical pages (P=plumbing, M=mechanical, etc.)
+- Falls back to footprint detection for undecided pages
+- Outputs filtered PDF
+
+### 3. Panel Detection (`PanelSearchToolV24.PanelBoardSearch`)
+- Renders PDF pages at high DPI
+- Detects "void" regions (panel schedules) using whitespace analysis
+- Crops individual panel images
+- Validates table structure via horizontal line spacing
+- Outputs: `pdf_images/*.png`, `cropped_tables_pdf/*.pdf`
+
+### 4. OCR Analysis (`BreakerTableParserAPIv3.BreakerTablePipeline`)
+- **Analyzer**: Finds header/footer boundaries, grid structure
+- **Header Parser**: Extracts panel name, voltage, amperage, interrupting rating
+- **Table Parser**: Reads breaker rows (circuit, description, trip, poles)
+- Returns structured component data
+
+### 5. Rules Engine (`RulesEngine2.process_job`)
+- Takes detected components + UI overrides
+- Applies business logic:
+  - Snaps spaces to valid panel sizes (18, 30, 42, 54, 66, 72, 84)
+  - Selects breaker frames based on amperage/voltage/interrupting rating
+  - Determines panel type (NQ, NF, I-Line)
+  - Adds accessories (feed-thru lugs, SPDs, covers)
+- Outputs part numbers with quantities
+
+### 6. Result Delivery
+- Results written to `result.json`
+- Status tracked in `status.json`
+- Client polls `vm_get_job_status()` until done
+
+## Data Flow
+
+```
+PDF Input
+    │
+    ▼
+PageFilter.readPdf()          → Filter electrical sheets
+    │
+    ▼
+PanelBoardSearch.readPdf()    → Detect panel table regions
+    │
+    ▼
+BreakerTablePipeline.run()    → OCR and parse tables
+    ├── BreakerTableAnalyzer  → Find header/footer
+    ├── PanelHeaderParser     → Extract panel metadata
+    └── BreakerTableParser    → Parse breaker rows
+    │
+    ▼
+process_job()                 → Apply business rules
+    │
+    ▼
+Structured Output
+```
+
+## Key Data Structures
+
+### Component Schema (OCR → Rules)
+
+```python
+{
+    "type": "panelboard",
+    "name": "DP-1",
+    "source": "/path/to/image.png",
+    "attrs": {
+        "amperage": 400,          # Main bus rating
+        "spaces": 42,             # Circuit spaces
+        "voltage": 208,           # System voltage
+        "intRating": 22,          # kAIC interrupting rating
+        "mainBreakerAmperage": 400,  # Main breaker (if present)
+        "detected_breakers": [
+            {"ckt": "1", "description": "LIGHTING", "amperage": 20, "poles": 1},
+            {"ckt": "3", "description": "RECEPTACLES", "amperage": 20, "poles": 1},
+        ]
+    }
+}
+```
+
+### UI Overrides Schema
+
+```python
+{
+    "panelboards": {
+        "bussing_material": "ALUMINUM",      # or "COPPER"
+        "allow_plug_on_breakers": True,
+        "rating_type": "FULLY_RATED",        # or "SERIES_RATED"
+        "default_trim_style": "FLUSH",
+        "enclosure": "NEMA1",
+        "allow_square_d_spd": True,
+    },
+    "transformers": {...},
+    "disconnects": {...}
+}
+```
+
+## Directory Structure Per Job
+
+```
+~/jobs/<job_name>__<timestamp>/
+├── uploaded_pdfs/           # Original PDF
+│   └── drawing.pdf
+├── pdf_images/              # Cropped panel images
+│   ├── drawing_page001_panel01.png
+│   ├── magenta_overlays/    # Debug overlays
+│   ├── cropped_tables_pdf/  # Vector PDF crops
+│   ├── raster_images/       # Embedded rasters
+│   └── invalid_tables/      # Failed validation
+├── debug/                   # OCR debug outputs
+├── status.json              # Current job state
+└── result.json              # Final results (when done)
+```
+
+## Server Configuration
+
+```python
+REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer")
+BASE_JOBS_DIR = Path.home() / "jobs"
+MAX_WORKERS = 3           # Concurrent worker threads
+MAX_INFLIGHT_PER_USER = 1 # Jobs per user limit
+WATCHDOG_TIMEOUT_MIN = 15 # Job timeout (minutes)
+```
+
+## Module Dependencies
+
+```
+uplink_server.py
+├── PageFilter.PageFilterV3.PageFilter
+├── VisualDetectionToolLibrary.PanelSearchToolV24.PanelBoardSearch
+├── OcrLibrary.BreakerTableParserAPIv3.BreakerTablePipeline
+│   ├── OcrLibrary.BreakerTableAnalyzer12.BreakerTableAnalyzer
+│   │   ├── AnchoringClasses.BreakerHeaderFinder
+│   │   └── AnchoringClasses.BreakerFooterFinder
+│   ├── OcrLibrary.BreakerTableParser5.BreakerTableParser
+│   └── OcrLibrary.PanelHeaderParserV4.PanelParser
+└── RulesEngine.RulesEngine2
+    └── PartNumberSelector.PartNumberBuilder.*
+```

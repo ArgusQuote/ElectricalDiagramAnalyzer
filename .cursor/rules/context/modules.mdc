@@ -1,0 +1,386 @@
+---
+description: Consolidated module documentation for all major components
+globs:
+alwaysApply: false
+---
+
+# Module Documentation
+
+## PageFilter (`PageFilter/PageFilterV3.py`)
+
+### Purpose
+Filters PDF pages to keep only electrical-related sheets using OCR and footprint detection.
+
+### Class: `PageFilter`
+
+```python
+PageFilter(
+    output_dir: str,
+    dpi: int = 300,
+    use_ocr: bool = True,
+    ocr_gpu: bool = False,
+    verbose: bool = True,
+    debug: bool = False,
+)
+```
+
+### Entry Point
+
+```python
+kept, dropped, out_pdf, log_json = filter.readPdf("/path/to/input.pdf")
+```
+
+### Detection Algorithm
+
+1. **Pass A (E-Sheet Detection)**: OCR corner region for sheet labels (E-101, E2.01)
+2. **Pass B (Label Scoring)**: Score for "panel schedule", "single line", "riser"
+3. **Fallback (Footprint Detection)**: Find rectangular voids if no E-sheets
+
+### Key Parameters
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `hard_hit_score` | 6.5 | Gold threshold for keeping page |
+| `min_hit_score` | 3.0 | Soft threshold |
+| `crop_frac` | (0.88, 0.92, 0.98, 0.98) | Title block region |
+
+---
+
+## PanelBoardSearch (`VisualDetectionToolLibrary/PanelSearchToolV24.py`)
+
+### Purpose
+Detects panel board schedule tables ("voids") in PDF pages and extracts high-quality image crops.
+
+### Class: `PanelBoardSearch`
+
+```python
+PanelBoardSearch(
+    output_dir: str,
+    dpi: int = 400,               # Detection DPI
+    render_dpi: int = 1200,       # Final PNG output DPI
+    min_void_area_fr: float = 0.004,
+    max_void_area_fr: float = 0.30,
+    enforce_one_box: bool = True,
+    debug: bool = False,
+)
+```
+
+### Entry Point
+
+```python
+panel_images = finder.readPdf("/path/to/electrical.pdf")
+# Returns: ["/path/to/output/electrical_page001_panel01.png", ...]
+```
+
+### Detection Algorithm
+
+1. Render page at detection DPI
+2. Binarize ink → extract whitespace mask
+3. Find connected components → detect "holes" (voids)
+4. Validate void dimensions against thresholds
+5. Export vector PDF crops + high-DPI PNG crops
+6. Validate horizontal line spacing
+7. Enforce one-box-per-crop rule
+
+### Output Structure
+
+```
+output_dir/
+├── <base>_page001_panel01.png     # Main panel crops
+├── magenta_overlays/              # Debug overlays
+├── cropped_tables_pdf/            # Vector PDF crops
+├── raster_images/                 # Embedded rasters
+└── invalid_tables/                # Failed validation
+```
+
+---
+
+## TableDetectorML (`MLTableDetection/TableDetectorML.py`) - EXPERIMENTAL
+
+### Purpose
+ML-based table detection using Table Transformer. Intended as alternative to heuristic `PanelBoardSearch`.
+
+### Status: Under Development
+See `context/known-issues.mdc` for current problems and next steps.
+
+### Class: `TableDetectorML`
+
+```python
+TableDetectorML(
+    output_dir: str,
+    model_path: str = None,              # HuggingFace ID or local path
+    backend: str = "table-transformer",  # or "detectron2"
+    dpi: int = 400,
+    render_dpi: int = 1200,
+    conf_threshold: float = 0.5,         # Detection confidence
+    enforce_one_box: bool = True,        # Split multi-table crops
+    device: str = None,                  # "cuda", "cpu", or auto
+)
+```
+
+### Entry Point
+
+```python
+from MLTableDetection import TableDetectorML
+
+detector = TableDetectorML(output_dir="./output")
+panel_images = detector.readPdf("/path/to/electrical.pdf")
+```
+
+### Related Files
+
+| File | Purpose |
+|------|---------|
+| `TableDetectorML.py` | Main detector class |
+| `train_table_transformer.py` | Fine-tuning script |
+| `DevEnv/AnnotateTables.py` | Annotation GUI tool |
+| `DevEnv/DevMLTableDetection.py` | Test script |
+
+### Data Locations
+
+| Data | Path |
+|------|------|
+| Training images | `~/Documents/TableAnnotations/images/` |
+| Annotations (COCO) | `~/Documents/TableAnnotations/annotations/annotations_coco.json` |
+| Fine-tuned model | `~/Documents/TableAnnotations/models/final/` |
+
+### Known Issues
+
+- Over-detection with current model
+- `enforce_one_box` causes cascading splits
+- May need more training data or higher confidence threshold
+
+---
+
+## BreakerTablePipeline (`OcrLibrary/BreakerTableParserAPIv3.py`)
+
+### Purpose
+Main OCR pipeline that analyzes table structure and extracts breaker data.
+
+### Class: `BreakerTablePipeline`
+
+```python
+class BreakerTablePipeline:
+    def __init__(self, *, debug: bool = True):
+        pass
+
+    def run(
+        self,
+        image_path: str,
+        *,
+        run_analyzer: bool = True,
+        run_parser: bool = True,
+        run_header: bool = True,
+    ) -> dict:
+        """Main entry point. Returns structured result dict."""
+```
+
+### Pipeline Flow
+
+```
+Panel Image (PNG)
+       │
+       ▼
+┌──────────────────────────────────────┐
+│       BreakerTablePipeline           │
+├──────────────────────────────────────┤
+│  1. BreakerTableAnalyzer.analyze()   │
+│     ├─ BreakerHeaderFinder           │
+│     └─ BreakerFooterFinder           │
+│                                      │
+│  2. PanelHeaderParser.parse_panel()  │
+│     → Panel name, voltage, amps      │
+│                                      │
+│  3. BreakerTableParser.parse_from_*  │
+│     → Breaker rows with details      │
+└──────────────────────────────────────┘
+```
+
+### Output Schema
+
+```python
+{
+    "results": {
+        "header": {
+            "name": "DP-1",
+            "attrs": {
+                "amperage": 400,
+                "voltage": 208,
+                "intRating": 22,
+                "mainBreakerAmperage": 400,
+                "spaces": 42,
+            }
+        },
+        "parser": {
+            "spaces": 42,
+            "detected_breakers": [
+                {"ckt": "1", "description": "LIGHTING", "amperage": 20, "poles": 1},
+            ]
+        }
+    }
+}
+```
+
+---
+
+## BreakerTableAnalyzer (`OcrLibrary/BreakerTableAnalyzer12.py`)
+
+### Purpose
+Analyzes table structure to find header/footer boundaries.
+
+### Class: `BreakerTableAnalyzer`
+
+```python
+class BreakerTableAnalyzer:
+    def __init__(self, debug: bool = False):
+        self.reader = easyocr.Reader(["en"], gpu=False)
+        self._header_finder = BreakerHeaderFinder(...)
+        self._footer_finder = BreakerFooterFinder(...)
+
+    def analyze(self, image_path: str) -> dict:
+        """Returns header_y, footer_y, panel_size, debug_dir"""
+```
+
+### Image Preprocessing
+
+```python
+def _prep(self, img: np.ndarray) -> np.ndarray:
+    # 1. Convert to grayscale
+    # 2. Apply CLAHE for contrast enhancement
+    # 3. Upscale if height < 1600px
+```
+
+---
+
+## BreakerHeaderFinder (`AnchoringClasses/BreakerHeaderFinder.py`)
+
+### Purpose
+Finds header row containing column labels (CKT, DESCRIPTION, TRIP, POLES).
+
+### Token Aliases
+
+```python
+CATEGORY_ALIASES = {
+    "ckt": {"CKT", "CCT"},
+    "description": {"CIRCUITDESCRIPTION", "DESCRIPTION", "LOADDESCRIPTION", "NAME"},
+    "trip": {"TRIP", "AMPS", "AMP", "BREAKER", "BKR", "SIZE"},
+    "poles": {"POLES", "POLE", "P"},
+}
+```
+
+### Algorithm
+
+1. Crop top 50% of page, skip top 15%
+2. OCR with multiple magnification passes
+3. Group tokens by Y-bin (14px)
+4. Score each line (CKT=4, DESC=4, POLES=3, TRIP=1)
+5. Pick highest scoring line
+6. Snap to nearest horizontal grid line
+
+---
+
+## BreakerFooterFinder (`AnchoringClasses/BreakerFooterFinder.py`)
+
+### Purpose
+Finds footer row containing panel size indicators (e.g., 84, 42, 30).
+
+### Panel Size Map
+
+```python
+PANEL_FOOTER_MAP = {
+    84: {84, 83, 82, 81},
+    72: {72, 71, 70, 69},
+    66: {66, 65, 64, 63},
+    54: {54, 53, 52, 51},
+    42: {42, 41, 40, 39},
+    30: {30, 29, 28, 27},
+    18: {18, 17, 16, 15},
+}
+```
+
+---
+
+## RulesEngine (`RulesEngine/RulesEngine2.py`)
+
+### Purpose
+Transforms detected panel data into actionable part numbers.
+
+### Entry Point
+
+```python
+def process_job(payload: dict) -> dict:
+    """
+    payload = {
+        "defaults": {...},    # UI overrides
+        "items": [...]        # Components from OCR
+    }
+    
+    Returns: { "panels": [...] }
+    """
+```
+
+### Space Snapping
+
+Valid panel sizes: `18, 30, 42, 54, 66, 72, 84`
+
+### Interrupting Ratings
+
+```python
+DEFAULT_INTERRUPTING_RATING = 22  # kAIC default when not detected
+```
+
+### Frame Selection
+
+| Frame | Min | Max | Notes |
+|-------|-----|-----|-------|
+| B | 15 | 100 | Bolt-on, residential |
+| H | 15 | 150 | Standard commercial |
+| J | 150 | 250 | Medium capacity |
+| L | 250 | 600 | Large capacity |
+| M | 300 | 800 | Heavy duty |
+| P | 600 | 1200 | Maximum capacity |
+
+---
+
+## PartNumberBuilder (`PartNumberSelector/PartNumberBuilder.py`)
+
+### Classes
+
+| Class | Purpose |
+|-------|---------|
+| `Disconnect` | Disconnect switch part numbers |
+| `breakerSelector` | Breaker part numbers (QO, QOB, HOM, etc.) |
+| `nqPanelboard` | NQ panelboard part numbers |
+| `nfPanelboard` | NF panelboard part numbers |
+| `iLinePanelboard` | I-Line panelboard part numbers |
+| `loadcenter` | Residential load center part numbers |
+| `mccb` | Molded case circuit breaker part numbers |
+| `transformer` | Transformer part numbers |
+| `blanks` | Blank filler part numbers |
+
+---
+
+## Uplink Server (`AnvilUplinkCode/uplink_server.py`)
+
+### Public API Functions
+
+| Function | Purpose |
+|----------|---------|
+| `vm_submit_for_detection` | Submit PDF for processing |
+| `vm_get_job_status` | Poll job status |
+| `vm_cancel_job` | Cancel queued/running job |
+| `vm_list_jobs` | List user's jobs |
+| `vm_fetch_image` | Retrieve panel image |
+
+### Job States
+
+`queued` → `running` → `done` | `error` | `canceled`
+
+### Internal Functions
+
+| Function | Purpose |
+|----------|---------|
+| `_process_job` | Main worker function |
+| `render_pdf_to_images` | PageFilter + PanelBoardSearch |
+| `_btp_run_once` | Single panel OCR |
+| `_merge_component_from_btp` | Transform OCR output to component |

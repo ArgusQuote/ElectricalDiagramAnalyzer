@@ -1,0 +1,276 @@
+---
+description: Technical debt, known issues, and common errors
+globs:
+alwaysApply: false
+---
+
+# Known Issues & Common Errors
+
+## 🔴 Critical Issues
+
+### Missing Source File: `BreakerTableAnalyzer5.py`
+
+**Status:** CRITICAL - May cause import failures on fresh clone
+
+**Problem:** `BreakerTableParserAPIv3.py` imports from `BreakerTableAnalyzer5`:
+```python
+from OcrLibrary.BreakerTableAnalyzer5 import BreakerTableAnalyzer, ANALYZER_VERSION
+```
+
+However, only the bytecode `.pyc` exists, not the source file.
+
+**Impact:**
+- Works on existing deployments with cached `.pyc`
+- **Will fail on fresh clones or after cache clearing**
+
+**Fix Required:**
+1. Restore `BreakerTableAnalyzer5.py` from backup
+2. Or update import to use `BreakerTableAnalyzer12`
+
+---
+
+### Hardcoded Path: `/home/paperspace/`
+
+**Status:** MODERATE - Prevents running on other machines
+
+**Location:** `AnvilUplinkCode/uplink_server.py` line 17
+```python
+REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
+```
+
+**Fix:**
+```python
+REPO_ROOT = Path(__file__).resolve().parent.parent
+```
+
+---
+
+## 🟠 Moderate Issues
+
+### Stale Bytecode Cache
+
+**Problem:** `__pycache__` contains `.pyc` files for deleted modules:
+- `BreakerTableAnalyzer3/4/5/9.cpython-310.pyc`
+- `BreakerTableParserALT.cpython-310.pyc`
+
+**Fix:** Clear `__pycache__` directories, update imports.
+
+---
+
+### Inconsistent GPU Settings in EasyOCR
+
+**Problem:** Mixed `gpu=True` and `gpu=False` across files.
+
+**Files with `gpu=True` (may crash on CPU systems):**
+- `OcrLibrary/BreakerTableParser5.py` (lines 523, 1465, 2225, 2313, 2503)
+
+**Recommended:**
+```python
+import torch
+_USE_GPU = torch.cuda.is_available()
+self.reader = easyocr.Reader(['en'], gpu=_USE_GPU)
+```
+
+---
+
+### Module-Level State (Name De-duplication)
+
+**Location:** `OcrLibrary/BreakerTableParserAPIv3.py` lines 30-40
+
+**Problem:** `_NAME_COUNTS` persists across jobs in long-running server.
+
+**Fix:** Call `reset_name_deduper()` at start of each job.
+
+---
+
+## 🔴 Active Development: ML Table Detection
+
+### Status: FUNDAMENTALLY BROKEN - Model detects wrong regions entirely
+
+**Location:** `MLTableDetection/` module
+
+**What was built:**
+- `TableDetectorML.py` - ML detector using Table Transformer (MIT license)
+- `train_table_transformer.py` - Fine-tuning script
+- `DevEnv/AnnotateTables.py` - Annotation tool for training data
+- `DevEnv/DevMLTableDetection.py` - Test script
+
+**Current state:**
+- Fine-tuned model saved at `~/Documents/TableAnnotations/models/final`
+- Training data: 27 images, 120 bounding boxes (FAR TOO FEW)
+- Training completed: 10 epochs
+
+**Problem observed (Feb 2026):**
+- **Model detects completely wrong regions** - not a single correct table found
+- Test on `generic3.pdf`: Expected 6 tables, model found 8 (all incorrect regions)
+- Before NMS fix: model found 38 detections (14 raw, exploded to 38 via enforce_one_box)
+
+**Root cause analysis:**
+1. **Severe overfitting** - 27 training images is grossly insufficient
+   - Table Transformer was pretrained on 1M+ images
+   - Fine-tuning on 27 images causes the model to learn spurious patterns
+   - Model outputs high-confidence (0.59-0.96) detections for wrong regions
+2. **Model learned wrong features** - Detects any rectangular regions with lines/text
+3. **Annotation quality unknown** - May need review
+
+**Improvements made (still not working):**
+- Added NMS (Non-Maximum Suppression) - reduced overlapping duplicates (14→8)
+- Disabled `enforce_one_box` - was causing 14→38 cascade splits  
+- Raised `conf_threshold` from 0.3 to 0.5 - no effect (all detections are high confidence)
+- Added color-coded overlay visualization (blue=kept, magenta=rejected by NMS)
+
+**Why this approach may not work:**
+- The pretrained Table Transformer is trained on document tables (academic papers, reports)
+- Electrical panel schedules have very different visual structure
+- Small fine-tuning dataset cannot override pretrained weights effectively
+- May need 200-500+ annotated images for meaningful fine-tuning
+
+**Recommended next steps:**
+1. **Try pretrained model without fine-tuning** - may actually work better
+   ```python
+   detector = TableDetectorML(model_path=None)  # Uses pretrained
+   ```
+2. **Significantly expand training data** - target 200+ diverse images
+3. **Consider different approach entirely:**
+   - Use existing heuristic `PanelSearchToolV24.py` which works
+   - Train YOLO or Detectron2 from scratch on panel schedules
+   - Use template matching or feature-based detection
+4. **Review annotation quality** - verify bounding boxes are correct in:
+   `~/Documents/TableAnnotations/annotations/annotations_coco.json`
+
+**Files affected:**
+- `MLTableDetection/TableDetectorML.py` - Contains NMS fix, overlay visualization
+- `DevEnv/DevMLTableDetection.py` - Test parameters (conf=0.5, enforce_one_box=False)
+
+**Comparison baseline:**
+- Heuristic detector: `VisualDetectionToolLibrary/PanelSearchToolV24.py` - USE THIS FOR NOW
+
+---
+
+## 🟡 Low Priority
+
+### Broad Exception Handling
+
+541 `except Exception` blocks across 47 files. Many silently swallow errors.
+
+### Print-Based Error Reporting
+
+34 files use `print()` instead of proper `logging`.
+
+---
+
+## Common OCR Errors
+
+### Header Not Found
+
+**Symptoms:**
+- `header_y` returns None or 0
+- Debug images show no blue/cyan markers
+
+**Causes:**
+- Low image contrast
+- Unusual fonts
+- Missing terminology in `CATEGORY_ALIASES`
+
+**Fix:**
+1. Check debug output for detected tokens
+2. Add missing aliases to `BreakerHeaderFinder.CATEGORY_ALIASES`
+3. Adjust `text_threshold` or `mag_ratio`
+
+---
+
+### Wrong Panel Size Detected
+
+**Symptoms:**
+- `panel_size` doesn't match visual inspection
+- Missing breakers in output
+
+**Causes:**
+- OCR misreads numbers (8→3, 4→1)
+- Footer tokens outside expected region
+
+**Fix:**
+1. Enable debug mode
+2. Verify `PANEL_FOOTER_MAP` ranges
+3. Adjust scan region
+
+---
+
+### Missing Breakers
+
+**Symptoms:**
+- Fewer breakers than expected
+- Gaps in circuit numbers
+
+**Causes:**
+- Grid lines not detected
+- OCR misses faint text
+
+**Fix:**
+1. Check debug images for grid detection
+2. Adjust morphology kernel sizes
+3. Lower `text_threshold`
+
+---
+
+## Common Image Processing Errors
+
+### Empty Image Array
+
+**Error:** `cv2.error: (-215:Assertion failed) !_src.empty()`
+
+**Fix:**
+```python
+img = cv2.imread(path)
+if img is None:
+    raise FileNotFoundError(f"Could not read image: {path}")
+```
+
+---
+
+### Grid Lines Not Detected
+
+**Causes:**
+- Lines too thin at current resolution
+- Image noise
+
+**Fix:**
+```python
+# Adjust kernel based on image size
+H, W = gray.shape
+h_kernel_width = max(W // 30, 20)
+h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_width, 1))
+```
+
+---
+
+### Color Space Mismatch
+
+**Symptoms:** Colors inverted, shape mismatch errors
+
+**Fix:**
+```python
+if len(img.shape) == 2:
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+elif img.shape[2] == 4:
+    img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+```
+
+---
+
+## ✅ Resolved Issues
+
+### PanelSearchTool Version Mismatch (January 2026)
+
+**Original:** Server imported V11 from bytecode when V21 was latest.
+
+**Resolution:** Server now imports V24. Old versions cleaned up.
+
+---
+
+## When to Update This Document
+
+- New systematic issue discovered → Add to appropriate section
+- Issue resolved → Move to "Resolved" section
+- Workaround found → Document it
+- Severity changes → Update priority

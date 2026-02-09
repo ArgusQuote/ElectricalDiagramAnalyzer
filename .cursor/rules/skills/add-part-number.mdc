@@ -1,0 +1,329 @@
+---
+description: Skill for adding new part number logic to the rules engine
+globs:
+  - RulesEngine/**/*
+  - PartNumberSelector/**/*
+alwaysApply: false
+---
+
+# @add-part-number - Part Number Addition Skill
+
+Invoke with `@add-part-number` when adding new part number logic or product types.
+
+## Part Number System Overview
+
+```
+Component Data (from OCR)
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│ RulesEngine2.process_job()                                  │
+│                                                             │
+│   1. Validate and normalize detected values                 │
+│   2. Apply business rules for product selection             │
+│   3. Call PartNumberBuilder classes                         │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PartNumberBuilder.py                                        │
+│                                                             │
+│   - Disconnect            - nqPanelboard                    │
+│   - breakerSelector       - nfPanelboard                    │
+│   - iLinePanelboard       - loadcenter                      │
+│   - mccb                  - transformer                     │
+│   - blanks                                                  │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+Part Numbers with Quantities
+```
+
+---
+
+## Adding a New Breaker Type
+
+### Step 1: Update breakerSelector
+
+**Location:** `PartNumberSelector/PartNumberBuilder.py`
+
+```python
+class breakerSelector:
+    def __init__(self, attributes):
+        self.breakerType = attributes.get("breakerType")  # QO, QOB, HOM, etc.
+        self.poles = attributes.get("poles")
+        self.amperage = attributes.get("amperage")
+        self.interruptionRating = attributes.get("interruptionRating")
+        self.specialFeatures = attributes.get("specialFeatures")
+        self.iline = attributes.get("iline", False)
+
+    def generateBreakerPartNumber(self) -> str:
+        # Add new breaker type logic here
+        if self.breakerType == "NEW_TYPE":
+            return self._generate_new_type()
+        # ...
+```
+
+### Step 2: Add Part Number Mapping
+
+```python
+# Example: Add new breaker family
+NEW_TYPE_PARTS = {
+    # (poles, amperage): part_number
+    (1, 15): "NEWT115",
+    (1, 20): "NEWT120",
+    (2, 20): "NEWT220",
+    (3, 20): "NEWT320",
+    # ...
+}
+
+def _generate_new_type(self):
+    key = (self.poles, self.amperage)
+    return NEW_TYPE_PARTS.get(key, f"UNKNOWN_{key}")
+```
+
+### Step 3: Update Rules Engine Selection Logic
+
+**Location:** `RulesEngine/RulesEngine2.py`
+
+```python
+def _select_breaker_type(panel_type, amperage, voltage):
+    # Add logic to select new breaker type
+    if some_condition:
+        return "NEW_TYPE"
+    # ...
+```
+
+---
+
+## Adding a New Panel Type
+
+### Step 1: Create Panel Builder Class
+
+**Location:** `PartNumberSelector/PartNumberBuilder.py`
+
+```python
+class newPanelType:
+    """Builder for new panel type."""
+    
+    panelLibrary = {
+        # (spaces, amperage, voltage, enclosure): part_number
+        (18, 100, 208, "NEMA1"): "NEWP18100",
+        (30, 100, 208, "NEMA1"): "NEWP30100",
+        # ...
+    }
+    
+    def generatePanelboardPartNumber(self, attributes: dict) -> dict:
+        """
+        attributes = {
+            "spaces": int,
+            "amperage": int,
+            "voltage": int,
+            "enclosure": str,
+            # ...
+        }
+        """
+        key = (
+            attributes["spaces"],
+            attributes["amperage"],
+            attributes["voltage"],
+            attributes["enclosure"],
+        )
+        
+        part = self.panelLibrary.get(key)
+        if not part:
+            return {"error": f"No part for {key}"}
+        
+        return {
+            "Part Number": part,
+            # Add accessories...
+        }
+```
+
+### Step 2: Integrate in Rules Engine
+
+**Location:** `RulesEngine/RulesEngine2.py`
+
+```python
+from PartNumberSelector.PartNumberBuilder import newPanelType
+
+def _select_panel_builder(attrs):
+    if attrs.get("panel_family") == "NEW":
+        return newPanelType()
+    # ...
+```
+
+---
+
+## Adding a New Accessory
+
+### Step 1: Add to PartNumberBuilder
+
+```python
+class accessories:
+    """Accessory part number generator."""
+    
+    SPD_PARTS = {
+        # (voltage, amperage): part_number
+        (208, 100): "SPD208100",
+        # ...
+    }
+    
+    FEED_THRU_LUGS = {
+        # (amperage,): part_number
+        (100,): "FTL100",
+        (225,): "FTL225",
+        # ...
+    }
+    
+    def get_spd(self, voltage, amperage):
+        return self.SPD_PARTS.get((voltage, amperage))
+    
+    def get_feed_thru_lugs(self, amperage):
+        return self.FEED_THRU_LUGS.get((amperage,))
+```
+
+### Step 2: Call from Rules Engine
+
+```python
+def _add_accessories(panel_attrs, defaults):
+    parts = []
+    
+    if defaults.get("allow_square_d_spd"):
+        spd = accessories().get_spd(
+            panel_attrs["voltage"],
+            panel_attrs["amperage"]
+        )
+        if spd:
+            parts.append({"partNumber": spd, "qty": 1, "type": "spd"})
+    
+    return parts
+```
+
+---
+
+## Adding a New Disconnect Type
+
+### Step 1: Extend Disconnect Library
+
+**Location:** `PartNumberSelector/PartNumberBuilder.py`
+
+```python
+class Disconnect:
+    disconnectLibrary = {
+        # (switchType, fusible, poles, voltage, amps, enclosure): 
+        #     (partNumber, groundKit, neutralKit)
+        
+        # Add new entries:
+        ('NEW_SWITCH', True, 3, 600, 100, 'NEMA1'): ("NEWSW100", "GND100", None),
+        # ...
+    }
+```
+
+### Step 2: Update Selection Logic (if needed)
+
+```python
+def generateDisconnectPartNumber(self, attributes: dict) -> dict:
+    key = (
+        attributes["switchType"],
+        attributes["fusible"],
+        attributes["poles"],
+        attributes["voltage"],
+        attributes["amps"],
+        attributes["enclosure"],
+    )
+    
+    result = self.disconnectLibrary.get(key)
+    if not result:
+        return {"error": f"No disconnect for {key}"}
+    
+    part_number, ground_kit, neutral_kit = result
+    # ...
+```
+
+---
+
+## Testing New Part Numbers
+
+### Unit Test
+
+```python
+# Create test script
+from PartNumberSelector.PartNumberBuilder import breakerSelector
+
+# Test new breaker type
+selector = breakerSelector({
+    "breakerType": "NEW_TYPE",
+    "poles": 2,
+    "amperage": 20,
+})
+result = selector.generateBreakerPartNumber()
+print(f"Generated: {result}")
+assert result == "NEWT220"
+```
+
+### Integration Test
+
+```python
+from RulesEngine.RulesEngine2 import process_job
+
+payload = {
+    "defaults": {...},
+    "items": [
+        {
+            "type": "panelboard",
+            "attrs": {
+                "amperage": 100,
+                "spaces": 18,
+                "voltage": 208,
+                # ...
+            }
+        }
+    ]
+}
+
+result = process_job(payload)
+print(result)
+```
+
+---
+
+## Reference: Current Frame Sizes
+
+| Frame | Amperage Range | Use Case |
+|-------|----------------|----------|
+| B | 15-100 | Bolt-on, residential |
+| H | 15-150 | Standard commercial |
+| J | 150-250 | Medium capacity |
+| L | 250-600 | Large capacity |
+| M | 300-800 | Heavy duty |
+| P | 600-1200 | Maximum capacity |
+| R | 600-1200 | High interrupt |
+
+## Reference: Valid Panel Sizes
+
+`18, 30, 42, 54, 66, 72, 84`
+
+## Reference: Interrupting Ratings
+
+```python
+INTERRUPTING_RATINGS = {
+    'B': { 240:[25,65,100], 480:[18,35,65], 600:[14,18,25,65] },
+    'H': { 240:[25,65,100,125,200], 480:[18,35,65,100,200], 600:[14,18,25,50,100] },
+    # ...
+}
+
+DEFAULT_INTERRUPTING_RATING = 22  # kAIC
+```
+
+---
+
+## Files to Modify
+
+| Task | Primary File | Secondary |
+|------|--------------|-----------|
+| New breaker type | `PartNumberBuilder.py` | `RulesEngine2.py` |
+| New panel type | `PartNumberBuilder.py` | `RulesEngine2.py` |
+| New accessory | `PartNumberBuilder.py` | `RulesEngine2.py` |
+| New disconnect | `PartNumberBuilder.py` | `RulesEngine2.py` |
+| Selection logic | `RulesEngine2.py` | - |

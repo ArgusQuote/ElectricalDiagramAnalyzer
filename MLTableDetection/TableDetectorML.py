@@ -346,8 +346,9 @@ class TableDetectorML:
             # Create overlay image for visualization
             overlay_img = det_bgr.copy()
             
-            # Process detections
+            # Process detections - collect all candidates with pixel coords for overlay
             candidates = []  # (x0, y0, x1, y1) in PDF points
+            all_pixel_boxes = []  # Store pixel coords for overlay drawing later
             
             for det in detections:
                 x1, y1, x2, y2 = det["bbox"]
@@ -360,26 +361,18 @@ class TableDetectorML:
                 area = w * h
                 
                 # Filter by area
-                if area / page_area < self.min_area_fraction:
+                area_frac = area / page_area
+                if area_frac < self.min_area_fraction:
                     if self.verbose:
                         print(f"  [SKIP] Detection too small: {w}x{h}")
                     continue
-                if area / page_area > self.max_area_fraction:
+                if area_frac > self.max_area_fraction:
                     if self.verbose:
                         print(f"  [SKIP] Detection too large: {w}x{h}")
                     continue
                 
-                # Draw on overlay (green for detections)
-                cv2.rectangle(overlay_img, (x1, y1), (x2, y2), (0, 255, 0), 8)
-                cv2.putText(
-                    overlay_img,
-                    f"{label}: {conf:.2f}",
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 255, 0),
-                    2,
-                )
+                # Store pixel coordinates for overlay (drawn after NMS)
+                all_pixel_boxes.append((x1, y1, x2, y2, conf, label))
                 
                 # Add padding
                 px0 = max(0, x1 - self.pad)
@@ -397,6 +390,33 @@ class TableDetectorML:
                     page_height_pt * y1f,
                 )
                 candidates.append(clip)
+            
+            # Apply Non-Maximum Suppression to remove overlapping detections
+            candidates, kept_indices = self._apply_nms_with_indices(candidates, iou_threshold=0.3)
+            
+            # Draw overlay AFTER NMS - show kept (blue) vs rejected (magenta)
+            for i, (px1, py1, px2, py2, conf, label) in enumerate(all_pixel_boxes):
+                if i in kept_indices:
+                    # KEPT - draw in BLUE (BGR: 255, 0, 0)
+                    color = (255, 0, 0)
+                    thickness = 8
+                    text_prefix = "KEPT"
+                else:
+                    # REJECTED by NMS - draw in MAGENTA (BGR: 255, 0, 255)
+                    color = (255, 0, 255)
+                    thickness = 4
+                    text_prefix = "NMS"
+                
+                cv2.rectangle(overlay_img, (px1, py1), (px2, py2), color, thickness)
+                cv2.putText(
+                    overlay_img,
+                    f"{text_prefix} {label}: {conf:.2f}",
+                    (px1, py1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    color,
+                    2,
+                )
             
             # Export crops
             saved_idx = 0
@@ -480,6 +500,70 @@ class TableDetectorML:
             print(f"      Overlays    → {self.magenta_dir}")
         
         return all_pngs
+    
+    def _apply_nms(self, candidates: list[tuple], iou_threshold: float = 0.3) -> list[tuple]:
+        """
+        Apply Non-Maximum Suppression to remove overlapping detections.
+        
+        Args:
+            candidates: List of (x0, y0, x1, y1) tuples in PDF coordinates.
+            iou_threshold: IoU threshold above which boxes are considered duplicates.
+        
+        Returns:
+            Filtered list of candidates with overlaps removed.
+        """
+        filtered, _ = self._apply_nms_with_indices(candidates, iou_threshold)
+        return filtered
+    
+    def _apply_nms_with_indices(self, candidates: list[tuple], iou_threshold: float = 0.3) -> tuple[list[tuple], set[int]]:
+        """
+        Apply Non-Maximum Suppression and return kept indices for visualization.
+        
+        Args:
+            candidates: List of (x0, y0, x1, y1) tuples in PDF coordinates.
+            iou_threshold: IoU threshold above which boxes are considered duplicates.
+        
+        Returns:
+            Tuple of (filtered candidates, set of kept indices).
+        """
+        if len(candidates) <= 1:
+            return candidates, set(range(len(candidates)))
+        
+        # Convert to numpy for easier computation
+        boxes = np.array(candidates)
+        
+        # Calculate areas
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        
+        # Sort by area (largest first - keep larger boxes)
+        order = areas.argsort()[::-1]
+        
+        keep = []
+        while len(order) > 0:
+            i = order[0]
+            keep.append(i)
+            
+            if len(order) == 1:
+                break
+            
+            # Calculate IoU with remaining boxes
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            
+            w = np.maximum(0, xx2 - xx1)
+            h = np.maximum(0, yy2 - yy1)
+            intersection = w * h
+            
+            iou = intersection / (areas[i] + areas[order[1:]] - intersection)
+            
+            # Keep boxes with IoU below threshold
+            remaining = np.where(iou <= iou_threshold)[0]
+            order = order[remaining + 1]
+        
+        return [candidates[i] for i in keep], set(keep)
     
     def _enforce_one_box_on_paths(self, image_paths: list[str]) -> list[str]:
         """
