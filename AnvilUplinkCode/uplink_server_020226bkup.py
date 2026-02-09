@@ -104,27 +104,8 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv8 import BreakerTablePipeline, API_VERSION
-import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
-
-# ---------- PANEL DETECTION: ML or Heuristic ----------
-# Set USE_ML_DETECTOR=True to use ML-based table detection (requires trained model)
-# Set USE_ML_DETECTOR=False to use heuristic detection (PanelBoardSearch)
-USE_ML_DETECTOR = os.environ.get("USE_ML_DETECTOR", "false").lower() in ("true", "1", "yes")
-ML_MODEL_PATH = os.environ.get("ML_MODEL_PATH", None)  # Path to trained YOLO model
-
-if USE_ML_DETECTOR:
-    try:
-        from MLTableDetection.TableDetectorML import TableDetectorML as PanelBoardSearch
-        print(f">>> Using ML-based table detection")
-        if ML_MODEL_PATH:
-            print(f">>> ML model path: {ML_MODEL_PATH}")
-    except ImportError as e:
-        print(f">>> ML detector not available ({e}), falling back to heuristic")
-        from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-else:
-    from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-    print(f">>> Using heuristic table detection (PanelSearchToolV25)")
+from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
+import RulesEngine.RulesEngine3 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
 ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
@@ -402,7 +383,7 @@ def _normalize_ui_overrides(overrides: dict | None) -> dict:
 def _rel(p: Path, root: Path) -> str:
     return str(p.relative_to(root)).replace("\\", "/")
 
-def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
+def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = False) -> set[str]:
     """
     Return a set of job-relative file paths to keep.
     Everything else in the job folder will be deleted.
@@ -535,38 +516,25 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
 
-    # --- 2) Run the panel finder on the chosen PDF ---
-    # Build kwargs for PanelBoardSearch (works for both ML and heuristic detectors)
-    finder_kwargs = {
-        "output_dir": str(img_dir),
-        "dpi": dpi,
-        "render_dpi": PANEL_FINDER_DEFAULTS["render_dpi"],
-        "render_colorspace": PANEL_FINDER_DEFAULTS["render_colorspace"],
-        "pad": PANEL_FINDER_DEFAULTS["pad"],
-        "verbose": PANEL_FINDER_DEFAULTS["verbose"],
-    }
-    
-    # Add ML-specific or heuristic-specific parameters
-    if USE_ML_DETECTOR:
-        # ML detector parameters
-        if ML_MODEL_PATH:
-            finder_kwargs["model_path"] = ML_MODEL_PATH
-        finder_kwargs["conf_threshold"] = 0.25
-        finder_kwargs["min_area_fraction"] = PANEL_FINDER_DEFAULTS["min_void_area_fr"]
-        finder_kwargs["max_area_fraction"] = PANEL_FINDER_DEFAULTS["max_void_area_fr"]
-    else:
-        # Heuristic detector parameters
-        finder_kwargs["aa_level"] = PANEL_FINDER_DEFAULTS["aa_level"]
-        finder_kwargs["min_void_area_fr"] = PANEL_FINDER_DEFAULTS["min_void_area_fr"]
-        finder_kwargs["min_void_w_px"] = PANEL_FINDER_DEFAULTS["min_void_w_px"]
-        finder_kwargs["min_void_h_px"] = PANEL_FINDER_DEFAULTS["min_void_h_px"]
-        finder_kwargs["max_void_area_fr"] = PANEL_FINDER_DEFAULTS["max_void_area_fr"]
-        finder_kwargs["void_w_fr_range"] = PANEL_FINDER_DEFAULTS["void_w_fr_range"]
-        finder_kwargs["void_h_fr_range"] = PANEL_FINDER_DEFAULTS["void_h_fr_range"]
-        finder_kwargs["min_whitespace_area_fr"] = PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"]
-        finder_kwargs["margin_shave_px"] = PANEL_FINDER_DEFAULTS["margin_shave_px"]
-    
-    local_finder = PanelBoardSearch(**finder_kwargs)
+    # --- 2) Run the panel finder (PanelSearchToolV18) on the chosen PDF ---
+    local_finder = PanelBoardSearch(
+        output_dir=str(img_dir),
+        dpi=dpi,
+        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match your dev env
+        render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
+        aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
+        render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
+        min_void_area_fr=PANEL_FINDER_DEFAULTS["min_void_area_fr"],
+        min_void_w_px=PANEL_FINDER_DEFAULTS["min_void_w_px"],
+        min_void_h_px=PANEL_FINDER_DEFAULTS["min_void_h_px"],
+        max_void_area_fr=PANEL_FINDER_DEFAULTS["max_void_area_fr"],
+        void_w_fr_range=PANEL_FINDER_DEFAULTS["void_w_fr_range"],
+        void_h_fr_range=PANEL_FINDER_DEFAULTS["void_h_fr_range"],
+        min_whitespace_area_fr=PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"],
+        margin_shave_px=PANEL_FINDER_DEFAULTS["margin_shave_px"],
+        pad=PANEL_FINDER_DEFAULTS["pad"],
+        verbose=PANEL_FINDER_DEFAULTS["verbose"],
+    )
 
     try:
         crops = local_finder.readPdf(pdf_for_finder)
@@ -957,7 +925,7 @@ def _process_job(job_id: str):
 
         # ---- AUTO CLEANUP (keep only what UI uses) ----
         try:
-            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)  # set True if you want to keep the original PDF
+            keep = _collect_keep_relpaths(job_dir, keep_pdf=False)  # set True if you want to keep the original PDF
             _cleanup_job_dir(job_dir, keep)
             print(f">>> cleanup complete: kept {len(keep)} files")
         except Exception as ce:

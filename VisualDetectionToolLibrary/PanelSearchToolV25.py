@@ -9,17 +9,55 @@ from PIL import Image
 import json
 import shutil
 
-# #region agent log
-_DBG_LOG = "/home/marco/ElectricalDiagramAnalyzer/.cursor/debug.log"
-def _dbg(hyp, loc, msg, data):
-    try:
-        with open(_DBG_LOG, "a") as f:
-            f.write(json.dumps({"hypothesisId": hyp, "location": loc, "message": msg, "data": data}) + "\n")
-    except Exception as e:
-        print(f"[DBG ERROR] {e}")
-_dbg("INIT", "module_load", "PanelSearchToolV24 loaded (pypdfium2)", {"timestamp": "startup"})
-# #endregion
+def _get_dbg_log_path() -> str | None:
+    """
+    Portable debug log path.
+    Priority:
+      1) EDA_DEBUG_LOG env var (lets you control it per machine)
+      2) <repo_root>/.cursor/debug.log
+      3) ~/.cursor/debug.log
+    Returns None if we can't resolve a usable path.
+    """
+    # 1) Optional override
+    env_p = os.getenv("EDA_DEBUG_LOG")
+    if env_p:
+        p = Path(env_p).expanduser()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return str(p)
 
+    # 2) Try repo-root relative to this file (adjust parents[] if needed)
+    try:
+        repo_root = Path(__file__).resolve().parents[2]  # tweak if file depth differs
+        p = repo_root / ".cursor" / "debug.log"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return str(p)
+    except Exception:
+        pass
+
+    # 3) Fallback: home directory
+    try:
+        p = Path.home() / ".cursor" / "debug.log"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return str(p)
+    except Exception:
+        return None
+
+_DBG_LOG = _get_dbg_log_path()
+
+def _dbg(hyp, loc, msg, data):
+    if not _DBG_LOG:
+        return
+    try:
+        with open(_DBG_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(
+                {"hypothesisId": hyp, "location": loc, "message": msg, "data": data},
+                ensure_ascii=False
+            ) + "\n")
+    except Exception as e:
+        # keep non-fatal, but don't spam too hard
+        print(f"[DBG ERROR] {e}")
+
+_dbg("INIT", "module_load", "PanelSearchToolV24 loaded (pypdfium2)", {"timestamp": "startup"})
 
 class PanelBoardSearch:
     """

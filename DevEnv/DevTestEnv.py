@@ -16,10 +16,10 @@ if project_root not in sys.path:
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
-from OcrLibrary.BreakerTableParserAPIv7 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv8 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/K.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -117,6 +117,7 @@ def main():
             spaces            = tbl_res.get("spaces")
             detected_breakers = tbl_res.get("detected_breakers") or []
             breaker_counts    = tbl_res.get("breakerCounts") or {}
+            gfi_counts        = tbl_res.get("gfiBreakerCounts") or {}
 
             print("spaces               :", spaces)
             print("detected breakers    :", len(detected_breakers))
@@ -143,6 +144,18 @@ def main():
                         print(f"  {poles} P, {amps} A, count - {count}")
                     else:
                         print(f"  {key}, count - {count}")
+            # --- GFI summary ---
+            if gfi_counts:
+                print("GFI Breakers (tally):")
+                for key, count in sorted(gfi_counts.items(), key=_sort_key):
+                    m = re.match(r"(\d+)P_(\d+)A", key)
+                    if m:
+                        poles = int(m.group(1))
+                        amps  = int(m.group(2))
+                        print(f"  {poles} P, {amps} A, GFI count - {count}")
+                    else:
+                        print(f"  {key}, GFI count - {count}")
+
         else:
             print("parser  : None")
             detected_breakers = []
