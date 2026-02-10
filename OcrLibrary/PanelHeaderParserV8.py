@@ -36,6 +36,25 @@ class PanelParser:
         "I-LINE","ILINE","I","LINE","QO","HOM","SQUARE","SCHNEIDER","EATON","SIEMENS",
         "NOTES","TABLE","SCHEDULE","SIZE","RANGE","CATALOG","CAT","CAT.","DWG","REV","DATE",
         "ACCESSORY","ACCESSORIES",
+        # Added for robustness: common header/drawing words that shouldn't be names
+        "STAGE","PROPOSED","FUTURE","ALTERNATE","REVISION",
+        "SHEET","DRAWING","DETAIL","SECTION","ELEVATION","PLAN","SPEC","SPECIFICATION",
+        "CIRCUIT","BREAKER","DEVICE","EQUIPMENT","APPARATUS","UNIT","MODULE",
+        "DESCRIPTION","LOCATION","AREA","ROOM","FLOOR","LEVEL","BUILDING",
+        "SEE","REFER","NOTE","PER","AS","SHOWN","INDICATED","REQUIRED",
+        "GENERAL","STANDARD","SPECIAL","CUSTOM","MODIFIED","REVISED",
+    }
+
+    # ====== Value stopwords (tokens containing these should NOT be voltage/amps/AIC values) ======
+    _VALUE_STOPWORDS = {
+        # Words that indicate a token is contextual text, not an electrical value
+        "STAGE","TYPICAL","NEW","EXISTING","PROPOSED","FUTURE","ALTERNATE",
+        "SEE","REFER","NOTE","NOTES","PER","AS","SHOWN","INDICATED",
+        "SHEET","DRAWING","DWG","DETAIL","SECTION","PLAN","ELEVATION",
+        "SCHEDULE","TABLE","CIRCUIT","DESCRIPTION","LOCATION","AREA",
+        "GENERAL","STANDARD","SPECIAL","CUSTOM","MODIFIED","REVISED",
+        "EQUIPMENT","APPARATUS","DEVICE","UNIT","MODULE","SYSTEM",
+        "FLOOR","LEVEL","BUILDING","ROOM","SPACE",
     }
 
     # ====== Label families (regex) ======
@@ -58,21 +77,39 @@ class PanelParser:
         ],
         "NAME": [r"\bPANEL\s*DESIGNATION\b", r"\bDESIGNATION\b", r"\bPANEL(BOARD)?\b", r"\bBOARD\b", r"\bPANEL\s*:?\b", r"\bDISTRIBUTION\s*PANEL\b"],
         "WRONG": [
+            # Original patterns
             r"\bNOTES?\b", r"\bTABLE\b", r"\bSCHEDULE\b", r"\bSIZE\s*\(??A\)?\b", r"\bCIRCUIT\b",
-            r"\bCAT(ALOG)?\b", r"\bDWG\b", r"\bREV\b", r"\bDATE\b"
+            r"\bCAT(ALOG)?\b", r"\bDWG\b", r"\bREV\b", r"\bDATE\b",
+            # NEW: References/instructions that indicate context, not values
+            r"\bSEE\s+\w+\b",           # "SEE SHEET", "SEE NOTE", etc.
+            r"\bREFER\s+TO\b",          # "REFER TO"
+            r"\bPER\s+\w+\b",           # "PER SPEC", "PER PLAN"
+            # NEW: Drawing/construction terms
+            r"\bSTAGE\b", r"\bTYPICAL\b", r"\bFUTURE\b", r"\bPROPOSED\b", r"\bEXISTING\b",
+            r"\bSHEET\b", r"\bDRAWING\b", r"\bDETAIL\b", r"\bSECTION\b", r"\bELEVATION\b",
+            # NEW: Description/location terms
+            r"\bDESCRIPTION\b", r"\bLOCATION\b", r"\bAREA\b", r"\bROOM\b", r"\bFLOOR\b",
+            # NEW: General header/title words
+            r"\bGENERAL\b", r"\bSPECIAL\b", r"\bSTANDARD\b", r"\bTYPE\b",
+            r"\bEQUIPMENT\b", r"\bAPPARATUS\b",
         ],
     }
 
     # ====== Role weights (blend of value-shape, label-affinity, side, ctx, penalties) ======
+    # NOTE: W_wrong increased to penalize candidates near WRONG labels more strongly
     _WEIGHTS = {
-        "VOLTAGE": dict(W_shape=0.55, W_conf=0.15, W_lbl=0.22, W_side=0.12, W_ctx=0.07, W_wrong=0.12, W_y=0.00),
-        "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
-        "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
-        "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.12, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
-        "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35)
+        "VOLTAGE": dict(W_shape=0.55, W_conf=0.15, W_lbl=0.22, W_side=0.12, W_ctx=0.07, W_wrong=0.18, W_y=0.00),
+        "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.20, W_y=0.00),
+        "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.20, W_y=0.00),
+        "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.12, W_ctx=0.08, W_wrong=0.18, W_y=0.00),
+        "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.12, W_y=0.35)
     }
 
-    _THRESH = {"VOLTAGE":0.55, "BUS":0.54, "MAIN":0.54, "AIC":0.54, "NAME":0.50}
+    # Base thresholds - raised slightly for more conservative detection
+    _THRESH = {"VOLTAGE": 0.58, "BUS": 0.56, "MAIN": 0.56, "AIC": 0.56, "NAME": 0.50}
+    
+    # Higher thresholds used when no supporting label is present (dynamic thresholding)
+    _THRESH_NO_LABEL = {"VOLTAGE": 0.65, "BUS": 0.62, "MAIN": 0.62, "AIC": 0.62, "NAME": 0.55}
 
     _SIGMA_PX = 80.0
 
@@ -318,8 +355,15 @@ class PanelParser:
         def _pick_role_consuming(role: str, ranked: list) -> dict | None:
             """
             Like _pick_role, but skips candidates already used by earlier roles.
+            Uses dynamic thresholding: higher threshold when no supporting label exists.
             """
-            thr = self._THRESH.get(role, 0.5)
+            # Dynamic thresholding: use higher threshold if no label for this role
+            has_label = bool(labels_map.get(role))
+            if has_label:
+                thr = self._THRESH.get(role, 0.5)
+            else:
+                thr = self._THRESH_NO_LABEL.get(role, self._THRESH.get(role, 0.5))
+            
             for c in (ranked or []):
                 if float(c.get("rank", 0.0)) < thr:
                     break
@@ -703,6 +747,9 @@ class PanelParser:
                         "x2": best["x2"], "y2": best["y2"], "xc": best["xc"], "yc": best["yc"],
                         "conf": float(best.get("conf", 0.5)), "rank": 0.50  # diagnostic rank
                     }
+
+        # ===== NEW: Cross-validate all picks for plausibility =====
+        chosen_map = self._cross_validate_picks(chosen_map, labels_map)
 
         # ===== Convert chosen → normalized outputs =====
         def _to_int(s):
@@ -1320,6 +1367,192 @@ class PanelParser:
         dmin = min(dist(it, L) for L in Ls)
         return math.exp(-dmin / self._SIGMA_PX)
 
+    def _cross_validate_picks(self, chosen_map: dict, labels_map: dict) -> dict:
+        """
+        Sanity-check that chosen values are plausible together.
+        
+        Validation rules:
+        1. Voltage must be one of the standard values (120/208/240/480/600)
+        2. Bus amps must be in reasonable range for panel type (100-1200 typically)
+        3. AIC must be in typical ranges (10-200 kA)
+        4. If voltage+bus combination is implausible, reject voltage
+        5. If no supporting label exists for a value, reduce confidence
+        
+        Returns modified chosen_map with invalid picks set to None.
+        """
+        import re
+        
+        VALID_VOLTAGES = {120, 208, 240, 277, 480, 600}
+        
+        def _extract_voltage(cand: dict) -> int | None:
+            if not cand:
+                return None
+            txt = str(cand.get("text", "") or "").upper()
+            txt = self._normalize_digits(txt)
+            
+            # Try to find standard voltage values
+            for v in (600, 480, 277, 240, 208, 120):
+                if str(v) in txt:
+                    return v
+            return None
+        
+        def _extract_amps(cand: dict) -> int | None:
+            if not cand:
+                return None
+            txt = str(cand.get("text", "") or "").upper()
+            txt = self._normalize_digits(txt)
+            m = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txt)
+            return int(m.group(1)) if m else None
+        
+        def _extract_aic(cand: dict) -> int | None:
+            if not cand:
+                return None
+            txt = str(cand.get("text", "") or "").upper()
+            txt = self._normalize_digits(txt)
+            # kA form: 65kA, 22KAIC
+            m = re.search(r"(\d{2,3})(?:KAIC|AIC|KA|K)\b", txt.replace(" ", ""))
+            if m:
+                return int(m.group(1))
+            # Large form: 65,000 -> 65kA
+            m2 = re.search(r"(\d{2,3})[,]?000", txt)
+            if m2:
+                return int(m2.group(1))
+            return None
+        
+        # Extract values
+        v_volts = _extract_voltage(chosen_map.get("VOLTAGE"))
+        v_bus = _extract_amps(chosen_map.get("BUS"))
+        v_main = _extract_amps(chosen_map.get("MAIN"))
+        v_aic = _extract_aic(chosen_map.get("AIC"))
+        
+        # Rule 1: Voltage must be standard
+        if chosen_map.get("VOLTAGE") and v_volts not in VALID_VOLTAGES:
+            if self.debug:
+                print(f"[CrossValidate] Rejecting non-standard voltage: {v_volts}")
+            chosen_map["VOLTAGE"] = None
+        
+        # Rule 2: Validate voltage has some supporting context
+        # If we picked a voltage but there's no VOLTAGE label anywhere, be suspicious
+        if chosen_map.get("VOLTAGE") and not labels_map.get("VOLTAGE"):
+            cand = chosen_map["VOLTAGE"]
+            txt = str(cand.get("text", "") or "").upper()
+            # Must have explicit voltage syntax (V, Y, /, WYE, DELTA, etc.)
+            has_explicit_syntax = bool(
+                re.search(r"\dV\b|Y/|\bWYE\b|\bDELTA\b|/\d{2,3}", txt)
+            )
+            if not has_explicit_syntax:
+                if self.debug:
+                    print(f"[CrossValidate] Rejecting voltage without label support: {txt}")
+                chosen_map["VOLTAGE"] = None
+        
+        # Rule 3: AIC must be in reasonable range (10-200 kA)
+        if chosen_map.get("AIC") and v_aic is not None:
+            if v_aic < 10 or v_aic > 200:
+                if self.debug:
+                    print(f"[CrossValidate] Rejecting out-of-range AIC: {v_aic}kA")
+                chosen_map["AIC"] = None
+        
+        # Rule 4: Bus amps should be reasonable (60-2000A for most panels)
+        if chosen_map.get("BUS") and v_bus is not None:
+            if v_bus < 60 or v_bus > 4000:
+                if self.debug:
+                    print(f"[CrossValidate] Rejecting out-of-range bus amps: {v_bus}A")
+                chosen_map["BUS"] = None
+        
+        # Rule 5: If BUS and VOLTAGE are the same token text but parsed differently, reject one
+        if chosen_map.get("BUS") and chosen_map.get("VOLTAGE"):
+            bus_txt = str(chosen_map["BUS"].get("text", "") or "").strip()
+            volt_txt = str(chosen_map["VOLTAGE"].get("text", "") or "").strip()
+            if bus_txt == volt_txt:
+                # Same token got picked for both - keep whichever has better context
+                bus_has_label = bool(labels_map.get("BUS"))
+                volt_has_label = bool(labels_map.get("VOLTAGE"))
+                if volt_has_label and not bus_has_label:
+                    if self.debug:
+                        print(f"[CrossValidate] Same token as BUS/VOLTAGE - keeping VOLTAGE")
+                    chosen_map["BUS"] = None
+                elif bus_has_label and not volt_has_label:
+                    if self.debug:
+                        print(f"[CrossValidate] Same token as BUS/VOLTAGE - keeping BUS")
+                    chosen_map["VOLTAGE"] = None
+        
+        return chosen_map
+
+    def _is_sentence_context(self, token: dict, items: list, med_h: float) -> bool:
+        """
+        Returns True if this token appears to be part of a sentence-like context.
+        
+        Indicators of sentence context:
+        - Token is surrounded by multiple words on the same line
+        - Neighboring tokens are common sentence words (SEE, REFER, NOTE, PER, etc.)
+        - Token appears in a run of 3+ closely-spaced words
+        
+        This helps reject candidates like "STAGE" in "SEE PANEL STAGE 2".
+        """
+        if not items or not token:
+            return False
+        
+        # Sentence indicator words that suggest nearby tokens are part of instructions
+        SENTENCE_INDICATORS = {
+            "SEE", "REFER", "NOTE", "NOTES", "PER", "AS", "SHOWN", "INDICATED",
+            "FOR", "THE", "THIS", "THAT", "WITH", "FROM", "TO", "AND", "OR",
+            "IS", "ARE", "BE", "WILL", "SHALL", "MUST", "MAY", "CAN",
+            "ALL", "EACH", "EVERY", "ANY", "OTHER", "SAME", "SIMILAR",
+            "PROVIDE", "INSTALL", "CONNECT", "MOUNT", "LOCATE", "VERIFY",
+        }
+        
+        tx1, ty1, tx2, ty2 = token["x1"], token["y1"], token["x2"], token["y2"]
+        t_cy = (ty1 + ty2) / 2.0
+        t_height = max(1, ty2 - ty1)
+        
+        # Find tokens on the same line (vertically overlapping)
+        same_line_tokens = []
+        for it in items:
+            if it is token:
+                continue
+            iy1, iy2 = it["y1"], it["y2"]
+            i_cy = (iy1 + iy2) / 2.0
+            
+            # Check vertical overlap / same line
+            v_overlap = max(0, min(ty2, iy2) - max(ty1, iy1))
+            if v_overlap > 0.3 * t_height or abs(i_cy - t_cy) < 0.6 * med_h:
+                same_line_tokens.append(it)
+        
+        if len(same_line_tokens) < 2:
+            return False
+        
+        # Check if any neighboring tokens are sentence indicators
+        for neighbor in same_line_tokens:
+            n_text = str(neighbor.get("text", "") or "").strip().upper()
+            # Check each word in the neighbor token
+            for word in n_text.split():
+                word_clean = word.strip(".,;:!?()-")
+                if word_clean in SENTENCE_INDICATORS:
+                    return True
+        
+        # Check if we're in a run of 3+ words (suggests a sentence/phrase)
+        # Sort by x position and check for closely-spaced tokens
+        same_line_tokens.append(token)
+        same_line_tokens.sort(key=lambda t: t["x1"])
+        
+        # Count consecutive closely-spaced tokens
+        consecutive_count = 1
+        for i in range(1, len(same_line_tokens)):
+            prev = same_line_tokens[i-1]
+            curr = same_line_tokens[i]
+            gap = curr["x1"] - prev["x2"]
+            # If gap is small (less than 2x median height), tokens are part of same phrase
+            if gap < 2.0 * med_h:
+                consecutive_count += 1
+            else:
+                consecutive_count = 1
+            
+            # If we have 4+ consecutive tokens, this looks like a sentence
+            if consecutive_count >= 4:
+                return True
+        
+        return False
+
     def _collect_label_candidates(self, items: list) -> dict:
         import re
         role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","AIC","NAME","WRONG")}
@@ -1350,12 +1583,38 @@ class PanelParser:
             if any(rx.search(t2) for rx in aic_label_rxs):
                 aic_labels.append(it2)
 
+        # Precompute VOLTAGE label positions for proximity checks
+        voltage_labels: list[dict] = []
+        voltage_label_rxs = [re.compile(rx, re.I) for rx in self._LABELS.get("VOLTAGE", [])]
+        for it2 in items:
+            t2 = str(it2.get("text", "") or "")
+            if any(rx.search(t2) for rx in voltage_label_rxs):
+                voltage_labels.append(it2)
+
+        def _has_nearby_voltage_label(it_check: dict) -> bool:
+            """Check if a VOLTAGE label is within _SIGMA_PX distance."""
+            import math
+            if not voltage_labels:
+                return False
+            for lbl in voltage_labels:
+                d = math.hypot(it_check["xc"] - lbl["xc"], it_check["yc"] - lbl["yc"])
+                if d <= self._SIGMA_PX * 1.5:  # 1.5x for a bit more tolerance
+                    return True
+            return False
+
         for it in items:
             raw = str(it["text"] or "")
             txt = raw.upper()
             txtD = self._normalize_digits(txt)
             conf = float(it["conf"])
             x1,y1,x2,y2,xc,yc = it["x1"],it["y1"],it["x2"],it["y2"],it["xc"],it["yc"]
+
+            # --- NEW: Check for VALUE_STOPWORDS - skip tokens containing these ---
+            has_value_stopword = any(sw in txt.split() for sw in self._VALUE_STOPWORDS)
+
+            # --- NEW: Check for sentence-like context ---
+            # Tokens that appear in sentences (e.g., "SEE PANEL STAGE 2") should not be values
+            is_in_sentence = self._is_sentence_context(it, items, med_h)
 
             # VOLTAGE (pairs or single; tolerate OCR typos and missing slash)
             txtN = self._normalize_voltage_text(txtD)
@@ -1373,6 +1632,13 @@ class PanelParser:
                 re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|V)\b', txtN)
             )
 
+            # Explicit voltage syntax indicators (strong signal)
+            has_explicit_voltage_syntax = (
+                "/" in txtN or                                      # Pair separator: 480/277
+                re.search(r'\d[YV]\b', txtN) or                     # Y or V suffix: 480Y, 208V
+                re.search(r'\b(WYE|DELTA)\b', txtN)                 # Explicit wye/delta
+            )
+
             # Recognize "pair" voltages like "480/277", "208/120", "480Y/277V", etc.
             pair = re.search(
                 r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b',
@@ -1384,16 +1650,31 @@ class PanelParser:
             if pair and aic_like and not has_volty_ctx and "/" not in txtN and "Y" not in txtN and "V" not in txtN:
                 pair = None
 
+            # NEW: Reject voltage candidates that contain VALUE_STOPWORDS or are in sentence context
+            if pair and (has_value_stopword or is_in_sentence):
+                pair = None
+
             # Single-voltage detection (e.g., "480V", "208", "600V")
-            # Only allowed when this token does NOT look like AIC or amps
-            # and has some voltage-ish context.
+            # STRENGTHENED: Require EITHER:
+            #   - Explicit voltage syntax (V suffix, etc.), OR
+            #   - Nearby VOLTAGE label (within SIGMA_PX distance)
+            # This prevents random 3-digit numbers from being detected as voltage.
             single = None
-            if not aic_like and not amps_like and has_volty_ctx:
-                single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
+            if not aic_like and not amps_like and not has_value_stopword and not is_in_sentence:
+                # Only consider single voltages if they have strong evidence
+                if has_explicit_voltage_syntax or _has_nearby_voltage_label(it):
+                    single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
+                elif has_volty_ctx:
+                    # Weak context (just "PH" or generic voltage word) - require label proximity
+                    if _has_nearby_voltage_label(it):
+                        single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
 
             if pair or single:
                 shape = 0.92 if pair else 0.62
                 ctx = 0.15 if has_volty_ctx else 0.0
+                # Boost shape score if we have explicit syntax
+                if has_explicit_voltage_syntax:
+                    shape = min(1.0, shape + 0.08)
                 out["VOLTAGE"].append({
                     "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                     "xc": xc, "yc": yc,
@@ -1426,7 +1707,8 @@ class PanelParser:
             main_ctxt = bool(re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE)\b", txt))
 
             cand = None
-            if m_with_unit:
+            # NEW: Skip BUS/MAIN candidates that contain VALUE_STOPWORDS or are in sentence context
+            if not has_value_stopword and not is_in_sentence and m_with_unit:
                 n = int(m_with_unit.group(1))
                 # For explicit main-breaker tokens, allow 30A–4000A.
                 # For everything else, keep the 60A floor to avoid branch circuits.
@@ -1442,7 +1724,7 @@ class PanelParser:
                         "has_unit": True,
                     }
 
-            elif m_bare_num and not strong_voltage_token:
+            elif not has_value_stopword and not is_in_sentence and m_bare_num and not strong_voltage_token:
                 n = int(m_bare_num.group(1))
                 # allow bare 60..1200; rely on label affinity to disambiguate from AIC/others
                 # (bare 50, 40, etc. are *not* accepted here to avoid table circuits)
@@ -1479,63 +1761,65 @@ class PanelParser:
 
             # AIC (10k..100k) and KA forms: 65kA, 65 kA
             # Normalize spaces for kA form matching
-            t_nos = txtD.replace(" ", "")
-            mk = re.search(r"\b(\d{2,3})(?:KAIC|AIC|KA|K)\b", t_nos)
-            if mk:
-                val_ka = int(mk.group(1))
-                if 10 <= val_ka <= 100:
-                    shape = 0.90
-                    ctx = 0.10
-                    out["AIC"].append({
-                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                        "xc": xc, "yc": yc,
-                        "conf": conf,
-                        "text": raw,
-                        "shape": shape,
-                        "ctx": ctx,
-                    })
-            else:
-                AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A, 29,000A
-                if AIC:
-                    val = int(AIC.group(1).replace(",", ""))
-                    if 10000 <= val <= 100000:
-                        # ---- Reject non-thousand-rounded values like 29,114 ----
-                        if (val % 1000) != 0:
-                            pass
-                        else:
-                            shape = 0.85 + (0.10 if "," in AIC.group(1) else 0.0)
-                            ctx = 0.08 if re.search(r"\b(SYMMETRICAL|AIC|A\.?\s*I\.?\s*C\.?|SCCR)\b", txt) else 0.0
-                            out["AIC"].append({
-                                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                                "xc": xc, "yc": yc,
-                                "conf": conf,
-                                "text": raw,
-                                "shape": min(1.0, shape),
-                                "ctx": ctx,
-                            })
+            # NEW: Skip AIC candidates that contain VALUE_STOPWORDS or are in sentence context
+            if not has_value_stopword and not is_in_sentence:
+                t_nos = txtD.replace(" ", "")
+                mk = re.search(r"\b(\d{2,3})(?:KAIC|AIC|KA|K)\b", t_nos)
+                if mk:
+                    val_ka = int(mk.group(1))
+                    if 10 <= val_ka <= 100:
+                        shape = 0.90
+                        ctx = 0.10
+                        out["AIC"].append({
+                            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                            "xc": xc, "yc": yc,
+                            "conf": conf,
+                            "text": raw,
+                            "shape": shape,
+                            "ctx": ctx,
+                        })
                 else:
-                    SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
-                    # Look for a plain 2–3 digit number
-                    m_small = re.search(r'(?<!\d)(\d{2,3})(?!\d)', txtD)
-                    if m_small:
-                        n = int(m_small.group(1))
-                        if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', txtD):
-                            # Must be horizontally to the right of an AIC label and on roughly the same row
-                            for L in aic_labels:
-                                yov = max(0, min(y2, L["y2"]) - max(y1, L["y1"]))  # vertical overlap
-                                dx = x1 - L["x2"]                                   # distance to the right
-                                if yov > 0 and 0 <= dx <= 3 * med_h:
-                                    shape = 0.88
-                                    ctx = 0.20  # extra context because it's directly tied to AIC label
-                                    out["AIC"].append({
-                                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                                        "xc": xc, "yc": yc,
-                                        "conf": conf,
-                                        "text": raw,
-                                        "shape": shape,
-                                        "ctx": ctx
-                                    })
-                                    break  # only need to prove adjacency to one label
+                    AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A, 29,000A
+                    if AIC:
+                        val = int(AIC.group(1).replace(",", ""))
+                        if 10000 <= val <= 100000:
+                            # ---- Reject non-thousand-rounded values like 29,114 ----
+                            if (val % 1000) != 0:
+                                pass
+                            else:
+                                shape = 0.85 + (0.10 if "," in AIC.group(1) else 0.0)
+                                ctx = 0.08 if re.search(r"\b(SYMMETRICAL|AIC|A\.?\s*I\.?\s*C\.?|SCCR)\b", txt) else 0.0
+                                out["AIC"].append({
+                                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                                    "xc": xc, "yc": yc,
+                                    "conf": conf,
+                                    "text": raw,
+                                    "shape": min(1.0, shape),
+                                    "ctx": ctx,
+                                })
+                    else:
+                        SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
+                        # Look for a plain 2–3 digit number
+                        m_small = re.search(r'(?<!\d)(\d{2,3})(?!\d)', txtD)
+                        if m_small:
+                            n = int(m_small.group(1))
+                            if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', txtD):
+                                # Must be horizontally to the right of an AIC label and on roughly the same row
+                                for L in aic_labels:
+                                    yov = max(0, min(y2, L["y2"]) - max(y1, L["y1"]))  # vertical overlap
+                                    dx = x1 - L["x2"]                                   # distance to the right
+                                    if yov > 0 and 0 <= dx <= 3 * med_h:
+                                        shape = 0.88
+                                        ctx = 0.20  # extra context because it's directly tied to AIC label
+                                        out["AIC"].append({
+                                            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                                            "xc": xc, "yc": yc,
+                                            "conf": conf,
+                                            "text": raw,
+                                            "shape": shape,
+                                            "ctx": ctx
+                                        })
+                                        break  # only need to prove adjacency to one label
 
             # NAME candidates (short, alphanum, higher & larger)
             up = raw.strip().upper().strip(":")
@@ -1768,8 +2052,15 @@ class PanelParser:
         ranked.sort(key=lambda d: (-d["rank"], -float(d.get("conf", 0.0)), d["y1"], d["x1"]))
         return ranked
 
-    def _pick_role(self, role: str, ranked: list) -> dict | None:
-        thr = self._THRESH.get(role, 0.5)
+    def _pick_role(self, role: str, ranked: list, has_label: bool = True) -> dict | None:
+        """
+        Pick the best candidate for a role if it meets the threshold.
+        Uses dynamic thresholding: higher threshold when no supporting label exists.
+        """
+        if has_label:
+            thr = self._THRESH.get(role, 0.5)
+        else:
+            thr = self._THRESH_NO_LABEL.get(role, self._THRESH.get(role, 0.5))
         return ranked[0] if ranked and ranked[0]["rank"] >= thr else None
 
     def _normalize_voltage_text(self, s: str) -> str:
