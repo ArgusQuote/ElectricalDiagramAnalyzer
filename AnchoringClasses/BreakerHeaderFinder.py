@@ -265,6 +265,7 @@ class BreakerHeaderFinder:
 
     @staticmethod
     def _normalize_text(s: str) -> str:
+        """Strip non-alphanumeric chars, uppercase, and fix digit confusions (1->I, 0->O) for header token matching."""
         return re.sub(
             r"[^A-Z0-9]",
             "",
@@ -272,6 +273,7 @@ class BreakerHeaderFinder:
         )
 
     def _run_ocr(self, img, mag: float):
+        """Run EasyOCR readtext on *img* with the given magnification ratio and a restricted alphanumeric allowlist."""
         try:
             return self.reader.readtext(
                 img,

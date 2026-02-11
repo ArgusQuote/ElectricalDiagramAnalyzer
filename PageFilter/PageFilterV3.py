@@ -416,6 +416,7 @@ class PageFilter:
 
     # ----------------- OCR helpers -----------------
     def _init_ocr(self):
+        """Lazily initialize the EasyOCR reader; disable OCR on failure."""
         if not self.use_ocr:
             return
         try:
@@ -502,6 +503,7 @@ class PageFilter:
         return (base_x0, new_top, new_right, base_y0 + ch)
 
     def _save_crop_png(self, arr: np.ndarray, path: str) -> None:
+        """Write a numpy array to disk as a PNG via OpenCV (silently ignores errors)."""
         try:
             if arr.ndim == 2:
                 cv2.imwrite(path, arr)
@@ -651,6 +653,7 @@ class PageFilter:
         return dp[lb]
 
     def _has_token_like(self, tokens: List[str], target: str, max_dist: int) -> bool:
+        """Return True if any token in *tokens* is within *max_dist* Levenshtein edits of *target*."""
         for t in tokens:
             # quick prune by length
             if abs(len(t) - len(target)) > max_dist:
@@ -661,6 +664,7 @@ class PageFilter:
 
     @staticmethod
     def _normalize_for_regex(s: str) -> str:
+        """Normalize whitespace and dashes in *s* for regex matching."""
         s = s.replace("\n", " ")
         s = re.sub(r"\s+", " ", s)
         s = s.replace("—", "-").replace("–", "-")
@@ -688,6 +692,7 @@ class PageFilter:
     # ----------------- Normalization for corner tokens -----------------
     @staticmethod
     def _normalize_token(tok: str) -> str:
+        """Normalize an OCR token: uppercase, strip punctuation, fix common digit confusions (O->0, I->1, S->5, B->8)."""
         s = (tok or "").upper().strip()
         if not s:
             return ""
@@ -709,6 +714,7 @@ class PageFilter:
         return "".join(out)
 
     def _looks_like_e_sheet(self, tok: str) -> bool:
+        """Return True if *tok* matches the E-sheet pattern (e.g., E1.01, E-201)."""
         norm = self._normalize_token(tok)
         if not norm:
             return False
@@ -717,6 +723,7 @@ class PageFilter:
         return bool(self.PATTERN_E_LOOSE.match(norm))
 
     def _looks_like_non_e_sheet(self, tok: str) -> bool:
+        """Return True if *tok* matches a non-E sheet pattern (e.g., P1.01, M-201, A-101)."""
         norm = self._normalize_token(tok)
         if not norm:
             return False
@@ -745,6 +752,7 @@ class PageFilter:
 
     # ----------------- Footprint detector -----------------
     def _has_rectangular_footprints(self, img_bgr: np.ndarray) -> Tuple[bool, int, List[Dict[str, float]]]:
+        """Detect rectangular whitespace voids (panel-schedule-like regions) in a page image for undecided-page filtering."""
         Hf, Wf = img_bgr.shape[:2]
         if self.proc_scale < 1.0:
             img = cv2.resize(img_bgr, (int(Wf * self.proc_scale), int(Hf * self.proc_scale)),

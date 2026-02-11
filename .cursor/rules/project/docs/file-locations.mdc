@@ -1,0 +1,111 @@
+---
+description: Map of source code file locations, directory structure, key files and their purposes, and module boundaries. Use when navigating the codebase, finding where functionality lives, or understanding project organization.
+alwaysApply: false
+---
+
+# File Locations
+
+## Directory Structure
+
+```
+ElectricalDiagramAnalyzer/
+├── AnvilUplinkCode/           # Anvil Uplink server (main entry point)
+├── PageFilter/                # PDF page filtering (keep electrical pages)
+├── VisualDetectionToolLibrary/# Heuristic panel/table detection
+├── MLTableDetection/          # ML-based table detection (optional)
+├── OcrLibrary/                # OCR pipeline (analyzer, header parser, table parser)
+├── AnchoringClasses/          # Header/footer anchor detection
+├── RulesEngine/               # Part number selection rules
+├── PartNumberSelector/        # Equipment part number lookup tables
+├── DevEnv/                    # Development and testing scripts
+├── Backups/                   # Anvil app exports and server backups
+├── MISC/                      # Utilities, configs, requirements
+└── .cursor/                   # Cursor rules and skills
+    ├── rules/
+    │   ├── domain/            # Technology-specific rules
+    │   ├── generic/           # Universal rules
+    │   └── project/docs/      # Project documentation rules
+    └── skills/                # Agent skills
+```
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, worker pool, all RPC callables |
+| `PageFilter/PageFilterV3.py` | Page filtering -- OCR-based E-sheet detection, label scoring, whitespace heuristics |
+| `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping |
+| `MLTableDetection/TableDetectorML.py` | ML panel detection -- Table Transformer / Detectron2 inference |
+| `OcrLibrary/BreakerTableParserAPIv8.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class |
+| `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
+| `OcrLibrary/PanelHeaderParserV7.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
+| `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
+| `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
+| `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
+| `RulesEngine/RulesEngine4.py` | Rules engine -- `process_job()` selects part numbers from component dicts |
+| `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
+| `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
+| `OcrLibrary/breaker_labels_config.jsonc` | Breaker label configuration |
+| `MISC/requirements.txt` | Main project Python dependencies |
+| `MLTableDetection/requirements.txt` | ML-specific dependencies (torch, transformers, detectron2) |
+| `.gitignore` | Ignores venvs, PDFs, images, annotation data |
+
+## Module Boundaries
+
+### AnvilUplinkCode
+- **Path**: `AnvilUplinkCode/`
+- **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
+- **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
+
+### PageFilter
+- **Path**: `PageFilter/`
+- **Purpose**: Filters PDF pages to keep only electrical/panel content
+- **Entry point**: `PageFilterV3.PageFilter` class, `.readPdf()` method
+- **Dependencies**: pypdfium2, pikepdf, EasyOCR, OpenCV
+
+### VisualDetectionToolLibrary
+- **Path**: `VisualDetectionToolLibrary/`
+- **Purpose**: Detects and crops panel regions from PDF page bitmaps using heuristics
+- **Entry point**: `PanelSearchToolV25.PanelBoardSearch` class, `.readPdf()` method
+- **Dependencies**: pypdfium2, OpenCV, NumPy
+
+### MLTableDetection
+- **Path**: `MLTableDetection/`
+- **Purpose**: ML-based alternative to heuristic panel detection
+- **Entry point**: `TableDetectorML.TableDetectorML` class (same interface as PanelBoardSearch)
+- **Dependencies**: PyTorch, Hugging Face Transformers, Detectron2
+
+### OcrLibrary
+- **Path**: `OcrLibrary/`
+- **Purpose**: Three-stage OCR pipeline for breaker table extraction
+- **Entry point**: `BreakerTableParserAPIv8.BreakerTablePipeline` class, `.run()` method
+- **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
+
+### AnchoringClasses
+- **Path**: `AnchoringClasses/`
+- **Purpose**: Detects header and footer anchor positions for layout analysis
+- **Entry point**: `BreakerHeaderFinder` and `BreakerFooterFinder` classes
+- **Dependencies**: EasyOCR reader (passed in), OpenCV, NumPy
+
+### RulesEngine
+- **Path**: `RulesEngine/`
+- **Purpose**: Maps OCR-extracted component attributes to equipment part numbers
+- **Entry point**: `RulesEngine4.process_job(payload)` function
+- **Dependencies**: PartNumberSelector
+
+### PartNumberSelector
+- **Path**: `PartNumberSelector/`
+- **Purpose**: Part number lookup tables and selection logic for electrical equipment
+- **Entry point**: `PartNumberBuilder` module (exports: mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer, loadcenter)
+- **Dependencies**: None (pure logic)
+
+## Conventions
+
+- **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is the current active version. Lower versions are kept for comparison in DevEnv scripts.
+- **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
+- **Backups**: `Backups/` contains Anvil form exports and server snapshots. Not part of the runtime.
+- **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.
+- **New pipeline module**: Create a new directory at the repo root with a versioned Python file (e.g., `NewModule/NewModuleV1.py`).
+- **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in `RulesEngine4.py`.
+- **New RPC endpoint**: Add an `@anvil.server.callable` function in `uplink_server.py`.

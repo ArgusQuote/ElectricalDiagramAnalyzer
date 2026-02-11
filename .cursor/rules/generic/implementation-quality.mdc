@@ -1,0 +1,21 @@
+---
+description: Mandatory quality verification after every code change
+alwaysApply: true
+---
+# Implementation Quality
+
+After implementing any code change, always verify correctness before presenting results:
+
+1. Run the project's tests on changed files -- all must pass
+2. Run the linter on changed files -- no new errors
+3. Run the type checker if applicable -- no new errors
+4. If any check fails, fix the root cause and re-verify
+5. Do not present code to the user until all checks pass or you have documented why a check cannot run
+
+When implementing a feature or fix, follow the plan-implement-verify loop:
+- Plan the approach before writing code
+- Implement in small, verifiable increments
+- Verify after each increment
+- If verification fails 3 times on the same issue, stop and present findings to the user
+
+Load the `implementing-changes` skill for the full workflow procedure.

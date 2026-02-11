@@ -1,0 +1,60 @@
+---
+description: Python-specific conventions and patterns used in this project. Use when writing or modifying Python code, adding new modules, or working with the project's core libraries (EasyOCR, OpenCV, pypdfium2, Anvil Uplink).
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python Conventions
+
+## Module Versioning
+
+- Source files carry a version suffix: `PageFilterV3.py`, `PanelSearchToolV25.py`, `BreakerTableAnalyzer12.py`
+- The highest version number is the current active version
+- Lower versions are kept for side-by-side comparison in `DevEnv/` scripts
+- When creating a new version, copy the current file, increment the suffix, and update imports in `uplink_server.py`
+
+## Import Path
+
+- The repo root must be on `sys.path` for imports to work
+- `uplink_server.py` adds it explicitly: `sys.path.insert(0, str(REPO_ROOT))`
+- Dev scripts must do the same before importing project modules
+- Imports use the directory name as the package: `from PageFilter.PageFilterV3 import PageFilter`
+
+## Concurrency
+
+- Jobs run in spawned subprocesses (`multiprocessing.get_context("spawn")`) -- never fork
+- Spawning is required because EasyOCR, PyTorch, and OpenCV carry state that leaks across fork
+- Thread-level parallelism is capped at 1 via environment variables (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, etc.)
+- Worker threads manage the queue; heavy work always happens in the child process
+
+## EasyOCR Patterns
+
+- A single shared `easyocr.Reader` instance is created once and passed to components that need it
+- OCR warmup happens at server startup (`_warmup_ocr_once`) to load models before the first job
+- Always pass `reader` to classes that need OCR (BreakerHeaderFinder, BreakerFooterFinder, BreakerTableParser) rather than creating new readers
+
+## OpenCV Patterns
+
+- Images are loaded and manipulated as NumPy arrays via `cv2`
+- Grayscale is preferred for analysis (`cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)`)
+- CLAHE is used for contrast normalization before OCR
+- `cv2.setNumThreads(1)` is called at startup for determinism
+
+## pypdfium2 Patterns
+
+- PDF pages are rendered to bitmaps using `pypdfium2` at configurable DPI (default 1400 for detection, 300 for filtering)
+- `pikepdf` is used alongside for PDF manipulation (page extraction, filtered PDF creation)
+- Always close/release pypdfium2 document objects after use
+
+## JSON Config Files
+
+- Configuration files use `.jsonc` extension (JSON with C-style comments)
+- Located in `OcrLibrary/`: `labels_config.jsonc`, `breaker_labels_config.jsonc`
+- Loaded with a custom comment-stripping reader -- do not use `json.load()` directly on `.jsonc` files
+
+## Error Handling
+
+- Pipeline functions return dicts with error info rather than raising exceptions
+- `panelStatus` field in BreakerTablePipeline output indicates per-panel errors
+- Job-level exceptions are caught in `_process_job` and written to `status.json` as `state="error"`
+- Always include the traceback string when writing error state

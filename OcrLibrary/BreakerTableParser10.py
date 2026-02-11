@@ -113,6 +113,7 @@ class HeaderBandScanner:
             self.reader = None
 
     def _ensure_debug_dir(self, analyzer_result: Dict) -> str:
+        """Resolve and create the debug output directory from analyzer_result."""
         src_dir = analyzer_result.get("src_dir") or os.path.dirname(
             analyzer_result.get("src_path", "") or "."
         )

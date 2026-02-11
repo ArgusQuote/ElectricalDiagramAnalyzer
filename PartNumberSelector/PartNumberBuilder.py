@@ -2,6 +2,7 @@
 # Start Disconnects
 class Disconnect():
     def __init__(self):
+        """Initializes disconnect switch lookup table with fusible/non-fusible configurations."""
         # Initialize EasyOCR reader
         self.bool = False
 
@@ -111,8 +112,8 @@ class Disconnect():
             ("HEAVY_DUTY", True, 3, 600, 1200, "NEMA3R"): ("H368NR", "PKOGTA8", None),
         }
 
-    # Disconnect part number generation logic
     def generateDisconnectPartNumber(self, attributes):
+        """Generates disconnect part number from switch type, fusible, poles, voltage, amps, and enclosure."""
         switchType = attributes.get("switchType", "").upper()
         fusible = attributes.get("fusible", False)
         poles = attributes.get("poles")
@@ -189,6 +190,7 @@ class Disconnect():
 # Breaker Selection Logic for QO, QOB, HOM, QOH, QH, QHB, QO-VH, and QOB-VH breakers
 class breakerSelector:
     def __init__(self, attributes):
+        """Stores breaker selection attributes (type, poles, amperage, interruption rating, special features)."""
         self.breakerType = attributes.get("breakerType")
         self.poles = attributes.get("poles")
         self.amperage = attributes.get("amperage")
@@ -198,6 +200,7 @@ class breakerSelector:
         self.hiddenKRating = None
 
     def selectBreaker(self):
+        """Validates all breaker attributes and generates breaker part number; returns error dict if invalid."""
         if not self.validateBreakerType():
             return {"Error": "Invalid breaker type. Valid options: ['QO', 'QOB', 'HOM', 'QOH', 'QH', 'QHB', 'QO-VH', 'QOB-VH']"}
 
@@ -226,10 +229,12 @@ class breakerSelector:
         return self.generateBreakerPartNumber()
 
     def validateBreakerType(self):
+        """Validates breaker type against allowed QO, QOB, HOM, QOH, QH, QHB, QO-VH, QOB-VH."""
         validBreakerTypes = ['QO', 'QOB', 'HOM', 'QOH', 'QH', 'QHB', 'QO-VH', 'QOB-VH']
         return self.breakerType in validBreakerTypes
 
     def validatePoles(self):
+        """Validates poles for breaker type (e.g., QOH 2-pole only; HOM 1–2-pole; QO/QOB 1–3-pole)."""
         # QOH is only 2-pole
         if self.breakerType == "QOH":
             return self.poles == 2
@@ -250,16 +255,19 @@ class breakerSelector:
         return False
 
     def validateAmperage(self):
+        """Validates amperage against allowed values for the current poles and breaker type."""
         amperageMap = self.getAmperageOptionsByPoles()
         return self.amperage in amperageMap
 
     def validateInterruptionRating(self):
+        """Validates interruption rating; for HOM breakers the user value is ignored."""
         # For HOM breakers, we ignore any user-supplied value.
         if self.breakerType == "HOM":
             return True
         return True  # For all non-HOM types, the value is ignored and hidden k rating is used.
 
     def validateSpecialFeatures(self):
+        """Validates special features (CAFI, GFI, EPD, etc.) for the breaker type and amperage."""
         # For QH and QHB, no special features are allowed.
         if self.breakerType in ["QH", "QHB"]:
             return self.specialFeatures == ""
@@ -344,6 +352,7 @@ class breakerSelector:
         return kRatingMap.get(self.breakerType)
 
     def generateBreakerPartNumber(self):
+        """Generates QO/QOB/HOM/QH/QHB part number from validated breaker attributes."""
         output = {}
 
         if self.breakerType == "QOH":
@@ -608,8 +617,8 @@ class loadcenter():
             return {"Ground Bar Kit": qoGroundBarMapping[qoBasePartNumber]}
         return {"Error": "Ground bar kit mapping not found for QO"}
 
-    # Function to generate Load Center part number
     def generateLoadcenterPartNumber(self, attributes):
+        """Generates load center part number for HOM and QO types from enclosure, phasing, mains, and options."""
         loadCenterType = attributes.get("loadCenterType")
         enclosure = attributes.get("enclosure")
         phasing = attributes.get("phasing")
@@ -967,8 +976,8 @@ class loadcenter():
 # Start Transformers
 class transformer():
 
-    # Function to generate part number for transformers
     def generateTransformerPartNumber(self, attributes):
+        """Generates transformer part number from type, kVA, voltages, core material, and mounting options."""
         transformerType = attributes.get("transformerType")
         kva = attributes.get("kva")
         primaryVolts = attributes.get("primaryVolts")

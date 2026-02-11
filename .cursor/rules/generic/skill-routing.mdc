@@ -1,0 +1,14 @@
+---
+description: Routes the agent to specialized skills based on the current task
+alwaysApply: true
+---
+
+# Skill Routing
+
+- When implementing a feature, fix, or code change, load the `implementing-changes` skill
+- When exploring or onboarding to the codebase, load the `exploring-codebase` skill
+- When debugging an issue or fixing a bug, load the `debugging-issues` skill
+- When verifying changes work correctly, load the `verifying-changes` skill
+- When preparing a commit or pull request, load the `preparing-pull-requests` skill
+- When reviewing code for quality, load the `reviewing-code` skill
+- When assessing code for security vulnerabilities, load the `reviewing-security` skill

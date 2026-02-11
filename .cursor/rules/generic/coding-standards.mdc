@@ -1,0 +1,26 @@
+---
+description: Core coding standards that apply across all code in this project
+alwaysApply: true
+---
+
+# Coding Standards
+
+## Naming
+- Use clear, descriptive names that reveal intent
+- Avoid abbreviations unless universally understood (e.g., URL, HTTP, ID)
+- Be consistent with naming patterns across the codebase
+
+## Error Handling
+- Never silently swallow exceptions
+- Always log errors with sufficient context for debugging
+- Use specific exception types, not generic Exception
+
+## Code Quality
+- No magic numbers or strings -- use named constants
+- Keep methods focused on a single responsibility
+- Prefer early returns to reduce nesting
+
+## Documentation
+- Document WHY, not WHAT (code shows what, comments explain why)
+- Keep comments up to date when changing code
+- Add a brief doc comment to public methods explaining purpose and parameters

@@ -191,6 +191,7 @@ class PanelBoardSearch:
 
     # ----------------- Public API -----------------
     def readPdf(self, pdf_path: str) -> list[str]:
+        """Detect panel-board voids on each PDF page, export vector-PDF clips and hi-DPI PNG crops, and return the list of PNG paths."""
         pdf_path_str = os.path.expanduser(pdf_path)
         if not Path(pdf_path_str).is_file():
             raise FileNotFoundError(pdf_path_str)
@@ -1086,6 +1087,7 @@ class PanelBoardSearch:
 
     @staticmethod
     def _shave_margin(mask: np.ndarray, px: int) -> np.ndarray:
+        """Zero out the border of *mask* by *px* pixels on all sides to suppress edge artifacts."""
         if px <= 0:
             return mask
         m = mask.copy()
@@ -1095,11 +1097,13 @@ class PanelBoardSearch:
 
     @staticmethod
     def _components(mask: np.ndarray):
+        """Run 8-connected component analysis on a binary mask; return (num, labels, stats, centroids)."""
         lab = (mask > 0).astype(np.uint8)
         return cv2.connectedComponentsWithStats(lab, connectivity=8)
 
     @staticmethod
     def _selected_ws_mask(labels: np.ndarray, keep_ids: list[int]) -> np.ndarray:
+        """Build a binary mask containing only the whitespace components whose IDs are in *keep_ids*."""
         m = np.zeros_like(labels, dtype=np.uint8)
         for cid in keep_ids:
             m[labels == cid] = 255
@@ -1174,6 +1178,7 @@ class PanelBoardSearch:
                         max_rel_area=0.75,
                         aspect_range=(0.4, 3.0),
                         min_side_px=80):
+        """Find table-like rectangular regions via adaptive threshold + morphological line extraction, then NMS."""
         H, W = img_bgr.shape[:2]
         page_area = H * W
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
@@ -1213,6 +1218,7 @@ class PanelBoardSearch:
 
     @staticmethod
     def _nms_keep_larger(boxes, iou_thr=0.5):
+        """Non-maximum suppression: keep the larger box when two overlap above *iou_thr*."""
         if len(boxes) <= 1:
             return boxes
         boxes = sorted(boxes, key=lambda b: (b[2]-b[0])*(b[3]-b[1]), reverse=True)
@@ -1229,6 +1235,7 @@ class PanelBoardSearch:
 
     @staticmethod
     def _iou(a, b):
+        """Compute Intersection-over-Union between two (x1, y1, x2, y2) boxes."""
         ax1, ay1, ax2, ay2 = a
         bx1, by1, bx2, by2 = b
         inter_x1, inter_y1 = max(ax1, bx1), max(ay1, by1)
@@ -1321,6 +1328,7 @@ class PanelBoardSearch:
 
     @staticmethod
     def _horizontal_line_mask(img_bgr: np.ndarray) -> np.ndarray:
+        """Extract a binary mask of horizontal lines from *img_bgr* using adaptive threshold + morphological opening."""
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         thr = cv2.adaptiveThreshold(
             gray,
@@ -1339,6 +1347,7 @@ class PanelBoardSearch:
 
     @staticmethod
     def _extract_horizontal_line_metrics(mask: np.ndarray) -> list[list[int]]:
+        """Extract row-center spacing and line-length metrics from a horizontal-line mask; returns [[idx, dy, length], ...]."""
         if mask.ndim == 3:
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
 
@@ -1392,6 +1401,7 @@ class PanelBoardSearch:
         min_repeats: int = 5,
         min_len_frac: float = 0.5,
     ) -> bool:
+        """Return True if *metrics* shows at least *min_repeats* lines with consistent spacing (a table-like pattern)."""
         min_len_px = int(mask_width * min_len_frac)
 
         filtered = [

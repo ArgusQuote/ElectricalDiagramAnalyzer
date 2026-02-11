@@ -30,9 +30,11 @@ AMP_MAX = 1200
 _NAME_COUNTS = {}
 
 def _norm_name(s):
+    """Strip and uppercase a panel name for deduplication key comparison."""
     return str(s or "").strip().upper()
 
 def _dedupe_name(raw_name: str | None) -> str:
+    """Return a unique display name, appending '(2)', '(3)', etc. when the same base name recurs within a job."""
     base = (str(raw_name or "").strip()) or "(unnamed)"
     key = _norm_name(base)
     cnt = _NAME_COUNTS.get(key, 0) + 1
@@ -40,6 +42,7 @@ def _dedupe_name(raw_name: str | None) -> str:
     return base if cnt == 1 else f"{base} ({cnt})"
 
 def reset_name_deduper():
+    """Clear the per-job panel name deduplication counter (call before each new job)."""
     _NAME_COUNTS.clear()
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
@@ -47,12 +50,16 @@ from OcrLibrary.PanelHeaderParserV7   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
 
 class BreakerTablePipeline:
+    """Three-stage OCR pipeline: Analyzer -> Header Parser -> Table Parser. Orchestrates extraction of panel data from a single panel image."""
+
     def __init__(self, *, debug: bool = True):
+        """Initialize the pipeline with optional debug output."""
         self.debug = bool(debug)
         self._analyzer = None
         self._header_parser = None
 
     def _to_int_or_none(self, v):
+        """Extract digits from *v* and parse as int; return None if no digits or parse fails."""
         if v is None:
             return None
         s = ''.join(ch for ch in str(v) if ch.isdigit())
@@ -64,6 +71,7 @@ class BreakerTablePipeline:
             return None
 
     def _mask_header_non_name(self, header_result: dict | None, *, detected_name):
+        """Replace all header attrs except the panel name with 'x' placeholders (used when header validation fails)."""
         out = dict(header_result) if isinstance(header_result, dict) else {}
         out["name"] = detected_name
         attrs = out.get("attrs")
@@ -83,6 +91,7 @@ class BreakerTablePipeline:
         return out
 
     def _mask_parser_non_name(self, parser_result: dict | None, *, detected_name):
+        """Replace parser result attrs except the panel name with 'x' placeholders (used when validation fails)."""
         out = dict(parser_result) if isinstance(parser_result, dict) else {}
         out["name"] = detected_name
         out["spaces"] = "x"
@@ -90,6 +99,7 @@ class BreakerTablePipeline:
         return out or {"name": detected_name, "spaces": "x", "detected_breakers": []}
 
     def _extract_panel_keys(self, analyzer_result: dict | None, header_result: dict | None, parser_result: dict | None):
+        """Pull (name, volts, bus_amps, main_amps, spaces) from analyzer/header/parser results, preferring header values."""
         ar = analyzer_result or {}
         hdr = header_result or {}
         attrs = hdr.get("attrs") if isinstance(hdr.get("attrs"), dict) else {}
@@ -123,6 +133,7 @@ class BreakerTablePipeline:
         return name, volts, bus_amps, main_amps, spaces
 
     def _parse_voltage(self, v):
+        """Parse a voltage value from string or int; handles pairs like '480Y/277V' and singles. Returns an int in VALID_VOLTAGES or None."""
         if v is None:
             return None
         if isinstance(v, int):
@@ -136,6 +147,7 @@ class BreakerTablePipeline:
         return int(m_single.group(1)) if m_single and int(m_single.group(1)) in VALID_VOLTAGES else None
 
     def _is_valid_amp(self, val) -> bool:
+        """Return True if *val* parses to an amperage in [100..1200] that is a multiple of 5."""
         n = self._to_int_or_none(val)
         if n is None:
             return False
@@ -144,10 +156,12 @@ class BreakerTablePipeline:
         return (n % 10) in (0, 5)
 
     def _ensure_dir(self, p: str) -> str:
+        """Create directory *p* if it doesn't exist; return *p*."""
         os.makedirs(p, exist_ok=True)
         return p
 
     def _scale_box(self, box, src_w, src_h, dst_w, dst_h):
+        """Scale a [x1, y1, x2, y2] bounding box from (src_w, src_h) to (dst_w, dst_h) coordinate space."""
         # box = [x1,y1,x2,y2]
         if not box or src_w <= 0 or src_h <= 0:
             return None
@@ -160,6 +174,7 @@ class BreakerTablePipeline:
         return [int(round(x1*sx)), int(round(y1*sy)), int(round(x2*sx)), int(round(y2*sy))]
 
     def _draw_box(self, vis, box, color_bgr, label=None, *, fill_alpha: float = 0.0, thickness: int = 2):
+        """Draw a rectangle on *vis* at *box* [x1,y1,x2,y2] with optional translucent fill and text label."""
         if not box or len(box) != 4:
             return
         H, W = vis.shape[:2]
@@ -324,11 +339,13 @@ class BreakerTablePipeline:
             return None
 
     def _ensure_analyzer(self):
+        """Lazily create the BreakerTableAnalyzer instance (shared EasyOCR reader)."""
         if self._analyzer is None:
             self._analyzer = BreakerTableAnalyzer(debug=self.debug)
         return self._analyzer
 
     def _ensure_header_parser(self):
+        """Lazily create the PanelHeaderParser instance."""
         if self._header_parser is None:
             self._header_parser = PanelHeaderParser(debug=self.debug)
         return self._header_parser
@@ -525,6 +542,7 @@ def parse_image(
     run_header: bool = True,
     debug: bool = True
 ):
+    """Convenience wrapper: create a BreakerTablePipeline and run it on a single image."""
     pipe = BreakerTablePipeline(debug=debug)
     return pipe.run(
         image_path,

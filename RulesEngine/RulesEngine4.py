@@ -114,6 +114,7 @@ _CANON_PREF = {
 }
 
 def canonicalize_pairs(allowed_pairs: list[str]) -> list[str]:
+    """Pick canonical phase pairs from allowed list (e.g., AB over BA)."""
     s = set(allowed_pairs)
     chosen = []
 
@@ -127,9 +128,11 @@ def canonicalize_pairs(allowed_pairs: list[str]) -> list[str]:
     return chosen
 
 def pair_to_phases(pair: str) -> tuple[str,str]:
+    """Split pair string into two phase letters (e.g., 'AB' -> ('A','B'))."""
     return pair[0], pair[1]
 
 def pick_balanced_pair(phase_load: dict[str, float], pairs: list[str], weight: float) -> str:
+    """Pick the pair that best balances phase load across A/B/C."""
     best_pair, best_score = None, None
     for p in pairs:
         a,b = pair_to_phases(p)
@@ -142,29 +145,35 @@ def pick_balanced_pair(phase_load: dict[str, float], pairs: list[str], weight: f
     return best_pair
 
 def hj_allowed_pairs(frame: str, intr_letter: str, amps: int):
+    """Return allowed 2-pole phase pairs for H/J frame at given amps."""
     table = HJ_2P_ALLOWED.get(frame, {}).get(intr_letter, {})
     allowed = [pair for pair in _2P_BASE_ORDER if amps in table.get(pair, set())]
     return allowed
 
 def _lc_snap_spaces(requested: int) -> int:
+    """Snap requested spaces up to nearest load center size (4–120)."""
     for v in [4, 8, 12, 16, 24, 32, 40, 48, 60, 80, 84, 120]:
         if v >= max(0, int(requested or 0)):
             return v
     return 120
 
 def _lc_cover_style(trim_style: str, enclosure: str) -> str:
+    """Map trim_style and enclosure to cover style (Flush, Surface, Included)."""
     t = str(trim_style or "").upper()
     if t == "FLUSH":   return "Flush"
     if t == "SURFACE": return "Surface"
     return "Included"
 
 def _lc_type_of_main_from_raw(raw: dict) -> str:
+    """Return 'M' (main breaker) or 'L' (main lug) from raw attrs."""
     return "M" if "mainBreakerAmperage" in raw else "L"
 
 def _prefer_qo(material: str | None) -> bool:
+    """Return True if material is COPPER (prefer QO over Homeline)."""
     return str(material or "").upper() == "COPPER"
 
 def ui_defaults():
+    """Return default UI config for panelboards, transformers, disconnects."""
     return {
         "panelboards": {
             "bussing_material":         "ALUMINUM",   # or "COPPER"
@@ -195,6 +204,7 @@ def ui_defaults():
     }
 
 def loadcenter_defaults_from_panel_defaults() -> dict:
+    """Derive load center defaults from panelboard UI defaults."""
     pb = ui_defaults()["panelboards"]
     return {
         "allowPlugOn":     pb["allow_plug_on_breakers"],  # True/False
@@ -205,6 +215,7 @@ def loadcenter_defaults_from_panel_defaults() -> dict:
     }
 
 def _deep_merge(base: dict, override: dict) -> dict:
+    """Deep-merge override into base dict; nested dicts merged recursively."""
     if not isinstance(base, dict) or not isinstance(override, dict):
         return base
     out = dict(base)
@@ -224,6 +235,7 @@ _DEFAULT_KEY_ALIASES = {
 }
 
 def _apply_aliases(d: dict) -> dict:
+    """Apply key aliases (e.g., material->bussing_material) to dict recursively."""
     if not isinstance(d, dict):
         return d
     out = {}
@@ -240,10 +252,12 @@ class DefaultResolver:
       3) Item-level overrides (item['defaults']) [optional]
     """
     def __init__(self, job_defaults: dict | None, item_defaults: dict | None):
+        """Store job- and item-level default overrides for resolution."""
         self.job = _apply_aliases(job_defaults or {})
         self.item = _apply_aliases(item_defaults or {})
 
     def resolve(self, domain: str) -> dict:
+        """Resolve defaults for domain (panelboards, transformers, disconnects)."""
         base = ui_defaults().get(domain, {})
         merged = _deep_merge(base, self.job.get("*", {}))
         merged = _deep_merge(merged, self.job.get(domain, {}))
@@ -252,12 +266,16 @@ class DefaultResolver:
         return merged
 
 class BaseEngine:
+    """Base engine for processing panelboard, disconnect, and transformer items."""
+
     def __init__(self, name: str, attrs: dict, resolver: "DefaultResolver | None" = None):
+        """Initialize engine with item name, attrs, and optional default resolver."""
         self.name = name
         self.attrs = attrs.copy()
         self._defaults = resolver or DefaultResolver({}, {})
 
     def process(self) -> dict:
+        """Process item attrs and return result dict; subclass must implement."""
         raise NotImplementedError
 
 ENGINE_REGISTRY = {}
@@ -265,12 +283,14 @@ ENGINE_REGISTRY = {}
 _NONE_STR = "NONE"
 
 def _is_none_token(val) -> bool:
+    """Return True if value is the string 'NONE' (case-insensitive)."""
     try:
         return isinstance(val, str) and val.strip().upper() == _NONE_STR
     except Exception:
         return False
 
 def _scrub_none_tokens(obj):
+    """Recursively replace 'NONE' string tokens with None in dicts/lists/tuples."""
     if isinstance(obj, dict):
         return {k: _scrub_none_tokens(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -282,6 +302,7 @@ def _scrub_none_tokens(obj):
     return obj
 
 def _safe_int(v, default=0):
+    """Parse value as int; return default on failure or NONE/empty."""
     try:
         if v in (None, "", "NONE"):
             return default
@@ -290,6 +311,7 @@ def _safe_int(v, default=0):
         return default
 
 def register_engine(item_type):
+    """Decorator to register engine class for given item type in ENGINE_REGISTRY."""
     def decorator(cls):
         ENGINE_REGISTRY[item_type] = cls
         return cls
@@ -299,6 +321,7 @@ faulthandler.enable()
 faulthandler.dump_traceback_later(30, repeat=True)
 
 def process_job(payload) -> dict:
+    """Main entry: route items to engines by type and merge results."""
     job_defaults = {}
     if isinstance(payload, dict) and "items" in payload:
         items = payload.get("items", [])
@@ -375,6 +398,7 @@ def process_job(payload) -> dict:
     return results
 
 def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | None]:
+    """Screen raw attrs for plug-on compatibility; return (allow_nq, allow_nf, routing)."""
     det = raw.get("detected_breakers", []) or []
     if not det:
         return True, True, None
@@ -508,6 +532,7 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | 
     return allow_nq, allow_nf, routing
 
 def _routing_bump_message(raw: dict) -> str | None:
+    """Build routing-bump message when panel was bumped to I-LINE for breaker limits."""
     routing = raw.get("_routing") or {}
     if routing.get("forcedFamily") != "I-LINE":
         return None

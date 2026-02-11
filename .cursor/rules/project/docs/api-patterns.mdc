@@ -1,0 +1,103 @@
+---
+description: Documentation of external API integrations, connection patterns, authentication flows, and error handling conventions. Use when working with API clients, external service calls, REST endpoints, or HTTP communication code.
+alwaysApply: false
+---
+
+# API Patterns
+
+This project uses Anvil Uplink RPC -- not REST/HTTP. The backend exposes callable functions that the Anvil web frontend invokes directly.
+
+## External Service Integrations
+
+### Anvil Uplink
+- **Connection**: `anvil.server.connect(ANVIL_UPLINK_KEY)` then `anvil.server.wait_forever()`
+- **Authentication**: `ANVIL_UPLINK_KEY` environment variable (required at startup)
+- **Client class**: `AnvilUplinkCode/uplink_server.py` (the entire server is the client)
+- **Error handling**: Connection failure raises `RuntimeError` at startup; Anvil handles reconnection
+
+### Hugging Face Table Transformer (optional)
+- **Model**: `microsoft/table-transformer-detection`
+- **Usage**: Downloaded on first use via Hugging Face Transformers; used only when `USE_ML_DETECTOR=true`
+- **Client class**: `MLTableDetection/TableDetectorML.py`
+- **Error handling**: Falls back to heuristic detection if import fails
+
+## RPC Callable Endpoints
+
+All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.server.callable`.
+
+### vm_submit_for_detection
+- **Purpose**: Upload a PDF and start a detection job
+- **Parameters**: `media` (Anvil BlobMedia), `ui_overrides=None` (dict), `job_note=None` (str), `owner_email=None` (str)
+- **Returns**: Dict with `job_id`, `job_dir`, and submission metadata
+- **Side effects**: Creates job directory, saves PDF, writes initial status.json, enqueues job
+
+### vm_get_job_status
+- **Purpose**: Get current status and result for a job
+- **Parameters**: `job_id` (str), `owner_email` (str)
+- **Returns**: Dict with `state`, `progress`, `step`, and `result` when state is "done"
+- **Auth**: Validates `owner_email` matches job owner; returns error dict if mismatch
+
+### vm_list_jobs
+- **Purpose**: List jobs owned by a user
+- **Parameters**: `owner_id` (str), `limit=50` (int)
+- **Returns**: List of dicts with job metadata (job_id, state, job_name, submitted_at)
+
+### vm_cancel_job
+- **Purpose**: Cancel a queued or running job
+- **Parameters**: `job_id` (str), `owner_id` (str)
+- **Returns**: `True` if canceled, `False` if not found or unauthorized
+- **Side effects**: Creates `.cancel` file in job directory; worker checks for it
+
+### vm_list_magenta_overlay_images
+- **Purpose**: List full-page magenta overlay PNG paths for a job (detection visualization)
+- **Parameters**: `job_id` (str)
+- **Returns**: List of job-relative PNG paths
+
+### vm_list_overlay_images
+- **Purpose**: List review overlay PNG paths for a job (OCR visualization)
+- **Parameters**: `job_id` (str)
+- **Returns**: List of job-relative paths from `pdf_images/review_overlays/`
+
+### vm_fetch_image
+- **Purpose**: Return an image file as BlobMedia for display in the UI
+- **Parameters**: `job_id` (str), `source_path` (str -- absolute or job-relative)
+- **Returns**: `anvil.BlobMedia` with image bytes
+- **Security**: Validates path is under the job directory to prevent path traversal
+
+### vm_get_default_overrides
+- **Purpose**: Return default UI override settings (panelboard, transformer, disconnect defaults)
+- **Parameters**: None
+- **Returns**: Deep copy of `_DEFAULT_OVERRIDES` dict
+
+### vm_set_watchdog_timeout
+- **Purpose**: Set the watchdog timeout at runtime (persists for process lifetime only)
+- **Parameters**: `minutes` (int)
+- **Returns**: Dict with `ok`, `old`, `new` values
+
+### vm_get_watchdog_timeout
+- **Purpose**: Get the current watchdog timeout
+- **Parameters**: None
+- **Returns**: int (minutes)
+
+## Authentication Pattern
+
+- No session tokens or JWT -- Anvil handles user authentication on the frontend
+- The frontend passes `owner_email` (lowercased) with each request
+- Backend validates ownership by comparing `owner_email` against the `owner_id` stored in `status.json`
+- Per-user concurrency is enforced server-side via `_INFLIGHT_BY_USER` dict
+
+## Error Handling Convention
+
+- **Callable-level**: Each callable wraps its logic in try/except; errors return dicts with an `error` key
+- **Job-level**: Exceptions during `_process_job` write `state="error"` and the traceback to `status.json`
+- **Watchdog**: Jobs exceeding `WATCHDOG_TIMEOUT_MIN` (default 15 min) are killed; status is set to error with a user-facing message
+- **Cancellation**: Workers check for a `.cancel` file in the job directory at each pipeline step
+- **No retry**: Failed jobs are not automatically retried; the user must resubmit
+
+## Timeout Configuration
+
+| Setting | Source | Default |
+|---|---|---|
+| `WATCHDOG_TIMEOUT_MIN` | Env var or `vm_set_watchdog_timeout` | 15 minutes |
+| `WATCHDOG_KILL_GRACE_SEC` | Env var | 3 seconds |
+| Anvil Uplink connection timeout | Managed by anvil-uplink library | Library default |
