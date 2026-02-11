@@ -1,0 +1,40 @@
+---
+description: Virtual environment activation requirement for all Python execution
+globs:
+alwaysApply: true
+---
+
+# Development Environment
+
+## Virtual Environment
+
+**ALWAYS activate before any Python command:**
+
+```bash
+source /home/marco/venv/bin/activate
+```
+
+## Verification
+
+```bash
+which python
+# Expected: /home/marco/venv/bin/python
+```
+
+## Required For
+
+- Running Python scripts
+- Running pytest/tests
+- Installing pip packages
+- Running the uplink server
+- Running DevEnv scripts
+
+## Key Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| EasyOCR | Text recognition |
+| PyMuPDF (fitz) | PDF rendering |
+| OpenCV (cv2) | Image processing |
+| NumPy | Numerical operations |
+| Anvil Uplink | Backend connection |

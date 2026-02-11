@@ -7,8 +7,9 @@ alwaysApply: false
 # Panel Detection Documentation
 
 ## File Location
-- **Latest**: `VisualDetectionToolLibrary/PanelSearchToolV21.py`
-- **Legacy**: V15, V17, V18, V19, V20 (historical iterations)
+- **Latest**: `VisualDetectionToolLibrary/PanelSearchToolV25.py`
+- **Production**: `VisualDetectionToolLibrary/PanelSearchToolV24.py`
+- **Legacy**: V15-V23 have been removed (consolidated)
 
 ## Purpose
 Detects panel board schedule tables ("voids") in PDF pages and extracts high-quality image crops for OCR processing.
@@ -163,7 +164,7 @@ Second pass over PDF:
 
 ## Version Note
 
-> **Important**: The server (`uplink_server.py`) currently imports `PanelSearchToolV11` from bytecode cache, though `V21` is the latest source file. The documentation here covers V21 features. Check `uplink_server.py` imports for the actually-used version.
+> **Current State**: The server (`uplink_server.py`) imports `PanelSearchToolV24`. V25 is available as the latest iteration for testing new features. Old versions (V15-V23) have been cleaned up from the repository.
 
 ## Common Tuning Points
 
@@ -178,7 +179,7 @@ Second pass over PDF:
 ## Usage Example
 
 ```python
-from VisualDetectionToolLibrary.PanelSearchToolV21 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV24 import PanelBoardSearch
 
 finder = PanelBoardSearch(
     output_dir="/path/to/output",

@@ -1,0 +1,272 @@
+---
+description: Skill for modifying the processing pipeline
+globs:
+  - AnvilUplinkCode/**/*
+  - OcrLibrary/**/*
+  - VisualDetectionToolLibrary/**/*
+  - PageFilter/**/*
+alwaysApply: false
+---
+
+# @modify-pipeline - Pipeline Modification Skill
+
+Invoke with `@modify-pipeline` when making changes to the processing flow.
+
+## Pipeline Overview
+
+```
+PDF Input
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ uplink_server.py: render_pdf_to_images()                    │
+│                                                             │
+│   1. PageFilter.readPdf()      ─── PageFilterV3.py          │
+│   2. PanelBoardSearch.readPdf() ── PanelSearchToolV24.py    │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼ For each panel image
+┌─────────────────────────────────────────────────────────────┐
+│ uplink_server.py: _btp_run_once()                           │
+│                                                             │
+│   BreakerTablePipeline.run()   ─── BreakerTableParserAPIv3  │
+│     ├─ BreakerTableAnalyzer    ─── BreakerTableAnalyzer12   │
+│     ├─ PanelHeaderParser       ─── PanelHeaderParserV4      │
+│     └─ BreakerTableParser      ─── BreakerTableParser5      │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ uplink_server.py: _merge_component_from_btp()               │
+│                                                             │
+│   Transform OCR output → Component schema                   │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ RulesEngine2.process_job()                                  │
+│                                                             │
+│   Apply business rules → Generate part numbers              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Modification Checklist
+
+### Before Making Changes
+
+- [ ] Identify which stage to modify (see pipeline above)
+- [ ] Check current version in `uplink_server.py` imports
+- [ ] Understand data flow in/out of the component
+- [ ] Review existing debug output for the component
+
+### After Making Changes
+
+- [ ] Test with `DevEnv/` scripts first
+- [ ] Update relevant context file if behavior changed
+- [ ] Check for downstream impacts
+
+---
+
+## Common Modifications
+
+### Add New OCR Token Recognition
+
+**Location:** `AnchoringClasses/BreakerHeaderFinder.py`
+
+```python
+# Add to CATEGORY_ALIASES
+CATEGORY_ALIASES = {
+    "ckt": {"CKT", "CCT", "CIRCUIT"},  # Add new term
+    # ...
+}
+```
+
+**Test:** Run OCR on image with the new terminology.
+
+---
+
+### Adjust Detection Thresholds
+
+**Location:** `VisualDetectionToolLibrary/PanelSearchToolV24.py`
+
+```python
+# In constructor, modify:
+min_void_area_fr=0.004,    # Minimum panel area
+max_void_area_fr=0.30,     # Maximum panel area
+void_w_fr_range=(0.10, 0.60),  # Width range
+void_h_fr_range=(0.10, 0.60),  # Height range
+```
+
+**Test:** Run `DevEnv/DevEnvPanelSearchToolSimple.py`
+
+---
+
+### Add New Page Filter Pattern
+
+**Location:** `PageFilter/PageFilterV3.py`
+
+```python
+# Add to label patterns
+_label_patterns = {
+    "panel_schedules": [
+        r"\bpanel\s*schedules?\b",
+        r"\bnew\s*pattern\b",  # Add new pattern
+    ],
+}
+```
+
+**Test:** Run `DevEnv/PageFilterDevEnv.py`
+
+---
+
+### Modify Business Rule
+
+**Location:** `RulesEngine/RulesEngine2.py`
+
+```python
+# Find the rule to modify
+def process_job(payload):
+    # ...
+    # Modify logic here
+```
+
+**Test:** Create test payload and call `process_job()` directly.
+
+---
+
+### Add New Part Number Logic
+
+**See:** `@add-part-number` skill for detailed workflow
+
+---
+
+## Creating New Versions
+
+### When to Create a New Version
+
+- Major algorithm changes
+- Risky modifications to stable code
+- A/B testing new approaches
+
+### Version Naming Convention
+
+```
+ComponentNameV{N}.py
+# e.g., PanelSearchToolV25.py, BreakerTableAnalyzer13.py
+```
+
+### Steps
+
+1. Copy current version to new file
+2. Make modifications in new file
+3. Test thoroughly with DevEnv scripts
+4. Update import in `uplink_server.py` when ready
+
+```python
+# uplink_server.py
+from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch  # New
+```
+
+---
+
+## Data Flow Reference
+
+### Component → OCR Output
+
+```python
+# BreakerTablePipeline.run() returns:
+{
+    "results": {
+        "header": {
+            "name": "DP-1",
+            "attrs": {
+                "amperage": 400,
+                "voltage": 208,
+                "intRating": 22,
+                "mainBreakerAmperage": 400,
+                "spaces": 42,
+            }
+        },
+        "parser": {
+            "spaces": 42,
+            "detected_breakers": [...]
+        }
+    }
+}
+```
+
+### OCR Output → Component Schema
+
+```python
+# _merge_component_from_btp() transforms to:
+{
+    "type": "panelboard",
+    "name": "DP-1",
+    "source": "/path/to/image.png",
+    "attrs": {
+        "amperage": 400,
+        "spaces": 42,
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": [...]
+    }
+}
+```
+
+### Component Schema → Rules Input
+
+```python
+# process_job() receives:
+{
+    "defaults": {...},    # UI overrides
+    "items": [component1, component2, ...]
+}
+```
+
+---
+
+## Testing Changes
+
+### Unit Test with DevEnv
+
+```bash
+source /home/marco/venv/bin/activate
+cd /home/marco/ElectricalDiagramAnalyzer
+
+# Test panel detection
+python DevEnv/DevEnvPanelSearchToolSimple.py
+
+# Test OCR
+python DevEnv/DevEnvBreakerTableAnalyzerV12andHigher.py
+
+# Test page filter
+python DevEnv/PageFilterDevEnv.py
+```
+
+### Integration Test
+
+```python
+# In uplink_server.py context:
+from OcrLibrary.BreakerTableParserAPIv3 import BreakerTablePipeline
+
+pipe = BreakerTablePipeline(debug=True)
+result = pipe.run("/path/to/test/image.png")
+print(result)
+```
+
+---
+
+## Files Summary
+
+| Stage | Primary File | Entry Point |
+|-------|--------------|-------------|
+| Job orchestration | `uplink_server.py` | `_process_job()` |
+| Page filtering | `PageFilterV3.py` | `readPdf()` |
+| Panel detection | `PanelSearchToolV24.py` | `readPdf()` |
+| OCR pipeline | `BreakerTableParserAPIv3.py` | `run()` |
+| Table analysis | `BreakerTableAnalyzer12.py` | `analyze()` |
+| Header parsing | `PanelHeaderParserV4.py` | `parse_panel()` |
+| Breaker parsing | `BreakerTableParser5.py` | `parse_from_analyzer()` |
+| Rules engine | `RulesEngine2.py` | `process_job()` |
+| Part numbers | `PartNumberBuilder.py` | Various classes |

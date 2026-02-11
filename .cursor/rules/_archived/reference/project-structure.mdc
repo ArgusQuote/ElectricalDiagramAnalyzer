@@ -100,8 +100,8 @@ ElectricalDiagramAnalyzer/
 │   └── PanelHeaderParserV4.py         # ★ Current header parser (PanelParser)
 │
 ├── PageFilter/                        # PDF page filtering
-│   ├── PageFilter.py                  # Legacy page filter
-│   └── PageFilterV2.py                # ★ Current filter (PageFilter class)
+│   ├── PageFilterV2.py                # Legacy page filter
+│   └── PageFilterV3.py                # ★ Current filter (PageFilter class)
 │
 ├── PartNumberSelector/                # Part number generation
 │   ├── __init__.py
@@ -121,13 +121,8 @@ ElectricalDiagramAnalyzer/
 │
 ├── VisualDetectionToolLibrary/        # Panel/table detection from PDFs
 │   ├── __init__.py
-│   ├── PanelSearchToolV15.py          # Legacy versions (V15-V20)
-│   ├── PanelSearchToolV17.py
-│   ├── PanelSearchToolV18.py
-│   ├── PanelSearchToolV19.py
-│   ├── PanelSearchToolV20.py
-│   └── PanelSearchToolV21.py          # Latest version (PanelBoardSearch)
-│                                      # NOTE: Server currently imports V11 (from cache)
+│   ├── PanelSearchToolV24.py          # Previous stable version
+│   └── PanelSearchToolV25.py          # ★ Latest version (PanelBoardSearch)
 │
 └── easyocrdump.json                   # EasyOCR model cache/dump
 ```
@@ -143,19 +138,19 @@ Files with version numbers (e.g., `V21`, `V12`) indicate iteration history:
 ### Current Active Versions (per uplink_server.py imports)
 | Component | Active Version | File |
 |-----------|----------------|------|
-| Page Filter | V2 | `PageFilter/PageFilterV2.py` |
-| Panel Detection | V11 (cached) | `VisualDetectionToolLibrary/PanelSearchToolV11` |
+| Page Filter | V3 | `PageFilter/PageFilterV3.py` |
+| Panel Detection | V24 | `VisualDetectionToolLibrary/PanelSearchToolV24.py` |
 | OCR Pipeline | v3 | `OcrLibrary/BreakerTableParserAPIv3.py` |
 | Rules Engine | 2 | `RulesEngine/RulesEngine2.py` |
 
-> **Note**: The server imports `PanelSearchToolV11` from cache (`.pyc`), though `V21` is the latest `.py` file. This may be intentional for stability or may need updating.
+> **Note**: V25 of PanelSearchTool is available as the latest iteration. V24 is the current stable version in production.
 
 ## Module Dependencies
 
 ```
 uplink_server.py
-├── PageFilter.PageFilterV2.PageFilter
-├── VisualDetectionToolLibrary.PanelSearchToolV11.PanelBoardSearch
+├── PageFilter.PageFilterV3.PageFilter
+├── VisualDetectionToolLibrary.PanelSearchToolV24.PanelBoardSearch
 ├── OcrLibrary.BreakerTableParserAPIv3.BreakerTablePipeline
 │   ├── OcrLibrary.BreakerTableAnalyzer12.BreakerTableAnalyzer
 │   │   ├── AnchoringClasses.BreakerHeaderFinder

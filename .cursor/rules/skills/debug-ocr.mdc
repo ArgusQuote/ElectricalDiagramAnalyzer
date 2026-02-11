@@ -1,0 +1,213 @@
+---
+description: Skill for debugging OCR and table parsing issues
+globs:
+  - OcrLibrary/**/*
+  - AnchoringClasses/**/*
+alwaysApply: false
+---
+
+# @debug-ocr - OCR Debugging Skill
+
+Invoke with `@debug-ocr` when troubleshooting OCR parsing problems.
+
+## Diagnostic Workflow
+
+### Step 1: Identify the Symptom
+
+| Symptom | Likely Cause | Jump To |
+|---------|--------------|---------|
+| Header not found | Token detection | [Header Issues](#header-issues) |
+| Wrong panel size | Footer detection | [Footer Issues](#footer-issues) |
+| Missing breakers | Grid/row detection | [Parser Issues](#parser-issues) |
+| Wrong values | OCR misread | [OCR Tuning](#ocr-tuning) |
+
+### Step 2: Enable Debug Mode
+
+```python
+# In BreakerTablePipeline
+pipe = BreakerTablePipeline(debug=True)
+result = pipe.run(image_path)
+
+# Check debug output in:
+# - Same directory as image
+# - Look for *_debug/ folder
+```
+
+### Step 3: Examine Debug Images
+
+| Color | Meaning |
+|-------|---------|
+| Blue boxes | Header anchor tokens |
+| Cyan line | HEADER_Y position |
+| Orange line | HEADER_BOTTOM_Y position |
+| Magenta boxes | Other header tokens |
+| Red boxes | Excluded tokens |
+| Green line | FOOTER_Y position |
+
+---
+
+## Header Issues
+
+### Problem: Header Not Found
+
+**Check 1:** Look at debug image - are header words visible?
+
+```python
+# BreakerHeaderFinder.py
+CATEGORY_ALIASES = {
+    "ckt": {"CKT", "CCT"},
+    "description": {"DESCRIPTION", "LOADDESCRIPTION", "NAME"},
+    "trip": {"TRIP", "AMPS", "BREAKER", "SIZE"},
+    "poles": {"POLES", "POLE", "P"},
+}
+```
+
+**Fix:** Add missing terminology:
+```python
+"ckt": {"CKT", "CCT", "CIRCUIT"},  # Add new alias
+```
+
+**Check 2:** Is image contrast too low?
+
+```python
+# BreakerTableAnalyzer12.py - _prep() method
+# Ensure CLAHE is applied:
+g = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(g)
+```
+
+**Check 3:** Is image too small?
+
+```python
+# Should upscale if height < 1600px
+if H < 1600:
+    scale = 1600.0 / H
+    g = cv2.resize(g, ..., interpolation=cv2.INTER_CUBIC)
+```
+
+---
+
+## Footer Issues
+
+### Problem: Wrong Panel Size
+
+**Check 1:** Look at debug image for footer tokens
+
+```python
+# BreakerFooterFinder.py
+PANEL_FOOTER_MAP = {
+    84: {84, 83, 82, 81},
+    72: {72, 71, 70, 69},
+    # ...
+}
+```
+
+**Check 2:** Are multiple size candidates found?
+
+The algorithm requires ≥2 numbers from same size window. If there's ambiguity, check the raw OCR output.
+
+**Check 3:** Is footer outside expected region?
+
+Footer finder scans below `header_bottom_y`. If the actual footer is above this, it won't be found.
+
+---
+
+## Parser Issues
+
+### Problem: Missing Breakers
+
+**Check 1:** Grid line detection
+
+```python
+# Look for horizontal lines in debug output
+# Adjust kernel sizes based on image dimensions:
+h_kernel_width = max(W // 30, 20)
+h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_width, 1))
+```
+
+**Check 2:** Row height consistency
+
+```python
+# BreakerTableParser5.py
+# Check if row heights are being detected consistently
+# Look for gaps in the row detection
+```
+
+**Check 3:** Faint text
+
+```python
+# Lower text_threshold for faint text:
+reader.readtext(
+    image,
+    text_threshold=0.3,  # Default is 0.4
+    low_text=0.2,        # Default is 0.25
+)
+```
+
+---
+
+## OCR Tuning
+
+### EasyOCR Settings
+
+```python
+reader.readtext(
+    image,
+    detail=1,
+    paragraph=False,
+    allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/",
+    mag_ratio=1.6,          # Try 2.0 for second pass
+    contrast_ths=0.05,
+    adjust_contrast=0.7,
+    text_threshold=0.4,     # Lower for faint text
+    low_text=0.25,
+)
+```
+
+### Multi-Pass Strategy
+
+```python
+# First pass: standard settings
+results1 = reader.readtext(img, mag_ratio=1.6)
+
+# Second pass: higher magnification
+results2 = reader.readtext(img, mag_ratio=2.0)
+
+# Merge and deduplicate results
+```
+
+---
+
+## Quick Fixes
+
+### Add Header Alias
+
+```python
+# AnchoringClasses/BreakerHeaderFinder.py
+CATEGORY_ALIASES["description"].add("LOAD")
+```
+
+### Adjust Confidence Threshold
+
+```python
+# Filter low-confidence results
+results = [r for r in results if r[2] >= 0.7]
+```
+
+### Force Panel Size
+
+```python
+# If automatic detection fails, override:
+result["panel_size"] = 42  # Force to known size
+```
+
+---
+
+## Files to Check
+
+| Issue | Primary File | Secondary |
+|-------|--------------|-----------|
+| Header detection | `AnchoringClasses/BreakerHeaderFinder.py` | `BreakerTableAnalyzer12.py` |
+| Footer detection | `AnchoringClasses/BreakerFooterFinder.py` | `BreakerTableAnalyzer12.py` |
+| Breaker parsing | `OcrLibrary/BreakerTableParser5.py` | `BreakerTableParserAPIv3.py` |
+| Panel header | `OcrLibrary/PanelHeaderParserV4.py` | - |
+| Pipeline | `OcrLibrary/BreakerTableParserAPIv3.py` | - |
