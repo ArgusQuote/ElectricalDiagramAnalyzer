@@ -47,6 +47,43 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 ## 🟠 Moderate Issues
 
+### PanelHeaderParserV8 vs V7 (V7 treated as correct)
+
+**Status:** ACTIVE - V8 diverges from V7 in several areas; **V7 is the reference** for batch correctness.
+
+**Current state (Feb 2026):**
+- **V7 (`PanelHeaderParserV7.py`)** - Production version; treat as correct for batch comparison.
+- **V8 (`PanelHeaderParserV8.py`)** - Voltage regression fixed (explicit voltage syntax override); other V8-only behaviours remain.
+
+**Voltage fix (done):** V8 no longer drops "Distribution System: 480Y/277" — candidates with explicit voltage syntax (e.g. `/`, `Y`, `V`, WYE, DELTA) bypass stopword/sentence filtering. `good_tester_combo.pdf` now matches V7 (voltage 480).
+
+**V8 behaviour vs V7 (batch comparison, 8 PDFs; V7 assumed correct):**
+
+| Area | V8 behaviour |
+|------|----------------|
+| **Name** | Can differ: OCR/normalisation (e.g. LIA→LA, M.1→M1, EDP.→ED.P.); or V8 picks a label as name (e.g. "ASSEMBLY", "VOLTAGE:") instead of designation. |
+| **Voltage** | On **I.pdf** crops, V8 returns placeholder `'x'` where V7 has 208; other PDFs match after voltage fix. |
+| **Amperage (bus)** | Mostly matches; **E.pdf**: V7 1150 vs V8 150, V7 100 vs V8 650 (different token/role assignment). |
+| **Main breaker** | V8 often returns **None** where V7 has a value (e.g. B crop3, D crop3, Electrical Takeoff crops 1/3/4); E crop5: V7 100 vs V8 650. |
+| **intRating** | Matches when both parse; **I.pdf**: V8 returns `'x'` with voltage/amperage parse failure. |
+
+**Summary:** V8’s stricter filtering and dynamic thresholds can (1) pick a different or wrong token for name, (2) drop or mis-assign main breaker amperage, (3) fail on some panels (e.g. I.pdf) and emit `'x'` for voltage/amperage/intRating.
+
+**Used by:**
+- `BreakerTableParserAPIv8.py` → uses **V7** (reference)
+- `BreakerTableParserAPIv9.py` → uses **V8**
+
+**Recommendation:** Use **V7** (APIv8) for production until V8’s name/main/parse-failure behaviours are addressed. Compare with `DevEnv/CompareV7V8_BatchOutputs.py` (input: `DevEnv_FullAnalysis` vs `DevEnv2_FullAnalysis`).
+
+**Files:**
+- `OcrLibrary/PanelHeaderParserV7.py`
+- `OcrLibrary/PanelHeaderParserV8.py`
+- `DevEnv/DevTestEnv.py` - tests V7 via APIv8
+- `DevEnv/DevTestEnvV2.py` - tests V8 via APIv9
+- `DevEnv/CompareV7V8_BatchOutputs.py` - diff header outputs (V7 vs V8)
+
+---
+
 ### Stale Bytecode Cache
 
 **Problem:** `__pycache__` contains `.pyc` files for deleted modules:

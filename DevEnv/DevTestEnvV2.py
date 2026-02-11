@@ -16,13 +16,13 @@ if project_root not in sys.path:
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 # Use the SAME Parser API you used in your analyzer tests:
-from OcrLibrary.BreakerTableParserAPIv8 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS ----------
 # Input: directory containing PDFs to analyze (all *.pdf in this folder)
 INPUT_DIR       = Path("~/Documents/pdfToScan").expanduser()
 # Output base: each PDF gets a subdir and a unique dump file
-OUT_BASE        = Path("~/Documents/DevEnv_FullAnalysis").expanduser()
+OUT_BASE        = Path("~/Documents/DevEnv2_FullAnalysis").expanduser()
 
 def process_one_pdf(input_pdf: Path, filter_out_dir: Path, finder_out_dir: Path, pipe_out_dir: Path, pipe: BreakerTablePipeline) -> Path | None:
     """Run full pipeline for one PDF; write JSON dump to pipe_out_dir. Returns dump path or None."""

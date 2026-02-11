@@ -141,3 +141,39 @@ Files with version suffixes (e.g., `V21`, `V12`) indicate iteration history:
 - **Always use highest version** for active development
 - Check `uplink_server.py` imports for currently active versions
 - Lower versions kept for reference/rollback
+
+## Debug Code Cleanup
+
+**ALWAYS remove debug instrumentation after debugging is complete:**
+
+### What to Remove
+
+- Debug log statements (file writes, print statements)
+- `# #region agent log` / `# #endregion` blocks
+- Temporary variables used only for logging
+- Hardcoded debug file paths (e.g., `.cursor/debug.log`)
+
+### Cleanup Checklist
+
+After fixing a bug:
+
+1. Search for `# #region agent log` in modified files
+2. Search for `debug.log` or similar debug file references
+3. Remove all temporary debug imports (`import json as _json`, etc.)
+4. Verify code still works after cleanup
+5. Delete any debug log files created during debugging
+
+### Example
+
+```python
+# ❌ Bad: Debug code left in production
+# #region agent log
+import json as _json
+with open("/path/debug.log", "a") as _f:
+    _f.write(_json.dumps({"data": value}) + "\n")
+# #endregion
+result = process(value)
+
+# ✅ Good: Clean production code
+result = process(value)
+```
