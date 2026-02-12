@@ -104,7 +104,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv8 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION
 import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
 # ---------- CONNECT UPLINK ----------
