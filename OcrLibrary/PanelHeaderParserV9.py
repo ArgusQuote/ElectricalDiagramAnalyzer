@@ -160,7 +160,8 @@ class PanelParser:
         Return ONLY one of {120, 208, 240, 480, 600} if present.
 
         Rules:
-        - For 120/240 → choose 120 (intentional special-case)
+        - If the token contains BOTH 120 and 240 (either order) → choose 120
+        (the ONLY case where 120 is allowed to be the winner)
         - For common wye pairs like 120/208 or 277/480 → choose the higher system voltage (208, 480)
         - Otherwise:
             - if voltage_first_number_only=True → choose the first occurring allowed voltage
@@ -173,19 +174,20 @@ class PanelParser:
         s = self._normalize_digits(str(txt).upper())
         s = self._normalize_voltage_text(s)
 
-        # Explicit special-case: 120/240 should normalize to 120
-        if re.search(r'(?<!\d)120\s*/\s*240(?!\d)', s):
-            return 120
+        allowed = {120, 208, 240, 480, 600}
 
-        # If this token contains an explicit voltage pair, prefer the higher system voltage.
-        # Examples: "120/208 WYE" -> 208, "277/480" -> 480, "208Y/120" -> 208
+        # If this token contains an explicit voltage pair, resolve it.
         pair = re.search(r'(?<!\d)(\d{3})\s*[YV]?\s*/\s*(\d{3})(?!\d)', s)
         if pair:
             a = int(pair.group(1))
             b = int(pair.group(2))
-            allowed = {120, 208, 240, 480, 600}
 
             if a in allowed and b in allowed:
+                # ONLY special case where 120 wins: 120/240 (either order)
+                if {a, b} == {120, 240}:
+                    return 120
+
+                # Everything else: system voltage is the higher one
                 return max(a, b)
 
         # Otherwise collect allowed voltages in appearance order
@@ -211,6 +213,7 @@ class PanelParser:
             return vals_in_order[0]
 
         return max(vals_in_order)
+
 
     def parse_panel(
         self,
@@ -270,7 +273,7 @@ class PanelParser:
             inv = cv2.bitwise_not(prep)
             det2 = self.reader.readtext(
                 inv, detail=1, paragraph=False,
-                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,()/:- kKVvYØø ",
+                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,()/:-._\"'“”‘’ kKVvYØø ",
                 mag_ratio=1.9, contrast_ths=0.05, adjust_contrast=0.7,
                 text_threshold=0.4, low_text=0.25
             )
@@ -1361,6 +1364,7 @@ class PanelParser:
     def _normalize_name_output(self, s: str) -> str:
         import re
         u = (s or "").strip()
+        u = self._strip_quotes(u)
         u = re.sub(r'^(?:PANEL(?:BOARD)?\b\s*:?)\s*', '', u, flags=re.I)  # drop ONLY the leading label
         u = re.sub(r'\s{2,}', ' ', u).strip()
         return u
@@ -1886,6 +1890,7 @@ class PanelParser:
 
             # NAME candidates (short, alphanum, higher & larger)
             up = raw.strip().upper().strip(":")
+            up = self._strip_quotes(up)
             if not up:
                 continue
 
@@ -2212,6 +2217,15 @@ class PanelParser:
 
         return u
 
+    def _strip_quotes(self, s: str) -> str:
+        if not s:
+            return s
+        # remove straight + curly quotes
+        return s.translate(str.maketrans({
+            '"': '', "'": '',
+            '“': '', '”': '',
+            '‘': '', '’': '',
+        }))
 
     def _write_overlay_with_band(
         self,
