@@ -24,34 +24,37 @@ FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduse
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
 
-def process_one_pdf(input_pdf: Path, filter_out_dir: Path, finder_out_dir: Path, pipe_out_dir: Path, pipe: BreakerTablePipeline) -> Path | None:
-    """Run full pipeline for one PDF; write JSON dump to pipe_out_dir. Returns dump path or None."""
+for d in (FILTER_OUT_DIR, FINDER_OUT_DIR, PIPE_OUT_DIR):
+    d.mkdir(parents=True, exist_ok=True)
+
+def main():
     # ---- 1) PageFilter ----
     print("\n[PageFilter] starting…")
     FILTER = PageFilter(
-        output_dir=str(filter_out_dir),
-        dpi=400,
+        output_dir=str(FILTER_OUT_DIR),   # filtered PDF will be written here
+        dpi=400,                          # raster DPI used only for undecided pages
         longest_cap_px=9000,
         proc_scale=0.5,
         use_ocr=True,
         ocr_gpu=False,
         verbose=True,
-        debug=False,
+        debug=False,                      # True -> JSON log at output_dir/filter_debug/
         rect_w_fr_range=(0.10, 0.55),
         rect_h_fr_range=(0.10, 0.60),
         min_rectangularity=0.70,
         min_rect_count=2,
     )
-    kept_pages, dropped_pages, filtered_pdf, log_json = FILTER.readPdf(str(input_pdf))
+    kept_pages, dropped_pages, filtered_pdf, log_json = FILTER.readPdf(str(INPUT_PDF))
     print(f"[PageFilter] kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")
 
-    pdf_for_finder = Path(filtered_pdf) if (filtered_pdf and len(kept_pages) > 0) else input_pdf
+    # Choose PDF for finder: filtered if we kept something, else original
+    pdf_for_finder = Path(filtered_pdf) if (filtered_pdf and len(kept_pages) > 0) else INPUT_PDF
     print(f"[PanelFinder] using PDF: {pdf_for_finder}")
 
     # ---- 2) PanelBoardSearch ----
     print("\n[PanelFinder] starting…")
     FINDER = PanelBoardSearch(
-        output_dir=str(finder_out_dir),
+        output_dir=str(FINDER_OUT_DIR),
         dpi=400,
         render_dpi=1400,
         aa_level=8,
@@ -66,13 +69,21 @@ def process_one_pdf(input_pdf: Path, filter_out_dir: Path, finder_out_dir: Path,
         margin_shave_px=6,
         pad=6,
         verbose=True,
+        # one-box settings (defaults are fine, but you can loosen slightly if needed):
+        # onebox_min_rel_area=0.02, onebox_max_rel_area=0.75,
+        # onebox_aspect_range=(0.4, 3.0), onebox_min_side_px=80,
     )
     crops = FINDER.readPdf(str(pdf_for_finder))
-    print(f"[PanelFinder] wrote {len(crops)} crop(s) to {finder_out_dir}")
+    print(f"[PanelFinder] wrote {len(crops)} crop(s) to {FINDER_OUT_DIR}")
 
     if not crops:
-        print("[Pipeline] No panel crops found — skipping.")
-        return None
+        print("[Pipeline] No panel crops found — exiting.")
+        return
+
+    # ---- 3) BreakerTableParser API (same as your analyzer test env) ----
+    print("\n[ParserAPI] starting…")
+    pipe = BreakerTablePipeline(debug=True)
+    print("[ParserAPI] API_VERSION:", API_VERSION)
 
     all_results = []
     total_hdr_breakers = 0
@@ -159,56 +170,16 @@ def process_one_pdf(input_pdf: Path, filter_out_dir: Path, finder_out_dir: Path,
             "table_breakers": detected_breakers,
         })
 
-    # ---- Write JSON dump (unique file per PDF) ----
-    dump_path = pipe_out_dir / "pipeline_dump.json"
+    # ---- Write JSON dump ----
+    dump_path = PIPE_OUT_DIR / "full_pipeline_breaker_dump.json"
     try:
         with open(dump_path, "w", encoding="utf-8") as f:
             json.dump(all_results, f, indent=2, ensure_ascii=False, default=str)
         print(f"\n[WROTE] {dump_path}")
     except Exception as e:
         print(f"[WARN] Could not write dump: {e}")
-        return None
 
     print(f"\n[Pipeline] Done. crops={len(crops)} | header_breakers={total_hdr_breakers} | table_breakers={total_tbl_breakers}")
-    return dump_path
-
-
-def main():
-    """Discover all PDFs in INPUT_DIR, run pipeline for each, write one output file per PDF."""
-    if not INPUT_DIR.is_dir():
-        print(f"[ERROR] Input directory does not exist: {INPUT_DIR}")
-        return
-
-    pdfs = sorted(INPUT_DIR.glob("*.pdf"))
-    if not pdfs:
-        print(f"[ERROR] No PDFs found in {INPUT_DIR}")
-        return
-
-    OUT_BASE.mkdir(parents=True, exist_ok=True)
-    pipe = BreakerTablePipeline(debug=True)
-    print("[ParserAPI] API_VERSION:", API_VERSION)
-
-    written = []
-    for i, input_pdf in enumerate(pdfs, 1):
-        stem = input_pdf.stem
-        print(f"\n{'='*60}")
-        print(f"PDF {i}/{len(pdfs)}: {input_pdf.name}")
-        print(f"{'='*60}")
-
-        filter_out_dir = OUT_BASE / stem / "PdfOutput"
-        finder_out_dir = OUT_BASE / stem / "PanelSearchOutput"
-        pipe_out_dir = OUT_BASE / stem / "ParserOutput"
-        for d in (filter_out_dir, finder_out_dir, pipe_out_dir):
-            d.mkdir(parents=True, exist_ok=True)
-
-        dump_path = process_one_pdf(input_pdf, filter_out_dir, finder_out_dir, pipe_out_dir, pipe)
-        if dump_path:
-            written.append((input_pdf.name, str(dump_path)))
-
-    print(f"\n[SUMMARY] Processed {len(pdfs)} PDF(s), wrote {len(written)} output file(s).")
-    for name, path in written:
-        print(f"  {name} -> {path}")
-
 
 if __name__ == "__main__":
     main()
