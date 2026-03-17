@@ -56,18 +56,11 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
 # ---------- WATCHDOG CONFIG ----------
-WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "10"))  # dial in prod
+WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "15"))  # dial in prod
 WATCHDOG_KILL_GRACE_SEC = int(os.environ.get("WATCHDOG_KILL_GRACE_SEC", "3"))
 WATCHDOG_ERROR_MSG = (
   "This job took over {mins} minutes to process. "
   "Please trim the PDF to only relevant pages and try again."
-)
-
-# ---------- QUEUE TIMEOUT CONFIG ----------
-QUEUE_TIMEOUT_MIN = int(os.environ.get("QUEUE_TIMEOUT_MIN", "25"))
-QUEUE_TIMEOUT_ERROR_MSG = (
-  "This job waited in the processing queue too long due to current demand. "
-  "Please try again in a few minutes."
 )
 
 def _set_runtime_determinism():
@@ -592,22 +585,6 @@ def _peek_owner_id(job_dir: Path) -> str:
     st = _json_read_or_none(sp["status"]) or {}
     return str(st.get("owner_id") or "").strip().lower()
 
-def _is_queue_timed_out(job_dir: Path) -> tuple[bool, int | None]:
-    """
-    Returns (timed_out, age_ms).
-    Only checks total queued age from noticed_ts_ms.
-    """
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-
-    noticed_ts_ms = st.get("noticed_ts_ms")
-    if not isinstance(noticed_ts_ms, int):
-        return (False, None)
-
-    age_ms = max(0, _epoch_ms() - noticed_ts_ms)
-    queue_limit_ms = max(1, int(QUEUE_TIMEOUT_MIN)) * 60 * 1000
-    return (age_ms > queue_limit_ms, age_ms)
-
 # ---------- Shared helpers for component mapping ----------
 def _to_int_or_none(x):
     try:
@@ -971,76 +948,14 @@ def _dequeue_loop(idx: int):
     except Empty:
       continue
 
-    job_dir = BASE_JOBS_DIR / job_id
-
-    # If the job disappeared somehow, just drop it
-    if not job_dir.exists():
-      _JOB_Q.task_done()
-      continue
-
-    # Check current status snapshot
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-    current_state = str(st.get("state") or "").lower()
-
-    # If already finished/canceled/errored, drop it
-    if current_state in ("done", "error", "canceled"):
-      _JOB_Q.task_done()
-      continue
-
-    # Queue timeout applies only before the job starts running
-    timed_out, age_ms = _is_queue_timed_out(job_dir)
-    if current_state == "queued" and timed_out:
-      msg = QUEUE_TIMEOUT_ERROR_MSG
-      age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
-      _status_write(
-          job_dir,
-          "error",
-          error=msg,
-          queue_timeout=True,
-          queue_timeout_min=QUEUE_TIMEOUT_MIN,
-          queue_age_ms=age_ms,
-          queue_age_str=age_str,
-          progress=0.0
-      )
-      _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-      print(f">>> queue timeout: {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
-      _JOB_Q.task_done()
-      continue
-
     # enforce per-user cap
     if not _enter_inflight(owner_id):
-        threading.Timer(0.05, lambda j=job_id, o=owner_id: _enqueue_job(j, o)).start()
-        _JOB_Q.task_done()
-        continue
+      threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
+      _JOB_Q.task_done()
+      continue
 
     proc = None
     try:
-      # Re-check queue timeout one last time right before starting
-      st = _json_read_or_none(sp["status"]) or {}
-      current_state = str(st.get("state") or "").lower()
-      timed_out, age_ms = _is_queue_timed_out(job_dir)
-
-      if current_state == "queued" and timed_out:
-        msg = QUEUE_TIMEOUT_ERROR_MSG
-        age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
-        _status_write(
-            job_dir,
-            "error",
-            error=msg,
-            step="queue_timeout",
-            queue_timeout=True,
-            queue_timeout_min=QUEUE_TIMEOUT_MIN,
-            queue_age_ms=age_ms,
-            queue_age_str=age_str,
-            progress=0.0
-        )
-        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-        print(f">>> queue timeout (pre-start): {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
-        continue
-
       # Spawn child process for this job
       proc = mp.Process(target=_run_job_target, args=(job_id,), daemon=True)
       proc.start()
@@ -1051,6 +966,7 @@ def _dequeue_loop(idx: int):
 
       if proc.is_alive():
         # Timed out: mark canceled/error, terminate child, clean up
+        job_dir = BASE_JOBS_DIR / job_id
         # Mark cancel file so future reads show canceled intent
         try:
           with open(_cancel_path(job_dir), "w") as f:
@@ -1275,26 +1191,6 @@ def vm_fetch_image(job_id: str, source_path: str):
     return BlobMedia(ctype, p.read_bytes(), name=p.name)
 
 @anvil.server.callable
-def vm_set_queue_timeout(minutes: int) -> dict:
-  """
-  Set the queue timeout (minutes) at runtime.
-  Persists only for this process lifetime.
-  """
-  global QUEUE_TIMEOUT_MIN
-  try:
-    m = int(minutes)
-    if m < 1 or m > 120:
-      raise ValueError("minutes must be between 1 and 120")
-    QUEUE_TIMEOUT_MIN = m
-    return {"ok": True, "queue_timeout_min": QUEUE_TIMEOUT_MIN}
-  except Exception as e:
-    return {"ok": False, "error": str(e), "queue_timeout_min": QUEUE_TIMEOUT_MIN}
-
-@anvil.server.callable
-def vm_get_queue_timeout() -> int:
-  return int(QUEUE_TIMEOUT_MIN)
-
-@anvil.server.callable
 def vm_set_watchdog_timeout(minutes: int) -> dict:
   """
   Set the watchdog timeout (minutes) at runtime.
@@ -1313,73 +1209,6 @@ def vm_set_watchdog_timeout(minutes: int) -> dict:
 @anvil.server.callable
 def vm_get_watchdog_timeout() -> int:
   return int(WATCHDOG_TIMEOUT_MIN)
-
-def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[int | None, int]:
-    """
-    Returns (queue_position, active_count)
-
-    queue_position:
-      0 -> currently running
-      1 -> next in line
-      2 -> one queued ahead, etc.
-      None -> job missing / not active anymore
-
-    active_count:
-      count of jobs on this node that are still queued/running
-    """
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-    target = _json_read_or_none(sp["status"]) or {}
-    if not target:
-        return (None, 0)
-
-    target_state = str(target.get("state") or "").lower()
-    if target_state in ("done", "error", "canceled"):
-        return (None, 0)
-
-    target_noticed = target.get("noticed_ts_ms")
-    if not isinstance(target_noticed, int):
-        return (None, 0)
-
-    target_node = str(target.get("node_id") or "").strip()
-    if not target_node:
-        target_node = NODE_ID
-
-    rows = []
-    for d in BASE_JOBS_DIR.iterdir():
-        if not d.is_dir():
-            continue
-
-        st = _json_read_or_none(_status_paths(d)["status"]) or {}
-        state = str(st.get("state") or "").lower()
-        if state not in ("queued", "running"):
-            continue
-
-        node_id = str(st.get("node_id") or "").strip()
-        if node_id and node_id != target_node:
-            continue
-
-        noticed = st.get("noticed_ts_ms")
-        if not isinstance(noticed, int):
-            continue
-
-        rows.append({
-            "job_id": d.name,
-            "state": state,
-            "noticed_ts_ms": noticed,
-        })
-
-    # Oldest first, then job_id for stable ordering
-    rows.sort(key=lambda r: (r["noticed_ts_ms"], r["job_id"]))
-
-    active_count = len(rows)
-
-    for idx, row in enumerate(rows):
-        if row["job_id"] == job_id:
-            # idx is zero-based among active queued/running jobs
-            return (idx, active_count)
-
-    return (None, active_count)
 
 @anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
@@ -1415,27 +1244,13 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         res = _json_read_or_none(sp["result"]) or {}
         return {"state": "done", "result": res, **node_hint}
     if state == "error":
-        out = {
-            "state": "error",
-            "error": st.get("error") or "Unknown error",
-            **node_hint
-        }
-        for k in ("queue_timeout", "queue_timeout_min", "queue_age_ms", "queue_age_str"):
-            if k in st:
-                out[k] = st[k]
-        return out
+        return {"state": "error", "error": st.get("error") or "Unknown error", **node_hint}
 
     out = {"state": state, **node_hint}
     for k in ("step", "image_count", "ui_overrides", "noticed_ts_ms",
-            "cycle_time_str", "cycle_time_ms", "progress"):
+              "cycle_time_str", "cycle_time_ms", "progress"):
         if k in st:
             out[k] = st[k]
-
-    if state in ("queued", "running"):
-        queue_position, active_count = _get_queue_position(job_id, req_email)
-        if queue_position is not None:
-            out["queue_position"] = int(queue_position)
-        out["active_count"] = int(active_count)
 
     if "noticed_ts_ms" in st and isinstance(st["noticed_ts_ms"], int):
         elapsed_ms = max(0, _epoch_ms() - int(st["noticed_ts_ms"]))
