@@ -1,301 +1,431 @@
 #!/usr/bin/env python3
 """
-Evaluate a trained YOLOv8 table detection model.
+Evaluate a Table Transformer table detection model.
 
-This script runs evaluation on the validation set and generates
-detailed metrics, visualizations, and comparison with ground truth.
+Computes mAP against COCO ground-truth annotations, runs inference on a
+directory of images, or compares ML detections with the heuristic
+PanelBoardSearch detector.
+
+All evaluation uses the Table Transformer (MIT license) via the
+``TableDetectorML`` class and ``torchmetrics`` for metric computation.
 
 Usage:
-    python evaluate_model.py --model best.pt --data data.yaml
-    python evaluate_model.py --model best.pt --images /path/to/test/images
+    # Evaluate against COCO ground-truth annotations
+    python evaluate_model.py --model ~/models/final --data ~/TableAnnotations
+
+    # Run inference on a folder of images
+    python evaluate_model.py --model ~/models/final --images ~/test_images
+
+    # Compare ML vs heuristic on a PDF
+    python evaluate_model.py --model ~/models/final \
+        --pdf ~/Documents/SinglePdf/generic3.pdf
 """
 
 import os
+import sys
 import argparse
+import json
 from pathlib import Path
 from typing import Optional
-import json
 
+import numpy as np
+import cv2
+from PIL import Image
+
+
+# ---------------------------------------------------------------------------
+# Ensure project root is importable
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _load_tatr_model(model_path: str, device: Optional[str] = None):
+    """
+    Load a Table Transformer model and processor from *model_path*.
+
+    Returns:
+        (processor, model, device_str)
+    """
+    import torch
+    from transformers import (
+        TableTransformerForObjectDetection,
+        AutoImageProcessor,
+    )
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    processor = AutoImageProcessor.from_pretrained(model_path)
+    model = TableTransformerForObjectDetection.from_pretrained(model_path)
+    model.to(device)
+    model.eval()
+    return processor, model, device
+
+
+def _detect_tables_tatr(image: Image.Image, processor, model, device,
+                        conf_threshold: float = 0.5) -> list[dict]:
+    """
+    Run Table Transformer on a single PIL image.
+
+    Returns a list of dicts with keys ``bbox`` ([x1, y1, x2, y2]),
+    ``confidence``, and ``label``.
+    """
+    import torch
+
+    inputs = processor(images=image, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    target_sizes = torch.tensor([image.size[::-1]]).to(device)
+    results = processor.post_process_object_detection(
+        outputs, threshold=conf_threshold, target_sizes=target_sizes
+    )[0]
+
+    detections = []
+    for score, label, box in zip(
+        results["scores"].cpu().numpy(),
+        results["labels"].cpu().numpy(),
+        results["boxes"].cpu().numpy(),
+    ):
+        detections.append({
+            "bbox": box.tolist(),
+            "confidence": float(score),
+            "label": model.config.id2label.get(int(label), "table"),
+        })
+    return detections
+
+
+# ---------------------------------------------------------------------------
+# Evaluate against COCO ground-truth
+# ---------------------------------------------------------------------------
 
 def evaluate_on_dataset(
     model_path: str,
-    data_yaml: str,
+    data_dir: str,
     output_dir: Optional[str] = None,
-    conf_threshold: float = 0.25,
-    iou_threshold: float = 0.5,
+    conf_threshold: float = 0.5,
     verbose: bool = True,
 ) -> dict:
     """
-    Evaluate model on the validation set defined in data.yaml.
-    
+    Evaluate a Table Transformer model against COCO ground-truth annotations.
+
+    Computes mAP@0.5, mAP@0.5:0.95, precision, and recall using
+    ``torchmetrics.detection.mean_ap.MeanAveragePrecision``.
+
     Args:
-        model_path: Path to trained model weights (.pt file).
-        data_yaml: Path to data.yaml configuration.
-        output_dir: Directory to save evaluation results.
+        model_path: Path to a fine-tuned Table Transformer directory.
+        data_dir: Directory containing ``images/`` and a COCO annotation
+            file (``annotations.json`` or ``annotations/annotations_coco.json``).
+        output_dir: Where to save the metrics JSON.
         conf_threshold: Confidence threshold for detections.
-        iou_threshold: IoU threshold for mAP calculation.
-        verbose: Print evaluation progress.
-    
+        verbose: Print progress.
+
     Returns:
-        Dictionary containing evaluation metrics.
+        Dictionary of evaluation metrics.
     """
-    try:
-        from ultralytics import YOLO
-    except ImportError:
-        print("[ERROR] ultralytics not installed. Run: pip install ultralytics")
-        raise
-    
-    model_path = Path(model_path)
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model not found: {model_path}")
-    
-    data_yaml = Path(data_yaml)
-    if not data_yaml.exists():
-        raise FileNotFoundError(f"Data config not found: {data_yaml}")
-    
-    # Set up output directory
+    import torch
+    from torchmetrics.detection.mean_ap import MeanAveragePrecision
+
+    data_dir = Path(data_dir)
+    model_path_str = str(model_path)
+
     if output_dir:
         output_dir = Path(output_dir)
     else:
-        output_dir = model_path.parent / "evaluation"
+        output_dir = Path(model_path_str) / "evaluation"
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    if verbose:
-        print(f"[INFO] Loading model: {model_path}")
-    
-    model = YOLO(str(model_path))
-    
-    if verbose:
-        print(f"[INFO] Evaluating on dataset: {data_yaml}")
-    
-    # Run validation
-    metrics = model.val(
-        data=str(data_yaml),
-        conf=conf_threshold,
-        iou=iou_threshold,
-        verbose=verbose,
-        save_json=True,
-        project=str(output_dir),
-        name="val_results",
-        exist_ok=True,
-    )
-    
-    # Extract key metrics
-    results = {
-        'model': str(model_path),
-        'dataset': str(data_yaml),
-        'conf_threshold': conf_threshold,
-        'iou_threshold': iou_threshold,
-        'metrics': {
-            'mAP50': float(metrics.box.map50),
-            'mAP50-95': float(metrics.box.map),
-            'precision': float(metrics.box.mp),
-            'recall': float(metrics.box.mr),
-        },
-        'per_class': {},
-    }
-    
-    # Per-class metrics if available
-    if hasattr(metrics.box, 'ap_class_index'):
-        class_names = model.names
-        for i, class_idx in enumerate(metrics.box.ap_class_index):
-            class_name = class_names[class_idx]
-            results['per_class'][class_name] = {
-                'AP50': float(metrics.box.ap50[i]),
-                'AP': float(metrics.box.ap[i]),
-            }
-    
-    # Save results
-    results_file = output_dir / "val_results" / "metrics.json"
-    results_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    if verbose:
-        print(f"\n{'='*50}")
-        print("EVALUATION RESULTS")
-        print(f"{'='*50}")
-        print(f"Model: {model_path.name}")
-        print(f"mAP@0.5:      {results['metrics']['mAP50']:.4f}")
-        print(f"mAP@0.5:0.95: {results['metrics']['mAP50-95']:.4f}")
-        print(f"Precision:    {results['metrics']['precision']:.4f}")
-        print(f"Recall:       {results['metrics']['recall']:.4f}")
-        
-        if results['per_class']:
-            print(f"\nPer-class AP@0.5:")
-            for class_name, class_metrics in results['per_class'].items():
-                print(f"  {class_name}: {class_metrics['AP50']:.4f}")
-        
-        print(f"\nResults saved to: {results_file}")
-    
-    return results
 
+    # Locate COCO annotations
+    coco_path = None
+    for candidate in [
+        data_dir / "annotations.json",
+        data_dir / "annotations" / "annotations_coco.json",
+        data_dir / "annotations" / "annotations.json",
+    ]:
+        if candidate.exists():
+            coco_path = candidate
+            break
+    if coco_path is None:
+        raise FileNotFoundError(
+            f"No COCO annotation file found in {data_dir}")
+
+    with open(coco_path) as f:
+        coco_data = json.load(f)
+
+    # Build image-id -> annotations mapping
+    img_to_anns: dict[int, list] = {}
+    for ann in coco_data["annotations"]:
+        img_to_anns.setdefault(ann["image_id"], []).append(ann)
+
+    # Normalise category IDs to 0-indexed
+    cat_ids = sorted(set(a["category_id"] for a in coco_data["annotations"]))
+    cat_map = {old: new for new, old in enumerate(cat_ids)}
+
+    images_dir = data_dir / "images"
+
+    # Load model
+    processor, model, device = _load_tatr_model(model_path_str)
+
+    if verbose:
+        print(f"[INFO] Evaluating model: {model_path_str}")
+        print(f"[INFO] Dataset: {coco_path} "
+              f"({len(coco_data['images'])} images)")
+
+    metric = MeanAveragePrecision(box_format="xyxy", class_metrics=False)
+
+    for img_info in coco_data["images"]:
+        img_path = images_dir / img_info["file_name"]
+        if not img_path.exists():
+            if verbose:
+                print(f"  [SKIP] Missing: {img_info['file_name']}")
+            continue
+
+        image = Image.open(img_path).convert("RGB")
+        detections = _detect_tables_tatr(
+            image, processor, model, device, conf_threshold)
+
+        # Predictions
+        if detections:
+            pred_boxes = torch.tensor(
+                [d["bbox"] for d in detections], dtype=torch.float32)
+            pred_scores = torch.tensor(
+                [d["confidence"] for d in detections], dtype=torch.float32)
+            pred_labels = torch.zeros(
+                len(detections), dtype=torch.int64)
+        else:
+            pred_boxes = torch.zeros((0, 4), dtype=torch.float32)
+            pred_scores = torch.zeros(0, dtype=torch.float32)
+            pred_labels = torch.zeros(0, dtype=torch.int64)
+
+        # Ground truth
+        gt_anns = img_to_anns.get(img_info["id"], [])
+        if gt_anns:
+            gt_boxes_list = []
+            gt_labels_list = []
+            for ann in gt_anns:
+                x, y, w, h = ann["bbox"]
+                gt_boxes_list.append([x, y, x + w, y + h])
+                gt_labels_list.append(cat_map.get(ann["category_id"], 0))
+            gt_boxes = torch.tensor(gt_boxes_list, dtype=torch.float32)
+            gt_labels = torch.tensor(gt_labels_list, dtype=torch.int64)
+        else:
+            gt_boxes = torch.zeros((0, 4), dtype=torch.float32)
+            gt_labels = torch.zeros(0, dtype=torch.int64)
+
+        metric.update(
+            preds=[{"boxes": pred_boxes, "scores": pred_scores,
+                    "labels": pred_labels}],
+            target=[{"boxes": gt_boxes, "labels": gt_labels}],
+        )
+
+        if verbose:
+            print(f"  {img_info['file_name']}: "
+                  f"{len(detections)} pred, {len(gt_anns)} gt")
+
+    result = metric.compute()
+
+    metrics = {
+        "model": model_path_str,
+        "dataset": str(coco_path),
+        "conf_threshold": conf_threshold,
+        "metrics": {
+            "mAP@0.5:0.95": round(float(result["map"]), 4),
+            "mAP@0.5": round(float(result["map_50"]), 4),
+            "mAP@0.75": round(float(result["map_75"]), 4),
+            "recall@100": round(float(result["mar_100"]), 4),
+        },
+    }
+
+    metrics_file = output_dir / "metrics.json"
+    with open(metrics_file, 'w') as f:
+        json.dump(metrics, f, indent=2)
+
+    if verbose:
+        print(f"\n{'=' * 50}")
+        print("EVALUATION RESULTS")
+        print(f"{'=' * 50}")
+        print(f"Model:          {Path(model_path_str).name}")
+        print(f"mAP@0.5:        {metrics['metrics']['mAP@0.5']:.4f}")
+        print(f"mAP@0.5:0.95:   {metrics['metrics']['mAP@0.5:0.95']:.4f}")
+        print(f"mAP@0.75:       {metrics['metrics']['mAP@0.75']:.4f}")
+        print(f"Recall@100:     {metrics['metrics']['recall@100']:.4f}")
+        print(f"\nResults saved to: {metrics_file}")
+
+    return metrics
+
+
+# ---------------------------------------------------------------------------
+# Inference on images
+# ---------------------------------------------------------------------------
 
 def run_inference_on_images(
     model_path: str,
     images_dir: str,
     output_dir: Optional[str] = None,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = 0.5,
     save_visualizations: bool = True,
     verbose: bool = True,
 ) -> list[dict]:
     """
-    Run inference on a directory of images and save results.
-    
+    Run Table Transformer inference on a directory of images.
+
     Args:
-        model_path: Path to trained model weights.
-        images_dir: Directory containing test images.
-        output_dir: Directory to save results.
-        conf_threshold: Confidence threshold for detections.
-        save_visualizations: Save images with drawn bounding boxes.
+        model_path: Path to model directory.
+        images_dir: Directory of test images.
+        output_dir: Where to save results.
+        conf_threshold: Confidence threshold.
+        save_visualizations: Draw and save bounding-box overlays.
         verbose: Print progress.
-    
+
     Returns:
-        List of detection results per image.
+        Per-image detection results.
     """
-    try:
-        from ultralytics import YOLO
-    except ImportError:
-        print("[ERROR] ultralytics not installed. Run: pip install ultralytics")
-        raise
-    
-    model_path = Path(model_path)
     images_dir = Path(images_dir)
-    
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model not found: {model_path}")
     if not images_dir.exists():
         raise FileNotFoundError(f"Images directory not found: {images_dir}")
-    
-    # Set up output directory
+
     if output_dir:
         output_dir = Path(output_dir)
     else:
         output_dir = images_dir.parent / "inference_results"
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Find images
-    image_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.bmp']
-    image_files = []
-    for ext in image_extensions:
-        image_files.extend(images_dir.glob(f"*{ext}"))
-        image_files.extend(images_dir.glob(f"*{ext.upper()}"))
-    
+
+    image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
+    image_files = sorted(
+        p for p in images_dir.iterdir()
+        if p.suffix.lower() in image_extensions
+    )
+
     if not image_files:
         print(f"[WARN] No images found in {images_dir}")
         return []
-    
+
+    processor, model, device = _load_tatr_model(str(model_path))
+
     if verbose:
-        print(f"[INFO] Loading model: {model_path}")
+        print(f"[INFO] Model: {model_path}")
         print(f"[INFO] Found {len(image_files)} images")
-    
-    model = YOLO(str(model_path))
-    
+
     all_results = []
-    
-    for img_path in sorted(image_files):
+
+    for img_path in image_files:
         if verbose:
             print(f"  Processing: {img_path.name}")
-        
-        # Run inference
-        results = model(str(img_path), conf=conf_threshold, verbose=False)
-        
-        for result in results:
-            detections = []
-            
-            for box in result.boxes:
-                detection = {
-                    'class_id': int(box.cls[0]),
-                    'class_name': model.names[int(box.cls[0])],
-                    'confidence': float(box.conf[0]),
-                    'bbox': box.xyxy[0].tolist(),  # [x1, y1, x2, y2]
-                    'bbox_normalized': box.xyxyn[0].tolist(),
-                }
-                detections.append(detection)
-            
-            image_result = {
-                'image': str(img_path),
-                'image_name': img_path.name,
-                'detections': detections,
-                'num_detections': len(detections),
-            }
-            all_results.append(image_result)
-            
-            # Save visualization
-            if save_visualizations:
-                vis_dir = output_dir / "visualizations"
-                vis_dir.mkdir(parents=True, exist_ok=True)
-                vis_path = vis_dir / f"{img_path.stem}_detected.jpg"
-                result.save(str(vis_path))
-    
-    # Save all results to JSON
+
+        image = Image.open(img_path).convert("RGB")
+        detections = _detect_tables_tatr(
+            image, processor, model, device, conf_threshold)
+
+        image_result = {
+            "image": str(img_path),
+            "image_name": img_path.name,
+            "detections": detections,
+            "num_detections": len(detections),
+        }
+        all_results.append(image_result)
+
+        if save_visualizations and detections:
+            vis_dir = output_dir / "visualizations"
+            vis_dir.mkdir(parents=True, exist_ok=True)
+
+            img_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            for det in detections:
+                x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
+                conf = det["confidence"]
+                cv2.rectangle(img_bgr, (x1, y1), (x2, y2),
+                              (255, 0, 0), 3)
+                cv2.putText(
+                    img_bgr,
+                    f"table: {conf:.2f}",
+                    (x1, max(y1 - 8, 0)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2,
+                )
+            vis_path = vis_dir / f"{img_path.stem}_detected.jpg"
+            cv2.imwrite(str(vis_path), img_bgr)
+
     results_file = output_dir / "detections.json"
     with open(results_file, 'w') as f:
         json.dump(all_results, f, indent=2)
-    
-    # Summary statistics
-    total_detections = sum(r['num_detections'] for r in all_results)
-    images_with_detections = sum(1 for r in all_results if r['num_detections'] > 0)
-    
+
+    total_det = sum(r["num_detections"] for r in all_results)
+    with_det = sum(1 for r in all_results if r["num_detections"] > 0)
+
     if verbose:
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print("INFERENCE SUMMARY")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         print(f"Total images:           {len(all_results)}")
-        print(f"Images with detections: {images_with_detections}")
-        print(f"Total detections:       {total_detections}")
-        print(f"Avg detections/image:   {total_detections/len(all_results):.2f}")
+        print(f"Images with detections: {with_det}")
+        print(f"Total detections:       {total_det}")
+        print(f"Avg detections/image:   "
+              f"{total_det / max(len(all_results), 1):.2f}")
         print(f"\nResults saved to: {results_file}")
         if save_visualizations:
             print(f"Visualizations in: {output_dir / 'visualizations'}")
-    
+
     return all_results
 
+
+# ---------------------------------------------------------------------------
+# Compare with heuristic
+# ---------------------------------------------------------------------------
 
 def compare_with_heuristic(
     model_path: str,
     pdf_path: str,
     output_dir: Optional[str] = None,
+    conf_threshold: float = 0.5,
     verbose: bool = True,
 ) -> dict:
     """
     Compare ML model detections with the heuristic PanelBoardSearch.
-    
+
+    Uses ``TableDetectorML`` for the ML path and ``PanelBoardSearch``
+    for the heuristic path so results are directly comparable.
+
     Args:
-        model_path: Path to trained model weights.
+        model_path: Path to a fine-tuned Table Transformer directory.
         pdf_path: Path to a test PDF file.
-        output_dir: Directory to save comparison results.
+        output_dir: Where to save comparison results.
+        conf_threshold: Confidence threshold for ML detections.
         verbose: Print progress.
-    
+
     Returns:
-        Dictionary with comparison metrics.
+        Dictionary with comparison data.
     """
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    
+    from MLTableDetection.TableDetectorML import TableDetectorML
+
     try:
-        from ultralytics import YOLO
-        from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-        import pypdfium2 as pdfium
-        import cv2
-        import numpy as np
-    except ImportError as e:
-        print(f"[ERROR] Missing dependency: {e}")
+        from VisualDetectionToolLibrary.PanelSearchToolV25 import (
+            PanelBoardSearch,
+        )
+    except ImportError:
+        print("[ERROR] PanelSearchToolV25 not found. "
+              "Cannot run heuristic comparison.")
         raise
-    
-    model_path = Path(model_path)
+
     pdf_path = Path(pdf_path)
-    
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
     if output_dir:
         output_dir = Path(output_dir)
     else:
         output_dir = Path("comparison_results")
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     if verbose:
         print(f"[INFO] Comparing ML vs Heuristic on: {pdf_path.name}")
-    
-    # Run heuristic detector
+
+    # --- heuristic detector ---
     heuristic_dir = output_dir / "heuristic"
     heuristic_detector = PanelBoardSearch(
         output_dir=str(heuristic_dir),
@@ -303,146 +433,132 @@ def compare_with_heuristic(
         verbose=False,
     )
     heuristic_results = heuristic_detector.readPdf(str(pdf_path))
-    
-    # Run ML detector (on rendered pages)
-    model = YOLO(str(model_path))
-    doc = pdfium.PdfDocument(str(pdf_path))
-    scale = 400 / 72.0  # Match heuristic DPI
-    
-    ml_results = []
-    for page_idx in range(len(doc)):
-        page = doc[page_idx]
-        bitmap = page.render(scale=scale)
-        img_array = np.array(bitmap.to_pil())
-        
-        # Convert to BGR for YOLO
-        if len(img_array.shape) == 2:
-            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
-        elif img_array.shape[2] == 4:
-            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
-        else:
-            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        
-        results = model(img_bgr, verbose=False)
-        for r in results:
-            for box in r.boxes:
-                ml_results.append({
-                    'page': page_idx + 1,
-                    'bbox': box.xyxy[0].tolist(),
-                    'confidence': float(box.conf[0]),
-                    'class': model.names[int(box.cls[0])],
-                })
-    
-    doc.close()
-    
+
+    # --- ML detector ---
+    ml_dir = output_dir / "ml"
+    ml_detector = TableDetectorML(
+        output_dir=str(ml_dir),
+        model_path=str(model_path),
+        conf_threshold=conf_threshold,
+        dpi=400,
+        enforce_one_box=False,
+        verbose=False,
+    )
+    ml_results = ml_detector.readPdf(str(pdf_path))
+
     comparison = {
-        'pdf': str(pdf_path),
-        'heuristic': {
-            'num_detections': len(heuristic_results),
-            'output_files': heuristic_results,
+        "pdf": str(pdf_path),
+        "conf_threshold": conf_threshold,
+        "heuristic": {
+            "num_detections": len(heuristic_results),
+            "output_files": heuristic_results,
         },
-        'ml_model': {
-            'num_detections': len(ml_results),
-            'detections': ml_results,
+        "ml_model": {
+            "model_path": str(model_path),
+            "num_detections": len(ml_results),
+            "output_files": ml_results,
         },
     }
-    
-    # Save comparison
+
     comparison_file = output_dir / "comparison.json"
     with open(comparison_file, 'w') as f:
         json.dump(comparison, f, indent=2)
-    
+
     if verbose:
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print("COMPARISON RESULTS")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         print(f"Heuristic detections: {len(heuristic_results)}")
         print(f"ML model detections:  {len(ml_results)}")
+        print(f"\nHeuristic overlays: {heuristic_dir / 'magenta_overlays'}")
+        print(f"ML overlays:        {ml_dir / 'magenta_overlays'}")
         print(f"\nResults saved to: {comparison_file}")
-    
+
     return comparison
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate trained table detection model"
+        description="Evaluate Table Transformer table detection model"
     )
     parser.add_argument(
-        "--model", "-m",
-        required=True,
-        help="Path to trained model weights (.pt file)"
+        "--model", "-m", required=True,
+        help="Path to fine-tuned Table Transformer model directory",
     )
     parser.add_argument(
         "--data", "-d",
-        help="Path to data.yaml for validation set evaluation"
+        help="Data directory with images/ and COCO annotations "
+             "for mAP evaluation",
     )
     parser.add_argument(
         "--images", "-i",
-        help="Directory of images for inference"
+        help="Directory of images for inference",
     )
     parser.add_argument(
         "--pdf",
-        help="PDF file for comparison with heuristic detector"
+        help="PDF file for comparison with heuristic detector",
     )
     parser.add_argument(
         "--output", "-o",
-        help="Output directory for results"
+        help="Output directory for results",
     )
     parser.add_argument(
-        "--conf",
-        type=float,
-        default=0.25,
-        help="Confidence threshold (default: 0.25)"
+        "--conf", type=float, default=0.5,
+        help="Confidence threshold (default: 0.5)",
     )
     parser.add_argument(
-        "--iou",
-        type=float,
-        default=0.5,
-        help="IoU threshold for mAP (default: 0.5)"
+        "--no-visualizations", action="store_true",
+        help="Don't save visualization images",
     )
     parser.add_argument(
-        "--no-visualizations",
-        action="store_true",
-        help="Don't save visualization images"
+        "--quiet", "-q", action="store_true",
+        help="Suppress progress output",
     )
-    parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Suppress progress output"
-    )
-    
+
     args = parser.parse_args()
     verbose = not args.quiet
-    
+
+    model_path = os.path.expanduser(args.model)
+    if not os.path.exists(model_path):
+        print(f"[ERROR] Model not found: {model_path}")
+        return 1
+
     if args.data:
+        data_dir = os.path.expanduser(args.data)
         evaluate_on_dataset(
-            model_path=args.model,
-            data_yaml=args.data,
+            model_path=model_path,
+            data_dir=data_dir,
             output_dir=args.output,
             conf_threshold=args.conf,
-            iou_threshold=args.iou,
             verbose=verbose,
         )
     elif args.images:
+        images_dir = os.path.expanduser(args.images)
         run_inference_on_images(
-            model_path=args.model,
-            images_dir=args.images,
+            model_path=model_path,
+            images_dir=images_dir,
             output_dir=args.output,
             conf_threshold=args.conf,
             save_visualizations=not args.no_visualizations,
             verbose=verbose,
         )
     elif args.pdf:
+        pdf_path = os.path.expanduser(args.pdf)
         compare_with_heuristic(
-            model_path=args.model,
-            pdf_path=args.pdf,
+            model_path=model_path,
+            pdf_path=pdf_path,
             output_dir=args.output,
+            conf_threshold=args.conf,
             verbose=verbose,
         )
     else:
         print("[ERROR] Must provide --data, --images, or --pdf")
         return 1
-    
+
     return 0
 
 

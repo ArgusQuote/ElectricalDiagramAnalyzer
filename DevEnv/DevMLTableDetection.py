@@ -28,10 +28,6 @@ from MLTableDetection import TableDetectorML
 INPUT_PDF = Path("~/Documents/SinglePdf").expanduser()
 OUTPUT_BASE = Path("~/Documents/ML_Test").expanduser()
 
-# Separate output directories for comparison
-OUTPUT_FINETUNED = OUTPUT_BASE / "finetuned"
-OUTPUT_PRETRAINED = OUTPUT_BASE / "pretrained"
-
 # Fine-tuned model path
 FINETUNED_MODEL = Path("~/Documents/TableAnnotations/models/final").expanduser()
 
@@ -50,7 +46,8 @@ def find_pdf_in_dir(dir_path: Path) -> Path:
 
 
 def run_detection(pdf_path: Path, output_dir: Path, model_path: str | None, 
-                  model_name: str, conf_threshold: float = 0.5) -> list[str]:
+                  model_name: str, conf_threshold: float = 0.5,
+                  dpi: int = 400) -> list[str]:
     """
     Run table detection with specified model.
     
@@ -60,6 +57,8 @@ def run_detection(pdf_path: Path, output_dir: Path, model_path: str | None,
         model_path: Path to model or None for pretrained.
         model_name: Display name for logging.
         conf_threshold: Confidence threshold for detections.
+        dpi: Resolution for rendering PDF pages. Must match the DPI
+             used to render training images (currently 400 DPI).
     
     Returns:
         List of generated PNG paths.
@@ -71,12 +70,14 @@ def run_detection(pdf_path: Path, output_dir: Path, model_path: str | None,
     print(f"{'=' * 60}")
     print(f"  Model: {model_path or 'microsoft/table-transformer-detection'}")
     print(f"  Confidence threshold: {conf_threshold}")
+    print(f"  Detection DPI: {dpi}")
     print(f"  Output: {output_dir}")
     
     detector = TableDetectorML(
         output_dir=str(output_dir),
         model_path=model_path,
         conf_threshold=conf_threshold,
+        dpi=dpi,
         enforce_one_box=False,
         verbose=True,
     )
@@ -85,44 +86,6 @@ def run_detection(pdf_path: Path, output_dir: Path, model_path: str | None,
     
     print(f"\n[{model_name}] Tables detected: {len(crops)}")
     return crops
-
-
-def print_comparison(finetuned_crops: list[str], pretrained_crops: list[str]):
-    """Print side-by-side comparison of results."""
-    print("\n" + "=" * 70)
-    print("COMPARISON SUMMARY")
-    print("=" * 70)
-    
-    print(f"\n{'Model':<25} {'Tables Detected':<20}")
-    print("-" * 45)
-    print(f"{'Fine-tuned':<25} {len(finetuned_crops):<20}")
-    print(f"{'Pretrained':<25} {len(pretrained_crops):<20}")
-    
-    diff = len(finetuned_crops) - len(pretrained_crops)
-    if diff > 0:
-        print(f"\nFine-tuned detected {diff} MORE table(s)")
-    elif diff < 0:
-        print(f"\nPretrained detected {abs(diff)} MORE table(s)")
-    else:
-        print("\nBoth models detected the same number of tables")
-    
-    print("\n" + "-" * 70)
-    print("OUTPUT LOCATIONS:")
-    print("-" * 70)
-    print(f"\nFine-tuned outputs:")
-    print(f"  - PNG crops: {OUTPUT_FINETUNED}")
-    print(f"  - PDF crops: {OUTPUT_FINETUNED / 'cropped_tables_pdf'}")
-    print(f"  - Overlays:  {OUTPUT_FINETUNED / 'magenta_overlays'}")
-    
-    print(f"\nPretrained outputs:")
-    print(f"  - PNG crops: {OUTPUT_PRETRAINED}")
-    print(f"  - PDF crops: {OUTPUT_PRETRAINED / 'cropped_tables_pdf'}")
-    print(f"  - Overlays:  {OUTPUT_PRETRAINED / 'magenta_overlays'}")
-    
-    print("\n" + "-" * 70)
-    print("TIP: Compare the overlay images in 'magenta_overlays' folders")
-    print("     to see which regions each model detected.")
-    print("-" * 70)
 
 
 def main():

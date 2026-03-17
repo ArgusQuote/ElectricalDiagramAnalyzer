@@ -1,0 +1,24 @@
+---
+description: Tracks known issues, limitations, and deferred work items. Consult before starting work on a component to check for known problems. Update when discovering new issues or resolving existing ones.
+alwaysApply: true
+---
+
+# Known Issues
+
+The file `KNOWN_ISSUES.md` at the project root tracks known bugs, limitations, and
+deferred work items.
+
+## How to Use
+
+- **Before working on a component**: Check `KNOWN_ISSUES.md` for known problems
+  that may affect your work or that your work could address.
+- **When discovering a new issue**: Add an entry with status, date, component,
+  problem description, and any known root cause or workaround.
+- **When resolving an issue**: Update the status to "Resolved" with the date and
+  a brief note on the fix, but keep the entry for historical context.
+
+## Current Open Issues
+
+- **ML Table Detection underperforms heuristic baseline** -- The fine-tuned Table
+  Transformer model detects fewer tables with less precision than `PanelSearchToolV25`.
+  Needs more training data and tuning. See `KNOWN_ISSUES.md` for details.
