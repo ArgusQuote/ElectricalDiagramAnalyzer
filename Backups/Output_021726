@@ -1,0 +1,2833 @@
+from ._anvil_designer import outputTemplate
+from anvil import *
+from routing import router
+import stripe.checkout
+from anvil import BlobMedia
+import anvil.server
+import anvil.users
+import json
+from ..FeedbackDialog import FeedbackDialog
+from anvil import js
+from .. import router_state
+
+# ---------- CSV inclusion policy ----------
+ALWAYS_INCLUDE = {
+  "Interior","Interior/Box","Box","Trim","Cover",
+  "Main Breaker","Main Breaker Kit",
+  "Blanks/Filler","Breaker"
+}
+# Optional by default (user can check to include)
+OPTIONAL_DEFAULT_OFF = {
+  "SPD","Service Entrance Kit","Service Entrance Barrier Kit",
+  "Neutral","Neutral (100%)","Neutral (200%)","Feed-Thru Lugs"
+}
+# Optional but pre-checked (cheap/convenient)
+OPTIONAL_DEFAULT_ON = {"Ground Bar Kit"}
+
+CARD_FONT_SIZE = 20
+
+class output(outputTemplate):
+  def __init__(self, result: dict, job_name: str = None, **properties):
+    self.init_components(**properties)
+    for n in ("content_panel", "linear_panel_1"):
+      try:
+        c = getattr(self, n, None)
+        if c is not None:
+          c.width = "100%"
+      except Exception:
+        pass
+        
+    if not anvil.users.get_user():
+      js.window.location.hash = "landing"
+      return
+
+    # NEW: entitlement gate
+    try:
+      ent = anvil.server.call("is_current_user_entitled") or {}
+      if not ent.get("ok"):
+        js.window.location.hash = "upload"
+        return
+    except Exception:
+      js.window.location.hash = "landing"
+      return
+      
+    self._panel_order = []
+
+    if hasattr(self, "btn_show_raw"):
+      self.btn_show_raw.set_event_handler('click', self.btn_show_raw_click)
+    if hasattr(self, "download_btn"):
+      self.download_btn.set_event_handler('click', self._download_and_feedback_click)
+    if hasattr(self, "new_job_btn"):
+      self.new_job_btn.set_event_handler('click', self.new_job_btn_click)
+
+    if hasattr(self, "jobs_btn"):
+      self.jobs_btn.set_event_handler('click', self.jobs_btn_click)
+
+    if hasattr(self, "logout_btn"):
+      self.logout_btn.set_event_handler('click', self.logout_btn_click)
+
+    # cache of the flattened rows we show in the main grid
+    self._flat_rows = []
+
+    # Where the VM payload lives
+    self.result = result or {}
+    self.job_name = (job_name or "").strip()
+
+    # Title
+    if hasattr(self, "label_job"):
+      self.label_job.text = f"BOM - {self.job_name or '(untitled)'}"
+    else:
+      self.add_component(Label(text=f"BOM - {self.job_name or '(untitled)'}",
+                               role="headline"), slot=None)
+
+    self._set_ttp_label()
+    
+    self._render_detected_panels_header_only()
+    self._render_detected_panels_many_tables()
+    
+    self._render_non_panel_table()
+    self._render()
+    
+    # Ensure page stays full width after router/theme/layout settles
+    self._force_full_width_everywhere()
+    self.set_event_handler("show", self._force_full_width_everywhere)
+    self.set_event_handler("hide", self._wide_off)
+    try:
+      js.window.setTimeout(self._force_full_width_everywhere, 50)
+      js.window.setTimeout(self._force_full_width_everywhere, 200)
+      js.window.setTimeout(self._force_full_width_everywhere, 500)
+    except Exception:
+      pass
+
+  def _wide_off(self, **e):
+    # undo the "wide" mode this form enables
+    try:
+      js.document.body.removeAttribute("data-argus-wide")
+    except Exception:
+      pass
+  
+    # remove injected CSS nodes
+    for attr in ("_css_wide_node", "_css_output_node"):
+      try:
+        n = getattr(self, attr, None)
+        if n is not None:
+          n.remove()
+          setattr(self, attr, None)
+      except Exception:
+        pass
+
+  def _add_full_width(self, parent, comp):
+    """Add comp to parent, forcing full-width row when parent is a ColumnPanel."""
+    try:
+      if isinstance(parent, ColumnPanel):
+        parent.add_component(comp, full_width_row=True)
+      else:
+        parent.add_component(comp)
+    except TypeError:
+      # fallback for containers that don't accept full_width_row kwarg
+      parent.add_component(comp)
+
+  def _force_full_width_everywhere(self, **e):
+    try:
+      js.window.setTimeout(self._force_full_width_now, 0)
+    except Exception:
+      self._force_full_width_now()
+
+  def _force_full_width_now(self):
+    try:
+      node = js.get_dom_node(self)
+
+      # tag the form itself (fine to keep)
+      try:
+        node.setAttribute("data-argus-output", "1")
+      except Exception:
+        pass
+      
+      # THIS is the important part
+      self._tag_and_expand_bootstrap_ancestors(node)
+
+      try:
+        js.document.body.setAttribute("data-argus-wide", "1")
+
+        if not hasattr(self, "_css_wide_node") or self._css_wide_node is None:
+          css = """
+                /* --- Root: allow full width when wide mode is enabled --- */
+                html, body {
+                  width: 100% !important;
+                  max-width: none !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                }
+                
+                body[data-argus-wide="1"] {
+                  width: 100% !important;
+                  max-width: none !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                }
+                
+                /* --- Anvil/theme wrappers that commonly cap width (keep global) --- */
+                body[data-argus-wide="1"] #appGoesHere,
+                body[data-argus-wide="1"] .anvil-app,
+                body[data-argus-wide="1"] .anvil-app-container,
+                body[data-argus-wide="1"] .anvil-page,
+                body[data-argus-wide="1"] .anvil-page-container,
+                body[data-argus-wide="1"] .anvil-page-wrapper,
+                body[data-argus-wide="1"] .anvil-content,
+                body[data-argus-wide="1"] .anvil-container,
+                body[data-argus-wide="1"] .container,
+                body[data-argus-wide="1"] .container-fluid {
+                  width: 100% !important;
+                  max-width: none !important;
+                  margin-left: 0 !important;
+                  margin-right: 0 !important;
+                }
+                
+                /* Kill common gutters that create side margins */
+                body[data-argus-wide="1"] .anvil-content,
+                body[data-argus-wide="1"] .anvil-container,
+                body[data-argus-wide="1"] .container,
+                body[data-argus-wide="1"] .container-fluid {
+                  padding-left: 0 !important;
+                  padding-right: 0 !important;
+                }
+                
+                /* =========================================================
+                  IMPORTANT: BOOTSTRAP GRID OVERRIDES (SCOPED)
+                  Only apply to your output form subtree.
+                  This is what prevents linear_panel_3, etc. from stretching.
+                  ========================================================= */
+                
+                /* Rows add negative margins; only nuke them inside output subtree */
+                body[data-argus-wide="1"] [data-argus-output="1"] .row {
+                  margin-left: 0 !important;
+                  margin-right: 0 !important;
+                }
+                
+                /* Force any bootstrap column to full width ONLY inside output subtree */
+                body[data-argus-wide="1"] [data-argus-output="1"] [class*="col-"],
+                body[data-argus-wide="1"] [data-argus-output="1"] .col,
+                body[data-argus-wide="1"] [data-argus-output="1"] .col-auto {
+                  flex: 0 0 100% !important;
+                  max-width: 100% !important;
+                  width: 100% !important;
+                  padding-left: 0 !important;
+                  padding-right: 0 !important;
+                }
+                
+                /* =========================================================
+                  DataGrid stretch helpers (scoped to hostwide containers)
+                  ========================================================= */
+                body[data-argus-wide="1"] [data-argus-hostwide="1"] .anvil-data-grid,
+                body[data-argus-wide="1"] [data-argus-hostwide="1"] .anvil-data-grid-wrapper,
+                body[data-argus-wide="1"] [data-argus-hostwide="1"] .anvil-data-grid table {
+                  width: 100% !important;
+                  max-width: none !important;
+                }
+                
+                body[data-argus-wide="1"] [data-argus-hostwide="1"] .anvil-data-grid,
+                body[data-argus-wide="1"] [data-argus-hostwide="1"] .anvil-data-grid-wrapper {
+                  display: block !important;
+                }
+                
+                /* =========================================================
+                  Zebra roles (keep)
+                  ========================================================= */
+                .anvil-role-zebra-even { background: rgba(255,255,255,0.03); }
+                .anvil-role-zebra-odd  { background: rgba(255,255,255,0.00); }
+
+          """
+          style_node = js.document.createElement("style")
+          style_node.type = "text/css"
+          style_node.setAttribute("data-argus", "wide-layout")
+          style_node.appendChild(js.document.createTextNode(css))
+          js.document.head.appendChild(style_node)
+          self._css_wide_node = style_node
+      except Exception:
+        pass
+        
+      # Walk up and kill max-width on every ancestor (this is what fixes "skinny")
+      el = node
+      hops = 0
+      while el is not None and hops < 60:
+        try:
+          s = el.style
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("width", "100%", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+          s.setProperty("padding-left", "0", "important")
+          s.setProperty("padding-right", "0", "important")
+        except Exception:
+          pass
+
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+
+        hops += 1
+
+      # Optional padding so it’s not edge-to-edge
+      try:
+        node.style.setProperty("padding-left", "0", "important")
+        node.style.setProperty("padding-right", "0", "important")
+      except Exception:
+        pass
+        
+      # Hard-force key host panels to full width
+      for n in ("content_panel", "linear_panel_1", "linear_panel_3", "linear_panel_4"):
+        try:
+          c = getattr(self, n, None)
+          if c is not None:
+            c.width = "100%"
+            elc = js.get_dom_node(c)
+            if elc:
+              elc.style.setProperty("width", "100%", "important")
+              elc.style.setProperty("max-width", "none", "important")
+              elc.style.setProperty("display", "block", "important")
+        except Exception:
+          pass
+
+      # FORCE datagrid/table to actually fill the card width
+      try:
+        if not hasattr(self, "_css_output_node") or self._css_output_node is None:
+          css = """
+          /* ========== WIDE MODE ROOT ========== */
+          html, body {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          
+          body[data-argus-wide="1"] {
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          
+          /* ========== ANVIL/THEME WRAPPERS THAT CAP WIDTH ========== */
+          body[data-argus-wide="1"] #appGoesHere,
+          body[data-argus-wide="1"] .anvil-app,
+          body[data-argus-wide="1"] .anvil-app-container,
+          body[data-argus-wide="1"] .anvil-page,
+          body[data-argus-wide="1"] .anvil-page-container,
+          body[data-argus-wide="1"] .anvil-page-wrapper,
+          body[data-argus-wide="1"] .anvil-content,
+          body[data-argus-wide="1"] .anvil-container,
+          body[data-argus-wide="1"] .container,
+          body[data-argus-wide="1"] .container-fluid {
+            width: 100% !important;
+            max-width: none !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+          }
+          
+          /* Kill gutters that create visible side margins */
+          body[data-argus-wide="1"] .anvil-content,
+          body[data-argus-wide="1"] .anvil-container,
+          body[data-argus-wide="1"] .container,
+          body[data-argus-wide="1"] .container-fluid {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+          }
+          
+          /* ========== BOOTSTRAP GRID (THIS IS THE REAL FIX) ========== */
+          /* Rows add negative margins; nuke them */
+          body[data-argus-wide="1"] .row {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+          }
+          
+          /* Force ANY bootstrap column to full width when wide-mode is on.
+            This hits the *ancestor* col-md-* that usually caps your form. */
+          body[data-argus-wide="1"] [class*="col-"],
+          body[data-argus-wide="1"] .col,
+          body[data-argus-wide="1"] .col-auto {
+            flex: 0 0 100% !important;
+            max-width: 100% !important;
+            width: 100% !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+          }
+          
+          /* ========== YOUR ZEBRA ROW ROLES (keep) ========== */
+          .anvil-role-zebra-even { background: rgba(255,255,255,0.03); }
+          .anvil-role-zebra-odd  { background: rgba(255,255,255,0.00); }
+          """
+
+          style_node = js.document.createElement("style")
+          style_node.type = "text/css"
+          style_node.setAttribute("data-argus", "output-width")
+          style_node.appendChild(js.document.createTextNode(css))
+          js.document.head.appendChild(style_node)
+          self._css_output_node = style_node
+
+      except Exception:
+        pass
+        
+      try:
+        js.window.setTimeout(self._tag_status_rows, 0)
+      except Exception:
+        self._tag_status_rows()
+        
+    except Exception:
+      pass
+
+  def _patch_status_row_colspan(self):
+    """
+    Make status rows truly span all columns by applying colspan to the first TD
+    and removing the remaining TDs.
+    """
+    try:
+      dg = getattr(self, "data_grid_2", None)
+      if not isinstance(dg, DataGrid):
+        return
+  
+      root = js.get_dom_node(dg)
+  
+      # Find the marker label we set: lab.role = "status-marker"
+      markers = root.querySelectorAll(".anvil-role-status-marker")
+      mcount = int(markers.length) if hasattr(markers, "length") else 0
+      if mcount == 0:
+        return
+  
+      for idx in range(mcount):
+        try:
+          m = markers.item(idx)
+          tr = m.closest("tr")
+          if not tr:
+            continue
+  
+          tr.classList.add("status-row")
+  
+          tds = tr.querySelectorAll("td")
+          n = int(tds.length) if hasattr(tds, "length") else 0
+          if n < 2:
+            continue
+  
+          first = tds.item(0)
+          # span all columns
+          first.setAttribute("colspan", str(n))
+  
+          # remove remaining tds
+          # (remove index 1 repeatedly because NodeList can be "live")
+          while True:
+            tds2 = tr.querySelectorAll("td")
+            n2 = int(tds2.length) if hasattr(tds2, "length") else 0
+            if n2 <= 1:
+              break
+            try:
+              tds2.item(1).remove()
+            except Exception:
+              break
+  
+        except Exception:
+          pass
+  
+    except Exception:
+      pass
+
+  def _tag_status_rows(self):
+    """
+    Add a real CSS class to the <tr> that contains our status marker label,
+    so our CSS rule `tr.status-row td:not(:first-child)` actually applies.
+    """
+    try:
+      dg = getattr(self, "data_grid_2", None)
+      if not isinstance(dg, DataGrid):
+        return
+
+      root = js.get_dom_node(dg)
+
+      # Find the marker labels (Anvil renders role as .anvil-role-<role>)
+      markers = root.querySelectorAll(".anvil-role-status-marker")
+
+      for m in markers:
+        try:
+          tr = m.closest("tr")
+          if tr:
+            tr.classList.add("status-row")
+        except Exception:
+          pass
+    except Exception:
+      pass
+      
+  # ---------- Card helpers ----------
+  def _panel_source(self, designation: str):
+    """Return (source_path, display_name) for this designation, or (None, name)."""
+    des_n = self._norm(designation)
+    for row in (self._extract_panels() or []):
+      if self._norm(row.get("name")) == des_n:
+        return (row.get("source") or "").strip(), (row.get("name") or "").strip()
+    return None, designation
+
+  def _panel_quick_attrs(self, designation: str) -> dict:
+    """Return quick attributes for a designation from components/attrs, with safe defaults."""
+    amap = self._panel_attrs_map() or {}
+    a = amap.get(self._norm(designation), {}) or {}
+    # Try to backfill from the top-panel table rows if attrs empty
+    if not a:
+      for row in (self._extract_panels() or []):
+        if self._norm(row.get("name")) == self._norm(designation):
+          a = {
+            "amperage": row.get("amperage"),
+            "voltage": row.get("voltage"),
+            "intRating": row.get("int_rating"),
+            "spaces": row.get("spaces"),
+            "mainBreakerAmperage": row.get("main_brk_amps"),
+          }
+          break
+    return a
+
+  def _fmt_attr_chip(self, label: str, value) -> Component:
+    """Single-line chip: 'Label: value' (no stacked text)."""
+    txt = "-" if value in (None, "", "NONE") else str(value)
+    lab = Label(text=f"{label}: {txt}", foreground="theme:Background")
+    lab.width = "18%"      # helps distribute across the bar
+    return lab
+
+  def _make_item_row(self, row_dict: dict) -> Component:
+    """
+    Build a single BOM item row for a card.
+    Columns: Item Type | Product | Description | Qty | Include
+    """
+    row = FlowPanel(spacing='small')
+    row.role = None
+
+    def L(text, w=None, align=None, bold=False):
+      lab = Label(text=text, bold=bold, align=align)
+      if w: lab.width = w
+      return lab
+
+    # Compute description (like your DataGrid path)
+    try:
+      row_dict["description"] = self._describe_row(row_dict)
+    except Exception:
+      row_dict["description"] = ""
+
+    # Columns (use fixed-ish widths for quick readability in cards)
+    row.add_component(L(str(row_dict.get("item_type","")),   w="12%"))
+    row.add_component(L(str(row_dict.get("product","")),     w="28%"))
+    row.add_component(L(str(row_dict.get("description","")), w="34%"))
+    row.add_component(L(str(row_dict.get("qty","")),         w="8%", align="center"))
+
+    itype = (row_dict.get("item_type") or "").strip()
+    show_cb = itype not in ("Note", "Skipped")
+    if show_cb:
+      cb = CheckBox()
+      cb.checked = bool(row_dict.get("csv_include", False))
+      cb.enabled = bool(row_dict.get("csv_selectable", False))
+      cb.tooltip = "Include this row in CSV"
+      def _on_change(sender=cb, r=row_dict, **e):
+        r["csv_include"] = bool(sender.checked)
+      cb.set_event_handler('change', _on_change)
+      row.add_component(cb)
+    else:
+      row.add_component(L("", w="8%"))
+
+    return row
+
+  def _get_cards_host(self):
+    """
+    Return the container to render cards into.
+    Prefer a design-time LinearPanel named 'linear_panel_1' if present,
+    otherwise fall back to content_panel.
+    """
+    host = getattr(self, "linear_panel_1", None)
+    if isinstance(host, (ColumnPanel, FlowPanel, LinearPanel, GridPanel, XYPanel, DataGrid)):
+      return host
+    return self.content_panel
+
+  def _make_items_grid(self, rows: list) -> DataGrid:
+    dg = DataGrid()
+    dg.width = "100%"
+    dg.show_header = True
+    dg.show_page_controls = False
+    dg.rows_per_page = 1000
+    dg.role = "bom-grid"
+
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+
+    dg.columns = [
+      {"id":"item",    "title":"Item",        "data_key":"item"},
+      {"id":"pn",      "title":"Part Number", "data_key":"pn"},
+      {"id":"details", "title":"Details",     "data_key":"details"},
+      {"id":"qty",     "title":"Qty",         "data_key":"qty", "width":70},
+      {"id":"include", "title":"Include",     "data_key":"include", "width":90},
+    ]
+
+    # Clear previous rows/components
+    for c in list(dg.get_components()):
+      try: c.remove_from_parent()
+      except Exception: pass
+
+    def H(text, align=None):
+      lab = Label(text=text, bold=True, align=align)
+      lab.font_size = CARD_FONT_SIZE
+      lab.foreground = "theme:Background"
+      return lab
+
+    def L(text, align=None):
+      lab = Label(text=text, align=align)
+      lab.font_size = CARD_FONT_SIZE
+      lab.foreground = "theme:Background"
+      return lab
+
+    # Header row
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.add_component(H("Item"), column="item")
+    hdr.add_component(H("Part Number"), column="pn")
+    hdr.add_component(H("Details"), column="details")
+    hdr.add_component(H("Qty", align="center"), column="qty")
+    hdr.add_component(H("Include", align="center"), column="include")
+    dg.add_component(hdr, slot="header")
+
+    # Rows
+    for i, r in enumerate(rows):
+      try:
+        r["description"] = self._describe_row(r)
+      except Exception:
+        r["description"] = ""
+
+      role = "zebra-odd" if (i % 2 == 0) else "zebra-even"
+      row = DataRowPanel(role=role)
+
+      row.add_component(L(str(r.get("item_type",""))), column="item")
+      row.add_component(L(str(r.get("product",""))), column="pn")
+      row.add_component(L(str(r.get("description",""))), column="details")
+      row.add_component(L(str(r.get("qty","")), align="center"), column="qty")
+
+      itype = (r.get("item_type") or "").strip()
+      if itype not in ("Note","Skipped"):
+        cb = CheckBox()
+        cb.checked = bool(r.get("csv_include", False))
+        cb.enabled = bool(r.get("csv_selectable", False))
+        cb.tooltip = "Include this row in CSV"
+
+        def _on_change(sender=cb, rr=r, **e):
+          rr["csv_include"] = bool(sender.checked)
+
+        cb.set_event_handler('change', _on_change)
+        row.add_component(cb, column="include")
+      else:
+        row.add_component(L("", align="center"), column="include")
+
+      dg.add_component(row)
+
+    return dg
+
+
+  def _make_attr_grid(self, designation: str) -> DataGrid:
+    """One-row grid with inline 'Amps / Volts / Main Amps / IR / Spaces' to match Detected Items."""
+    attrs = self._panel_quick_attrs(designation) or {}
+  
+    def _i(v):
+      try:
+        return int(str(v).strip())
+      except:
+        return None
+  
+    def _ka(v):
+      try:
+        if v is None or str(v).strip().upper() == "NONE":
+          return "-"
+        return f"{int(str(v).strip())}K"
+      except:
+        return "-"
+  
+    amps_i  = _i(attrs.get('amperage'))
+    volt_i  = _i(attrs.get('voltage'))
+    main_i  = _i(attrs.get('mainBreakerAmperage'))
+    ir_txt  = _ka(attrs.get('intRating'))
+    space_i = _i(attrs.get('spaces'))
+  
+    # Match Detected Items column order and label text
+    cells = [
+      f"Bus Amps: {f'{amps_i}A' if amps_i is not None else '-'}",
+      f"Volts: {f'{volt_i}V' if volt_i is not None else '-'}",
+      f"Main Amps: {f'{main_i}' if main_i is not None else '-'}",
+      f"Int Rating: {ir_txt}",
+      f"Spaces: {f'{space_i}ckt' if space_i is not None else '-'}",
+    ]
+  
+    dg = DataGrid()
+    dg.width = "100%"
+    dg.show_header = False
+    dg.show_page_controls = False
+    dg.rows_per_page = 1
+    dg.role = "attr-grid"
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+    dg.columns = [
+      {"id":"c1","title":"","data_key":"c1"},
+      {"id":"c2","title":"","data_key":"c2"},
+      {"id":"c3","title":"","data_key":"c3"},
+      {"id":"c4","title":"","data_key":"c4"},
+      {"id":"c5","title":"","data_key":"c5"},
+    ]
+  
+    row = DataRowPanel()
+    for i, text in enumerate(cells, start=1):
+      lab = Label(text=text, bold=True, foreground="theme:Background")
+      lab.font_size = CARD_FONT_SIZE
+      row.add_component(lab, column=f"c{i}")
+    dg.add_component(row)
+    return dg
+
+  def _panel_attrs_all_none(self, designation: str) -> bool:
+    def _missing(v):
+      if v is None: return True
+      s = str(v).strip().upper()
+      return (s == "" or s == "NONE" or s == "X" or s == "-")
+    attrs = self._panel_quick_attrs(designation) or {}
+    keys = ("amperage", "voltage", "intRating", "spaces", "mainBreakerAmperage")
+    return all(_missing(attrs.get(k)) for k in keys)
+
+  def _rows_have_real_items(self, rows: list) -> bool:
+    # real = anything the user could include in CSV (we set csv_selectable=True in _normalize_rules)
+    return any(bool(r.get("csv_selectable")) for r in (rows or []))
+
+  def _nonpanel_from_attrless_panels(self) -> list[dict]:
+    out = []
+    for p in (self._extract_panels() or []):
+      name = (p.get("name") or "").strip()
+      if not name:
+        continue
+      if self._panel_attrs_all_none(name):
+        src = (p.get("source") or "").strip()
+        if src:
+          out.append({"source": src})
+    return out
+
+  def _render_cards_bom(self, rows_by_des: dict):
+    """
+    One 'elevated-card' per designation, stacked vertically inside linear_panel_1.
+    Header: Name (left) + Attr chips (right, same line).
+    Body: DataGrid of items.
+    """
+    # Hide old DataGrid if present
+    dg_legacy = getattr(self, "data_grid_1", None)
+    if isinstance(dg_legacy, DataGrid):
+      try: dg_legacy.visible = False
+      except Exception: pass
+
+    host = self._get_cards_host()
+    try:
+      host.width = "100%"
+    except Exception:
+      pass
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+
+    # Build cards in visual order
+    for des in self._iter_designations_in_panel_order(rows_by_des):
+      rows = rows_by_des.get(des) or []
+      if not rows:
+        continue
+    
+      if self._panel_attrs_all_none(des):
+        continue
+    
+      if not self._rows_have_real_items(rows):
+        continue
+    
+      # Skip if:
+      #  1) header attrs are effectively empty (None/"NONE"/"x"), OR
+      #  2) there are no real CSV-selectable items (only Notes/Skipped)
+      try:
+        attrs_empty = self._panel_attrs_all_none(des)
+      except Exception:
+        attrs_empty = False
+    
+      if attrs_empty or (not self._rows_have_real_items(rows)):
+        continue
+
+      # ----- Card container -----
+      card = ColumnPanel(role="elevated-card")
+      card.width = "100%"
+      card.padding = "18px"
+      card.spacing = "medium"
+      card.background = "theme:Text Primary"
+      card.foreground = "theme:Background"
+
+      # ----- Header row: title left, "View" button right -----
+      header = FlowPanel(spacing='none')
+      header.width = "100%"
+      
+      title = Label(text=str(des or "(unnamed)"), bold=True, foreground="theme:Background")
+      title.font_size = CARD_FONT_SIZE
+      header.add_component(title)
+      
+      # Push the button to the right
+      header.add_component(Spacer(width="100%"))
+      
+      # Build a "View" button like the one in the top grid
+      src, disp_name = self._panel_source(des)
+      btn_view = Button(
+        text="View",
+        foreground="#117BC3",
+        background="transparent",
+        bold=True,
+        role=None,
+        underline=True
+      )
+      btn_view.font_size = CARD_FONT_SIZE
+
+      btn_view.enabled = bool(src)
+      btn_view.tag = {
+        "source": src or "",
+        "name":   disp_name or (des or "(panel)"),
+        "job_id": (self.result.get("job_id") or "").strip()
+      }
+      btn_view.tooltip = "Preview detected overlay" if btn_view.enabled else "No image available"
+      btn_view.set_event_handler('click', self._preview_click)
+      
+      header.add_component(btn_view)
+      
+      # Add the header row to the card
+      card.add_component(header)
+
+      # ----- Inline attribute grid (Bus/Volts/IR/Spaces/Main) -----
+      card.add_component(self._make_attr_grid(des))
+
+      # ----- Items grid inside the card -----
+      items_grid = self._make_items_grid(rows)
+      card.add_component(items_grid)
+
+      # Add card and a small spacer for breathing room
+      host.add_component(card)
+      host.add_component(Spacer(height=18))
+
+  def _make_single_panel_table(self, panel_row: dict) -> DataGrid:
+    dg = DataGrid()
+    dg.width = "100%"
+    dg.show_header = False
+    dg.show_page_controls = False
+    dg.rows_per_page = 1
+    dg.role = "detected-panel-mini-grid"
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+  
+    # IMPORTANT: titles blank so no repeated labels appear per mini grid
+    dg.columns = [
+      {"id":"name",          "title":"", "data_key":"name",          "width": 200},
+      {"id":"amperage",      "title":"", "data_key":"amperage"},
+      {"id":"voltage",       "title":"", "data_key":"voltage"},
+      {"id":"main_brk_amps", "title":"", "data_key":"main_brk_amps"},
+      {"id":"int_rating",    "title":"", "data_key":"int_rating"},
+      {"id":"spaces",        "title":"", "data_key":"spaces"},
+      {"id":"preview",       "title":"", "data_key":"preview",       "width": 110},
+    ]
+  
+    def C(text, align="center", bold=False):
+      lab = Label(text=text, align=align, bold=bold)
+      lab.font_size = CARD_FONT_SIZE
+      return lab
+  
+    # ---------- display format helpers ----------
+    def _blankish(v):
+      if v is None:
+        return True
+      s = str(v).strip()
+      return s == "" or s.upper() in ("NONE", "X", "-")
+  
+    def _num(v):
+      if _blankish(v):
+        return None
+      s = str(v).strip()
+      # allow things like "22", "22.0"
+      try:
+        f = float(s)
+        i = int(f)
+        # preserve non-integer if truly non-integer
+        return str(i) if abs(f - i) < 1e-9 else str(f).rstrip("0").rstrip(".")
+      except Exception:
+        # if it's non-numeric, return raw trimmed
+        return s
+  
+    def _fmt_amps(v):
+      n = _num(v)
+      return "-" if n is None else f"{n}A"
+  
+    def _fmt_volts(v):
+      n = _num(v)
+      return "-" if n is None else f"{n}V"
+  
+    def _fmt_main_amps(v):
+      n = _num(v)
+      return "-" if n is None else f"{n}A MB"
+  
+    def _fmt_kaic(v):
+      n = _num(v)
+      return "-" if n is None else f"{n}K"
+  
+    def _fmt_spaces(v):
+      n = _num(v)
+      return "-" if n is None else f"{n}sp"
+    # -------------------------------------------
+  
+    dr = DataRowPanel()
+    dr.add_component(C(str(panel_row.get("name") or "-"), align="left", bold=True), column="name")
+    dr.add_component(C(_fmt_amps(panel_row.get("amperage"))), column="amperage")
+    dr.add_component(C(_fmt_volts(panel_row.get("voltage"))), column="voltage")
+    dr.add_component(C(_fmt_main_amps(panel_row.get("main_brk_amps"))), column="main_brk_amps")
+    dr.add_component(C(_fmt_kaic(panel_row.get("int_rating"))), column="int_rating")
+    dr.add_component(C(_fmt_spaces(panel_row.get("spaces"))), column="spaces")
+  
+    btn = Button(text="View", foreground="#117BC3", background="transparent", bold=True, underline=True)
+    btn.font_size = CARD_FONT_SIZE
+    btn.enabled = bool(panel_row.get("source"))
+    btn.tag = {
+      "source": panel_row.get("source"),
+      "name":   panel_row.get("name"),
+      "job_id": self.result.get("job_id") or ""
+    }
+    btn.tooltip = "Preview detected overlay" if btn.enabled else "No image available"
+    btn.set_event_handler('click', self._preview_click)
+    dr.add_component(btn, column="preview")
+  
+    dg.add_component(dr)
+    return dg
+
+  def _ensure_linear3_scoped_css(self):
+    try:
+      if getattr(self, "_css_linear3_node", None) is not None:
+        return
+  
+      css = """
+      /* ONLY affect containers you tag with data-argus-hostwide="1" */
+      [data-argus-hostwide="1"] {
+        width: 100% !important;
+        max-width: 100% !important;
+        display: block !important;
+        box-sizing: border-box !important;
+      }
+      
+      [data-argus-hostwide="1"] .anvil-data-grid,
+      [data-argus-hostwide="1"] .anvil-data-grid-wrapper,
+      [data-argus-hostwide="1"] table {
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+      }
+      
+      /* Keep row gutters from shrinking apparent width inside this panel only */
+      [data-argus-hostwide="1"] .row {
+        margin-left: 0 !important;
+        margin-right: 0 !important;
+      }
+      
+      /* Optional: if internal bootstrap cols appear INSIDE linear_panel_3 */
+      [data-argus-hostwide="1"] [class*="col-"],
+      [data-argus-hostwide="1"] .col,
+      [data-argus-hostwide="1"] .col-auto {
+        max-width: 100% !important;
+        width: 100% !important;
+      }
+      
+      /* =========================================================
+        linear_panel_3 ONLY: mini panel tables in detected section
+        Remove repeated column headers and any leftover header line
+        ========================================================= */
+      
+      /* Hide mini-grid header completely */
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid thead,
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid .anvil-data-grid-header {
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        border: 0 !important;
+      }
+      
+      /* Remove top border/line on table and wrappers */
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid table,
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid .anvil-data-grid,
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid .anvil-data-grid-wrapper {
+        border-top: 0 !important;
+        border: 0 !important;
+      }
+      
+      /* Remove any top rule on first body row/cells (theme-dependent) */
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid tbody tr:first-child,
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid tbody tr:first-child td,
+      [data-argus-hostwide="1"] .anvil-role-detected-panel-mini-grid tbody tr:first-child th {
+        border-top: 0 !important;
+      }
+      """
+  
+      style_node = js.document.createElement("style")
+      style_node.type = "text/css"
+      style_node.setAttribute("data-argus", "linear3-scoped")
+      style_node.appendChild(js.document.createTextNode(css))
+      js.document.head.appendChild(style_node)
+      self._css_linear3_node = style_node
+    except Exception:
+      pass
+
+  def _render_detected_panels_many_tables(self):
+    host = getattr(self, "linear_panel_3", None)
+    if not isinstance(host, (ColumnPanel, LinearPanel, FlowPanel)):
+      return
+  
+    host.width = "100%"
+  
+    try:
+      js.get_dom_node(host).setAttribute("data-argus-hostwide", "1")
+    except Exception:
+      pass
+  
+    self._ensure_linear3_scoped_css()
+  
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+  
+    all_rows = self._extract_panels() or []
+    if not all_rows:
+      host.add_component(Label(text="(No panels detected)"))
+      return
+  
+    # Keep ONLY good/usable panel statuses in linear_panel_3
+    rows = []
+    for r in all_rows:
+      name = (r.get("name") or "").strip()
+      status, note = self._panel_status(name)
+      if self._is_good_status_for_linear3(status):
+        rows.append((r, status, note))
+  
+    if not rows:
+      host.add_component(Label(text="(No usable panel outputs)"))
+      return
+  
+    for i, tup in enumerate(rows):
+      r, status, note = tup
+      zebra_role = "zebra-odd" if (i % 2 == 0) else "zebra-even"
+  
+      block = ColumnPanel(role=zebra_role)
+      block.width = "100%"
+      block.spacing = "none"
+      block.padding = "10px 0 10px 0"
+  
+      dg = self._make_single_panel_table(r)
+      self._add_full_width(block, dg)
+  
+      try:
+        js.window.setTimeout(lambda dg=dg: self._force_datagrid_table_full_width(dg), 0)
+        js.window.setTimeout(lambda dg=dg: self._force_datagrid_table_full_width(dg), 100)
+      except Exception:
+        self._force_datagrid_table_full_width(dg)
+  
+      status_text = status if not note else f"{status} — {note}"
+      lab = Label(text=f"Status: {status_text}", bold=True, align="left")
+      lab.foreground = "theme:Background"
+      lab.font_size = CARD_FONT_SIZE
+      self._add_full_width(block, lab)
+  
+      self._add_full_width(host, block)
+
+  def _force_host_full_width(self, host_component):
+    """
+    Force a specific Anvil component (like linear_panel_3) to span full width by
+    overriding bootstrap column widths on ALL ancestors.
+    """
+    try:
+      host = host_component
+      if host is None:
+        return
+      try:
+        host.width = "100%"
+      except Exception:
+        pass
+  
+      el = js.get_dom_node(host)
+      if not el:
+        return
+  
+      # Tag it for CSS targeting if needed
+      try:
+        el.setAttribute("data-argus-hostwide", "1")
+      except Exception:
+        pass
+  
+      hops = 0
+      cur = el
+      while cur is not None and hops < 80:
+        try:
+          s = cur.style
+          s.setProperty("width", "100%", "important")
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+          s.setProperty("padding-left", "0", "important")
+          s.setProperty("padding-right", "0", "important")
+  
+          # If any ancestor is a bootstrap column, force it to full width
+          cls = (cur.className or "")
+          if "col-" in cls:
+            s.setProperty("flex", "0 0 100%", "important")
+            s.setProperty("max-width", "100%", "important")
+        except Exception:
+          pass
+  
+        try:
+          cur = cur.parentElement
+        except Exception:
+          cur = None
+        hops += 1
+  
+      # Finally: force the host element itself to act like a block that can stretch
+      try:
+        el.style.setProperty("display", "block", "important")
+        el.style.setProperty("flex", "1 1 auto", "important")
+      except Exception:
+        pass
+  
+    except Exception:
+      pass
+
+  def _render_detected_panels_header_only(self):
+    dg = getattr(self, "data_grid_2", None)
+    if not isinstance(dg, DataGrid):
+      return
+      
+    dg.visible = True
+    dg.width = "100%"
+    dg.show_header = False
+    dg.show_page_controls = False
+    dg.rows_per_page = 1
+    dg.role = "bom-grid"
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+  
+    dg.columns = [
+      {"id": "name",          "title": "Name",                "data_key": "name"},
+      {"id": "amperage",      "title": "Amps",                "data_key": "amperage"},
+      {"id": "voltage",       "title": "Volts",               "data_key": "voltage"},
+      {"id": "main_brk_amps", "title": "Main Breaker Amps",   "data_key": "main_brk_amps"},
+      {"id": "int_rating",    "title": "Interrupting Rating", "data_key": "int_rating"},
+      {"id": "spaces",        "title": "Spaces",              "data_key": "spaces"},
+      {"id": "preview",       "title": "View Item",           "data_key": "preview"},
+    ]
+  
+    # clear any previous components/rows (including the old header DataRowPanel)
+    for c in list(dg.get_components()):
+      try: c.remove_from_parent()
+      except Exception: pass
+  
+    def H(text, align=None):
+      lab = Label(text=text, bold=True, align=align)
+      lab.font_size = CARD_FONT_SIZE
+      return lab
+  
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.add_component(H("Name"), column="name")
+    hdr.add_component(H("Amps", align="center"), column="amperage")
+    hdr.add_component(H("Volts", align="center"), column="voltage")
+    hdr.add_component(H("Main Breaker Amps", align="center"), column="main_brk_amps")
+    hdr.add_component(H("Interrupting Rating", align="center"), column="int_rating")
+    hdr.add_component(H("Spaces", align="center"), column="spaces")
+    hdr.add_component(H("View Item", align="center"), column="preview")
+    dg.add_component(hdr, slot="header")
+  
+  # ---------- Rendering ----------
+  def _render(self):
+    try:
+      host = self._get_cards_host()
+      if host is not None:
+        host.width = "100%"
+    except Exception:
+      pass
+  
+    rules = (self.result or {}).get("rules_result") or {}
+
+    if not isinstance(rules, dict) or not rules:
+      self.content_panel.add_component(Label(text="No results to display."))
+      btn_bar = FlowPanel()
+      btn_raw = Button(text="Show raw JSON", tag="raw")
+      btn_raw.set_event_handler('click', self._top_click)
+      btn_bar.add_component(btn_raw)
+      return
+
+    rows_by_des = self._normalize_rules(rules)
+
+    flat_rows = []
+    for desig in self._iter_designations_in_panel_order(rows_by_des):
+      rows = rows_by_des[desig]
+      rows.sort(key=lambda r: (r.get("_order", 999), r.get("item_type",""), r.get("product","")))
+      for r in rows:
+        r.pop("_order", None)
+      flat_rows.extend(rows)
+
+    if not flat_rows:
+      flat_rows = [{
+        "designation": "(none)",
+        "item_type": "Note",
+        "product": "No displayable items were found in rules_result.",
+        "qty": 0,
+        "notes": "",
+        "csv_selectable": False,
+        "csv_include": False,
+      }]
+
+    self._flat_rows = flat_rows
+
+    # Render vertically-stacked cards into linear_panel_1 (preferred) or content_panel
+    self._render_cards_bom(rows_by_des)
+
+    # If you want a button bar below the cards, attach it to the same host:
+    host = self._get_cards_host()
+    btn_bar = FlowPanel(spacing='small', align='right')
+    btn_bar.width = "100%"
+    btn_bar.foreground = "theme:Background"
+
+  def _format_duration_ms(self, ms: int) -> str:
+    try:
+      ms = int(ms)
+    except Exception:
+      return ""
+    if ms < 0:
+      ms = 0
+    secs, msec = divmod(ms, 1000)
+    mins, sec = divmod(secs, 60)
+    hrs, min_ = divmod(mins, 60)
+    if hrs:
+      return f"{hrs}h {min_}m {sec}.{msec:03d}s"
+    if mins:
+      return f"{min_}m {sec}.{msec:03d}s"
+    return f"{sec}.{msec:03d}s"
+
+  # ---------- Description Helpers ----------
+  def _norm(self, s):
+    return str(s or "").strip().upper()
+
+  def _norm_path(self, p):
+    """Normalize source paths for dedupe comparisons."""
+    s = str(p or "").strip().replace("\\", "/")
+    while "//" in s:
+      s = s.replace("//", "/")
+    return s
+
+  def _panel_attrs_map(self):
+    """
+    Build { NORM_NAME -> attrs_dict } from self.result['components'].
+    """
+    if hasattr(self, "_attrs_map_cache"):
+      return self._attrs_map_cache
+    amap = {}
+    comps = (self.result or {}).get("components") or []
+    for c in comps:
+      if not isinstance(c, dict): continue
+      if (c.get("type") or "").lower() != "panelboard": continue
+      name = self._norm(c.get("name") or "")
+      attrs = c.get("attrs") or {}
+      if name and isinstance(attrs, dict):
+        amap[name] = attrs
+    self._attrs_map_cache = amap
+    return amap
+
+  def _fmt_ka(self, val):
+    try:
+      if val is None or str(val).strip().upper() == "NONE":
+        return ""
+      i = int(str(val).strip())
+      return f"{i}K"
+    except Exception:
+      return ""
+
+  def _fmt_int(self, val):
+    try:
+      return int(str(val).strip())
+    except Exception:
+      return None
+
+  def _interior_description(self, designation):
+    """
+    Interior → '250A Bus, 208V, 22K, 84ckt' (+ ', 225A MB' if present)
+    Uses components.attrs matched by designation/panel name.
+    """
+    attrs = self._panel_attrs_map().get(self._norm(designation), {}) or {}
+    bus_amps  = self._fmt_int(attrs.get("amperage"))
+    main_amps = self._fmt_int(attrs.get("mainBreakerAmperage"))
+    volts     = self._fmt_int(attrs.get("voltage"))
+    ir_ka     = self._fmt_ka(attrs.get("intRating"))
+    spaces    = self._fmt_int(attrs.get("spaces"))
+    parts = []
+    if bus_amps: parts.append(f"{bus_amps}A Bus")
+    if volts:    parts.append(f"{volts}V")
+    if ir_ka:    parts.append(ir_ka)
+    if spaces:   parts.append(f"{spaces}ckt")
+    if main_amps:
+      parts.append(f"{main_amps}A MB")
+    return ", ".join(parts)
+
+  def _trim_description(self, product):
+    """
+    Trim → 'Flush' / 'Surface' / '3R'
+    Prefers UI overrides; falls back to PN suffix F/S if needed.
+    """
+    ui = (self.result or {}).get("ui_overrides", {}) or {}
+    pb = ui.get("panelboards", {}) or {}
+    enclosure = (pb.get("enclosure") or "").upper()
+    if enclosure == "NEMA3R":
+      return "3R"
+    style = (pb.get("default_trim_style") or "").upper()
+    if style in ("FLUSH", "SURFACE"):
+      return style.capitalize()
+    pn = str(product or "").upper()
+    if pn.endswith("F"):
+      return "Flush"
+    if pn.endswith("S"):
+      return "Surface"
+    return ""
+
+  def _breaker_description_from_pn(self, pn: str) -> str:
+    d = self._parse_breaker_part_number(pn)
+    if not d:
+      return ""
+  
+    parts = []
+    if d.get("amperage") is not None:
+      parts.append(f"{d['amperage']}A")
+    if d.get("poles") is not None:
+      parts.append(f"{d['poles']}P")
+  
+    if d.get("trip_function") == "ELECTRONIC":
+      parts.append("Electronic")
+
+    if d.get("is_gfi"):
+      parts.append("GFI")
+    
+    return " ".join(parts)
+  
+  
+  def _parse_breaker_part_number(self, pn: str) -> dict:
+    import re
+  
+    s = str(pn or "").strip().upper()
+    if not s:
+      return {}
+  
+    # ----------------------------
+    # 1) NF E-Frame (EDB/EGB/EJB)
+    # ----------------------------
+    m = re.match(r"^(EDB|EGB|EJB)(14|24|34)(\d{3})(EPD)?$", s)
+    if m:
+      prefix, base, amps, epd = m.group(1), m.group(2), int(m.group(3)), m.group(4)
+      poles_map = {"14": 1, "24": 2, "34": 3}
+      return {
+        "family": "E-Frame",
+        "frame": prefix,
+        "poles": poles_map.get(base),
+        "amperage": amps,
+        "trip_function": None,          # never show magnetic
+        "trip_suffix": None,            # we don't display it anyway
+        "termination": None,
+        "extra_suffix": "",
+      }
+  
+    # ----------------------------
+    # 2) Branch breakers (QO/QOB/HOM/QH/QHB/QOH)
+    # ----------------------------
+    # QOH
+    m = re.match(r"^(QOH)2(\d{2,3})$", s)
+    if m:
+      amps = int(m.group(2))
+      return {
+        "family": "Branch",
+        "frame": "QOH",
+        "poles": 2,
+        "amperage": amps,
+        "trip_function": None,
+        "trip_suffix": None,
+        "termination": None,
+        "extra_suffix": "",
+      }
+  
+    # QO/QOB/HOM/QH/QHB (+ optional VH) (+ optional trailing letters)
+    m = re.match(r"^(QOB|QO|HOM|QHB|QH)([123])(\d{2,3})(VH)?([A-Z]+)?$", s)
+    if m:
+      btype = m.group(1)
+      poles = int(m.group(2))
+      amps  = int(m.group(3))
+      vh    = bool(m.group(4))
+      suffix = (m.group(5) or "").upper()
+    
+      # Detect GFI when part number ends with GFI (ex: QO120GFI)
+      is_gfi = suffix.endswith("GFI")
+    
+      return {
+        "family": "Branch",
+        "frame": btype + ("-VH" if vh else ""),
+        "poles": poles,
+        "amperage": amps,
+        "trip_function": None,
+        "trip_suffix": None,
+        "termination": None,
+        "extra_suffix": suffix,
+        "is_gfi": is_gfi,
+      }
+  
+    # ----------------------------
+    # 3) MCCB: B/H/J/Q (fixed positions)
+    # Format: [Frame][IRletter][Term][Poles][VoltCode][AAA][...suffix...]
+    # Electronic is detected ONLY by U31X/U44X in the suffix
+    # ----------------------------
+    if s[0] in {"B", "H", "J", "Q"} and len(s) >= 8:
+      frame = s[0]
+      expected_v = "2" if frame == "Q" else "6"
+  
+      term = s[2]
+      poles_ch = s[3]
+      volt = s[4]
+  
+      if poles_ch.isdigit() and volt == expected_v and s[5:8].isdigit() and term in {"L", "A"}:
+        poles = int(poles_ch)
+        amps  = int(s[5:8])
+        rest  = s[8:]
+  
+        tf = None
+        if re.search(r"U(31|44)X", rest):
+          tf = "ELECTRONIC"
+  
+        return {
+          "family": "MCCB",
+          "frame": frame,
+          "poles": poles,
+          "amperage": amps,
+          "trip_function": tf,
+          "trip_suffix": None,     # never show U-codes
+          "termination": None,
+          "extra_suffix": "",
+        }
+  
+    # ----------------------------
+    # 4) L family
+    # L electronic has U31X/U44X
+    # LL magnetic has no U-code
+    # ----------------------------
+    if s.startswith("L"):
+      # L electronic
+      m = re.match(r"^L([GJLR])L?36(\d{3,4})U(31|44)X(\d*)$", s)
+      if m:
+        amps = int(m.group(2))
+        return {
+          "family": "MCCB",
+          "frame": "L",
+          "poles": 3,
+          "amperage": amps,
+          "trip_function": "ELECTRONIC",
+          "trip_suffix": None,
+          "termination": None,
+          "extra_suffix": m.group(4) or "",
+        }
+  
+      # LL magnetic
+      m = re.match(r"^L([AH])L?36(\d{3,4})(\d*)$", s)
+      if m:
+        amps = int(m.group(2))
+        return {
+          "family": "MCCB",
+          "frame": "LL",
+          "poles": 3,
+          "amperage": amps,
+          "trip_function": None,
+          "trip_suffix": None,
+          "termination": None,
+          "extra_suffix": m.group(3) or "",
+        }
+  
+    # ----------------------------
+    # 5) M frame (electronic only)
+    # Format: M ? ? [23] 6 [4|8]00 ...
+    # amps: 4 => 400A, 8 => 600A (per your builder)
+    # ----------------------------
+    if s.startswith("M"):
+      m = re.match(r"^M([GJ])([LA])([23])6([48])00(\d*)$", s)
+      if m:
+        poles = int(m.group(3))
+        amp_digit = m.group(4)
+        amps = 400 if amp_digit == "4" else 600
+        return {
+          "family": "MCCB",
+          "frame": "M",
+          "poles": poles,
+          "amperage": amps,
+          "trip_function": "ELECTRONIC",
+          "trip_suffix": None,
+          "termination": None,
+          "extra_suffix": m.group(5) or "",
+        }
+  
+    # ----------------------------
+    # 6) P frame (electronic)
+    # amps = ampCode*10
+    # ----------------------------
+    if s.startswith("P"):
+      m = re.match(r"^P([GJKL])([LA])3([46])(\d{3})(U(31|44)A)?(\d*)$", s)
+      if m:
+        amp_code = int(m.group(4))
+        amps = amp_code * 10
+        return {
+          "family": "MCCB",
+          "frame": "P",
+          "poles": 3,
+          "amperage": amps,
+          "trip_function": "ELECTRONIC",
+          "trip_suffix": None,
+          "termination": None,
+          "extra_suffix": m.group(7) or "",
+        }
+  
+    # ----------------------------
+    # 7) R frame (electronic)
+    # amps = ampCode*10
+    # ----------------------------
+    if s.startswith("R"):
+      m = re.match(r"^R([GJKL])([FA])36(\d{3})(C)?(U(31|44)A)?(\d*)$", s)
+      if m:
+        amp_code = int(m.group(3))
+        amps = amp_code * 10
+        extra = (("C" if m.group(4) else "") + (m.group(7) or ""))
+        return {
+          "family": "MCCB",
+          "frame": "R",
+          "poles": 3,
+          "amperage": amps,
+          "trip_function": "ELECTRONIC",
+          "trip_suffix": None,
+          "termination": None,
+          "extra_suffix": extra,
+        }
+  
+    return {}
+  
+  def _describe_row(self, row_dict: dict):
+    """
+    Compute description string for a row based on item_type/product.
+    """
+    itype = (row_dict.get("item_type") or "").strip()
+    prod  = (row_dict.get("product") or "").strip()
+    des   = (row_dict.get("designation") or "").strip()
+    if itype in ("Interior", "Interior/Box"):
+      return self._interior_description(des)
+    if itype in ("Trim", "Trim/Cover", "Cover"):
+      return self._trim_description(prod)
+    if itype == "Breaker":
+      return self._breaker_description_from_pn(prod)
+    if itype in ("Box", "Feed-Thru Lugs", "Ground Bar Kit",
+                 "Neutral", "Neutral (100%)", "Neutral (200%)"):
+      return ""
+    return ""
+
+  def _format_mm_ss(self, ms: int) -> str:
+    """Return 'M:SS' from milliseconds (no hours, no ms)."""
+    try:
+      total_s = max(0, int(round(int(ms) / 1000)))
+    except Exception:
+      total_s = 0
+    mins, secs = divmod(total_s, 60)
+    return f"{mins}:{secs:02d}"
+  
+  def _parse_cycle_time_str_to_ms(self, s: str) -> int:
+    """
+    Parse 'HH:MM:SS:ms' like '00:06:56:403' to milliseconds.
+    If parsing fails, return 0.
+    """
+    try:
+      hh, mm, ss, ms = [int(p) for p in str(s).strip().split(":")]
+      return ((hh*3600 + mm*60 + ss) * 1000) + ms
+    except Exception:
+      return 0
+  
+  def _set_ttp_label(self):
+    lbl = getattr(self, "label_ttp", None)
+    if not isinstance(lbl, Label):
+      return
+  
+    # Priority: timestamps > numeric ms > string
+    start_ms = self.result.get("noticed_ts_ms")
+    end_ms   = self.result.get("parse_done_ts_ms")
+    if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)):
+      ms = max(0, int(end_ms - start_ms))
+      lbl.text = f"Processed in {self._format_mm_ss(ms)}"
+      return
+  
+    ct = self.result.get("cycle_time_ms")
+    if isinstance(ct, (int, float)):
+      lbl.text = f"Processed in {self._format_mm_ss(int(ct))}"
+      return
+  
+    s = (self.result.get("cycle_time_str") or "").strip()
+    if s:
+      ms = self._parse_cycle_time_str_to_ms(s)
+      lbl.text = f"Processed in {self._format_mm_ss(ms)}"
+      return
+  
+    lbl.text = ""
+
+  # ---------- Panel Status helpers ----------
+  def _get_component_for_panel(self, designation: str):
+    des_n = self._norm(designation)
+    for c in ((self.result or {}).get("components") or []):
+      if not isinstance(c, dict): 
+        continue
+      if (c.get("type") or "").lower() != "panelboard":
+        continue
+      if self._norm(c.get("name")) == des_n:
+        return c
+    return None
+
+  def _panel_missing_keys(self, attrs: dict) -> list[str]:
+    """
+    Keys we consider 'required' to confidently build panel output.
+    You can tune this later.
+    """
+    def _missing(v):
+      if v is None: 
+        return True
+      s = str(v).strip().upper()
+      return (s == "" or s == "NONE" or s == "X" or s == "-")
+
+    missing = []
+    # bus amps + spaces are the big ones, voltage/int rating helpful
+    if _missing(attrs.get("amperage")):  missing.append("bus amps")
+    if _missing(attrs.get("spaces")):    missing.append("spaces")
+    if _missing(attrs.get("voltage")):   missing.append("voltage")
+    if _missing(attrs.get("intRating")): missing.append("interrupting rating")
+    return missing
+
+  def _panel_has_any_bom(self, rules_payload: dict) -> bool:
+    if not isinstance(rules_payload, dict) or not rules_payload:
+      return False
+    # any of these signals means “something real got built”
+    for k in ("Interior", "Interior/Box", "Box", "Trim", "Cover", "Main Breaker", "Main Breaker Kit",
+              "Ground Bar Kit", "Neutral", "Neutral (100%)", "Neutral (200%)", "Feed-Thru Lugs", "SPD",
+              "Service Entrance Kit", "Service Entrance Barrier Kit"):
+      v = rules_payload.get(k)
+      if isinstance(v, str) and v.strip() and "not suitable" not in v.lower():
+        return True
+
+    # branch breakers
+    for k, v in rules_payload.items():
+      if k.startswith("Branch Breakers") and isinstance(v, list) and len(v) > 0:
+        return True
+
+    # blanks/filler
+    fp = rules_payload.get("Filler Plates")
+    if isinstance(fp, dict) and (fp.get("Part Number") or ""):
+      return True
+    bl = rules_payload.get("I-LINE Blanks & Extensions")
+    if isinstance(bl, dict) and isinstance(bl.get("Items"), list) and len(bl.get("Items")) > 0:
+      return True
+
+    return False
+
+  def _panel_has_breakers(self, rules_payload: dict) -> bool:
+    if not isinstance(rules_payload, dict):
+      return False
+    for k, v in rules_payload.items():
+      if k.startswith("Branch Breakers") and isinstance(v, list) and len(v) > 0:
+        return True
+    return False
+
+  def _force_datagrid_table_full_width(self, dg: DataGrid):
+    try:
+      root = js.get_dom_node(dg)
+      if not root:
+        return
+  
+      # Anvil DataGrid structure has wrapper(s); table is usually inside
+      tbl = root.querySelector("table")
+      if tbl:
+        tbl.style.setProperty("width", "100%", "important")
+        tbl.style.setProperty("max-width", "none", "important")
+        tbl.style.setProperty("table-layout", "fixed", "important")  # makes it stretch
+  
+      # Also force wrappers (sometimes they are inline-ish)
+      wrap = root.querySelector(".anvil-data-grid-wrapper")
+      if wrap:
+        wrap.style.setProperty("width", "100%", "important")
+        wrap.style.setProperty("max-width", "none", "important")
+        wrap.style.setProperty("display", "block", "important")
+  
+      root.style.setProperty("width", "100%", "important")
+      root.style.setProperty("max-width", "none", "important")
+      root.style.setProperty("display", "block", "important")
+  
+    except Exception:
+      pass
+
+  def _is_problem_status(self, status: str) -> bool:
+    s = (status or "").strip().lower()
+    return (
+      s.startswith("system error")
+      or s.startswith("no output - confidence low/not currently supported style")
+      or s.startswith("detected but skipped")
+    )
+
+  def _is_good_status_for_linear3(self, status: str) -> bool:
+    s = (status or "").strip().lower()
+    # Keep only usable panel outputs here
+    return (
+      s.startswith("bom fully generated")
+      or s.startswith("bom partially generated")
+    )
+
+  def _extract_problem_items_for_linear4(self) -> list[dict]:
+    """
+    Build list of problem/non-panel rows for linear_panel_4.
+    Sources:
+      1) Explicit non_panelboard_items payload
+      2) Panel components whose status is one of:
+         - System error
+         - No output - confidence low/not currently supported style
+         - Detected but skipped
+    Returns rows:
+      {
+        "source": "...",
+        "name": "...",
+        "status": "...",
+        "note": "..."
+      }
+    """
+    out = []
+
+    # A) explicit non-panel payload (keep)
+    for r in (self._extract_non_panel_items() or []):
+      src = self._norm_path(r.get("source"))
+      if src:
+        out.append({
+          "source": src,
+          "name": "Non-panel item",
+          "status": "Detected item",
+          "note": ""
+        })
+
+    # B) panel-derived problem items
+    for p in (self._extract_panels() or []):
+      name = (p.get("name") or "(unnamed)").strip()
+      src = self._norm_path(p.get("source"))
+      status, note = self._panel_status(name)
+
+      if self._is_problem_status(status):
+        out.append({
+          "source": src,
+          "name": name,
+          "status": status,
+          "note": note or ""
+        })
+
+    # Robust de-dupe: basename first, then full path + status + name
+    seen = set()
+    dedup = []
+    for r in out:
+      s = self._norm_path(r.get("source"))
+      base = (s.split("/")[-1].strip().lower() if s else "")
+      key = (
+        base,
+        s.lower(),
+        (r.get("status") or "").strip().lower(),
+        (r.get("name") or "").strip().lower()
+      )
+      if key in seen:
+        continue
+      seen.add(key)
+      dedup.append({
+        "source": s,
+        "name": r.get("name") or "(item)",
+        "status": r.get("status") or "",
+        "note": r.get("note") or ""
+      })
+
+    return dedup
+
+  def _make_single_nonpanel_table(self, idx: int, row: dict) -> DataGrid:
+    dg = DataGrid()
+    dg.width = "100%"
+    dg.show_header = False
+    dg.show_page_controls = False
+    dg.rows_per_page = 1
+    dg.role = "detected-panel-mini-grid"  # reuse your mini-grid styling
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+  
+    dg.columns = [
+      {"id":"idx",    "title":"", "data_key":"idx", "width": 90},
+      {"id":"name",   "title":"", "data_key":"name", "width": 260},
+      {"id":"status", "title":"", "data_key":"status"},
+      {"id":"preview","title":"", "data_key":"preview", "width": 110},
+    ]
+  
+    def C(text, align="center", bold=False):
+      lab = Label(text=text, align=align, bold=bold)
+      lab.font_size = CARD_FONT_SIZE
+      return lab
+  
+    # keep real name for preview logic, but display generic label
+    real_name = str(row.get("name") or f"Item {idx}")
+    display_name = "Detected item"
+  
+    dr = DataRowPanel()
+    dr.add_component(C(str(idx), align="center", bold=True), column="idx")
+    dr.add_component(C(display_name, align="left", bold=True), column="name")
+    dr.add_component(C(str(row.get("status") or ""), align="left"), column="status")
+  
+    btn = Button(text="View", foreground="#117BC3", background="transparent", bold=True, underline=True)
+    btn.font_size = CARD_FONT_SIZE
+    src = (row.get("source") or "").strip()
+    btn.enabled = bool(src)
+    btn.tag = {
+      "source": src,
+      "name":   real_name,  # IMPORTANT: keep real name so _preview_click works
+      "job_id": self.result.get("job_id") or ""
+    }
+    btn.tooltip = "Preview detected item" if btn.enabled else "No image available"
+    btn.set_event_handler('click', self._preview_click)
+    dr.add_component(btn, column="preview")
+  
+    dg.add_component(dr)
+    return dg
+
+  def _panel_status(self, designation: str) -> tuple[str, str]:
+    """
+    Returns (status_text, notes_text) for the status row.
+    Status buckets (your 4 + system error):
+      - BOM fully generated
+      - BOM partially generated (breakers need manual review)
+      - Detected but skipped (missing xyz)
+      - No output - confidence low/not currently supported style
+      - System error
+    """
+    rules = ((self.result or {}).get("rules_result") or {})
+    payload = rules.get(designation) if isinstance(rules, dict) else None
+    comp = self._get_component_for_panel(designation) or {}
+    attrs = (comp.get("attrs") or {}) if isinstance(comp, dict) else {}
+
+    # 0) System error
+    if bool(comp.get("_skipped")) or (isinstance(comp.get("reason"), str) and comp.get("reason").strip()):
+      reason = (comp.get("reason") or "").strip()
+      if not reason:
+        reason = "Unhandled parsing exception."
+      return ("System error", reason)
+
+    # 1) Missing required attrs => “Detected but skipped”
+    missing = self._panel_missing_keys(attrs or {})
+    # If rules has no useful output AND attrs are missing → call it skipped
+    if missing and not self._panel_has_any_bom(payload):
+      return ("Detected but skipped", "Missing: " + ", ".join(missing))
+
+    # 2) No output at all (but not missing attrs) => confidence low / unsupported
+    if not self._panel_has_any_bom(payload):
+      # if the rules engine returned an error blob
+      if isinstance(payload, dict) and isinstance(payload.get("error"), str) and payload["error"].strip():
+        return ("System error", payload["error"].strip())
+      return ("No output - confidence low/not currently supported style", "")
+
+    # 3) Partial: panel built but breakers questionable / suppressed / absent
+    # Your server sets attrs["breaker_data_suppressed"]=True when it kills breakers due to 2+ invalid
+    if bool(attrs.get("breaker_data_suppressed")):
+      return ("BOM partially generated (breakers need manual review)",
+              "Breaker data was suppressed due to detection/validation issues (manual review needed).")
+
+    # If panel has BOM but no breakers were produced at all
+    if not self._panel_has_breakers(payload):
+      return ("BOM partially generated (needs manual review)",
+              "Panel BOM generated, but no breakers were produced.")
+
+    # 4) Fully generated
+    return ("BOM fully generated", "")
+
+  def _extract_panels(self) -> list:
+    res = self.result or {}
+    items = []
+
+    if isinstance(res.get("components"), list):
+      items = res["components"]
+    elif isinstance(res.get("component"), dict):
+      items = [res["component"]]
+
+    out = []
+    for it in items:
+      if not isinstance(it, dict):
+        continue
+      if (it.get("type") or "").lower() != "panelboard":
+        continue
+      attrs = it.get("attrs") or {}
+      raw_src = (it.get("source") or "").strip()
+
+      # Prefer overlay output if VM provides it (keep raw_src as fallback)
+      overlay_src = (
+        (it.get("overlay_source") or "") or
+        (it.get("overlaySource") or "") or
+        (it.get("preview_source") or "") or
+        (it.get("previewSource") or "") or
+        (it.get("reviewOverlayPath") or "") or
+        (it.get("review_overlay_path") or "") or
+        ""
+      ).strip()
+
+      preview_src = overlay_src or raw_src
+
+      out.append({
+        "name": it.get("name") or "(unnamed)",
+        "amperage":            attrs.get("amperage", "NONE"),
+        "voltage":             attrs.get("voltage", "NONE"),
+        "main_brk_amps":       attrs.get("mainBreakerAmperage", "NONE"),
+        "int_rating":          attrs.get("intRating", "NONE"),
+        "spaces":              attrs.get("spaces", "NONE"),
+
+        # IMPORTANT: this is now what "View" uses
+        "source":              preview_src,
+
+        # optional (kept for future use if you want a "View Raw" button)
+        "raw_source":          raw_src,
+        "overlay_source":      overlay_src,
+      })
+
+
+    if out:
+      # Record the visual order used by the top grid (normalized + original)
+      self._panel_order = [ (str(r.get("name") or "").strip(),  # original
+                             str(r.get("name") or "").strip().upper())  # norm
+                           for r in out ]
+      return out
+
+    rr = res.get("rules_result") or {}
+    if isinstance(rr, dict) and rr:
+      rows = []
+      # dict preserves insertion order; use it as fallback order
+      self._panel_order = [ (k, str(k).strip().upper()) for k in rr.keys() ]
+      for name, _ in self._panel_order:
+        rows.append({
+          "name": name or "(no name detected)",
+          "amperage": "NONE",
+          "voltage": "NONE",
+          "main_brk_amps": "NONE",
+          "int_rating": "NONE",
+          "spaces": "NONE",
+        })
+      return rows
+
+    return out
+
+  def _tag_and_expand_bootstrap_ancestors(self, node):
+    """
+    Find any ancestor bootstrap columns (col-*) that constrain width and force them to full width.
+    Also tag them so you can target with CSS if you want.
+    """
+    try:
+      el = node
+      hops = 0
+      while el is not None and hops < 80:
+        try:
+          cls = (el.className or "")
+          if "col-" in cls:  # bootstrap column wrapper
+            try:
+              el.setAttribute("data-argus-widecol", "1")
+            except Exception:
+              pass
+  
+            s = el.style
+            s.setProperty("flex", "0 0 100%", "important")
+            s.setProperty("max-width", "100%", "important")
+            s.setProperty("width", "100%", "important")
+            s.setProperty("margin-left", "0", "important")
+            s.setProperty("margin-right", "0", "important")
+            s.setProperty("padding-left", "0", "important")
+            s.setProperty("padding-right", "0", "important")
+        except Exception:
+          pass
+  
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+        hops += 1
+    except Exception:
+      pass
+
+  def _render_panel_tables_separately(self, rows_by_des: dict):
+    """
+    Create a NEW labeled table (DataGrid) for EACH panel designation.
+    No colspan tricks. No DOM hacks.
+    """
+    host = self._get_cards_host()
+
+    # Make card host behave like the detected-panels host (full width)
+    try:
+      host.width = "100%"
+    except Exception:
+      pass
+
+    try:
+      js.get_dom_node(host).setAttribute("data-argus-hostwide", "1")
+    except Exception:
+      pass
+
+    # clear host
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+
+    host.width = "100%"
+
+    def make_panel_grid(rows: list) -> DataGrid:
+      dg = DataGrid()
+      dg.width = "100%"
+      dg.show_header = True
+      dg.show_page_controls = False
+      dg.rows_per_page = 1000
+      dg.role = "bom-grid"
+      dg.background = "transparent"
+      dg.foreground = "theme:Background"
+
+      dg.columns = [
+        {"id":"item",    "title":"Item",        "data_key":"item"},
+        {"id":"pn",      "title":"Part Number", "data_key":"pn"},
+        {"id":"details", "title":"Details",     "data_key":"details"},
+        {"id":"qty",     "title":"Qty",         "data_key":"qty", "width":70},
+        {"id":"include", "title":"Include",     "data_key":"include", "width":90},
+      ]
+
+      # remove any existing components just in case
+      for c in list(dg.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+
+      def H(text, align=None):
+        lab = Label(text=text, bold=True, align=align, foreground="theme:Background")
+        lab.font_size = CARD_FONT_SIZE
+        return lab
+
+      def L(text, align=None):
+        lab = Label(text=text, align=align, foreground="theme:Background")
+        lab.font_size = CARD_FONT_SIZE
+        return lab
+
+      # header row
+      hdr = DataRowPanel(role="custom-grid-header")
+      hdr.add_component(H("Item"), column="item")
+      hdr.add_component(H("Part Number"), column="pn")
+      hdr.add_component(H("Details"), column="details")
+      hdr.add_component(H("Qty", align="center"), column="qty")
+      hdr.add_component(H("Include", align="center"), column="include")
+      dg.add_component(hdr, slot="header")
+
+      # rows
+      for i, r in enumerate(rows or []):
+        try:
+          r["description"] = self._describe_row(r)
+        except Exception:
+          r["description"] = ""
+
+        role = "zebra-odd" if (i % 2 == 0) else "zebra-even"
+        dr = DataRowPanel(role=role)
+
+        dr.add_component(L(str(r.get("item_type",""))), column="item")
+        dr.add_component(L(str(r.get("product",""))), column="pn")
+        dr.add_component(L(str(r.get("description",""))), column="details")
+        dr.add_component(L(str(r.get("qty","")), align="center"), column="qty")
+
+        itype = (r.get("item_type") or "").strip()
+        if itype not in ("Note","Skipped"):
+          cb = CheckBox()
+          cb.checked = bool(r.get("csv_include", False))
+          cb.enabled = bool(r.get("csv_selectable", False))
+          cb.tooltip = "Include this row in CSV"
+          def _on_change(sender=cb, rr=r, **e):
+            rr["csv_include"] = bool(sender.checked)
+          cb.set_event_handler('change', _on_change)
+          dr.add_component(cb, column="include")
+        else:
+          dr.add_component(L("", align="center"), column="include")
+
+        dg.add_component(dr)
+
+      return dg
+
+    # build in order
+    for des in self._iter_designations_in_panel_order(rows_by_des):
+      rows = rows_by_des.get(des) or []
+    
+      if not rows:
+        continue
+    
+      # Keep only real BOM lines in the card (hide notes/skipped rows),
+      # but DO NOT drop the whole panel unless truly no real lines exist.
+      real_rows = [
+        r for r in rows
+        if (r.get("item_type") or "").strip() not in ("Note", "Skipped")
+      ]
+      if not real_rows:
+        continue
+
+
+      # container “card” (items only; no per-panel labels/status/attrs)
+      card = ColumnPanel(role="elevated-card")
+      card.width = "100%"
+      card.padding = "18px"
+      card.spacing = "small"
+      card.background = "theme:Text Primary"
+      card.foreground = "theme:Background"
+
+      # the per-panel grid
+      dg_panel = make_panel_grid(real_rows)
+      card.add_component(dg_panel)
+
+      # Force the DataGrid/table to stretch like your detected-panels tables
+      try:
+        js.window.setTimeout(lambda dg=dg_panel: self._force_datagrid_table_full_width(dg), 0)
+        js.window.setTimeout(lambda dg=dg_panel: self._force_datagrid_table_full_width(dg), 100)
+      except Exception:
+        self._force_datagrid_table_full_width(dg_panel)
+
+      host.add_component(card)
+      host.add_component(Spacer(height=18))
+
+  def _iter_designations_in_panel_order(self, rows_by_des: dict):
+    def _norm(s): 
+      return str(s or "").strip().upper()
+
+      # bucket all keys by normalized name, preserving insertion order
+    buckets = {}
+    for k in rows_by_des.keys():
+      nk = _norm(k)
+      buckets.setdefault(nk, []).append(k)
+
+    panel_order = getattr(self, "_panel_order", []) or []
+
+    # First: consume in visual panel order, one-by-one per normalized bucket
+    for _, nk in panel_order:
+      lst = buckets.get(nk, [])
+      if lst:
+        yield lst.pop(0)
+
+      # Then: leftovers in original insertion order
+    for nk in list(buckets.keys()):
+      lst = buckets.get(nk) or []
+      while lst:
+        yield lst.pop(0)
+
+  def _extract_non_panel_items(self) -> list[dict]:
+    """
+    Expect optional payload:
+      result["non_panelboard_items"] = [
+        {"source": "pdf_images/review_overlays/item_001.png"},
+        ...
+      ]
+    If not present, return empty list.
+    """
+    res = self.result or {}
+    items = res.get("non_panelboard_items") or res.get("nonPanelboardItems") or []
+    out = []
+    if isinstance(items, list):
+      for it in items:
+        if isinstance(it, str):
+          src = self._norm_path(it)
+          if src:
+            out.append({"source": src})
+        elif isinstance(it, dict):
+          src = self._norm_path(
+            it.get("source") or it.get("overlay_source") or it.get("overlaySource") or ""
+          )
+          if src:
+            out.append({"source": src})
+
+    # Also include attr-less panels as non-panel items
+    for r in self._nonpanel_from_attrless_panels():
+      src = self._norm_path(r.get("source"))
+      if src:
+        out.append({"source": src})
+
+    # De-dupe robustly:
+    # 1) by basename (most practical for overlays)
+    # 2) fallback by full normalized path
+    seen_base = set()
+    seen_full = set()
+    dedup = []
+
+    for r in out:
+      s = self._norm_path(r.get("source"))
+      if not s:
+        continue
+      base = s.split("/")[-1].strip().lower()
+
+      # Skip if we've already seen this basename OR full path
+      if (base and base in seen_base) or (s.lower() in seen_full):
+        continue
+
+      if base:
+        seen_base.add(base)
+      seen_full.add(s.lower())
+      dedup.append({"source": s})
+
+    return dedup
+
+  def _render_non_panel_table(self):
+    host = getattr(self, "linear_panel_4", None)
+    if not isinstance(host, (ColumnPanel, LinearPanel, FlowPanel)):
+      return
+
+    host.width = "100%"
+
+    try:
+      js.get_dom_node(host).setAttribute("data-argus-hostwide", "1")
+    except Exception:
+      pass
+
+    # Reuse scoped CSS you already inject for mini tables
+    self._ensure_linear3_scoped_css()
+
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+
+    rows = self._extract_problem_items_for_linear4() or []
+
+    if not rows:
+      host.add_component(Label(text="(No non-panel/problem items found)"))
+      return
+
+    for i, r in enumerate(rows, start=1):
+      zebra_role = "zebra-odd" if ((i - 1) % 2 == 0) else "zebra-even"
+
+      block = ColumnPanel(role=zebra_role)
+      block.width = "100%"
+      block.spacing = "none"
+      block.padding = "10px 0 10px 0"
+
+      dg = self._make_single_nonpanel_table(i, r)
+      self._add_full_width(block, dg)
+
+      try:
+        js.window.setTimeout(lambda dg=dg: self._force_datagrid_table_full_width(dg), 0)
+        js.window.setTimeout(lambda dg=dg: self._force_datagrid_table_full_width(dg), 100)
+      except Exception:
+        self._force_datagrid_table_full_width(dg)
+
+      note = (r.get("note") or "").strip()
+      if note:
+        lab = Label(text=f"Note: {note}", bold=True, align="left")
+        lab.foreground = "theme:Background"
+        lab.font_size = CARD_FONT_SIZE
+        self._add_full_width(block, lab)
+
+      self._add_full_width(host, block)
+
+  def _render_panel_table(self):
+    dg = getattr(self, "data_grid_2", None)
+    if not isinstance(dg, DataGrid):
+      self.data_grid_2 = dg = DataGrid()
+      try:
+        self.add_component(dg, index=0)
+      except Exception:
+        self.add_component(dg)
+
+    dg.width = "100%"
+    dg.show_header = True
+    dg.show_page_controls = False
+    dg.rows_per_page = 1000
+    dg.role = "bom-grid"
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+
+    # NOTE: Add a "status_row" column that spans the width visually
+    # We'll still keep the same 7 columns for the top row.
+    dg.columns = [
+      {"id": "name",          "title": "Name",       "data_key": "name"},
+      {"id": "amperage",      "title": "Bus Amps",   "data_key": "amperage"},
+      {"id": "voltage",       "title": "Volts",      "data_key": "voltage"},
+      {"id": "main_brk_amps", "title": "Main Amps",  "data_key": "main_brk_amps"},
+      {"id": "int_rating",    "title": "Int Rating", "data_key": "int_rating"},
+      {"id": "spaces",        "title": "Spaces",     "data_key": "spaces"},
+      {"id": "preview",       "title": "View Item",  "data_key": "preview"},
+    ]
+
+    for c in list(dg.get_components()):
+      try: c.remove_from_parent()
+      except Exception: pass
+
+    def H(text, align=None):
+      lab = Label(text=text, bold=True, align=align)
+      lab.font_size = CARD_FONT_SIZE
+      return lab
+
+    def C(text, align="center", bold=False):
+      lab = Label(text=text, align=align, bold=bold)
+      lab.font_size = CARD_FONT_SIZE
+      return lab
+
+    # Header row
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.add_component(H("Detected Panels"), column="name")  # rename table header feel
+    hdr.add_component(H("Bus Amps", align="center"), column="amperage")
+    hdr.add_component(H("Volts", align="center"), column="voltage")
+    hdr.add_component(H("Main Amps", align="center"), column="main_brk_amps")
+    hdr.add_component(H("Int Rating", align="center"), column="int_rating")
+    hdr.add_component(H("Spaces", align="center"), column="spaces")
+    hdr.add_component(H("View Item", align="center"), column="preview")
+    dg.add_component(hdr, slot="header")
+
+    def _fmt(v):
+      if v in (None, ""): return "-"
+      s = str(v)
+      return "-" if s.upper() == "NONE" else s
+
+    rows = self._extract_panels()
+    if not rows:
+      dr = DataRowPanel()
+      dr.add_component(C("(No panels detected)", align="left"), column="name")
+      dg.add_component(dr)
+      return
+
+    for i, r in enumerate(rows):
+      # ---- ROW 1: normal panel row ----
+      role = "zebra-odd" if (i % 2 == 0) else "zebra-even"
+      dr = DataRowPanel(role=role)
+
+      dr.add_component(C(_fmt(r.get("name")), align="left"), column="name")
+      dr.add_component(C(_fmt(r.get("amperage"))), column="amperage")
+      dr.add_component(C(_fmt(r.get("voltage"))), column="voltage")
+      dr.add_component(C(_fmt(r.get("main_brk_amps"))), column="main_brk_amps")
+      dr.add_component(C(_fmt(r.get("int_rating"))), column="int_rating")
+      dr.add_component(C(_fmt(r.get("spaces"))), column="spaces")
+
+      btn = Button(
+        text="View",
+        foreground="#117BC3",
+        background="transparent",
+        bold=True,
+        role=None,
+        underline=True
+      )
+      btn.font_size = CARD_FONT_SIZE
+      btn.enabled = bool(r.get("source"))
+      btn.tag = {
+        "source": r.get("source"),
+        "name":   r.get("name"),
+        "job_id": self.result.get("job_id") or ""
+      }
+      btn.tooltip = "Preview detected overlay" if btn.enabled else "No image available"
+      btn.set_event_handler('click', self._preview_click)
+
+      dr.add_component(btn, column="preview")
+      dg.add_component(dr)
+
+      # ---- ROW 2: status row (full-width feel) ----
+      status, note = self._panel_status(r.get("name") or "")
+      status_text = status if not note else f"{status} — {note}"
+
+      sr = DataRowPanel(role=role)  # IMPORTANT: role is only zebra-even / zebra-odd
+      
+      lab = C(f"Status: {status_text}", align="left", bold=True)
+      lab.role = "status-marker"    # marker we can find in the DOM reliably
+      sr.add_component(lab, column="name")
+      sr.add_component(C("", align="center"), column="amperage")
+      sr.add_component(C("", align="center"), column="voltage")
+      sr.add_component(C("", align="center"), column="main_brk_amps")
+      sr.add_component(C("", align="center"), column="int_rating")
+      sr.add_component(C("", align="center"), column="spaces")
+      sr.add_component(C("", align="center"), column="preview")
+      dg.add_component(sr)
+
+      try:
+        js.window.setTimeout(self._patch_status_row_colspan, 50)
+        js.window.setTimeout(self._patch_status_row_colspan, 250)  # second pass catches late render
+      except Exception:
+        self._patch_status_row_colspan()
+
+  def _preview_click(self, sender, **event_args):
+    try:
+      import re
+  
+      tag = getattr(sender, "tag", {}) or {}
+      job_id = (tag.get("job_id") or "").strip()
+      src    = (tag.get("source") or "").strip()
+      name   = (tag.get("name") or "(panel)").strip()
+  
+      if not job_id:
+        alert("No job id found."); return
+  
+      # Match API naming:
+      # safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", dedup_name).strip("_")
+      safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", name).strip("_") or "panel"
+      overlay_file = f"{safe_base}_review_overlay.png"
+  
+      candidates = []
+  
+      def _add(p):
+        p = (p or "").strip()
+        if not p:
+          return
+        p = p.replace("\\", "/")
+        if p not in candidates:
+          candidates.append(p)
+  
+      # 1) Correct overlay location (what you described)
+      _add(f"pdf_images/review_overlays/{overlay_file}")
+  
+      # 2) (Optional) in case vm_fetch_image expects folder without pdf_images prefix
+      _add(f"review_overlays/{overlay_file}")
+  
+      # 3) Fall back to whatever src was
+      _add(src)
+  
+      media = None
+      used_src = None
+      last_err = None
+  
+      for cand in candidates:
+        try:
+          media = anvil.server.call('vm_fetch_image', job_id, cand)
+          used_src = cand
+          break
+        except Exception as e:
+          last_err = e
+  
+      if media is None:
+        alert("Could not load preview.\n\nTried:\n- " + "\n- ".join(candidates) + f"\n\nLast error:\n{last_err}")
+        return
+  
+      img = Image(
+        source=media,
+        width="100%",
+        height=600,
+        display_mode='shrink_to_fit',
+        tooltip=used_src
+      )
+      alert(img, title=f"Preview — {name}", large=True, buttons=[("Close", True)])
+  
+    except Exception as e:
+      alert(f"Could not load preview:\n{e}")
+
+  def _add_spacer_row(self):
+    """Insert a blank-looking row to visually separate designations."""
+    dr = DataRowPanel(role="spacer-row")
+    dr.add_component(Label(text=" "), column="item_type")
+    dr.add_component(Label(text=" "), column="product")
+    dr.add_component(Label(text=" "), column="description")
+    dr.add_component(Label(text=" "), column="designation")
+    dr.add_component(Label(text=" "), column="qty")
+    dr.add_component(Label(text=" "), column="include")
+    self.data_grid_1.add_component(dr)
+  
+  # -- helper to render a row into the main grid, with checkbox on the right
+  def _add_row_to_grid(self, row_dict: dict, idx: int = None):
+    role = "zebra-odd" if (isinstance(idx, int) and idx % 2 == 0) else "zebra-even"
+    dr = DataRowPanel(role=role)
+    # Compute and store description so the grid can read it directly
+    try:
+      row_dict["description"] = self._describe_row(row_dict)
+    except Exception:
+      row_dict["description"] = ""
+    dr.add_component(Label(text=str(row_dict.get("item_type",""))),   column="item_type")
+    dr.add_component(Label(text=str(row_dict.get("product",""))),     column="product")
+    dr.add_component(Label(text=str(row_dict.get("description",""))), column="description")
+    dr.add_component(Label(text=str(row_dict.get("designation",""))), column="designation")
+    dr.add_component(Label(text=str(row_dict.get("qty",""))),         column="qty")
+  
+    itype = (row_dict.get("item_type") or "").strip()
+    show_cb = itype not in ("Note", "Skipped")
+    if show_cb:
+      is_selectable = bool(row_dict.get("csv_selectable", False))
+      cb = CheckBox()
+      cb.checked = bool(row_dict.get("csv_include", False))
+      cb.enabled = is_selectable            # ALL real items are selectable; notes are not rendered as cb
+      cb.tooltip = "Include this row in CSV"
+      # direct update of the row dict
+      def _on_change(sender=cb, r=row_dict, **e):
+        r["csv_include"] = bool(sender.checked)
+      cb.set_event_handler('change', _on_change)
+      dr.add_component(cb, column="include")
+    else:
+      dr.add_component(Label(text=""), column="include")
+  
+    self.data_grid_1.add_component(dr)
+
+  def _top_click(self, sender, **e):
+    if isinstance(sender, Button) and sender.tag == "raw":
+      try:
+        alert(TextArea(text=json.dumps(self.result, indent=2), height=400, width="100%"),
+              title="Raw payload", large=True, buttons=[("Close", True)])
+      except Exception:
+        alert("No raw data to display.")
+      return
+
+  # ---------- Normalization ----------
+  def _normalize_rules(self, rules_result: dict) -> dict:
+    """
+    Return { designation -> [ {designation,item_type,product,qty,notes,_order,csv_*}, ... ] }
+    Enforces order: Interior → Box → Trim/Cover → Main (breaker/kit) → Accessories → Breakers → Blanks/Filler → Notes
+    """
+    ORDER = {
+      "Interior": 10, "Interior/Box": 10,
+      "Box": 20,
+      "Main": 25,
+      "Trim": 30, "Cover": 30, "Trim/Cover": 30,
+      "Accessory": 40,
+      "Breaker": 60,
+      "Blanks/Filler": 70,
+      "Note": 90,
+    }
+
+    rows_by_des = {}
+    for designation, payload in (rules_result or {}).items():
+      designation = (designation or "").strip()  # trim only; keep original case
+      if not isinstance(payload, dict):
+        continue
+      out_rows = []
+
+      def add_row(des, item_type, product, qty, notes, order):
+        r = self._row(des, item_type, product, qty, notes, order)
+        # CSV flags:
+        # - ALWAYS_INCLUDE: pre-checked, but selectable (user can uncheck)
+        # - OPTIONAL_DEFAULT_ON: pre-checked, selectable
+        # - OPTIONAL_DEFAULT_OFF: unchecked, selectable
+        # - Else (Notes/Skipped): unchecked, not selectable
+        if item_type in ALWAYS_INCLUDE:
+          r["csv_selectable"] = True
+          r["csv_include"] = True
+        elif item_type in OPTIONAL_DEFAULT_ON:
+          r["csv_selectable"] = True
+          r["csv_include"] = True
+        elif item_type in OPTIONAL_DEFAULT_OFF:
+          r["csv_selectable"] = True
+          r["csv_include"] = False
+        else:
+          r["csv_selectable"] = False
+          r["csv_include"] = False
+        out_rows.append(r)
+
+      # 1) Interior / Box / Trim/Cover
+      if isinstance(payload.get("Interior"), str):
+        add_row(designation, "Interior", payload["Interior"], 1, "", ORDER["Interior"])
+      if isinstance(payload.get("Interior/Box"), str):
+        add_row(designation, "Interior/Box", payload["Interior/Box"], 1, "", ORDER["Interior/Box"])
+      if isinstance(payload.get("Box"), str):
+        add_row(designation, "Box", payload["Box"], 1, "", ORDER["Box"])
+      if isinstance(payload.get("Trim"), str):
+        add_row(designation, "Trim", payload["Trim"], 1, "", ORDER["Trim"])
+      if isinstance(payload.get("Cover"), str):
+        add_row(designation, "Cover", payload["Cover"], 1, "", ORDER["Cover"])
+
+      # 1.5) Main breaker items (pre-checked, selectable)
+      mb = payload.get("Main Breaker")
+      if isinstance(mb, str) and mb.strip():
+        add_row(designation, "Main Breaker", mb.strip(), 1, "", ORDER["Main"])
+      mbk = payload.get("Main Breaker Kit")
+      if isinstance(mbk, str) and mbk.strip():
+        add_row(designation, "Main Breaker Kit", mbk.strip(), 1, "", ORDER["Main"])
+
+      # Service-entrance suppression: block if any “not suitable” note appears
+      def _has_not_suitable(txt):
+        return isinstance(txt, str) and ("not suitable" in txt.lower())
+      se_note_block = _has_not_suitable(payload.get("Service Entrance Note"))
+      se_kit_text   = payload.get("Service Entrance Kit")
+      se_kit_is_note = _has_not_suitable(se_kit_text)
+      notes_list = payload.get("Notes") if isinstance(payload.get("Notes"), list) else []
+      notes_block = any(_has_not_suitable(n) for n in notes_list)
+      se_blocked = se_note_block or se_kit_is_note or notes_block
+
+      # 2) Accessories (use the actual label)
+      def add_acc(label_key, pretty_label=None, when=True):
+        if not when:
+          return
+        val = payload.get(label_key)
+        if isinstance(val, str) and val.strip() and "not suitable" not in val.lower():
+          add_row(designation, (pretty_label or label_key), val.strip(), 1, "", ORDER["Accessory"])
+      add_acc("Ground Bar Kit", "Ground Bar Kit")
+      add_acc("Neutral", "Neutral")
+      add_acc("Neutral (100%)", "Neutral (100%)")
+      add_acc("Neutral (200%)", "Neutral (200%)")
+      add_acc("Feed-Thru Lugs", "Feed-Thru Lugs")
+      add_acc("SPD", "SPD")
+      add_acc("Service Entrance Kit", "Service Entrance Kit", when=not se_blocked)
+      add_acc("Service Entrance Barrier Kit", "Service Entrance Barrier Kit", when=not se_blocked)
+
+      # 3) Breakers
+      for key, val in payload.items():
+        if isinstance(val, list) and key.startswith("Branch Breakers"):
+          for b in val:
+            if not isinstance(b, dict):
+              continue
+            pn = b.get("Part Number") or b.get("part_number") or ""
+            qty = int(b.get("count", 1) or 1)
+            ir  = b.get("Interrupting Rating") or b.get("interrupting_rating") or ""
+            note = f"IR: {ir}" if ir else ""
+            add_row(designation, "Breaker", pn, qty, note, ORDER["Breaker"])
+
+      # 4) Blanks / Filler
+      blanks = payload.get("I-LINE Blanks & Extensions")
+      if isinstance(blanks, dict) and isinstance(blanks.get("Items"), list):
+        for it in blanks["Items"]:
+          pn = (it or {}).get("Part Number") or ""
+          qty = int((it or {}).get("Quantity", 1) or 1)
+          add_row(designation, "Blanks/Filler", pn, qty, "", ORDER["Blanks/Filler"])
+      fp = payload.get("Filler Plates")
+      if isinstance(fp, dict):
+        pn = fp.get("Part Number") or ""
+        qty = int(fp.get("Quantity", 1) or 1)
+        covers = fp.get("Covers")
+        note = f"Covers: {covers}" if covers else ""
+        if pn:
+          add_row(designation, "Blanks/Filler", pn, qty, note, ORDER["Blanks/Filler"])
+
+      # 5) Notes
+      def add_note(label_key):
+        txt = payload.get(label_key)
+        if isinstance(txt, str) and txt.strip():
+          add_row(designation, "Note", txt.strip(), 0, label_key, ORDER["Note"])
+      add_note("Note")
+      add_note("Service Entrance Note")
+      sek = payload.get("Service Entrance Kit")
+      if isinstance(sek, str) and "not suitable" in sek.lower():
+        add_row(designation, "Note", sek.strip(), 0, "Service Entrance", ORDER["Note"])
+
+      # 6) Skipped payloads
+      skipped = payload.get("Skipped")
+      if isinstance(skipped, str) and skipped.strip():
+        add_row(designation, "Skipped", skipped.strip(), 0, "", ORDER["Note"])
+
+      # 7) Notes list
+      notes_list = payload.get("Notes")
+      if isinstance(notes_list, list):
+        for n in notes_list:
+          if isinstance(n, str) and n.strip():
+            add_row(designation, "Note", n.strip(), 0, "", ORDER["Note"])
+
+      if out_rows:
+        rows_by_des[designation] = out_rows
+
+    return rows_by_des
+
+  def _row(self, designation, item_type, product, qty, notes, order):
+    product_s = "" if product is None else str(product)
+    notes_s   = "" if notes is None else str(notes)
+    return {
+      "designation": designation,
+      "item_type": item_type,
+      "product": product_s,
+      "qty": int(qty or 0),
+      "notes": notes_s,
+      "_order": order,
+      # csv flags are added by caller in _normalize_rules
+    }
+
+  # -------- CSV export ----------
+  def _export_csv(self):
+    """
+    Export CSV with headers: Product,Designation,Quantity
+    Include only rows where csv_include is True (user-controlled).
+    """
+    try:
+      rows = self._flat_rows or []
+      lines = ["Product,Designation,Quantity"]
+      for r in rows:
+        itype = (r.get("item_type") or "").strip()
+        if itype in ("Note","Skipped"):
+          continue
+        if not bool(r.get("csv_include", False)):
+          continue
+        prod = (r.get("product") or "").replace('"','""')
+        des  = (r.get("designation") or "").replace('"','""')
+        qty  = str(r.get("qty", 0))
+        lines.append(f"\"{prod}\",\"{des}\",{qty}")
+      csv_bytes = ("\n".join(lines)).encode("utf-8")
+      media = BlobMedia("text/csv", csv_bytes, name="bill_of_materials.csv")
+      download(media)
+    except Exception as ex:
+      alert(f"Could not export CSV:\n{ex}")
+
+  def _download_and_feedback_click(self, **event_args):
+    # 1) Export the real BOM CSV immediately
+    try:
+      self._export_csv()
+    except Exception as ex:
+      alert(f"Could not export CSV:\n{ex}")
+      return
+  
+    # 2) Show the same nice feedback dialog you used on login
+    try:
+      dlg = FeedbackDialog()
+      alert(content=dlg, title="Quick feedback", large=False, buttons=None, dismissible=True)
+      rating = dlg.rating
+      if rating is None:
+        return
+    except Exception as ex:
+      Notification(f"Could not show feedback dialog: {ex}", style="warning", timeout=3).show()
+      return
+  
+    # 3) Send to you, then thank the user
+    try:
+      info = {
+        "source": "output_download",
+        "job_name": self.job_name or "",
+        "row_count": len(self._flat_rows or []),
+      }
+      anvil.server.call('send_accuracy_feedback', rating, info["job_name"], info)
+      Notification("Thanks for your feedback!", timeout=2).show()
+    except Exception as e:
+      Notification(f"Could not send feedback: {e}", style="warning", timeout=3).show()
+
+  # -------- Buttons --------
+  def btn_show_raw_click(self, **event_args):
+    try:
+      job_id = (self.result.get("job_id") or "").strip()
+      if not job_id:
+        alert("No job id found."); return
+  
+      # 1) Full-page magenta overlays
+      magenta_paths = anvil.server.call('vm_list_magenta_overlay_images', job_id) or []
+  
+      # 2) Individual panel/item overlays (your existing review_overlays)
+      panel_paths = anvil.server.call('vm_list_overlay_images', job_id) or []
+  
+      if not magenta_paths and not panel_paths:
+        alert("No overlay images found for this job."); return
+  
+      # Cache
+      if not hasattr(self, "_overlay_cache"):
+        self._overlay_cache = {}  # (job_id, path) -> BlobMedia
+  
+      def _fetch(path: str):
+        key = (job_id, path)
+        media = self._overlay_cache.get(key)
+        if media is None:
+          media = anvil.server.call('vm_fetch_image', job_id, path)
+          self._overlay_cache[key] = media
+        return media
+  
+      def _tile(path: str, w: int, h: int):
+        media = _fetch(path)
+        tile = ColumnPanel(width=w)
+        img = Image(source=media, width="100%", height=h, display_mode='shrink_to_fit', tooltip=path)
+        cap = Label(text=path.split("/")[-1], align="center", bold=True)
+        tile.add_component(img)
+        tile.add_component(cap)
+        return tile
+  
+      content = ColumnPanel(spacing="medium")
+      content.width = "100%"
+  
+      # --- Full overlays on top ---
+      if magenta_paths:
+        content.add_component(Label(text="Full Overlay Images", bold=True))
+        mag_grid = FlowPanel(spacing='large', align='center')
+        for p in magenta_paths:
+          mag_grid.add_component(_tile(p, w=1000, h=800))
+        content.add_component(mag_grid)
+  
+      # --- Individual panels below ---
+      if panel_paths:
+        content.add_component(Label(text="Individual Panels", bold=True))
+        panel_grid = FlowPanel(spacing='large', align='center')
+        for p in panel_paths:
+          panel_grid.add_component(_tile(p, w=800, h=600))
+        content.add_component(panel_grid)
+  
+      alert(content, title="Detected Items", large=True, buttons=[("Close", True)])
+  
+    except Exception as e:
+      alert(f"Could not load detected items:\n{e}")
+
+  def _clear_router_handoff(self):
+    try:
+      router_state.processing_args = None
+    except Exception:
+      pass
+    try:
+      router_state.output_args = None
+    except Exception:
+      pass
+
+  def logout_btn_click(self, **event_args):
+    self._clear_router_handoff()
+    anvil.users.logout()
+    js.window.location.hash = "landing"
+
+
+  def new_job_btn_click(self, **event_args):
+    self._clear_router_handoff()
+    js.window.location.hash = "upload"
+    return
+  
+  @handle("jobs_btn", "click")
+  def jobs_btn_click(self, **event_args):
+    self._clear_router_handoff()
+    js.window.location.hash = "myjobs"
+    return
+
+  @handle("det_pnl_icon", "click")
+  def det_pnl_icon_click(self, **event_args):
+    """Detected Panels help modal"""
+    body = (
+      "Detected Panels\n\n"
+      "This section shows the panel items Argus detected from your drawings.\n\n"
+      "If a panel appears here, it will have a BOM card in the BOM section below.\n\n"
+      "Use View to open the overlay preview for that detection."
+    )
+    alert(
+      content=Label(text=body),
+      title="About Detected Panels",
+      buttons=[("Got it", True)],
+      large=False,
+      dismissible=True
+    )
+
+  @handle("non_pnl_icon", "click")
+  def non_pnl_icon_click(self, **event_args):
+    """Non-panel / rejected detections help modal"""
+    body = (
+      "Non-Panel Items\n\n"
+      "This section contains detections that are NOT included in the BOM cards.\n\n"
+      "These are items we detected but classified as:\n"
+      "• Not a panel\n"
+      "• Unsupported panel style\n"
+      "• Low-quality/unreadable detection\n"
+      "• Skipped/error detections\n\n"
+      "These are shown for transparency/review only.\n"
+      "They will not generate cards and will not be included in the BOM export."
+    )
+    alert(
+      content=Label(text=body),
+      title="About Non-Panel Items",
+      buttons=[("Got it", True)],
+      large=False,
+      dismissible=True
+    )
+
+  @handle("bom_icon", "click")
+  def bom_icon_click(self, **event_args):
+    """BOM cards help modal"""
+    body = (
+      "BOM Cards\n\n"
+      "This section shows the generated BOM cards for good/usable panel detections.\n\n"
+      "Each card includes part numbers and include/exclude checkboxes for CSV export.\n"
+      "You can choose what to include before downloading.\n\n"
+      "Always review each card and notes.\n"
+      "Notes may indicate partial generation, skipped breakers, or other manual-review items."
+    )
+    alert(
+      content=Label(text=body),
+      title="About BOM Cards",
+      buttons=[("Got it", True)],
+      large=False,
+      dismissible=True
+    )

@@ -1,4 +1,4 @@
-# OcrLibrary/PanelHeaderParserV6.py
+# OcrLibrary/PanelHeaderParserV8.py
 import os, re, cv2, json, numpy as np
 from typing import Dict, List, Tuple, Optional
 

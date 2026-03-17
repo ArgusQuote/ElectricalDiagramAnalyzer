@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParserAPIv8.py
+# OcrLibrary/BreakerTableParserAPIv9.py
 import sys, os, inspect
 import re
 import cv2
@@ -10,7 +10,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "API_8"
+API_VERSION = "API_9"
 API_ORIGIN  = __file__
 
 SNAP_MAP = {
@@ -43,9 +43,9 @@ def reset_name_deduper():
     _NAME_COUNTS.clear()
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
-from OcrLibrary.PanelHeaderParserV8   import PanelParser as PanelHeaderParser
+from OcrLibrary.PanelHeaderParserV9   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
-
+ 
 class BreakerTablePipeline:
     def __init__(self, *, debug: bool = True):
         self.debug = bool(debug)

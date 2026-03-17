@@ -56,22 +56,14 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("PYTHONHASHSEED", "0")
 
 # ---------- WATCHDOG CONFIG ----------
-WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "10"))  # dial in prod
+WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "15"))  # dial in prod
 WATCHDOG_KILL_GRACE_SEC = int(os.environ.get("WATCHDOG_KILL_GRACE_SEC", "3"))
 WATCHDOG_ERROR_MSG = (
   "This job took over {mins} minutes to process. "
   "Please trim the PDF to only relevant pages and try again."
 )
 
-# ---------- QUEUE TIMEOUT CONFIG ----------
-QUEUE_TIMEOUT_MIN = int(os.environ.get("QUEUE_TIMEOUT_MIN", "25"))
-QUEUE_TIMEOUT_ERROR_MSG = (
-  "This job waited in the processing queue too long due to current demand. "
-  "Please try again in a few minutes."
-)
-
 def _set_runtime_determinism():
-    """Cap OpenCV/PyTorch thread counts and enable cuDNN determinism for reproducible OCR."""
     # OpenCV: cap threads if available
     try:
         import cv2
@@ -94,7 +86,6 @@ def _set_runtime_determinism():
         pass
 
 def _log_run_fingerprint(tag: str = ""):
-    """Log CUDA device names and cuDNN determinism settings for diagnostics."""
     try:
         import torch
         devs = []
@@ -116,25 +107,6 @@ from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION
 import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
-# ---------- PANEL DETECTION: ML or Heuristic ----------
-# Set USE_ML_DETECTOR=True to use ML-based table detection (requires trained model)
-# Set USE_ML_DETECTOR=False to use heuristic detection (PanelBoardSearch)
-USE_ML_DETECTOR = os.environ.get("USE_ML_DETECTOR", "false").lower() in ("true", "1", "yes")
-ML_MODEL_PATH = os.environ.get("ML_MODEL_PATH", None)  # Path to trained YOLO model
-
-if USE_ML_DETECTOR:
-    try:
-        from MLTableDetection.TableDetectorML import TableDetectorML as PanelBoardSearch
-        print(f">>> Using ML-based table detection")
-        if ML_MODEL_PATH:
-            print(f">>> ML model path: {ML_MODEL_PATH}")
-    except ImportError as e:
-        print(f">>> ML detector not available ({e}), falling back to heuristic")
-        from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-else:
-    from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-    print(f">>> Using heuristic table detection (PanelSearchToolV25)")
-
 # ---------- CONNECT UPLINK ----------
 ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
 if not ANVIL_UPLINK_KEY:
@@ -147,7 +119,6 @@ print(f">>> NODE_ID={NODE_ID}")
 
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
-    """Pre-load EasyOCR models by running BreakerTablePipeline on a dummy 32x32 image."""
     try:
         _log_run_fingerprint("warmup")
         import numpy as np, cv2, tempfile
@@ -177,16 +148,13 @@ _warmup_ocr_once()
 
 # ---------- UTILITIES ----------
 def _now_utc():
-    """Return the current UTC datetime."""
     return datetime.now(timezone.utc)
 
 def _epoch_ms(dt=None) -> int:
-    """Convert a datetime (default: now UTC) to epoch milliseconds."""
     dt = dt or datetime.now(timezone.utc)
     return int(dt.timestamp() * 1000)
 
 def _fmt_cycle_time(ms: int) -> str:
-    """Format milliseconds as HH:MM:SS:mmm for display in status payloads."""
     if ms is None or ms < 0:
         return "00:00:00:000"
     hours = ms // 3_600_000
@@ -198,13 +166,11 @@ def _fmt_cycle_time(ms: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{millis:03d}"
 
 def _slugify(s: str) -> str:
-    """Normalize a string to a filesystem-safe slug (alphanumeric, dots, hyphens, underscores)."""
     s = (s or "").strip().replace(" ", "_")
     s = re.sub(r"[^A-Za-z0-9._-]+", "", s)
     return s or "untitled"
 
 def _json_read_or_none(path: Path):
-    """Load JSON from *path*; return None on any read/parse error."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -241,7 +207,6 @@ def _parse_job_note(job_note: str) -> dict:
     return out
 
 def _iso_to_stamp(s: str) -> str:
-    """Parse an ISO-8601 datetime string into a YYYYMMDD_HHMMSS stamp for job directory names."""
     try:
         s2 = s.rstrip("Z")
         dt = datetime.fromisoformat(s2)
@@ -253,7 +218,6 @@ def _iso_to_stamp(s: str) -> str:
         return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
-    """Create and return a timestamped job directory under BASE_JOBS_DIR with uploaded_pdfs/ and pdf_images/ subdirs."""
     meta = _parse_job_note(job_note)
     job_name = _slugify(meta.get("job_name") or Path(fallback_filename).stem)
     stamp = _iso_to_stamp(meta.get("submitted_at_utc") or "")
@@ -263,7 +227,6 @@ def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
     return job_dir
 
 def _save_media_to_disk(media, dest_dir: Path) -> Path:
-    """Write an Anvil BlobMedia's bytes to *dest_dir* as a PDF file; return the saved path."""
     fname = _slugify(getattr(media, "name", None) or "uploaded.pdf")
     if not fname.lower().endswith(".pdf"):
         fname += ".pdf"
@@ -273,7 +236,6 @@ def _save_media_to_disk(media, dest_dir: Path) -> Path:
     return dst
 
 def _normalize_component_for_none(obj):
-    """Recursively normalize a component dict: convert None to 'NONE', numpy types to Python ints/floats, and numeric strings to numbers."""
     import re
     try:
         import numpy as np
@@ -322,7 +284,6 @@ def _normalize_component_for_none(obj):
 
 # ----- status.json / result.json on disk -----
 def _status_paths(dir_path: Path):
-    """Return a dict with 'status' and 'result' keys pointing to the respective JSON files in *dir_path*."""
     dir_path = Path(dir_path)
     return {"status": dir_path / "status.json", "result": dir_path / "result.json"}
 
@@ -349,14 +310,12 @@ def _status_write(dir_path: Path, state: str, **extras):
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
 
 def _result_write(dir_path: Path, result: dict):
-    """Write *result* dict to result.json in the job directory."""
     paths = _status_paths(dir_path)
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
 
 # ----- Data Tables helpers (disabled here; leave no-ops) -----
 def _jobs_upsert(job_id: str, **fields):
-    """No-op placeholder for a Data Tables upsert (disabled in disk-only mode)."""
     return
 
 # ---------- UI OVERRIDES ----------
@@ -389,7 +348,6 @@ _DEFAULT_OVERRIDES = {
 }
 
 def _deep_merge(dst: dict, src: dict) -> dict:
-    """Recursively merge *src* into *dst*, returning a new dict (nested dicts are merged, scalars overwritten)."""
     out = dict(dst)
     for k, v in (src or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -399,7 +357,6 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     return out
 
 def _coerce_types(overrides: dict) -> dict:
-    """Recursively coerce string values in UI overrides: 'true'/'false' to bool, digit strings to int."""
     def coerce(v):
         if isinstance(v, str):
             s = v.strip().lower()
@@ -420,12 +377,10 @@ def _coerce_types(overrides: dict) -> dict:
     return walk(overrides or {})
 
 def _normalize_ui_overrides(overrides: dict | None) -> dict:
-    """Merge coerced user overrides on top of _DEFAULT_OVERRIDES, returning the combined config."""
     return _deep_merge(_DEFAULT_OVERRIDES, _coerce_types(overrides or {}))
 
 # Delete unused images and folders for storage
 def _rel(p: Path, root: Path) -> str:
-    """Return *p* relative to *root* with forward slashes (for portable JSON paths)."""
     return str(p.relative_to(root)).replace("\\", "/")
 
 def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
@@ -515,7 +470,6 @@ def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
 
 @anvil.server.callable
 def vm_get_default_overrides() -> dict:
-    """RPC callable: return a deep copy of the default UI overrides for panelboards/transformers/disconnects."""
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
 # ---------- PDF → images ----------
@@ -562,38 +516,25 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
 
-    # --- 2) Run the panel finder on the chosen PDF ---
-    # Build kwargs for PanelBoardSearch (works for both ML and heuristic detectors)
-    finder_kwargs = {
-        "output_dir": str(img_dir),
-        "dpi": dpi,
-        "render_dpi": PANEL_FINDER_DEFAULTS["render_dpi"],
-        "render_colorspace": PANEL_FINDER_DEFAULTS["render_colorspace"],
-        "pad": PANEL_FINDER_DEFAULTS["pad"],
-        "verbose": PANEL_FINDER_DEFAULTS["verbose"],
-    }
-    
-    # Add ML-specific or heuristic-specific parameters
-    if USE_ML_DETECTOR:
-        # ML detector parameters
-        if ML_MODEL_PATH:
-            finder_kwargs["model_path"] = ML_MODEL_PATH
-        finder_kwargs["conf_threshold"] = 0.25
-        finder_kwargs["min_area_fraction"] = PANEL_FINDER_DEFAULTS["min_void_area_fr"]
-        finder_kwargs["max_area_fraction"] = PANEL_FINDER_DEFAULTS["max_void_area_fr"]
-    else:
-        # Heuristic detector parameters
-        finder_kwargs["aa_level"] = PANEL_FINDER_DEFAULTS["aa_level"]
-        finder_kwargs["min_void_area_fr"] = PANEL_FINDER_DEFAULTS["min_void_area_fr"]
-        finder_kwargs["min_void_w_px"] = PANEL_FINDER_DEFAULTS["min_void_w_px"]
-        finder_kwargs["min_void_h_px"] = PANEL_FINDER_DEFAULTS["min_void_h_px"]
-        finder_kwargs["max_void_area_fr"] = PANEL_FINDER_DEFAULTS["max_void_area_fr"]
-        finder_kwargs["void_w_fr_range"] = PANEL_FINDER_DEFAULTS["void_w_fr_range"]
-        finder_kwargs["void_h_fr_range"] = PANEL_FINDER_DEFAULTS["void_h_fr_range"]
-        finder_kwargs["min_whitespace_area_fr"] = PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"]
-        finder_kwargs["margin_shave_px"] = PANEL_FINDER_DEFAULTS["margin_shave_px"]
-    
-    local_finder = PanelBoardSearch(**finder_kwargs)
+    # --- 2) Run the panel finder (PanelSearchToolV18) on the chosen PDF ---
+    local_finder = PanelBoardSearch(
+        output_dir=str(img_dir),
+        dpi=dpi,
+        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match your dev env
+        render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
+        aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
+        render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
+        min_void_area_fr=PANEL_FINDER_DEFAULTS["min_void_area_fr"],
+        min_void_w_px=PANEL_FINDER_DEFAULTS["min_void_w_px"],
+        min_void_h_px=PANEL_FINDER_DEFAULTS["min_void_h_px"],
+        max_void_area_fr=PANEL_FINDER_DEFAULTS["max_void_area_fr"],
+        void_w_fr_range=PANEL_FINDER_DEFAULTS["void_w_fr_range"],
+        void_h_fr_range=PANEL_FINDER_DEFAULTS["void_h_fr_range"],
+        min_whitespace_area_fr=PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"],
+        margin_shave_px=PANEL_FINDER_DEFAULTS["margin_shave_px"],
+        pad=PANEL_FINDER_DEFAULTS["pad"],
+        verbose=PANEL_FINDER_DEFAULTS["verbose"],
+    )
 
     try:
         crops = local_finder.readPdf(pdf_for_finder)
@@ -606,7 +547,6 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
 
 # ---------- Rules payload helper ----------
 def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
-    """Assemble the payload dict expected by RulesEngine4.process_job() from UI defaults and component items."""
     return {"defaults": defaults or {}, "items": items or []}
 
 # ---------- Queue / Pool state ----------
@@ -617,11 +557,9 @@ _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
 
 def _enqueue_job(job_id: str, owner_id: str):
-    """Put a (job_id, owner_id) tuple onto the shared job queue for worker threads to dequeue."""
     _JOB_Q.put((job_id, owner_id))
 
 def _enter_inflight(owner_id: str) -> bool:
-    """Try to increment the per-user inflight count; return False if at MAX_INFLIGHT_PER_USER."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         if c >= MAX_INFLIGHT_PER_USER:
@@ -630,18 +568,15 @@ def _enter_inflight(owner_id: str) -> bool:
         return True
 
 def _leave_inflight(owner_id: str):
-    """Decrement the per-user inflight count (floor at 0)."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         _INFLIGHT_BY_USER[owner_id] = max(0, c - 1)
 
 # ---------- Cancel helpers ----------
 def _cancel_path(job_dir: Path) -> Path:
-    """Return the path to the .cancel marker file used to signal job cancellation."""
     return job_dir / ".cancel"
 
 def _is_canceled(job_dir: Path) -> bool:
-    """Check whether a job has been marked as canceled by the presence of its .cancel file."""
     return _cancel_path(job_dir).exists()
 
 def _peek_owner_id(job_dir: Path) -> str:
@@ -650,25 +585,8 @@ def _peek_owner_id(job_dir: Path) -> str:
     st = _json_read_or_none(sp["status"]) or {}
     return str(st.get("owner_id") or "").strip().lower()
 
-def _is_queue_timed_out(job_dir: Path) -> tuple[bool, int | None]:
-    """
-    Returns (timed_out, age_ms).
-    Only checks total queued age from noticed_ts_ms.
-    """
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-
-    noticed_ts_ms = st.get("noticed_ts_ms")
-    if not isinstance(noticed_ts_ms, int):
-        return (False, None)
-
-    age_ms = max(0, _epoch_ms() - noticed_ts_ms)
-    queue_limit_ms = max(1, int(QUEUE_TIMEOUT_MIN)) * 60 * 1000
-    return (age_ms > queue_limit_ms, age_ms)
-
 # ---------- Shared helpers for component mapping ----------
 def _to_int_or_none(x):
-    """Parse *x* as an integer (stripping commas); return None on failure."""
     try:
         return int(str(x).replace(",", "").strip())
     except Exception:
@@ -1021,7 +939,6 @@ def _process_job(job_id: str):
 
 # ---------- Worker pool ----------
 def _dequeue_loop(idx: int):
-  """Worker loop: dequeue jobs, enforce per-user cap, spawn subprocesses, and run watchdog timeout."""
   threading.current_thread().name = f"pool-worker-{idx}"
   mp = get_context("spawn")  # safer than fork for libs like torch/opencv
 
@@ -1031,76 +948,14 @@ def _dequeue_loop(idx: int):
     except Empty:
       continue
 
-    job_dir = BASE_JOBS_DIR / job_id
-
-    # If the job disappeared somehow, just drop it
-    if not job_dir.exists():
-      _JOB_Q.task_done()
-      continue
-
-    # Check current status snapshot
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-    current_state = str(st.get("state") or "").lower()
-
-    # If already finished/canceled/errored, drop it
-    if current_state in ("done", "error", "canceled"):
-      _JOB_Q.task_done()
-      continue
-
-    # Queue timeout applies only before the job starts running
-    timed_out, age_ms = _is_queue_timed_out(job_dir)
-    if current_state == "queued" and timed_out:
-      msg = QUEUE_TIMEOUT_ERROR_MSG
-      age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
-      _status_write(
-          job_dir,
-          "error",
-          error=msg,
-          queue_timeout=True,
-          queue_timeout_min=QUEUE_TIMEOUT_MIN,
-          queue_age_ms=age_ms,
-          queue_age_str=age_str,
-          progress=0.0
-      )
-      _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-      print(f">>> queue timeout: {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
-      _JOB_Q.task_done()
-      continue
-
     # enforce per-user cap
     if not _enter_inflight(owner_id):
-        threading.Timer(0.05, lambda j=job_id, o=owner_id: _enqueue_job(j, o)).start()
-        _JOB_Q.task_done()
-        continue
+      threading.Timer(0.05, lambda: _enqueue_job(job_id, owner_id)).start()
+      _JOB_Q.task_done()
+      continue
 
     proc = None
     try:
-      # Re-check queue timeout one last time right before starting
-      st = _json_read_or_none(sp["status"]) or {}
-      current_state = str(st.get("state") or "").lower()
-      timed_out, age_ms = _is_queue_timed_out(job_dir)
-
-      if current_state == "queued" and timed_out:
-        msg = QUEUE_TIMEOUT_ERROR_MSG
-        age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
-        _status_write(
-            job_dir,
-            "error",
-            error=msg,
-            step="queue_timeout",
-            queue_timeout=True,
-            queue_timeout_min=QUEUE_TIMEOUT_MIN,
-            queue_age_ms=age_ms,
-            queue_age_str=age_str,
-            progress=0.0
-        )
-        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-        print(f">>> queue timeout (pre-start): {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
-        continue
-
       # Spawn child process for this job
       proc = mp.Process(target=_run_job_target, args=(job_id,), daemon=True)
       proc.start()
@@ -1111,6 +966,7 @@ def _dequeue_loop(idx: int):
 
       if proc.is_alive():
         # Timed out: mark canceled/error, terminate child, clean up
+        job_dir = BASE_JOBS_DIR / job_id
         # Mark cancel file so future reads show canceled intent
         try:
           with open(_cancel_path(job_dir), "w") as f:
@@ -1238,7 +1094,7 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
     }
 
 def _natural_key(p: Path):
-    """Generate a natural sort key so 'page2' sorts before 'page10'."""
+    # Sort like page2 before page10
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 @anvil.server.callable
@@ -1294,7 +1150,6 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
 
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
-    """RPC callable: return job-relative paths of per-panel review overlay PNGs."""
     if not job_id:
         return []
     job_root = (BASE_JOBS_DIR / job_id).resolve()
@@ -1336,26 +1191,6 @@ def vm_fetch_image(job_id: str, source_path: str):
     return BlobMedia(ctype, p.read_bytes(), name=p.name)
 
 @anvil.server.callable
-def vm_set_queue_timeout(minutes: int) -> dict:
-  """
-  Set the queue timeout (minutes) at runtime.
-  Persists only for this process lifetime.
-  """
-  global QUEUE_TIMEOUT_MIN
-  try:
-    m = int(minutes)
-    if m < 1 or m > 120:
-      raise ValueError("minutes must be between 1 and 120")
-    QUEUE_TIMEOUT_MIN = m
-    return {"ok": True, "queue_timeout_min": QUEUE_TIMEOUT_MIN}
-  except Exception as e:
-    return {"ok": False, "error": str(e), "queue_timeout_min": QUEUE_TIMEOUT_MIN}
-
-@anvil.server.callable
-def vm_get_queue_timeout() -> int:
-  return int(QUEUE_TIMEOUT_MIN)
-
-@anvil.server.callable
 def vm_set_watchdog_timeout(minutes: int) -> dict:
   """
   Set the watchdog timeout (minutes) at runtime.
@@ -1373,75 +1208,7 @@ def vm_set_watchdog_timeout(minutes: int) -> dict:
 
 @anvil.server.callable
 def vm_get_watchdog_timeout() -> int:
-  """RPC callable: return the current watchdog timeout in minutes."""
   return int(WATCHDOG_TIMEOUT_MIN)
-
-def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[int | None, int]:
-    """
-    Returns (queue_position, active_count)
-
-    queue_position:
-      0 -> currently running
-      1 -> next in line
-      2 -> one queued ahead, etc.
-      None -> job missing / not active anymore
-
-    active_count:
-      count of jobs on this node that are still queued/running
-    """
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-    target = _json_read_or_none(sp["status"]) or {}
-    if not target:
-        return (None, 0)
-
-    target_state = str(target.get("state") or "").lower()
-    if target_state in ("done", "error", "canceled"):
-        return (None, 0)
-
-    target_noticed = target.get("noticed_ts_ms")
-    if not isinstance(target_noticed, int):
-        return (None, 0)
-
-    target_node = str(target.get("node_id") or "").strip()
-    if not target_node:
-        target_node = NODE_ID
-
-    rows = []
-    for d in BASE_JOBS_DIR.iterdir():
-        if not d.is_dir():
-            continue
-
-        st = _json_read_or_none(_status_paths(d)["status"]) or {}
-        state = str(st.get("state") or "").lower()
-        if state not in ("queued", "running"):
-            continue
-
-        node_id = str(st.get("node_id") or "").strip()
-        if node_id and node_id != target_node:
-            continue
-
-        noticed = st.get("noticed_ts_ms")
-        if not isinstance(noticed, int):
-            continue
-
-        rows.append({
-            "job_id": d.name,
-            "state": state,
-            "noticed_ts_ms": noticed,
-        })
-
-    # Oldest first, then job_id for stable ordering
-    rows.sort(key=lambda r: (r["noticed_ts_ms"], r["job_id"]))
-
-    active_count = len(rows)
-
-    for idx, row in enumerate(rows):
-        if row["job_id"] == job_id:
-            # idx is zero-based among active queued/running jobs
-            return (idx, active_count)
-
-    return (None, active_count)
 
 @anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
@@ -1477,27 +1244,13 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         res = _json_read_or_none(sp["result"]) or {}
         return {"state": "done", "result": res, **node_hint}
     if state == "error":
-        out = {
-            "state": "error",
-            "error": st.get("error") or "Unknown error",
-            **node_hint
-        }
-        for k in ("queue_timeout", "queue_timeout_min", "queue_age_ms", "queue_age_str"):
-            if k in st:
-                out[k] = st[k]
-        return out
+        return {"state": "error", "error": st.get("error") or "Unknown error", **node_hint}
 
     out = {"state": state, **node_hint}
     for k in ("step", "image_count", "ui_overrides", "noticed_ts_ms",
-            "cycle_time_str", "cycle_time_ms", "progress"):
+              "cycle_time_str", "cycle_time_ms", "progress"):
         if k in st:
             out[k] = st[k]
-
-    if state in ("queued", "running"):
-        queue_position, active_count = _get_queue_position(job_id, req_email)
-        if queue_position is not None:
-            out["queue_position"] = int(queue_position)
-        out["active_count"] = int(active_count)
 
     if "noticed_ts_ms" in st and isinstance(st["noticed_ts_ms"], int):
         elapsed_ms = max(0, _epoch_ms() - int(st["noticed_ts_ms"]))

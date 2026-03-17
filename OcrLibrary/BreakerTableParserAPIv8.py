@@ -46,9 +46,9 @@ def reset_name_deduper():
     _NAME_COUNTS.clear()
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
-from OcrLibrary.PanelHeaderParserV7   import PanelParser as PanelHeaderParser
+from OcrLibrary.PanelHeaderParserV9   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
-
+ 
 class BreakerTablePipeline:
     """Three-stage OCR pipeline: Analyzer -> Header Parser -> Table Parser. Orchestrates extraction of panel data from a single panel image."""
 
