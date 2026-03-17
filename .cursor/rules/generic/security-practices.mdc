@@ -1,0 +1,27 @@
+---
+description: Security practices for safe code and dependency management
+alwaysApply: true
+---
+
+# Security Practices
+
+## Secrets Management
+- Never hardcode secrets, API keys, passwords, or tokens in source code
+- Never log sensitive data (credentials, PII, session tokens)
+- Use environment variables or a secrets manager for all credentials
+- Add secret-containing files to .gitignore before they are created
+
+## Input Validation
+- Validate and sanitize all external input at system boundaries
+- Use parameterized queries for database operations -- never string concatenation
+- Escape output appropriately for the target context (HTML, SQL, shell)
+
+## Dependencies
+- Prefer well-maintained dependencies with active security response
+- Review new dependencies before adding them -- check for known vulnerabilities
+- Keep dependencies updated to receive security patches
+
+## Authentication and Authorization
+- Apply the principle of least privilege for all access controls
+- Verify authentication and authorization on every protected operation
+- Never rely solely on client-side validation for security decisions

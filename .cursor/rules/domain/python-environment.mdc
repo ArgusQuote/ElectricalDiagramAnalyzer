@@ -1,0 +1,23 @@
+---
+description: Python virtual environment configuration. Ensures the correct venv is activated before running any Python commands.
+globs: "**/*.py"
+alwaysApply: true
+---
+
+# Python Environment
+
+## Virtual Environment
+
+- The project uses a virtual environment at `/home/marco/venv/`
+- Always activate it before running any Python commands: `source /home/marco/venv/bin/activate`
+- After activation, use `python` (not `python3`) to run scripts
+- The venv contains all project dependencies: PyTorch, OpenCV, pypdfium2, transformers, EasyOCR, etc.
+
+## Running Scripts
+
+- Activate the venv first, then run from the project root:
+  ```
+  source /home/marco/venv/bin/activate
+  python DevEnv/SomeScript.py
+  ```
+- If the venv is already activated in the current shell session, do not re-activate it

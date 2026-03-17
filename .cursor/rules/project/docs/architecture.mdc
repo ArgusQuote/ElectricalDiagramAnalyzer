@@ -1,0 +1,140 @@
+---
+description: System architecture documentation including pipeline flows, component relationships, deployment topology, and key design decisions. Use when making architectural decisions, understanding system flow, or modifying pipeline components.
+alwaysApply: false
+---
+
+# System Architecture
+
+## Overview
+
+ElectricalDiagramAnalyzer is a Python backend that processes electrical PDF drawings (panel schedules, riser diagrams, one-line diagrams). It detects panel tables via heuristic or ML-based detection, extracts structured data (panel name, amperage, voltage, breakers) via OCR, and recommends equipment part numbers through a rules engine. The backend connects to an Anvil web UI via Uplink RPC.
+
+## Component Diagram
+
+```
+PDF Upload (Anvil UI)
+    │
+    ▼
+AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
+    │
+    ├─► PageFilter (PageFilterV3)
+    │       │  keeps electrical pages, outputs filtered PDF
+    │       ▼
+    ├─► PanelBoardSearch (PanelSearchToolV25) ─OR─ TableDetectorML
+    │       │  detects panel regions, crops to PNGs
+    │       ▼
+    ├─► BreakerTablePipeline (BreakerTableParserAPIv8)
+    │       ├─► BreakerTableAnalyzer (Analyzer12)
+    │       │       ├── BreakerHeaderFinder
+    │       │       └── BreakerFooterFinder
+    │       ├─► PanelHeaderParser (PanelHeaderParserV7)
+    │       └─► BreakerTableParser (BreakerTableParser10)
+    │       │  extracts structured OCR data per panel
+    │       ▼
+    ├─► _merge_component_from_btp()
+    │       │  maps OCR results to component dicts
+    │       ▼
+    └─► RulesEngine4.process_job()
+            └── PartNumberBuilder (mccb, nqPanelboard, Disconnect, ...)
+                │  selects equipment part numbers
+                ▼
+            result.json + status.json on disk
+```
+
+## Key Components
+
+### AnvilUplinkCode (Orchestrator)
+- **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, worker pool, and watchdog
+- **Location**: `AnvilUplinkCode/uplink_server.py`
+- **Dependencies**: PageFilter, PanelBoardSearch or TableDetectorML, BreakerTablePipeline, RulesEngine4
+- **Consumers**: Anvil web frontend via Uplink RPC
+
+### PageFilter
+- **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages using OCR and heuristics
+- **Location**: `PageFilter/PageFilterV3.py`
+- **Dependencies**: pypdfium2, pikepdf, EasyOCR, OpenCV
+- **Consumers**: uplink_server (pre-processing step)
+
+### VisualDetectionToolLibrary (Heuristic Panel Detection)
+- **Purpose**: Detects panel table regions in PDF bitmaps using whitespace/void analysis and border detection
+- **Location**: `VisualDetectionToolLibrary/PanelSearchToolV25.py`
+- **Dependencies**: pypdfium2, OpenCV, NumPy
+- **Consumers**: uplink_server (panel crop step, default path)
+
+### MLTableDetection (ML Panel Detection)
+- **Purpose**: Alternative ML-based table detection using Table Transformer / Detectron2
+- **Location**: `MLTableDetection/TableDetectorML.py`
+- **Dependencies**: PyTorch, Hugging Face Transformers, Detectron2
+- **Consumers**: uplink_server (panel crop step, opt-in via `USE_ML_DETECTOR` env var)
+
+### OcrLibrary (OCR Pipeline)
+- **Purpose**: Three-stage OCR pipeline -- layout analysis, header parsing, breaker table parsing
+- **Location**: `OcrLibrary/` (BreakerTableParserAPIv8, BreakerTableAnalyzer12, PanelHeaderParserV7, BreakerTableParser10)
+- **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses
+- **Consumers**: uplink_server via BreakerTablePipeline
+
+### AnchoringClasses
+- **Purpose**: Structural layout detection -- finds header and footer anchor positions in panel images
+- **Location**: `AnchoringClasses/BreakerHeaderFinder.py`, `AnchoringClasses/BreakerFooterFinder.py`
+- **Dependencies**: EasyOCR reader (shared), OpenCV, NumPy
+- **Consumers**: BreakerTableAnalyzer12
+
+### RulesEngine
+- **Purpose**: Processes component dicts from OCR to select equipment part numbers
+- **Location**: `RulesEngine/RulesEngine4.py`
+- **Dependencies**: PartNumberSelector
+- **Consumers**: uplink_server (final pipeline step)
+
+### PartNumberSelector
+- **Purpose**: Part number lookup and selection logic for panelboards, breakers, disconnects, transformers
+- **Location**: `PartNumberSelector/PartNumberBuilder.py`
+- **Dependencies**: None (pure logic)
+- **Consumers**: RulesEngine4
+
+## Data Pipelines
+
+### Main Detection Pipeline
+- **Trigger**: `vm_submit_for_detection()` callable from Anvil UI
+- **Steps**:
+  1. Save uploaded PDF to `~/jobs/{job_id}/`
+  2. Write initial `status.json` (state=queued)
+  3. Enqueue job to worker pool
+  4. Worker spawns subprocess: `PageFilter.readPdf()` filters pages
+  5. `PanelBoardSearch.readPdf()` (or `TableDetectorML`) detects and crops panels to PNGs
+  6. For each PNG (sequential): `BreakerTablePipeline.run()` extracts OCR data
+  7. `_merge_component_from_btp()` maps each OCR result to a component dict
+  8. `RulesEngine4.process_job()` selects part numbers for all components
+  9. Write `result.json` and update `status.json` (state=done)
+  10. Cleanup temporary files
+- **Output**: `result.json` with components, part numbers, and cycle time
+- **Error handling**: Exceptions write state=error to `status.json`; watchdog kills jobs exceeding timeout
+
+## Deployment Topology
+
+- **Runtime**: Single Paperspace VM (GPU-enabled for ML path)
+- **Connection**: Anvil Uplink RPC (`anvil.server.connect()` with `ANVIL_UPLINK_KEY`)
+- **Concurrency**: 3 dequeue threads, each spawning a child process per job (`multiprocessing.spawn`)
+- **Per-user limit**: 1 concurrent job per user (`MAX_INFLIGHT_PER_USER`)
+- **Watchdog**: Kills child processes exceeding `WATCHDOG_TIMEOUT_MIN` (default 15 minutes)
+- **Job storage**: `~/jobs/{job_id}/` with status.json, result.json, PDF, and PNG files
+- **No containerization**: Runs directly on the VM with system Python
+
+## Key Design Decisions
+
+### Dual-Path Panel Detection (Heuristic vs ML)
+- **Decision**: Support both heuristic (PanelSearchToolV25) and ML (TableDetectorML) panel detection
+- **Context**: Heuristic is reliable for standard layouts; ML handles unusual table structures
+- **Alternatives considered**: ML-only (not yet mature enough for all edge cases)
+- **Consequences**: Two code paths to maintain; toggled via `USE_ML_DETECTOR` env var
+
+### Process-Based Job Isolation
+- **Decision**: Each job runs in a spawned subprocess, not in-thread
+- **Context**: EasyOCR, PyTorch, and OpenCV have state that leaks across runs; subprocess ensures clean state
+- **Alternatives considered**: Thread-based execution (caused non-deterministic OCR results)
+- **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
+
+### Versioned Module Files
+- **Decision**: Modules carry version suffixes (e.g., PageFilterV3, PanelSearchToolV25, BreakerTableAnalyzer12)
+- **Context**: Enables side-by-side comparison during development; highest number is the active version
+- **Alternatives considered**: Git branching only (harder to compare in dev scripts)
+- **Consequences**: Multiple version files in each directory; only the highest version is imported by uplink_server

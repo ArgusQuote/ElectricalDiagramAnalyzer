@@ -1,0 +1,29 @@
+---
+description: Git workflow conventions for branching, commit messages, and pull requests
+alwaysApply: true
+---
+
+# Git Conventions
+
+## Branches
+- Use descriptive branch names with a type prefix: `feature/`, `fix/`, `refactor/`, `docs/`, `test/`
+- Keep branch names lowercase with hyphens as separators
+- Delete branches after merging
+
+## Commit Messages
+- Write a concise summary line (50 chars or less) in imperative mood
+- Add a body explaining WHY the change was made, not WHAT changed
+- Reference issue numbers when applicable
+- Do not commit unrelated changes together -- one logical change per commit
+
+## Pull Requests
+- Write a clear title summarizing the change
+- Include a description with context, motivation, and test plan
+- Keep PRs focused -- prefer small, reviewable changesets over large batches
+- Ensure all checks pass before requesting review
+
+## Never Commit
+- Secrets, credentials, API keys, or tokens
+- Environment files (.env) containing real values
+- Generated files that can be reproduced from source
+- Large binary files without explicit approval

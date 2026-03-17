@@ -1,0 +1,29 @@
+---
+description: How Cursor rules are organized in this project and when to consult each folder
+alwaysApply: true
+---
+
+# Cursor Rules Organization
+
+Rules in `.cursor/rules/` are organized into three categories:
+
+## domain/
+Technology-specific rules for the frameworks and tools used in this project. Consult when working with framework-specific code patterns.
+
+## generic/
+Universal rules that apply regardless of technology. Includes coding standards, git conventions, security practices, and this meta rule.
+
+## project/
+Project-specific rules and living documentation:
+- **project/docs/api-patterns.mdc** -- External API integrations and connection patterns
+- **project/docs/architecture.mdc** -- System architecture and pipeline flows
+- **project/docs/data-structures.mdc** -- Data models, DTOs, and schema conventions
+- **project/docs/file-locations.mdc** -- Source code map and module boundaries
+
+Consult the appropriate docs/ rule when you need context about how this project works.
+
+## Skills
+
+Reusable skills live in `.cursor/skills/`. Each skill is a directory with a `SKILL.md` file following the Agent Skills open standard. The agent discovers skills by their metadata and loads them on demand.
+
+The `generic/skill-routing.mdc` rule maps task types to skills. When a task matches a routing entry, load the corresponding skill for its procedure.

@@ -1,0 +1,182 @@
+---
+description: Documentation of core data models, DTOs, pipeline payloads, database schemas, and serialization formats. Use when working with data models, creating new entities, modifying schemas, or understanding data flow.
+alwaysApply: false
+---
+
+# Data Structures
+
+This project uses plain Python dicts (not ORM entities or dataclasses) as its primary data containers. Data is persisted as JSON files on disk, not in a database.
+
+## Pipeline Payloads
+
+### BreakerTablePipeline Output
+- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv8.BreakerTablePipeline.run()`
+- **Used by**: `_merge_component_from_btp()` in uplink_server.py
+- **Fields**:
+  - `apiVersion` -- str, pipeline API version
+  - `origin` -- str, source image path
+  - `panelStatus` -- None if OK, str error message otherwise
+  - `stages` -- dict of stage metadata (analyzer, parser, header)
+  - `results` -- dict containing the three stage outputs:
+    - `results.analyzer` -- dict: `src_path`, `header_y`, `header_bottom_y`, `footer_y`, `footer_token_val`, `panel_size`, `debug_dir`, `gray`
+    - `results.header` -- dict: `type`, `name`, `attrs`, `winningBoxes`, `boxImageShape`
+    - `results.parser` -- dict: `parserVersion`, `name`, `spaces`, `detected_breakers`, `breakerCounts`, `gfiBreakerCounts`, `headerScan`, `separatedScan`, `combinedScan`
+
+### Header Parser Output (results.header)
+- **Location**: Returned by `OcrLibrary/PanelHeaderParserV7.PanelParser.parse_panel()`
+- **Fields**:
+  - `type` -- str, always "panelboard"
+  - `name` -- str, detected panel name
+  - `attrs.amperage` -- int or None, panel bus amperage
+  - `attrs.voltage` -- int or None, detected voltage
+  - `attrs.intRating` -- int or None, AIC / interrupt rating (kA)
+  - `attrs.mainBreakerAmperage` -- int or None, main breaker amp (None if MLO)
+  - `attrs.detected_breakers` -- list of breaker dicts from header scan
+  - `winningBoxes` -- dict of bounding rects: `name`, `voltage`, `bus`, `main`, `aic`
+  - `boxImageShape` -- dict: `w`, `h`
+
+### Table Parser Output (results.parser)
+- **Location**: Returned by `OcrLibrary/BreakerTableParser10.BreakerTableParser.parse_from_analyzer()`
+- **Fields**:
+  - `parserVersion` -- str
+  - `name` -- str
+  - `spaces` -- int or None, number of panel spaces
+  - `detected_breakers` -- list of breaker dicts: `{amperage, count, poles, ...}`
+  - `breakerCounts` -- dict of amperage-to-count mappings
+  - `gfiBreakerCounts` -- dict of GFI breaker counts
+  - `headerScan.normalizedColumns` -- column layout info
+
+### Analyzer Output (results.analyzer)
+- **Location**: Returned by `OcrLibrary/BreakerTableAnalyzer12.BreakerTableAnalyzer.analyze()`
+- **Fields**:
+  - `src_path` -- str, path to source image
+  - `header_y` -- int, pixel y-position of header top
+  - `header_bottom_y` -- int, pixel y-position of header bottom
+  - `footer_y` -- int, pixel y-position of footer
+  - `footer_token_val` -- str or None, detected footer token
+  - `panel_size` -- tuple, image dimensions
+  - `gray` -- numpy array, preprocessed grayscale image
+  - `debug_dir` -- str or None, debug output path
+
+## Component Dict (OCR to RulesEngine)
+
+- **Location**: Built by `_merge_component_from_btp()` in `uplink_server.py`
+- **Used by**: `RulesEngine4.process_job()`
+- **Fields**:
+  - `type` -- str, always "panelboard"
+  - `name` -- str, panel name from header parser
+  - `source` -- str, path to the source PNG
+  - `attrs.amperage` -- int or None, panel bus amperage
+  - `attrs.spaces` -- int or None, number of spaces (table parser value preferred over header)
+  - `attrs.voltage` -- int or None
+  - `attrs.intRating` -- int or None, interrupt rating
+  - `attrs.mainBreakerAmperage` -- int or None
+  - `attrs.detected_breakers` -- list of breaker dicts (merged from header + table parser)
+  - `attrs.breaker_data_suppressed` -- bool, True if breakers were suppressed by 2-strikes rule
+  - `notes` -- list of str, optional warnings (e.g., breaker suppression reason)
+
+## RulesEngine Payload
+
+- **Location**: Built in `_process_job()`, consumed by `RulesEngine4.process_job()`
+- **Structure**: `{"defaults": {...}, "items": [component_dict, ...]}`
+  - `defaults` -- dict from `_DEFAULT_OVERRIDES` or `ui_overrides`
+  - `items` -- list of component dicts (one per detected panel)
+- **Returns**: dict keyed by component name, each value containing part number selections, BOM items, and optional error/skip info
+
+## Job Disk Structure
+
+Each job lives at `~/jobs/{job_id}/`:
+
+```
+{job_id}/
+├── status.json          # Job state and metadata
+├── result.json          # Full processing result (written on completion)
+├── *.pdf                # Uploaded PDF
+├── pdf_images/          # Rendered page images and panel crops
+│   ├── *.png            # Cropped panel PNGs
+│   └── review_overlays/ # OCR debug overlay PNGs
+├── magenta_overlays/    # Full-page detection visualization PNGs
+└── .cancel              # Sentinel file (created when job is canceled)
+```
+
+### status.json
+- **Fields**:
+  - `state` -- str: "queued", "running", "done", "error", "cancelled"
+  - `ts` -- str, ISO 8601 UTC timestamp of last update
+  - `progress` -- int, 0-100 percentage
+  - `step` -- str, current pipeline step description
+  - `owner_id` -- str, lowercased owner email
+  - `owner_email` -- str, owner email
+  - `noticed_ts_ms` -- int, epoch ms when job was first received
+  - `job_note` -- str or None, user-provided note
+  - `ui_overrides` -- dict, override settings from the UI
+  - `error` -- str, error message (only when state="error")
+
+### result.json
+- **Fields**:
+  - `ok` -- bool, True if successful
+  - `job_id` -- str
+  - `job_dir` -- str, absolute path
+  - `saved_pdf` -- str, path to saved PDF
+  - `image_count` -- int, number of panel PNGs processed
+  - `components` -- list of component dicts
+  - `rules_result` -- dict from RulesEngine4
+  - `ui_overrides` -- dict, effective overrides used
+  - `cycle_time_ms` -- int, total processing time in ms
+  - `cycle_time_str` -- str, human-readable cycle time
+  - `noticed_ts_ms` -- int, submission timestamp
+  - `parse_done_ts_ms` -- int, OCR completion timestamp
+
+## Configuration Dicts
+
+### PANEL_FINDER_DEFAULTS
+- **Location**: `uplink_server.py` lines 26-41
+- **Purpose**: Knobs for heuristic panel detection (PanelBoardSearch)
+- **Key fields**: `render_dpi` (1400), `min_void_area_fr`, `void_w_fr_range`, `void_h_fr_range`, `margin_shave_px`, `pad`
+
+### _DEFAULT_OVERRIDES
+- **Location**: `uplink_server.py` lines 339-366
+- **Purpose**: Default UI override settings for part number selection
+- **Sub-dicts**: panelboard defaults, transformer defaults, disconnect defaults
+
+## Constants
+
+| Constant | Location | Value |
+|---|---|---|
+| `MAX_WORKERS` | uplink_server.py | 3 |
+| `MAX_INFLIGHT_PER_USER` | uplink_server.py | 1 |
+| `WATCHDOG_TIMEOUT_MIN` | uplink_server.py (env) | 15 |
+| `WATCHDOG_KILL_GRACE_SEC` | uplink_server.py (env) | 3 |
+
+Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine4 and PartNumberBuilder.
+
+## Serialization
+
+- **On-disk format**: JSON files (`status.json`, `result.json`) with `ensure_ascii=False`, `indent=2`, and `default=str` for non-serializable types
+- **Image transport**: `anvil.BlobMedia` wrapping raw PNG bytes (via `vm_fetch_image`)
+- **Config files**: `.jsonc` extension (JSON with comments) for OCR label configs, loaded with custom comment-stripping parser
+- **No database**: All persistence is file-system based under `~/jobs/`
+
+## Data Flow
+
+```
+PDF (BlobMedia from Anvil UI)
+    │
+    ▼
+PageFilter.readPdf() → (kept_pages, dropped_pages, filtered_pdf_path, log_json_path)
+    │
+    ▼
+PanelBoardSearch.readPdf() → list[str]  (PNG crop paths)
+    │
+    ▼  (for each PNG, sequential)
+BreakerTablePipeline.run() → dict  (results with analyzer/header/parser)
+    │
+    ▼
+_merge_component_from_btp() → component dict  (type, name, attrs, notes)
+    │
+    ▼  (all components collected)
+RulesEngine4.process_job({"defaults": ..., "items": [...]}) → dict  (part numbers per component)
+    │
+    ▼
+result.json + status.json written to ~/jobs/{job_id}/
+```
