@@ -12,7 +12,6 @@ ElectricalDiagramAnalyzer/
 ├── AnvilUplinkCode/           # Anvil Uplink server (main entry point)
 ├── PageFilter/                # PDF page filtering (keep electrical pages)
 ├── VisualDetectionToolLibrary/# Heuristic panel/table detection
-├── MLTableDetection/          # ML-based table detection (optional)
 ├── OcrLibrary/                # OCR pipeline (analyzer, header parser, table parser)
 ├── AnchoringClasses/          # Header/footer anchor detection
 ├── RulesEngine/               # Part number selection rules
@@ -35,10 +34,9 @@ ElectricalDiagramAnalyzer/
 | `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, worker pool, all RPC callables |
 | `PageFilter/PageFilterV3.py` | Page filtering -- OCR-based E-sheet detection, label scoring, whitespace heuristics |
 | `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping |
-| `MLTableDetection/TableDetectorML.py` | ML panel detection -- Table Transformer / Detectron2 inference |
-| `OcrLibrary/BreakerTableParserAPIv8.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class |
+| `OcrLibrary/BreakerTableParserAPIv9.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV7.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
+| `OcrLibrary/PanelHeaderParserV9.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
 | `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
 | `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
@@ -47,7 +45,6 @@ ElectricalDiagramAnalyzer/
 | `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
 | `OcrLibrary/breaker_labels_config.jsonc` | Breaker label configuration |
 | `MISC/requirements.txt` | Main project Python dependencies |
-| `MLTableDetection/requirements.txt` | ML-specific dependencies (torch, transformers, detectron2) |
 | `.gitignore` | Ignores venvs, PDFs, images, annotation data |
 
 ## Module Boundaries
@@ -70,16 +67,10 @@ ElectricalDiagramAnalyzer/
 - **Entry point**: `PanelSearchToolV25.PanelBoardSearch` class, `.readPdf()` method
 - **Dependencies**: pypdfium2, OpenCV, NumPy
 
-### MLTableDetection
-- **Path**: `MLTableDetection/`
-- **Purpose**: ML-based alternative to heuristic panel detection
-- **Entry point**: `TableDetectorML.TableDetectorML` class (same interface as PanelBoardSearch)
-- **Dependencies**: PyTorch, Hugging Face Transformers, Detectron2
-
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
 - **Purpose**: Three-stage OCR pipeline for breaker table extraction
-- **Entry point**: `BreakerTableParserAPIv8.BreakerTablePipeline` class, `.run()` method
+- **Entry point**: `BreakerTableParserAPIv9.BreakerTablePipeline` class, `.run()` method
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
 
 ### AnchoringClasses
