@@ -1,0 +1,124 @@
+---
+description: Production server hardware specs, OS, Python version, GPU, CUDA, and installed package versions. Use when diagnosing performance issues, checking compatibility, or understanding deployment constraints.
+alwaysApply: false
+---
+
+# System Environment
+
+This project runs on two machines. This document profiles the **production server** (Paperspace VM). The local development machine may differ in hardware and venv path.
+
+## Environments
+
+| Property | Production (Paperspace) | Local Dev |
+|---|---|---|
+| **venv path** | `/home/paperspace/venv/` | `/home/marco/venv/` |
+| **User** | `paperspace` | `marco` |
+| **GPU** | NVIDIA RTX A5000 (24 GiB) | Varies |
+| **Purpose** | Runs the Anvil Uplink server for live jobs | Development and testing |
+
+## Production Server Hardware
+
+| Resource | Spec |
+|---|---|
+| **GPU** | NVIDIA RTX A5000, 24,564 MiB VRAM, Ampere architecture |
+| **CPU** | Intel Xeon Gold 5315Y @ 3.20 GHz, 8 cores, 1 socket, 1 thread/core |
+| **RAM** | 44 GiB |
+| **Disk** | 100 GB (xvda), ext4 on LVM |
+| **OS** | Ubuntu 22.04.5 LTS (Jammy Jellyfish) |
+| **Kernel** | 5.15.0-173-generic x86_64 |
+| **Hypervisor** | Xen (Paperspace cloud) |
+| **Hostname** | psk08ks526ub |
+
+## GPU / CUDA Stack
+
+| Component | Version |
+|---|---|
+| NVIDIA Driver | 570.211.01 |
+| CUDA (driver) | 12.8 |
+| CUDA (PyTorch runtime) | 12.1 |
+| cuDNN | 9.1.0 |
+
+The driver supports CUDA 12.8, but PyTorch was compiled against CUDA 12.1. This is forward-compatible -- no issues expected.
+
+## Python Runtime
+
+| Property | Value |
+|---|---|
+| Python | 3.10.12 |
+| venv location | `/home/paperspace/venv/` |
+| pip | 25.2 |
+| setuptools | 80.9.0 |
+
+## Key Package Versions
+
+### Core Pipeline
+
+| Package | Version | Purpose |
+|---|---|---|
+| easyocr | 1.7.2 | Text recognition from panel images |
+| opencv-python | 4.12.0.88 | Image processing (import cv2) |
+| opencv-contrib-python | 4.10.0.84 | Extended OpenCV modules |
+| numpy | 2.1.2 | Numerical operations |
+| PyMuPDF | 1.26.4 | PDF rendering (import fitz) |
+| pypdfium2 | 4.30.0 | PDF page rendering for detection |
+| pikepdf | 10.2.0 | PDF manipulation (page extraction) |
+| pillow | 11.0.0 | Image I/O |
+| anvil-uplink | 0.6.0 | Anvil backend connection |
+
+### ML / Deep Learning
+
+| Package | Version | Purpose |
+|---|---|---|
+| torch | 2.4.1+cu121 | PyTorch (EasyOCR backend, future ML detection) |
+| torchvision | 0.19.1+cu121 | Vision models and transforms |
+| torchaudio | 2.4.1+cu121 | Audio (installed as part of PyTorch bundle) |
+| detectron2 | 0.6 | Object detection framework (future ML detection) |
+| huggingface-hub | 0.35.1 | Model downloads |
+
+### PDF / Document Processing
+
+| Package | Version | Purpose |
+|---|---|---|
+| pdfplumber | 0.11.7 | PDF text/table extraction |
+| pdfminer.six | 20250506 | PDF parsing backend |
+| pdf2image | 1.17.0 | PDF to image conversion |
+| camelot-py | 1.0.9 | Table extraction from PDFs |
+| layoutparser | 0.3.4 | Document layout analysis |
+| pypdf | 3.17.4 | PDF reading/writing |
+
+### Data / Science
+
+| Package | Version | Purpose |
+|---|---|---|
+| scipy | 1.15.3 | Scientific computing |
+| scikit-image | 0.25.2 | Image processing algorithms |
+| pandas | 2.3.2 | Data manipulation |
+| matplotlib | 3.10.6 | Plotting / debug visualization |
+| shapely | 2.1.1 | Geometric operations |
+
+### Utilities
+
+| Package | Version | Purpose |
+|---|---|---|
+| requests | 2.32.5 | HTTP client |
+| pydantic | 2.11.9 | Data validation |
+| tqdm | 4.67.1 | Progress bars |
+| psutil | 7.1.0 | System monitoring |
+| PyYAML | 6.0.2 | YAML parsing |
+| openpyxl | 3.1.5 | Excel file I/O |
+
+## GPU Memory Budget
+
+At idle (server running, EasyOCR models loaded), the Python process uses ~10.9 GiB of the 24.6 GiB VRAM. This leaves ~13.7 GiB available for inference workloads during job processing.
+
+## Constraints and Limits
+
+- **Single GPU**: Only one NVIDIA RTX A5000; no multi-GPU support
+- **No swap**: Swap is disabled (`0B`); OOM kills are possible if RAM is exhausted
+- **Single worker**: `MAX_WORKERS=1` means one job at a time; this is deliberate to avoid GPU memory contention
+- **Thread pinning**: `OMP_NUM_THREADS`, `MKL_NUM_THREADS` set to 1 at startup for deterministic OCR
+- **VRAM ceiling**: High-DPI rendering + EasyOCR + large PDFs can approach the 24 GiB limit
+
+## Last Verified
+
+2026-03-18 (automated profile from `nvidia-smi`, `pip list`, `lscpu`, `/proc/meminfo`)
