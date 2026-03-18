@@ -130,11 +130,11 @@ class PanelParser:
 
     _SIGMA_PX = 80.0
 
-    def __init__(self, debug: bool = False, voltage_first_number_only: bool = True):
+    def __init__(self, debug: bool = False, voltage_first_number_only: bool = True, reader=None):
         self.debug = debug
         self.voltage_first_number_only = voltage_first_number_only
-        self.reader = None
-        if _HAS_OCR:
+        self.reader = reader
+        if self.reader is None and _HAS_OCR:
             try:
                 self.reader = easyocr.Reader(['en'], gpu=True)
             except Exception:
