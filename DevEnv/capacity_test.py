@@ -16,6 +16,10 @@ project_root = os.path.dirname(script_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
+# Cap thread pools BEFORE importing libs that init OpenMP / MKL / PyTorch
+from WorkerSetup import cap_thread_pools, set_runtime_determinism
+cap_thread_pools()
+
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
@@ -29,6 +33,7 @@ TEST_ROOT.mkdir(parents=True, exist_ok=True)
 JOB_TIMEOUT_SEC = 600  # 10 minutes
 
 def run_one_job(job_idx: int, input_pdf: str, result_path: str):
+    set_runtime_determinism()
     start = time.time()
     result = {
         "job_idx": job_idx,

@@ -1,0 +1,30 @@
+{
+  "concurrency": 2,
+  "batch_elapsed_sec": 157.32,
+  "success_count": 2,
+  "failure_count": 0,
+  "avg_job_elapsed_sec": 152.95,
+  "min_job_elapsed_sec": 150.96,
+  "max_job_elapsed_sec": 154.94,
+  "slowdown_vs_1x": 1.0,
+  "results": [
+    {
+      "job_idx": 0,
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "elapsed_sec": 154.94
+    },
+    {
+      "job_idx": 1,
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "elapsed_sec": 150.96
+    }
+  ]
+}

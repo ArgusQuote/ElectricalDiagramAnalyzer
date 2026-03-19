@@ -15,6 +15,37 @@ PARSER_VERSION = "BreakerParser10"
 _HDR_OCR_SCALE        = 2.0
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
 _HDR_MIN_CONF         = 0.40
+_OCR_TIMEOUT_SEC      = 30
+
+
+def _readtext_with_timeout(reader, image, timeout=_OCR_TIMEOUT_SEC, **kwargs):
+    """Run reader.readtext() with a wall-clock timeout.
+
+    EasyOCR can hang indefinitely on pathological images. This wraps the
+    call in a daemon thread so the pipeline keeps moving if a single row
+    band stalls.
+    """
+    import threading
+    result = [None]
+    exc_flag = [False]
+
+    def _worker():
+        try:
+            result[0] = reader.readtext(image, **kwargs)
+        except Exception:
+            exc_flag[0] = True
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+
+    if t.is_alive():
+        print(f"[OCR_TIMEOUT] readtext exceeded {timeout}s — skipping this region")
+        return []
+
+    if exc_flag[0]:
+        return []
+    return result[0] if result[0] is not None else []
  
 def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
     """
@@ -277,7 +308,8 @@ class HeaderBandScanner:
                     )
 
                     try:
-                        dets = self.reader.readtext(
+                        dets = _readtext_with_timeout(
+                            self.reader,
                             col_band_up,
                             detail=1,
                             paragraph=False,
@@ -1430,7 +1462,8 @@ class SeparatedLayoutParser:
             )
 
             try:
-                dets = self.reader.readtext(
+                dets = _readtext_with_timeout(
+                    self.reader,
                     row_up,
                     detail=1,
                     paragraph=False,
@@ -2163,7 +2196,8 @@ class CombinedLayoutParser:
             )
 
             try:
-                dets = self.reader.readtext(
+                dets = _readtext_with_timeout(
+                    self.reader,
                     row_up,
                     detail=1,
                     paragraph=False,

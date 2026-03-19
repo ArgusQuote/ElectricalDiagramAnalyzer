@@ -1,0 +1,21 @@
+{
+  "concurrency": 1,
+  "batch_elapsed_sec": 155.12,
+  "success_count": 1,
+  "failure_count": 0,
+  "avg_job_elapsed_sec": 152.61,
+  "min_job_elapsed_sec": 152.61,
+  "max_job_elapsed_sec": 152.61,
+  "slowdown_vs_1x": null,
+  "results": [
+    {
+      "job_idx": 0,
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "elapsed_sec": 152.61
+    }
+  ]
+}

@@ -47,12 +47,8 @@ MAX_WORKERS = 1
 MAX_INFLIGHT_PER_USER = 1
 
 # ===== Determinism & Thread Caps (must run before heavy libs init) =====
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("PYTHONHASHSEED", "0")
+from WorkerSetup import cap_thread_pools, set_runtime_determinism
+cap_thread_pools()
 
 # ---------- WATCHDOG CONFIG ----------
 WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "10"))  # dial in prod
@@ -70,26 +66,8 @@ QUEUE_TIMEOUT_ERROR_MSG = (
 )
 
 def _set_runtime_determinism():
-    # OpenCV: cap threads if available
-    try:
-        import cv2
-        try:
-            cv2.setNumThreads(1)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    # PyTorch/EasyOCR determinism if present
-    try:
-        import torch
-        torch.set_num_threads(1)
-        torch.set_num_interop_threads(1)
-        if hasattr(torch.backends, "cudnn"):
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
+    """Delegate to shared WorkerSetup module."""
+    set_runtime_determinism()
 
 def _log_run_fingerprint(tag: str = ""):
     try:
