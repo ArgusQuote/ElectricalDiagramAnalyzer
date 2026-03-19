@@ -24,3 +24,11 @@ deferred work items.
   planned future feature. The `.cursor/skills/training-panel-detector/` skill contains
   guidance for building it. Currently only heuristic detection via `PanelSearchToolV25`
   is available. See `KNOWN_ISSUES.md` for details.
+
+## Recently Resolved
+
+- **derekfirst.pdf multiprocessing hang** (resolved 2026-03-19) -- Fixed by
+  extracting thread-pool caps and runtime determinism into `WorkerSetup/worker_init.py`.
+  All entry points now call `cap_thread_pools()` before importing EasyOCR/PyTorch and
+  `set_runtime_determinism()` inside each spawned worker. See `KNOWN_ISSUES.md` for
+  full history.

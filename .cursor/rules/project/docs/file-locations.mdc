@@ -16,6 +16,7 @@ ElectricalDiagramAnalyzer/
 ├── AnchoringClasses/          # Header/footer anchor detection
 ├── RulesEngine/               # Part number selection rules
 ├── PartNumberSelector/        # Equipment part number lookup tables
+├── WorkerSetup/               # Thread-pool caps and runtime determinism for workers
 ├── DevEnv/                    # Development and testing scripts
 ├── Backups/                   # Anvil app exports and server backups
 ├── MISC/                      # Utilities, configs, requirements
@@ -44,6 +45,7 @@ ElectricalDiagramAnalyzer/
 | `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
 | `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
 | `OcrLibrary/breaker_labels_config.jsonc` | Breaker label configuration |
+| `WorkerSetup/worker_init.py` | Thread-pool env vars (`OMP_NUM_THREADS`, etc.) and runtime determinism (`torch`/`cv2` thread caps, cuDNN flags) |
 | `MISC/requirements.txt` | Main project Python dependencies |
 | `.gitignore` | Ignores venvs, PDFs, images, annotation data |
 
@@ -53,7 +55,7 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
+- **Dependencies**: WorkerSetup, PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
 
 ### PageFilter
 - **Path**: `PageFilter/`
@@ -90,6 +92,12 @@ ElectricalDiagramAnalyzer/
 - **Purpose**: Part number lookup tables and selection logic for electrical equipment
 - **Entry point**: `PartNumberBuilder` module (exports: mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer, loadcenter)
 - **Dependencies**: None (pure logic)
+
+### WorkerSetup
+- **Path**: `WorkerSetup/`
+- **Purpose**: Centralised thread-pool capping and runtime determinism for any process that runs EasyOCR/PyTorch inference
+- **Entry point**: `from WorkerSetup import cap_thread_pools, set_runtime_determinism`
+- **Dependencies**: None (stdlib `os`; optional `cv2`, `torch`)
 
 ## Conventions
 
