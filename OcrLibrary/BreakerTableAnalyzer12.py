@@ -133,6 +133,9 @@ class BreakerTableAnalyzer:
         self._header_finder.debug_dir = debug_dir
         self._footer_finder.debug_dir = debug_dir
 
+        base = os.path.splitext(os.path.basename(src_path))[0]
+        self._header_finder.debug_stem = base
+
         # ---------- load + prep ----------
         img = cv2.imread(src_path, cv2.IMREAD_COLOR)
         if img is None:
@@ -150,6 +153,11 @@ class BreakerTableAnalyzer:
                 f"[BreakerTableAnalyzer] header_y={header_y}, "
                 f"header_bottom_y={header_bottom_y}"
             )
+            if self._header_finder.last_ocr_error:
+                print(
+                    f"[BreakerTableAnalyzer] Header OCR error: "
+                    f"{self._header_finder.last_ocr_error}"
+                )
 
         # Build the payload expected by BreakerFooterFinder.find_footer()
         analyzer_result = {
