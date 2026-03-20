@@ -17,35 +17,7 @@ _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 _HDR_MIN_CONF         = 0.40
 _OCR_TIMEOUT_SEC      = 30
 
-
-def _readtext_with_timeout(reader, image, timeout=_OCR_TIMEOUT_SEC, **kwargs):
-    """Run reader.readtext() with a wall-clock timeout.
-
-    EasyOCR can hang indefinitely on pathological images. This wraps the
-    call in a daemon thread so the pipeline keeps moving if a single row
-    band stalls.
-    """
-    import threading
-    result = [None]
-    exc_flag = [False]
-
-    def _worker():
-        try:
-            result[0] = reader.readtext(image, **kwargs)
-        except Exception:
-            exc_flag[0] = True
-
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    t.join(timeout=timeout)
-
-    if t.is_alive():
-        print(f"[OCR_TIMEOUT] readtext exceeded {timeout}s — skipping this region")
-        return []
-
-    if exc_flag[0]:
-        return []
-    return result[0] if result[0] is not None else []
+from OcrLibrary.ocr_timeout import readtext_with_timeout as _readtext_with_timeout
  
 def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
     """

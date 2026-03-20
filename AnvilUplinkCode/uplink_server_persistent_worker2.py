@@ -43,7 +43,7 @@ PANEL_FINDER_DEFAULTS = {
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
 # Worker pool limits
-MAX_WORKERS = 4
+MAX_WORKERS = 2
 MAX_INFLIGHT_PER_USER = 1
 
 # Recycle the persistent worker after this many jobs to prevent resource

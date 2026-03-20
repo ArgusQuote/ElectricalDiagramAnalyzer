@@ -43,7 +43,7 @@ PANEL_FINDER_DEFAULTS = {
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
 # Worker pool limits
-MAX_WORKERS = 4
+MAX_WORKERS = 1
 MAX_INFLIGHT_PER_USER = 1
 
 # Recycle the persistent worker after this many jobs to prevent resource
@@ -138,10 +138,7 @@ def _warmup_ocr_once():
         print(f">>> OCR warmup skipped: {e}")
 
 if not _IS_WORKER_SUBPROCESS:
-    # Warmup skipped: main process does not do OCR.  Each worker subprocess
-    # loads its own GPU EasyOCR reader, so warming up here just wastes ~10 GiB
-    # VRAM that the worker pool needs.
-    print(">>> Main process: skipping OCR warmup (workers load their own models)")
+    _warmup_ocr_once()
 
 # ---------- UTILITIES ----------
 def _now_utc():
@@ -553,19 +550,12 @@ _Q_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
 
-# Per-slot worker pool state: each dequeue thread gets its own worker subprocess
+# Persistent worker process state
+_WORKER_LOCK = threading.Lock()
+_WORKER_PROC = None          # multiprocessing.Process
+_WORKER_JOB_Q = None         # mp Queue: main → worker (job_id str or None for shutdown)
+_WORKER_DONE_Q = None        # mp Queue: worker → main (status, job_id, error_msg)
 _WORKER_READY_TIMEOUT = 120  # seconds to wait for worker model loading
-
-class _WorkerSlot:
-    """State for one worker subprocess slot."""
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.proc = None       # multiprocessing.Process
-        self.job_q = None      # mp Queue: main → worker (job_id str or None for shutdown)
-        self.done_q = None     # mp Queue: worker → main (status, job_id, error_msg)
-
-_WORKER_SLOTS: list[_WorkerSlot] = [_WorkerSlot() for _ in range(MAX_WORKERS)]
-_SPAWN_LOCK = threading.Lock()  # serializes env-var set/start/unset across slots
 
 def _enqueue_job(job_id: str, owner_id: str):
     _JOB_Q.put((job_id, owner_id))
@@ -936,7 +926,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
 # ---------- Persistent worker subprocess ----------
 
-def _persistent_worker_main(slot_idx, job_q, done_q):
+def _persistent_worker_main(job_q, done_q):
     """Long-lived subprocess that loads GPU models once and processes jobs.
 
     Runs between-job hygiene (gc.collect + torch.cuda.empty_cache) after
@@ -945,32 +935,21 @@ def _persistent_worker_main(slot_idx, job_q, done_q):
 
     NOTE: _set_runtime_determinism() is NOT called here because the
     ``spawn`` context re-imports the module from scratch, so the
-    module-level call already runs in this subprocess. Calling it a second
-    time would raise ``RuntimeError: cannot set number of interop threads``
-    from PyTorch.
+    module-level call (line 85) already runs in this subprocess. Calling
+    it a second time would raise ``RuntimeError: cannot set number of
+    interop threads …`` from PyTorch.
     """
-    tag = f"slot-{slot_idx}"
     import gc
     import torch
-    _log_run_fingerprint(f"persistent_worker_init:{tag}")
+    _log_run_fingerprint("persistent_worker_init")
 
     import easyocr
-    print(f">>> Worker [{tag}]: loading GPU EasyOCR reader ...")
+    print(">>> Persistent worker: loading GPU EasyOCR reader ...")
     gpu_reader = easyocr.Reader(["en"], gpu=True)
     pipeline = BreakerTablePipeline(debug=True, reader=gpu_reader)
     pipeline._ensure_analyzer()
     pipeline._ensure_header_parser()
-    print(f">>> Worker [{tag}]: models loaded | API_VERSION={API_VERSION}")
-
-    try:
-        free_vram, total_vram = torch.cuda.mem_get_info()
-        print(
-            f">>> Worker [{tag}]: VRAM after model load — "
-            f"free={free_vram / 1024**3:.1f} GiB, "
-            f"total={total_vram / 1024**3:.1f} GiB"
-        )
-    except Exception:
-        pass
+    print(f">>> Persistent worker: models loaded | API_VERSION={API_VERSION}")
 
     done_q.put(("ready", None, None))
 
@@ -989,7 +968,7 @@ def _persistent_worker_main(slot_idx, job_q, done_q):
             done_q.put(("done", job_id, None))
         except Exception as e:
             tb = traceback.format_exc()
-            print(f">>> Worker [{tag}] job error [{job_id}]: {e}\n{tb}")
+            print(f">>> persistent worker job error [{job_id}]: {e}\n{tb}")
             try:
                 job_dir = BASE_JOBS_DIR / job_id
                 _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
@@ -1005,92 +984,83 @@ def _persistent_worker_main(slot_idx, job_q, done_q):
 
         jobs_processed += 1
         if jobs_processed >= WORKER_RECYCLE_AFTER_JOBS:
-            print(f">>> Worker [{tag}]: recycling after {jobs_processed} jobs")
+            print(
+                f">>> Persistent worker: recycling after {jobs_processed} jobs"
+            )
             break
 
-    print(f">>> Worker [{tag}]: shutdown")
+    print(">>> Persistent worker: shutdown")
 
 
 # ---------- Worker lifecycle ----------
 
-def _spawn_persistent_worker(idx: int):
-    """Spawn (or respawn) worker subprocess for slot ``idx``. Blocks until ready."""
-    slot = _WORKER_SLOTS[idx]
-    tag = f"slot-{idx}"
+def _spawn_persistent_worker():
+    """Spawn (or respawn) the persistent worker process. Returns when ready."""
+    global _WORKER_PROC, _WORKER_JOB_Q, _WORKER_DONE_Q
 
     mp_ctx = get_context("spawn")
-    slot.job_q = mp_ctx.Queue()
-    slot.done_q = mp_ctx.Queue()
+    _WORKER_JOB_Q = mp_ctx.Queue()
+    _WORKER_DONE_Q = mp_ctx.Queue()
 
-    with _SPAWN_LOCK:
-        os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
-        slot.proc = mp_ctx.Process(
-            target=_persistent_worker_main,
-            args=(idx, slot.job_q, slot.done_q),
-            daemon=True,
-        )
-        slot.proc.start()
-        os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
+    os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
+    _WORKER_PROC = mp_ctx.Process(
+        target=_persistent_worker_main,
+        args=(_WORKER_JOB_Q, _WORKER_DONE_Q),
+        daemon=True,
+    )
+    _WORKER_PROC.start()
+    os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
 
-    print(f">>> Worker [{tag}] spawned (pid={slot.proc.pid}), waiting for ready ...")
+    print(f">>> Persistent worker spawned (pid={_WORKER_PROC.pid}), waiting for ready ...")
     try:
-        status, _, _ = slot.done_q.get(timeout=_WORKER_READY_TIMEOUT)
+        status, _, _ = _WORKER_DONE_Q.get(timeout=_WORKER_READY_TIMEOUT)
         if status != "ready":
             raise RuntimeError(f"unexpected worker init status: {status}")
     except Empty:
         raise RuntimeError(
-            f"Worker [{tag}] did not become ready within {_WORKER_READY_TIMEOUT}s"
+            f"persistent worker did not become ready within {_WORKER_READY_TIMEOUT}s"
         )
-    print(f">>> Worker [{tag}] ready")
+    print(">>> Persistent worker ready")
 
 
-def _kill_persistent_worker(idx: int):
-    """Terminate and join the worker subprocess in slot ``idx``."""
-    slot = _WORKER_SLOTS[idx]
-    if slot.proc is None:
+def _kill_persistent_worker():
+    """Terminate and join the persistent worker process."""
+    global _WORKER_PROC
+    if _WORKER_PROC is None:
         return
     try:
-        slot.proc.terminate()
+        _WORKER_PROC.terminate()
     except Exception:
         pass
-    slot.proc.join(timeout=WATCHDOG_KILL_GRACE_SEC)
-    if slot.proc.is_alive():
+    _WORKER_PROC.join(timeout=WATCHDOG_KILL_GRACE_SEC)
+    if _WORKER_PROC.is_alive():
         try:
-            slot.proc.kill()
+            _WORKER_PROC.kill()
         except Exception:
             pass
-        slot.proc.join(timeout=1)
-    slot.proc = None
+        _WORKER_PROC.join(timeout=1)
+    _WORKER_PROC = None
 
 
-def _ensure_worker_alive(idx: int):
-    """If the worker in slot ``idx`` exited (recycle or crash), respawn it."""
-    slot = _WORKER_SLOTS[idx]
-    tag = f"slot-{idx}"
-    if slot.proc is not None and slot.proc.is_alive():
+def _ensure_worker_alive():
+    """If the persistent worker exited (recycle or crash), respawn it."""
+    global _WORKER_PROC
+    if _WORKER_PROC is not None and _WORKER_PROC.is_alive():
         return
-    if slot.proc is not None:
-        exitcode = getattr(slot.proc, "exitcode", None)
+    if _WORKER_PROC is not None:
+        exitcode = getattr(_WORKER_PROC, "exitcode", None)
         if exitcode is not None and exitcode == 0:
-            print(f">>> Worker [{tag}] exited (planned recycle) — respawning")
+            print(">>> Persistent worker exited (planned recycle) — respawning")
         else:
-            print(f">>> Worker [{tag}] died (exitcode={exitcode}) — respawning")
-    _kill_persistent_worker(idx)
-    _spawn_persistent_worker(idx)
+            print(f">>> Persistent worker died (exitcode={exitcode}) — respawning")
+    _kill_persistent_worker()
+    _spawn_persistent_worker()
 
 
-# ---------- Dequeue loop (per-slot worker pool) ----------
+# ---------- Dequeue loop (persistent worker) ----------
 
 def _dequeue_loop(idx: int):
-    """Each dequeue thread ``idx`` owns worker slot ``idx``.
-
-    Pulls jobs from the shared ``_JOB_Q``, dispatches to its own slot's
-    ``job_q``, and waits on its own slot's ``done_q``.  No cross-slot
-    queue access, no race conditions.
-    """
     threading.current_thread().name = f"pool-worker-{idx}"
-    slot = _WORKER_SLOTS[idx]
-    tag = f"slot-{idx}"
 
     while not _STOP.is_set():
         try:
@@ -1149,20 +1119,22 @@ def _dequeue_loop(idx: int):
                 print(f">>> queue timeout (pre-start): {job_id} | age={age_str}")
                 continue
 
-            with slot.lock:
-                _ensure_worker_alive(idx)
+            with _WORKER_LOCK:
+                _ensure_worker_alive()
 
-            slot.job_q.put(job_id)
+            _WORKER_JOB_Q.put(job_id)
 
             # Wait for completion with watchdog timeout
             timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
             worker_ok = True
             try:
-                status, done_job_id, err_msg = slot.done_q.get(timeout=timeout_sec)
+                status, done_job_id, err_msg = _WORKER_DONE_Q.get(timeout=timeout_sec)
             except Empty:
+                # Watchdog fired — the worker is stuck
                 worker_ok = False
 
-            if not worker_ok or (slot.proc is not None and not slot.proc.is_alive()):
+            if not worker_ok or (_WORKER_PROC is not None and not _WORKER_PROC.is_alive()):
+                # Worker timed out or crashed mid-job
                 try:
                     with open(_cancel_path(job_dir), "w") as f:
                         f.write("1")
@@ -1171,10 +1143,10 @@ def _dequeue_loop(idx: int):
 
                 if not worker_ok:
                     msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
-                    print(f">>> watchdog timeout [{tag}]: {job_id}")
+                    print(f">>> watchdog timeout: {job_id}")
                 else:
                     msg = "Worker process crashed during this job. Please try again."
-                    print(f">>> worker crash [{tag}] during: {job_id}")
+                    print(f">>> worker crash detected during: {job_id}")
 
                 _status_write(job_dir, "error", error=msg)
                 try:
@@ -1183,27 +1155,24 @@ def _dequeue_loop(idx: int):
                     pass
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
 
-                with slot.lock:
-                    _kill_persistent_worker(idx)
-                    _spawn_persistent_worker(idx)
+                # Kill and respawn the worker for subsequent jobs
+                with _WORKER_LOCK:
+                    _kill_persistent_worker()
+                    _spawn_persistent_worker()
 
         finally:
             _leave_inflight(owner_id)
             _JOB_Q.task_done()
 
 
-# ---------- Start worker pool (per-slot) ----------
+# ---------- Start worker pool ----------
 if not _IS_WORKER_SUBPROCESS:
-    for i in range(MAX_WORKERS):
-        _spawn_persistent_worker(i)
+    _spawn_persistent_worker()
     for i in range(MAX_WORKERS):
         t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
         t.start()
         _WORKERS.append(t)
-    print(
-        f">>> Worker pool started: {MAX_WORKERS} slots, "
-        f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
-    )
+    print(f">>> Worker pool started: {MAX_WORKERS} threads, per-user cap={MAX_INFLIGHT_PER_USER}")
 
 # ---------- API: submit / status / list / cancel ----------
 @anvil.server.callable

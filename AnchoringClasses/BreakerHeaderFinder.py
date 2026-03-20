@@ -7,6 +7,8 @@ import re
 import cv2
 import numpy as np
 
+from OcrLibrary.ocr_timeout import readtext_with_timeout
+
 
 @dataclass
 class HeaderDbg:
@@ -276,7 +278,8 @@ class BreakerHeaderFinder:
 
     def _run_ocr(self, img, mag: float):
         try:
-            out = self.reader.readtext(
+            out = readtext_with_timeout(
+                self.reader,
                 img,
                 detail=1,
                 paragraph=False,

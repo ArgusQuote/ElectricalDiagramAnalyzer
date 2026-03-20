@@ -14,6 +14,7 @@ This project uses Anvil Uplink RPC -- not REST/HTTP. The backend exposes callabl
 - **Authentication**: `ANVIL_UPLINK_KEY` environment variable (required at startup)
 - **Client class**: `AnvilUplinkCode/uplink_server.py` (the entire server is the client)
 - **Error handling**: Connection failure raises `RuntimeError` at startup; Anvil handles reconnection
+- **Subprocess guard**: `_IS_WORKER_SUBPROCESS` env var (`_EDA_WORKER_SUBPROCESS=1`) prevents the persistent worker subprocess from connecting to Anvil or starting its own workers
 
 ## RPC Callable Endpoints
 
@@ -22,30 +23,38 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 ### vm_submit_for_detection
 - **Purpose**: Upload a PDF and start a detection job
 - **Parameters**: `media` (Anvil BlobMedia), `ui_overrides=None` (dict), `job_note=None` (str), `owner_email=None` (str)
-- **Returns**: Dict with `job_id`, `job_dir`, and submission metadata
+- **Returns**: Dict with `ok`, `job_id`, `job_dir`, `saved_pdf`, `output_dir`, `images` (empty), `image_count` (0), `ui_overrides`, `noticed_ts_ms`, `owner_email`, `owner_id`, `node_id`, `state` ("queued"), `deferred_render` (True)
 - **Side effects**: Creates job directory, saves PDF, writes initial status.json, enqueues job
+- **Note**: Render is deferred -- images are produced by the worker, not at submit time
 
 ### vm_get_job_status
 - **Purpose**: Get current status and result for a job
 - **Parameters**: `job_id` (str), `owner_email` (str)
-- **Returns**: Dict with `state`, `progress`, `step`, and `result` when state is "done"
-- **Auth**: Validates `owner_email` matches job owner; returns error dict if mismatch
+- **Returns**: Dict with `state` plus state-dependent fields:
+  - Always: `node_id` (and `job_node_id` if job was created on a different node)
+  - When `state="done"`: `result` (full result.json contents)
+  - When `state="error"`: `error` message, plus `queue_timeout`, `queue_timeout_min`, `queue_age_ms`, `queue_age_str` if it was a queue timeout
+  - When `state="queued"` or `"running"`: `step`, `image_count`, `ui_overrides`, `noticed_ts_ms`, `cycle_time_str`, `cycle_time_ms`, `progress`, `queue_position`, `active_count`, `elapsed_ms`, `elapsed_str`
+  - When `canceled=True` and not done: `state="canceled"`
+- **Auth**: Validates `owner_email` matches job owner; returns `state="not_found"` if mismatch
 
 ### vm_list_jobs
 - **Purpose**: List jobs owned by a user
 - **Parameters**: `owner_id` (str), `limit=50` (int)
-- **Returns**: List of dicts with job metadata (job_id, state, job_name, submitted_at)
+- **Returns**: List of dicts with `job_id`, `job_name`, `submitted_at_utc`, `created_at`, `state`, `step`, `progress`, `image_count`, `cycle_time_str`
+- **Note**: Error-state jobs are excluded from the listing
 
 ### vm_cancel_job
 - **Purpose**: Cancel a queued or running job
 - **Parameters**: `job_id` (str), `owner_id` (str)
-- **Returns**: `True` if canceled, `False` if not found or unauthorized
-- **Side effects**: Creates `.cancel` file in job directory; worker checks for it
+- **Returns**: `True` if canceled, `False` if not found, unauthorized, or already done/error
+- **Side effects**: Creates `.cancel` file; sets `canceled=True` in status; if queued, sets state to "canceled" immediately
 
 ### vm_list_magenta_overlay_images
 - **Purpose**: List full-page magenta overlay PNG paths for a job (detection visualization)
 - **Parameters**: `job_id` (str)
-- **Returns**: List of job-relative PNG paths
+- **Returns**: List of job-relative PNG paths (natural-sorted)
+- **Search order**: Checks `pdf_images/magenta_overlays/`, `magenta_overlay/`, `page_overlays/`, `full_overlays/`, `overlays/`; falls back to any PNG containing "magenta" (excluding review_overlays)
 
 ### vm_list_overlay_images
 - **Purpose**: List review overlay PNG paths for a job (OCR visualization)
@@ -65,8 +74,8 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 
 ### vm_set_queue_timeout
 - **Purpose**: Set the queue timeout at runtime (persists for process lifetime only)
-- **Parameters**: `minutes` (int)
-- **Returns**: Dict with `ok`, `old`, `new` values
+- **Parameters**: `minutes` (int, 1-120)
+- **Returns**: Dict with `ok`, `queue_timeout_min` (or `error` on failure)
 
 ### vm_get_queue_timeout
 - **Purpose**: Get the current queue timeout
@@ -75,13 +84,19 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 
 ### vm_set_watchdog_timeout
 - **Purpose**: Set the watchdog timeout at runtime (persists for process lifetime only)
-- **Parameters**: `minutes` (int)
-- **Returns**: Dict with `ok`, `old`, `new` values
+- **Parameters**: `minutes` (int, 1-60)
+- **Returns**: Dict with `ok`, `watchdog_min` (or `error` on failure)
 
 ### vm_get_watchdog_timeout
 - **Purpose**: Get the current watchdog timeout
 - **Parameters**: None
 - **Returns**: int (minutes)
+
+## Internal Helper: _get_queue_position
+- **Purpose**: Determine a job's position in the processing queue
+- **Parameters**: `job_id` (str), `owner_email` (str, optional)
+- **Returns**: `(queue_position, active_count)` where position 0 = running, 1 = next, None = not active
+- **Logic**: Scans all job dirs for queued/running jobs on the same node, sorts by `noticed_ts_ms`, finds the target job's index
 
 ## Authentication Pattern
 
@@ -89,20 +104,24 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 - The frontend passes `owner_email` (lowercased) with each request
 - Backend validates ownership by comparing `owner_email` against the `owner_id` stored in `status.json`
 - Per-user concurrency is enforced server-side via `_INFLIGHT_BY_USER` dict
+- Multi-node awareness: `node_id` (`{hostname}:{pid}`) is stored per job and returned in status responses
 
 ## Error Handling Convention
 
 - **Callable-level**: Each callable wraps its logic in try/except; errors return dicts with an `error` key
-- **Job-level**: Exceptions during `_process_job` write `state="error"` and the traceback to `status.json`
-- **Watchdog**: Jobs exceeding `WATCHDOG_TIMEOUT_MIN` (default 10 min) are killed; status is set to error with a user-facing message
-- **Cancellation**: Workers check for a `.cancel` file in the job directory at each pipeline step
+- **Job-level**: Exceptions during `_process_job` write `state="error"` and the traceback to `status.json`; `_status_write` preserves existing fields (owner_id, etc.) when updating state
+- **Watchdog**: Jobs exceeding `WATCHDOG_TIMEOUT_MIN` (default 10 min) are killed; status is set to error; worker is killed and respawned
+- **Worker crash**: If the persistent worker process dies, the dequeue loop detects it, writes an error, and calls `_kill_persistent_worker()` + `_spawn_persistent_worker()` to recover
+- **Queue timeout**: Jobs waiting in queue longer than `QUEUE_TIMEOUT_MIN` (default 25 min) are expired with a user-facing message; checked both on dequeue and right before dispatch
+- **Cancellation**: Workers check for a `.cancel` file in the job directory at each pipeline step (before start, after render, mid-parse, before rules)
 - **No retry**: Failed jobs are not automatically retried; the user must resubmit
 
 ## Timeout Configuration
 
-| Setting | Source | Default |
-|---|---|---|
-| `WATCHDOG_TIMEOUT_MIN` | Env var or `vm_set_watchdog_timeout` | 10 minutes |
-| `WATCHDOG_KILL_GRACE_SEC` | Env var | 3 seconds |
-| `QUEUE_TIMEOUT_MIN` | Env var or `vm_set_queue_timeout` | 25 minutes |
-| Anvil Uplink connection timeout | Managed by anvil-uplink library | Library default |
+| Setting | Source | Default | Range |
+|---|---|---|---|
+| `WATCHDOG_TIMEOUT_MIN` | Env var or `vm_set_watchdog_timeout` | 10 minutes | 1-60 |
+| `WATCHDOG_KILL_GRACE_SEC` | Env var | 3 seconds | -- |
+| `QUEUE_TIMEOUT_MIN` | Env var or `vm_set_queue_timeout` | 25 minutes | 1-120 |
+| `_WORKER_READY_TIMEOUT` | Hardcoded | 120 seconds | -- |
+| Anvil Uplink connection timeout | Managed by anvil-uplink library | Library default | -- |

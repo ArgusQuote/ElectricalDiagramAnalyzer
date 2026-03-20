@@ -35,16 +35,17 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
     │       │  maps OCR results to component dicts
     │       ▼
     └─► RulesEngine4.process_job()
-            └── PartNumberBuilder (mccb, nqPanelboard, Disconnect, ...)
-                │  selects equipment part numbers
-                ▼
-            result.json + status.json on disk
+            └── PartNumberBuilder (mccb, nqPanelboard, iLinePanelboard,
+            │     loadcenter, Disconnect, transformer, externalSpd, ...)
+            │  selects equipment part numbers
+            ▼
+        result.json + status.json on disk
 ```
 
 ## Key Components
 
 ### AnvilUplinkCode (Orchestrator)
-- **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, worker pool, and watchdog
+- **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, persistent worker subprocess, and watchdog
 - **Location**: `AnvilUplinkCode/uplink_server.py`
 - **Dependencies**: WorkerSetup, PageFilter, PanelBoardSearch, BreakerTablePipeline, RulesEngine4
 - **Consumers**: Anvil web frontend via Uplink RPC
@@ -58,7 +59,7 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 ### VisualDetectionToolLibrary (Panel Detection)
 - **Purpose**: Detects panel table regions in PDF bitmaps using whitespace/void analysis and border detection
 - **Location**: `VisualDetectionToolLibrary/PanelSearchToolV25.py`
-- **Dependencies**: pypdfium2, OpenCV, NumPy
+- **Dependencies**: pypdfium2, pikepdf, OpenCV, NumPy, PIL
 - **Consumers**: uplink_server (panel crop step)
 
 ### OcrLibrary (OCR Pipeline)
@@ -74,14 +75,16 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Consumers**: BreakerTableAnalyzer12
 
 ### RulesEngine
-- **Purpose**: Processes component dicts from OCR to select equipment part numbers
+- **Purpose**: Processes component dicts from OCR to select equipment part numbers via engine classes
 - **Location**: `RulesEngine/RulesEngine4.py`
+- **Key classes**: `DefaultResolver`, `BaseEngine`, `PanelboardEngine`, `DisconnectEngine`, `TransformerEngine`
 - **Dependencies**: PartNumberSelector
 - **Consumers**: uplink_server (final pipeline step)
 
 ### PartNumberSelector
-- **Purpose**: Part number lookup and selection logic for panelboards, breakers, disconnects, transformers
+- **Purpose**: Part number lookup and selection logic for panelboards, load centers, breakers, disconnects, transformers, external SPDs
 - **Location**: `PartNumberSelector/PartNumberBuilder.py`
+- **Exports**: `mccb`, `nqPanelboard`, `nfPanelboard`, `iLinePanelboard`, `loadcenter`, `breakerSelector`, `blanks`, `eFrameBreaker`, `Disconnect`, `transformer`, `externalSpd`
 - **Dependencies**: None (pure logic)
 - **Consumers**: RulesEngine4
 
@@ -89,50 +92,101 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Purpose**: Thread-pool caps (`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, etc.) and runtime determinism (`torch.set_num_threads(1)`, `cv2.setNumThreads(1)`, cuDNN flags) for multiprocessing workers
 - **Location**: `WorkerSetup/worker_init.py`
 - **Dependencies**: None (uses only stdlib `os`; optional imports of `cv2` and `torch`)
-- **Consumers**: `uplink_server.py` (module-level + persistent worker), `DevEnv/capacity_test.py`
+- **Consumers**: `uplink_server.py` (module-level import + persistent worker subprocess)
+
+## Worker Architecture
+
+The server uses a **persistent worker subprocess** model:
+
+```
+Main process (Anvil Uplink)
+    │
+    ├── _spawn_persistent_worker()
+    │       │  spawns long-lived child via multiprocessing.get_context("spawn")
+    │       │  child loads GPU EasyOCR reader + BreakerTablePipeline once
+    │       │  signals "ready" via _WORKER_DONE_Q
+    │       ▼
+    │   _persistent_worker_main(job_q, done_q)
+    │       │  loops: job_q.get() → reset_name_deduper → _process_job(job_id, pipeline) → done_q.put()
+    │       │  pipeline (with GPU reader) is reused across all jobs -- no per-job model reload
+    │
+    ├── _dequeue_loop(idx=0)   [daemon thread]
+    │       │  pulls (job_id, owner_id) from _JOB_Q
+    │       │  checks: already done/error/canceled? → skip
+    │       │  checks: queue timeout? → write error, skip
+    │       │  checks: per-user inflight cap → re-enqueue if full
+    │       │  calls _ensure_worker_alive() → auto-respawn if worker crashed
+    │       │  puts job_id on _WORKER_JOB_Q
+    │       │  waits on _WORKER_DONE_Q with watchdog timeout
+    │       │  on timeout/crash: write error, kill worker, respawn
+    │
+    └── anvil.server.wait_forever()
+```
+
+Key aspects:
+- `_IS_WORKER_SUBPROCESS` env var (`_EDA_WORKER_SUBPROCESS=1`) prevents the child from connecting to Anvil, starting workers, or running warmup
+- GPU EasyOCR reader is loaded once in `_persistent_worker_main` and shared across all jobs via the `pipeline` parameter to `_process_job`
+- `_WORKER_READY_TIMEOUT = 120` seconds to wait for the worker to finish loading models
+- If the worker process dies mid-job, `_ensure_worker_alive()` detects it and `_spawn_persistent_worker()` respawns
+- Watchdog fires if `_WORKER_DONE_Q.get()` times out after `WATCHDOG_TIMEOUT_MIN * 60` seconds
 
 ## Data Pipelines
 
 ### Main Detection Pipeline
 - **Trigger**: `vm_submit_for_detection()` callable from Anvil UI
 - **Steps**:
-  1. Save uploaded PDF to `~/jobs/{job_id}/`
-  2. Write initial `status.json` (state=queued)
-  3. Enqueue job to worker pool
-  4. Worker spawns subprocess: `PageFilter.readPdf()` filters pages
-  5. `PanelBoardSearch.readPdf()` detects and crops panels to PNGs
-  6. For each PNG (sequential): `BreakerTablePipeline.run()` extracts OCR data
-  7. `_merge_component_from_btp()` maps each OCR result to a component dict
-  8. `RulesEngine4.process_job()` selects part numbers for all components
-  9. Write `result.json` and update `status.json` (state=done)
-  10. Cleanup temporary files
+  1. Save uploaded PDF to `~/jobs/{job_id}/uploaded_pdfs/`
+  2. Write initial `status.json` (state=queued, owner_id, noticed_ts_ms, ui_overrides)
+  3. Enqueue `(job_id, owner_id)` to `_JOB_Q`
+  4. Dequeue-loop thread picks up the job
+  5. Queue timeout check (if age exceeds `QUEUE_TIMEOUT_MIN`, write error and skip)
+  6. Dispatch `job_id` to persistent worker subprocess via `_WORKER_JOB_Q`
+  7. Worker calls `_process_job(job_id, pipeline)`:
+     a. `PageFilter.readPdf()` filters pages
+     b. `PanelBoardSearch.readPdf()` detects and crops panels to PNGs
+     c. For each PNG (sequential): `BreakerTablePipeline.run()` extracts OCR data
+     d. `_merge_component_from_btp()` maps each OCR result to a component dict
+     e. `RulesEngine4.process_job()` selects part numbers for all components
+     f. Write `result.json` and update `status.json` (state=done)
+     g. `_cleanup_job_dir()` removes temporary files, keeps overlays and PDFs
+  8. Worker signals completion via `_WORKER_DONE_Q`
 - **Output**: `result.json` with components, part numbers, and cycle time
-- **Error handling**: Exceptions write state=error to `status.json`; watchdog kills jobs exceeding timeout
+- **Error handling**: Exceptions write state=error to `status.json`; watchdog kills and respawns worker on timeout
 
 ## Deployment Topology
 
 - **Runtime**: Single Paperspace VM
 - **Connection**: Anvil Uplink RPC (`anvil.server.connect()` with `ANVIL_UPLINK_KEY`)
-- **Concurrency**: 1 worker thread spawning a child process per job (`multiprocessing.spawn`)
-- **Per-user limit**: 1 concurrent job per user (`MAX_INFLIGHT_PER_USER`)
-- **Watchdog**: Kills child processes exceeding `WATCHDOG_TIMEOUT_MIN` (default 10 minutes)
-- **Queue timeout**: Jobs waiting longer than `QUEUE_TIMEOUT_MIN` (default 25 minutes) are expired
+- **Concurrency**: 1 dequeue-loop daemon thread (`MAX_WORKERS=1`) dispatching to 1 persistent worker subprocess
+- **Per-user limit**: 1 concurrent job per user (`MAX_INFLIGHT_PER_USER=1`)
+- **Watchdog**: Kills worker process if job exceeds `WATCHDOG_TIMEOUT_MIN` (default 10 minutes); auto-respawns
+- **Queue timeout**: Jobs waiting longer than `QUEUE_TIMEOUT_MIN` (default 25 minutes) are expired with error
 - **Job storage**: `~/jobs/{job_id}/` with status.json, result.json, PDF, and PNG files
 - **No containerization**: Runs directly on the VM with system Python
 
 ## Key Design Decisions
 
+### Persistent Worker Subprocess
+- **Decision**: A single long-lived subprocess loads GPU models once and processes all jobs sequentially
+- **Context**: EasyOCR + PyTorch GPU model loading takes ~60-120s. Loading per-job was wasteful. The persistent worker loads the GPU reader once at startup, creates a `BreakerTablePipeline` with that reader, and reuses it for every job.
+- **Alternatives considered**: Per-job subprocess spawning (too slow for model reload), in-process execution (state leaks between runs), multiple persistent workers (GPU memory constraints)
+- **Consequences**: Fast per-job turnaround after initial load; single point of failure mitigated by auto-respawn via `_ensure_worker_alive()`
+
 ### Process-Based Job Isolation
-- **Decision**: Each job runs in a spawned subprocess, not in-thread
+- **Decision**: Each job runs in the persistent subprocess, not in the main thread
 - **Context**: EasyOCR, PyTorch, and OpenCV have state that leaks across runs; subprocess ensures clean state
 - **Alternatives considered**: Thread-based execution (caused non-deterministic OCR results)
-- **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
+- **Consequences**: Pipeline instance is reused but `reset_name_deduper()` is called between jobs
 
 ### Thread-Pool Capping for Multiprocessing
-- **Decision**: Cap OpenMP/MKL/OpenBLAS thread pools to 1 thread per process and apply PyTorch/OpenCV runtime determinism in every spawned worker
-- **Context**: EasyOCR and PyTorch create internal thread pools (OpenMP, MKL, OpenBLAS) during library init. When multiple `multiprocessing.spawn` workers run inference simultaneously, these competing thread pools deadlock at the C level. Setting `OMP_NUM_THREADS=1` (and related vars) before import, plus `torch.set_num_threads(1)` inside each worker, eliminates the contention while preserving process-level parallelism.
-- **Alternatives considered**: Single shared OCR worker with a job queue (more complex), `fork` context (unsafe with CUDA), daemon-thread timeouts around `readtext()` (cannot interrupt C-level hangs)
-- **Consequences**: Slightly slower single-process math operations, but multi-process throughput is unaffected. Centralised in `WorkerSetup/worker_init.py` so all entry points share the same setup.
+- **Decision**: Cap OpenMP/MKL/OpenBLAS thread pools to 1 thread per process and apply PyTorch/OpenCV runtime determinism
+- **Context**: EasyOCR and PyTorch create internal thread pools during library init. Competing thread pools deadlock at the C level. `cap_thread_pools()` runs before heavy imports at module level; `set_runtime_determinism()` runs both at init and inside the persistent worker.
+- **Consequences**: Slightly slower single-process math operations, but no deadlocks. Centralised in `WorkerSetup/worker_init.py`.
+
+### Queue Timeout
+- **Decision**: Jobs that wait in the queue longer than `QUEUE_TIMEOUT_MIN` (default 25 min) are expired
+- **Context**: Under load, jobs could queue indefinitely; timeout gives users a clear failure message and frees the queue
+- **Consequences**: Users must resubmit if their job expires; configurable at runtime via `vm_set_queue_timeout`
 
 ### Versioned Module Files
 - **Decision**: Modules carry version suffixes (e.g., PageFilterV3, PanelSearchToolV25, BreakerTableAnalyzer12)

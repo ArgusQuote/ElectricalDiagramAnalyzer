@@ -9,6 +9,8 @@ try:
 except Exception:
     _HAS_OCR = False
 
+from OcrLibrary.ocr_timeout import readtext_with_timeout
+
 
 class PanelParser:
     """
@@ -264,14 +266,16 @@ class PanelParser:
             except Exception:
                 self.reader = easyocr.Reader(['en'], gpu=False)
 
-        detailed = self.reader.readtext(
+        detailed = readtext_with_timeout(
+            self.reader,
             prep, detail=1, paragraph=False,
             mag_ratio=1.6, contrast_ths=0.05, adjust_contrast=0.7,
             text_threshold=0.4, low_text=0.3,
         )
         try:
             inv = cv2.bitwise_not(prep)
-            det2 = self.reader.readtext(
+            det2 = readtext_with_timeout(
+                self.reader,
                 inv, detail=1, paragraph=False,
                 allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,()/:-._\"'“”‘’ kKVvYØø ",
                 mag_ratio=1.9, contrast_ths=0.05, adjust_contrast=0.7,
