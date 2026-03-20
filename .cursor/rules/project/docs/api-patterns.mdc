@@ -14,7 +14,7 @@ This project uses Anvil Uplink RPC -- not REST/HTTP. The backend exposes callabl
 - **Authentication**: `ANVIL_UPLINK_KEY` environment variable (required at startup)
 - **Client class**: `AnvilUplinkCode/uplink_server.py` (the entire server is the client)
 - **Error handling**: Connection failure raises `RuntimeError` at startup; Anvil handles reconnection
-- **Subprocess guard**: `_IS_WORKER_SUBPROCESS` env var (`_EDA_WORKER_SUBPROCESS=1`) prevents the persistent worker subprocess from connecting to Anvil or starting its own workers
+- **Subprocess guard**: `_IS_WORKER_SUBPROCESS` env var (`_EDA_WORKER_SUBPROCESS=1`) prevents persistent worker subprocesses from connecting to Anvil or starting their own workers
 
 ## RPC Callable Endpoints
 
@@ -111,7 +111,7 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 - **Callable-level**: Each callable wraps its logic in try/except; errors return dicts with an `error` key
 - **Job-level**: Exceptions during `_process_job` write `state="error"` and the traceback to `status.json`; `_status_write` preserves existing fields (owner_id, etc.) when updating state
 - **Watchdog**: Jobs exceeding `WATCHDOG_TIMEOUT_MIN` (default 10 min) are killed; status is set to error; worker is killed and respawned
-- **Worker crash**: If the persistent worker process dies, the dequeue loop detects it, writes an error, and calls `_kill_persistent_worker()` + `_spawn_persistent_worker()` to recover
+- **Worker crash**: If a persistent worker process dies, its dequeue loop detects it, writes an error, and calls `_kill_persistent_worker(idx)` + `_spawn_persistent_worker(idx)` to recover the slot
 - **Queue timeout**: Jobs waiting in queue longer than `QUEUE_TIMEOUT_MIN` (default 25 min) are expired with a user-facing message; checked both on dequeue and right before dispatch
 - **Cancellation**: Workers check for a `.cancel` file in the job directory at each pipeline step (before start, after render, mid-parse, before rules)
 - **No retry**: Failed jobs are not automatically retried; the user must resubmit

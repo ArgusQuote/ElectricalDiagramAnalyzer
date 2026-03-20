@@ -551,12 +551,19 @@ _Q_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
 
-# On-demand worker process state (None when no worker is running)
-_WORKER_LOCK = threading.Lock()
-_WORKER_PROC = None          # multiprocessing.Process (None at boot)
-_WORKER_JOB_Q = None         # mp Queue: main → worker (job_id str or None for shutdown)
-_WORKER_DONE_Q = None        # mp Queue: worker → main (status, job_id, error_msg)
+# Per-slot on-demand worker pool state
 _WORKER_READY_TIMEOUT = 120  # seconds to wait for worker model loading
+
+class _WorkerSlot:
+    """State for one on-demand worker subprocess slot."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.proc = None       # multiprocessing.Process (None until first job)
+        self.job_q = None      # mp Queue: main → worker (job_id str or None for shutdown)
+        self.done_q = None     # mp Queue: worker → main (status, job_id, error_msg)
+
+_WORKER_SLOTS: list[_WorkerSlot] = [_WorkerSlot() for _ in range(MAX_WORKERS)]
+_SPAWN_LOCK = threading.Lock()  # serializes env-var set/start/unset across slots
 
 def _enqueue_job(job_id: str, owner_id: str):
     _JOB_Q.put((job_id, owner_id))
@@ -927,7 +934,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
 # ---------- On-demand worker subprocess ----------
 
-def _ondemand_worker_main(job_q, done_q, idle_timeout_sec):
+def _ondemand_worker_main(slot_idx, job_q, done_q, idle_timeout_sec):
     """On-demand worker: loads GPU models, processes jobs, exits when idle.
 
     Shuts down cleanly after ``idle_timeout_sec`` seconds with no new
@@ -939,19 +946,30 @@ def _ondemand_worker_main(job_q, done_q, idle_timeout_sec):
 
     NOTE: _set_runtime_determinism() is NOT called here because the
     ``spawn`` context re-imports the module from scratch, so the
-    module-level call (line 85) already runs in this subprocess.
+    module-level call already runs in this subprocess.
     """
+    tag = f"slot-{slot_idx}"
     import gc
     import torch
-    _log_run_fingerprint("ondemand_worker_init")
+    _log_run_fingerprint(f"ondemand_worker_init:{tag}")
 
     import easyocr
-    print(">>> On-demand worker: loading GPU EasyOCR reader ...")
+    print(f">>> Worker [{tag}]: loading GPU EasyOCR reader ...")
     gpu_reader = easyocr.Reader(["en"], gpu=True)
     pipeline = BreakerTablePipeline(debug=True, reader=gpu_reader)
     pipeline._ensure_analyzer()
     pipeline._ensure_header_parser()
-    print(f">>> On-demand worker: models loaded | API_VERSION={API_VERSION}")
+    print(f">>> Worker [{tag}]: models loaded | API_VERSION={API_VERSION}")
+
+    try:
+        free_vram, total_vram = torch.cuda.mem_get_info()
+        print(
+            f">>> Worker [{tag}]: VRAM after model load — "
+            f"free={free_vram / 1024**3:.1f} GiB, "
+            f"total={total_vram / 1024**3:.1f} GiB"
+        )
+    except Exception:
+        pass
 
     done_q.put(("ready", None, None))
 
@@ -961,7 +979,7 @@ def _ondemand_worker_main(job_q, done_q, idle_timeout_sec):
             msg = job_q.get(timeout=idle_timeout_sec)
         except Empty:
             print(
-                f">>> On-demand worker: idle for {idle_timeout_sec}s "
+                f">>> Worker [{tag}]: idle for {idle_timeout_sec}s "
                 f"after {jobs_processed} jobs — shutting down"
             )
             break
@@ -976,7 +994,7 @@ def _ondemand_worker_main(job_q, done_q, idle_timeout_sec):
             done_q.put(("done", job_id, None))
         except Exception as e:
             tb = traceback.format_exc()
-            print(f">>> on-demand worker job error [{job_id}]: {e}\n{tb}")
+            print(f">>> Worker [{tag}] job error [{job_id}]: {e}\n{tb}")
             try:
                 job_dir = BASE_JOBS_DIR / job_id
                 _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
@@ -991,76 +1009,93 @@ def _ondemand_worker_main(job_q, done_q, idle_timeout_sec):
                 pass
         jobs_processed += 1
 
-    print(f">>> On-demand worker: shutdown (processed {jobs_processed} jobs)")
+    print(f">>> Worker [{tag}]: shutdown (processed {jobs_processed} jobs)")
 
 
-# ---------- Worker lifecycle (on-demand) ----------
+# ---------- Worker lifecycle (per-slot on-demand) ----------
 
-def _spawn_worker():
-    """Spawn the on-demand worker process.  Returns when the worker is ready."""
-    global _WORKER_PROC, _WORKER_JOB_Q, _WORKER_DONE_Q
+def _spawn_ondemand_worker(idx: int):
+    """Spawn (or respawn) on-demand worker for slot ``idx``. Blocks until ready."""
+    slot = _WORKER_SLOTS[idx]
+    tag = f"slot-{idx}"
 
     mp_ctx = get_context("spawn")
-    _WORKER_JOB_Q = mp_ctx.Queue()
-    _WORKER_DONE_Q = mp_ctx.Queue()
+    slot.job_q = mp_ctx.Queue()
+    slot.done_q = mp_ctx.Queue()
 
-    os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
-    _WORKER_PROC = mp_ctx.Process(
-        target=_ondemand_worker_main,
-        args=(_WORKER_JOB_Q, _WORKER_DONE_Q, WORKER_IDLE_TIMEOUT_SEC),
-        daemon=True,
-    )
-    _WORKER_PROC.start()
-    os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
+    with _SPAWN_LOCK:
+        os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
+        slot.proc = mp_ctx.Process(
+            target=_ondemand_worker_main,
+            args=(idx, slot.job_q, slot.done_q, WORKER_IDLE_TIMEOUT_SEC),
+            daemon=True,
+        )
+        slot.proc.start()
+        os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
 
-    print(f">>> On-demand worker spawned (pid={_WORKER_PROC.pid}), waiting for ready ...")
+    print(f">>> Worker [{tag}] spawned (pid={slot.proc.pid}), waiting for ready ...")
     try:
-        status, _, _ = _WORKER_DONE_Q.get(timeout=_WORKER_READY_TIMEOUT)
+        status, _, _ = slot.done_q.get(timeout=_WORKER_READY_TIMEOUT)
         if status != "ready":
             raise RuntimeError(f"unexpected worker init status: {status}")
     except Empty:
         raise RuntimeError(
-            f"on-demand worker did not become ready within {_WORKER_READY_TIMEOUT}s"
+            f"Worker [{tag}] did not become ready within {_WORKER_READY_TIMEOUT}s"
         )
-    print(">>> On-demand worker ready")
+    print(f">>> Worker [{tag}] ready")
 
 
-def _kill_worker():
-    """Terminate and join the worker process."""
-    global _WORKER_PROC
-    if _WORKER_PROC is None:
+def _kill_ondemand_worker(idx: int):
+    """Terminate and join the worker subprocess in slot ``idx``."""
+    slot = _WORKER_SLOTS[idx]
+    if slot.proc is None:
         return
     try:
-        _WORKER_PROC.terminate()
+        slot.proc.terminate()
     except Exception:
         pass
-    _WORKER_PROC.join(timeout=WATCHDOG_KILL_GRACE_SEC)
-    if _WORKER_PROC.is_alive():
+    slot.proc.join(timeout=WATCHDOG_KILL_GRACE_SEC)
+    if slot.proc.is_alive():
         try:
-            _WORKER_PROC.kill()
+            slot.proc.kill()
         except Exception:
             pass
-        _WORKER_PROC.join(timeout=1)
-    _WORKER_PROC = None
+        slot.proc.join(timeout=1)
+    slot.proc = None
 
 
-def _ensure_worker_alive():
-    """If no worker is running, spawn one on demand."""
-    global _WORKER_PROC
-    if _WORKER_PROC is not None and _WORKER_PROC.is_alive():
+def _ensure_worker_alive(idx: int):
+    """If the worker in slot ``idx`` is not running, spawn one on demand."""
+    slot = _WORKER_SLOTS[idx]
+    tag = f"slot-{idx}"
+    if slot.proc is not None and slot.proc.is_alive():
         return
-    if _WORKER_PROC is None:
-        print(">>> On-demand worker: first request — spawning")
+    if slot.proc is None:
+        print(f">>> Worker [{tag}]: first request — spawning on demand")
     else:
-        print(">>> On-demand worker: not running — spawning fresh")
-    _kill_worker()
-    _spawn_worker()
+        exitcode = getattr(slot.proc, "exitcode", None)
+        if exitcode is not None and exitcode == 0:
+            print(f">>> Worker [{tag}]: exited (idle timeout) — respawning on demand")
+        else:
+            print(f">>> Worker [{tag}]: died (exitcode={exitcode}) — respawning")
+    _kill_ondemand_worker(idx)
+    _spawn_ondemand_worker(idx)
 
 
-# ---------- Dequeue loop (on-demand worker) ----------
+# ---------- Dequeue loop (per-slot on-demand worker pool) ----------
 
 def _dequeue_loop(idx: int):
+    """Each dequeue thread ``idx`` owns worker slot ``idx``.
+
+    Pulls jobs from the shared ``_JOB_Q``, dispatches to its own slot's
+    ``job_q``, and waits on its own slot's ``done_q``.  No cross-slot
+    queue access, no race conditions.  The worker is spawned on demand
+    when the first job for this slot arrives and auto-exits after
+    ``WORKER_IDLE_TIMEOUT_SEC`` seconds of inactivity.
+    """
     threading.current_thread().name = f"pool-worker-{idx}"
+    slot = _WORKER_SLOTS[idx]
+    tag = f"slot-{idx}"
 
     while not _STOP.is_set():
         try:
@@ -1116,25 +1151,23 @@ def _dequeue_loop(idx: int):
                     queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
                 )
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-                print(f">>> queue timeout (pre-start): {job_id} | age={age_str}")
+                print(f">>> queue timeout (pre-start) [{tag}]: {job_id} | age={age_str}")
                 continue
 
-            with _WORKER_LOCK:
-                _ensure_worker_alive()
+            with slot.lock:
+                _ensure_worker_alive(idx)
 
-            _WORKER_JOB_Q.put(job_id)
+            slot.job_q.put(job_id)
 
             # Wait for completion with watchdog timeout
             timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
             worker_ok = True
             try:
-                status, done_job_id, err_msg = _WORKER_DONE_Q.get(timeout=timeout_sec)
+                status, done_job_id, err_msg = slot.done_q.get(timeout=timeout_sec)
             except Empty:
-                # Watchdog fired — the worker is stuck
                 worker_ok = False
 
-            if not worker_ok or (_WORKER_PROC is not None and not _WORKER_PROC.is_alive()):
-                # Worker timed out or crashed mid-job
+            if not worker_ok or (slot.proc is not None and not slot.proc.is_alive()):
                 try:
                     with open(_cancel_path(job_dir), "w") as f:
                         f.write("1")
@@ -1143,10 +1176,10 @@ def _dequeue_loop(idx: int):
 
                 if not worker_ok:
                     msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
-                    print(f">>> watchdog timeout: {job_id}")
+                    print(f">>> watchdog timeout [{tag}]: {job_id}")
                 else:
                     msg = "Worker process crashed during this job. Please try again."
-                    print(f">>> worker crash detected during: {job_id}")
+                    print(f">>> worker crash [{tag}] during: {job_id}")
 
                 _status_write(job_dir, "error", error=msg)
                 try:
@@ -1155,28 +1188,27 @@ def _dequeue_loop(idx: int):
                     pass
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
 
-                # Kill the worker; next job will trigger a fresh spawn
-                with _WORKER_LOCK:
-                    _kill_worker()
+                with slot.lock:
+                    _kill_ondemand_worker(idx)
 
         finally:
             _leave_inflight(owner_id)
             _JOB_Q.task_done()
 
 
-# ---------- Start dequeue pool (on-demand: no worker at boot) ----------
+# ---------- Start dequeue pool (on-demand: no workers at boot) ----------
 if not _IS_WORKER_SUBPROCESS:
     for i in range(MAX_WORKERS):
         t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
         t.start()
         _WORKERS.append(t)
     print(
-        f">>> Dequeue pool started: {MAX_WORKERS} threads, "
-        f"per-user cap={MAX_INFLIGHT_PER_USER}"
+        f">>> Dequeue pool started: {MAX_WORKERS} slots, "
+        f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
     )
     print(
         f">>> On-demand worker mode: idle timeout={WORKER_IDLE_TIMEOUT_SEC}s "
-        f"(worker spawns on first job)"
+        f"(each slot spawns its worker on first job)"
     )
 
 # ---------- API: submit / status / list / cancel ----------

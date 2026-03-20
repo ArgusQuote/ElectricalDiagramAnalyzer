@@ -9,19 +9,17 @@ alwaysApply: false
 
 ```
 ElectricalDiagramAnalyzer/
-├── AnvilUplinkCode/           # Anvil Uplink server (main entry point) + dated backups
+├── AnvilUplinkCode/           # Anvil Uplink server (main entry point) + alternate implementations + dated backups
 ├── PageFilter/                # PDF page filtering (keep electrical pages)
-├── PageFilterOutput/          # Empty output directory for page filter dev runs
 ├── VisualDetectionToolLibrary/# Heuristic panel/table detection (PanelSearchTool versions)
-├── OcrLibrary/                # OCR pipeline (analyzer, header parser, table parser, API)
+├── OcrLibrary/                # OCR pipeline (analyzer, header parser, table parser, API, shared timeout)
 ├── AnchoringClasses/          # Header/footer anchor detection
 ├── RulesEngine/               # Part number selection rules (engine versions)
 ├── PartNumberSelector/        # Equipment part number lookup tables
 ├── WorkerSetup/               # Thread-pool caps and runtime determinism for workers
-├── DevEnv/                    # Development and testing scripts + SourcePdf/ test PDFs
+├── DevEnv/                    # Development and testing scripts (SourcePdf/ is gitignored)
 ├── Backups/                   # Anvil UI form exports (extensionless) + server backups (.py)
 ├── MISC/                      # OcrRules, breaker_labels_config, requirements.txt
-├── .vscode/                   # VS Code launch.json (debugpy config)
 └── .cursor/                   # Cursor rules and skills
     ├── rules/
     │   ├── domain/            # Technology-specific rules
@@ -30,17 +28,24 @@ ElectricalDiagramAnalyzer/
     └── skills/                # Agent skills
 ```
 
+Notes:
+- `.vscode/` (launch.json) is gitignored and not tracked in the repo.
+- `SourcePdf/` under DevEnv is gitignored (test PDFs stored locally only).
+
 ## Key Files
 
 | File | Purpose |
 |---|---|
-| `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, persistent worker subprocess, watchdog, all RPC callables |
+| `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, multi-slot persistent worker pool (4 slots), watchdog, worker recycling, all RPC callables |
+| `AnvilUplinkCode/uplink_server_persistent_worker.py` | Alternate implementation -- persistent worker variant (not the active server) |
+| `AnvilUplinkCode/uplink_server_ondemonad_worker.py` | Alternate implementation -- on-demand worker variant (not the active server) |
 | `PageFilter/PageFilterV3.py` | Page filtering -- OCR-based E-sheet detection, label scoring, whitespace heuristics |
 | `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping, magenta overlays |
 | `OcrLibrary/BreakerTableParserAPIv9.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class, name deduplication |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, `SimpleHFResult` dataclass |
 | `OcrLibrary/PanelHeaderParserV9.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
 | `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
+| `OcrLibrary/ocr_timeout.py` | Shared OCR timeout -- `readtext_with_timeout()` wraps EasyOCR calls in daemon threads with wall-clock timeout |
 | `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
 | `OcrLibrary/breaker_labels_config.jsonc` | Breaker label config -- trip/poles/circuit/footer labels, row rules, scoring, fallbacks |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images (`HeaderResult` dataclass) |
@@ -54,16 +59,15 @@ ElectricalDiagramAnalyzer/
 | `DevEnv/capacity_test.py` | Concurrent multi-PDF stress test with configurable concurrency levels |
 | `DevEnv/DevTestEnv.py` | End-to-end single-PDF pipeline test |
 | `.gitignore` | Ignores venvs, PDFs, images, annotation data |
-| `.vscode/launch.json` | VS Code debugpy launch config for current file |
 
 ## Module Boundaries
 
 ### AnvilUplinkCode
 - **Path**: `AnvilUplinkCode/`
-- **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, persistent worker subprocess, watchdog, queue timeout
+- **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, multi-slot persistent worker pool (4 workers), watchdog, queue timeout, worker recycling
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
 - **Dependencies**: WorkerSetup, PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
-- **Also contains**: Dated backup files (`*_bkup.py`, `*bkup.py`)
+- **Also contains**: Alternate implementations (`uplink_server_persistent_worker.py`, `uplink_server_ondemonad_worker.py`), dated backups (`*_bkup.py`, `*bkup.py`)
 
 ### PageFilter
 - **Path**: `PageFilter/`
@@ -77,20 +81,20 @@ ElectricalDiagramAnalyzer/
 - **Purpose**: Detects and crops panel regions from PDF page bitmaps using heuristics
 - **Entry point**: `PanelSearchToolV25.PanelBoardSearch` class, `.readPdf()` method
 - **Dependencies**: pypdfium2, pikepdf, OpenCV, NumPy, PIL
-- **Also contains**: Older versions (V11--V24), `BreakerTableAnalyzer7.py` (legacy)
+- **Also contains**: Older versions (V23, V24), `BreakerTableAnalyzer7.py` (legacy)
 
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
-- **Purpose**: Three-stage OCR pipeline for breaker table extraction
+- **Purpose**: Three-stage OCR pipeline for breaker table extraction plus shared timeout utility
 - **Entry point**: `BreakerTableParserAPIv9.BreakerTablePipeline` class, `.run()` method
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc, breaker_labels_config.jsonc
-- **Also contains**: Many older versions of Analyzer (3--10), Parser (4--9), API (v1--v8), HeaderParser (V4--V8)
+- **Also contains**: Shared `ocr_timeout.py`, older versions (APIv8, Parser9, Analyzer10, HeaderParserV8, BreakerTableParserAPI, BreakerTableParserALTModuleized)
 
 ### AnchoringClasses
 - **Path**: `AnchoringClasses/`
 - **Purpose**: Detects header and footer anchor positions for layout analysis
 - **Entry point**: `BreakerHeaderFinder` and `BreakerFooterFinder` classes
-- **Dependencies**: EasyOCR reader (passed in), OpenCV, NumPy
+- **Dependencies**: EasyOCR reader (passed in), OpenCV, NumPy, `OcrLibrary.ocr_timeout` (for header finder)
 
 ### RulesEngine
 - **Path**: `RulesEngine/`
@@ -98,7 +102,7 @@ ElectricalDiagramAnalyzer/
 - **Entry point**: `RulesEngine4.process_job(payload)` function
 - **Key classes**: `DefaultResolver`, `BaseEngine`, `PanelboardEngine`, `DisconnectEngine`, `TransformerEngine`
 - **Dependencies**: PartNumberSelector
-- **Also contains**: Older versions (RulesEngine2.py, RulesEngine3.py)
+- **Also contains**: Older versions (RulesEngine2.py, RulesEngine3.py), `__init__.py`
 
 ### PartNumberSelector
 - **Path**: `PartNumberSelector/`
@@ -112,6 +116,7 @@ ElectricalDiagramAnalyzer/
 - **Purpose**: Centralised thread-pool capping and runtime determinism for any process that runs EasyOCR/PyTorch inference
 - **Entry point**: `from WorkerSetup import cap_thread_pools, set_runtime_determinism`
 - **Dependencies**: None (stdlib `os`; optional `cv2`, `torch`)
+- **Also contains**: `__init__.py` (re-exports `cap_thread_pools`, `set_runtime_determinism`)
 
 ### MISC
 - **Path**: `MISC/`
@@ -121,14 +126,15 @@ ElectricalDiagramAnalyzer/
 ### DevEnv
 - **Path**: `DevEnv/`
 - **Purpose**: Development scripts for testing individual pipeline stages and batch runs
-- **Contents**: `capacity_test.py`, `DevTestEnv.py`, `PageFilterDevEnv.py`, various analyzer/parser/search test scripts
-- **Also contains**: `SourcePdf/` (test PDFs), `CAPACITY_TEST_LOG.md`
+- **Contents**: `capacity_test.py`, `DevTestEnv.py`, `PageFilterDevEnv.py`, `DevEnvPanelSearchToolBatch.py`, `DevEnvPanaelSearchToolSimple.py`, `DevEnvBreakerTableAnalyzerV12andHigher.py`, `DevEnvBreaktableAnalyzer2.py`, `DevEnvFindHeader7.py`, `DevTestBreakerTableAnalyzer.py`
+- **Note**: `SourcePdf/` (test PDFs) is gitignored and not committed
 
 ## Conventions
 
 - **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is the current active version. Lower versions are kept for comparison in DevEnv scripts.
 - **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
 - **Backups**: `Backups/` contains Anvil UI form exports (extensionless files like `Login`, `Output`, `Upload`) and dated server backup `.py` files. Not part of the runtime.
+- **Alternate implementations**: `AnvilUplinkCode/` contains `uplink_server_persistent_worker.py` and `uplink_server_ondemonad_worker.py` alongside the active `uplink_server.py`. These are alternate/experimental implementations, not imported by the active server.
 - **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.
 - **New pipeline module**: Create a new directory at the repo root with a versioned Python file (e.g., `NewModule/NewModuleV1.py`).
 - **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in `RulesEngine4.py`.

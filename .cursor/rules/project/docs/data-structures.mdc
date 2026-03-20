@@ -55,13 +55,40 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 - **Dataclass**: `SimpleHFResult` (fields: `src_path`, `header_y`, `header_bottom_y`, `footer_y`, `footer_token_val`, `panel_size`)
 - **Fields**:
   - `src_path` -- str, path to source image
-  - `header_y` -- int, pixel y-position of header top
-  - `header_bottom_y` -- int, pixel y-position of header bottom
-  - `footer_y` -- int, pixel y-position of footer
+  - `header_y` -- int or None, pixel y-position of header top
+  - `header_bottom_y` -- int or None, pixel y-position of header bottom
+  - `footer_y` -- int or None, pixel y-position of footer
   - `footer_token_val` -- int or None, detected footer token (panel space count)
   - `panel_size` -- int or None, detected panel size (e.g., 42, 84)
   - `gray` -- numpy array, preprocessed grayscale image
   - `debug_dir` -- str or None, debug output path
+
+### HeaderResult Dataclass
+- **Location**: `AnchoringClasses/BreakerHeaderFinder.py`
+- **Used by**: `BreakerTableAnalyzer12` for header/footer positioning
+- **Fields**:
+  - `centers` -- list[int], detected row center y-coordinates
+  - `dbg` -- `HeaderDbg`, debug info
+  - `header_y` -- int or None, pixel y of header top
+  - `header_bottom_y` -- int or None, pixel y of header bottom
+  - `footer_struct_y` -- int or None, structural footer y
+  - `last_footer_y` -- int or None, last detected footer y
+  - `footer_snapped` -- bool, whether footer was snapped to a grid line
+  - `snap_note` -- str or None, explanation of snap
+  - `bottom_border_y` -- int or None, y of bottom border
+  - `bottom_row_center_y` -- int or None, y of bottom row center
+
+### FooterResult Dataclass
+- **Location**: `AnchoringClasses/BreakerFooterFinder.py`
+- **Used by**: `BreakerTableAnalyzer12` for footer positioning and column layout
+- **Fields**:
+  - `footer_y` -- int or None, pixel y of footer
+  - `token_y` -- int or None, pixel y of footer token
+  - `token_val` -- int or None, detected footer token value (panel space count)
+  - `panel_size` -- int or None, detected panel size
+  - `dbg_marks` -- list[tuple[int, str]], debug marks as (y, label) pairs
+  - `vlines_x` -- list[int], vertical line x-coordinates (column separators)
+  - `cct_cols` -- list[tuple[int, int]], CKT/CCT column ranges as (x_start, x_end)
 
 ## Component Dict (OCR to RulesEngine)
 
@@ -88,6 +115,18 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `defaults` -- dict from `_DEFAULT_OVERRIDES` or `ui_overrides`
   - `items` -- list of component dicts (one per detected panel)
 - **Returns**: dict keyed by component name, each value containing part number selections, BOM items, and optional error/skip info
+
+## Worker Pool State
+
+### _WorkerSlot
+- **Location**: `uplink_server.py` (class at line ~559)
+- **Purpose**: State for one worker subprocess slot in the multi-slot pool
+- **Fields**:
+  - `lock` -- `threading.Lock`, protects spawn/kill operations for this slot
+  - `proc` -- `multiprocessing.Process` or None, the worker subprocess
+  - `job_q` -- `mp.Queue` or None, main → worker (sends job_id str, or None for shutdown)
+  - `done_q` -- `mp.Queue` or None, worker → main (sends (status, job_id, error_msg) tuples)
+- **Instances**: `_WORKER_SLOTS` is a list of 4 `_WorkerSlot` objects (one per `MAX_WORKERS`)
 
 ## Job Disk Structure
 
@@ -153,12 +192,12 @@ After completion, `_cleanup_job_dir()` removes everything except:
 ## Configuration Dicts
 
 ### PANEL_FINDER_DEFAULTS
-- **Location**: `uplink_server.py` lines 25-40
+- **Location**: `uplink_server.py` lines 25-39
 - **Purpose**: Knobs for heuristic panel detection (PanelBoardSearch)
 - **Key fields**: `render_dpi` (1400), `aa_level` (8), `render_colorspace` ("gray"), `min_void_area_fr` (0.004), `min_void_w_px` (90), `min_void_h_px` (90), `max_void_area_fr` (0.30), `void_w_fr_range`, `void_h_fr_range`, `min_whitespace_area_fr` (0.01), `margin_shave_px` (6), `pad` (6), `verbose` (True)
 
 ### _DEFAULT_OVERRIDES
-- **Location**: `uplink_server.py` lines 312-338
+- **Location**: `uplink_server.py` lines 317-340
 - **Purpose**: Default UI override settings for part number selection
 - **Sub-dicts**: panelboards (bussing, plug-on breakers, rating, feed-thru lugs, trim, enclosure, SPD), transformers (winding, temp, type, weathershield, mounting, resin_enclosure), disconnects (littlefuse, switch type, enclosure, fusible, grounding, solid neutral)
 
@@ -166,8 +205,9 @@ After completion, `_cleanup_job_dir()` removes everything except:
 
 | Constant | Location | Value |
 |---|---|---|
-| `MAX_WORKERS` | uplink_server.py | 1 |
+| `MAX_WORKERS` | uplink_server.py | 4 |
 | `MAX_INFLIGHT_PER_USER` | uplink_server.py | 1 |
+| `WORKER_RECYCLE_AFTER_JOBS` | uplink_server.py (env `WORKER_RECYCLE_JOBS`) | 25 |
 | `WATCHDOG_TIMEOUT_MIN` | uplink_server.py (env) | 10 |
 | `WATCHDOG_KILL_GRACE_SEC` | uplink_server.py (env) | 3 |
 | `QUEUE_TIMEOUT_MIN` | uplink_server.py (env) | 25 |
@@ -177,6 +217,7 @@ After completion, `_cleanup_job_dir()` removes everything except:
 | `PARSER_VERSION` | BreakerTableParser10.py | "BreakerParser10" |
 | `VALID_VOLTAGES` | BreakerTableParserAPIv9.py | {120, 208, 240, 480, 600} |
 | `AMP_MIN` / `AMP_MAX` | BreakerTableParserAPIv9.py | 100 / 1200 |
+| `OCR_TIMEOUT_SEC` | ocr_timeout.py | 30 |
 | `DEFAULT_INTERRUPTING_RATING` | RulesEngine4.py | 22 |
 
 Amperage bounds for breaker skip logic ([15..1200]) are in `_count_would_skip_breakers` in uplink_server.py. Voltage sets and snap maps are defined in BreakerTableParserAPIv9 and RulesEngine4/PartNumberBuilder.
@@ -199,7 +240,7 @@ PageFilter.readPdf() → (kept_pages, dropped_pages, filtered_pdf_path, log_json
     ▼
 PanelBoardSearch.readPdf() → list[str]  (PNG crop paths)
     │
-    ▼  (for each PNG, sequential, reusing persistent pipeline)
+    ▼  (for each PNG, sequential within a worker, parallel across workers)
 BreakerTablePipeline.run() → dict  (results with analyzer/header/parser)
     │
     ▼
@@ -213,4 +254,7 @@ result.json + status.json written to ~/jobs/{job_id}/
     │
     ▼
 _cleanup_job_dir()  (removes temp files, keeps overlays + PDFs)
+    │
+    ▼
+gc.collect() + torch.cuda.empty_cache()  (between-job cleanup in worker)
 ```

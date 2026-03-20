@@ -1,3 +1,8 @@
+---
+description: Capacity test performance baselines from capacity_test.py — concurrency benchmarks, known regressions, and throughput notes. Use when analyzing performance, planning concurrency limits, or investigating throughput issues.
+alwaysApply: false
+---
+
 # Capacity Test Log
 
 Performance baselines from `capacity_test.py` — full pipeline
@@ -27,14 +32,14 @@ Single-page PDF, 5 panel crops detected per job.
 
 ## derekfirst.pdf — 2025-03-19
 
-Multi-page PDF (~10 pages). **Pipeline hangs — known issue.**
+Multi-page PDF (~10 pages).
 
-**How far it gets before hanging:**
+**How far it gets before hanging (original issue):**
 1. PageFilter: completes (filtered to electrical pages).
 2. PanelBoardSearch: completes — finds **6 valid crops** (4 on page 7, 2 on
    page 8) plus 6 invalid tables rejected on pages 1, 4, 9.
 3. BreakerTablePipeline: completes header+body parsing for **page 7 panels 1–4**
-   successfully. Begins page 8 panel 1 — completes header analysis but **hangs
+   successfully. Begins page 8 panel 1 — completes header analysis but **hung
    during body/row parsing** (no `parser_body_combined` debug output produced).
 
 **Root cause:** `_readtext_with_timeout()` initially used `ThreadPoolExecutor`
@@ -45,7 +50,8 @@ bare daemon thread + `thread.join(timeout)` which abandons the thread on timeout
 **After fix (single job):** Pipeline completes in ~103s. All 6 crops processed,
 103 breakers detected. No OCR timeouts triggered in single-job run.
 
-**Concurrency test (post-fix):** Still hangs at concurrency >= 2. The daemon
-thread timeout does not resolve the multiprocessing case. The hang is likely
-at the C/CUDA/OpenMP level where Python threads cannot interrupt it. See
-`KNOWN_ISSUES.md` for details and possible next steps.
+**Concurrency fix:** The multiprocessing hang at concurrency >= 2 was resolved
+by extracting thread-pool caps (`OMP_NUM_THREADS=1`, etc.) and runtime
+determinism into `WorkerSetup/worker_init.py`. `capacity_test.py` now calls
+`cap_thread_pools()` before heavy imports and `set_runtime_determinism()` at
+the start of each worker. See `known-issues.mdc` (resolved section) for details.
