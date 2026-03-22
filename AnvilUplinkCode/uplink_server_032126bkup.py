@@ -470,28 +470,15 @@ def vm_get_default_overrides() -> dict:
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
 # ---------- PDF → images ----------
-def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_cb=None) -> list[str]:
+def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list[str]:
     """
     Run PageFilter first to keep only probable electrical/panel pages,
     then pass the (possibly filtered) PDF to PanelBoardSearch to produce crops.
     """
     img_dir.mkdir(parents=True, exist_ok=True)
     print(f">>> rendering PDF → images: {saved_pdf} -> {img_dir} (dpi={dpi})")
-    def _emit(step: str, progress: float | None = None, **extra):
-        if callable(status_cb):
-            try:
-                payload = {}
-                if step is not None:
-                    payload["step"] = step
-                if progress is not None:
-                    payload["progress"] = progress
-                payload.update(extra or {})
-                status_cb(**payload)
-            except Exception:
-                pass
 
     # --- 1) Filter pages (OCR first, footprints only if undecided) ---
-    _emit("finding_relevant_pages", 2.0)    
     try:
         pf = PageFilter(
             output_dir=str(img_dir.parent),   # keep filtered PDF alongside job folders
@@ -515,12 +502,6 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
         )
         kept_pages, dropped_pages, filtered_pdf, log_json = pf.readPdf(str(saved_pdf))
         print(f">>> PageFilter: kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")
-        _emit(
-            "finding_components",
-            8.0,
-            kept_pages=len(kept_pages),
-            dropped_pages=len(dropped_pages),
-        )
     except Exception as e:
         print(f">>> PageFilter error: {e}")
         kept_pages, filtered_pdf = [], None
@@ -554,7 +535,6 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
 
     try:
         crops = local_finder.readPdf(pdf_for_finder)
-        _emit("removing_false_positives", 18.0, image_count=len(crops))
     except Exception as e:
         print(f">>> render error: {e}")
         raise
@@ -787,10 +767,6 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         _jobs_upsert(job_id, state="running", updated_at=_now_utc())
 
         ui_overrides = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
-        def _render_status_cb(**kwargs):
-            payload = {"noticed_ts_ms": noticed_ts_ms}
-            payload.update(kwargs or {})
-            _status_write(job_dir, "running", **payload)
 
         # Ensure images are present
         pdf_dir = job_dir / "uploaded_pdfs"
@@ -802,34 +778,15 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             if not pdfs:
                 raise RuntimeError("No PDF found to render.")
 
-            # Early heartbeat: start relevant-page search
-            _status_write(
-                job_dir,
-                "running",
-                step="finding_relevant_pages",
-                noticed_ts_ms=noticed_ts_ms,
-                progress=2.0
-            )
+            # Early heartbeat: rendering start
+            _status_write(job_dir, "running", step="rendering", noticed_ts_ms=noticed_ts_ms, progress=2.0)
 
-            # Render / page-filter / component-find with live phase updates
-            imgs = []
-
+            # Render (PageFilter may be slow)
             try:
-                imgs = render_pdf_to_images(
-                    pdfs[0],
-                    img_dir,
-                    status_cb=_render_status_cb
-                )
+                imgs = render_pdf_to_images(pdfs[0], img_dir)
             finally:
-                # Final heartbeat after image generation finishes
-                _status_write(
-                    job_dir,
-                    "running",
-                    step="rendered",
-                    image_count=len(imgs),
-                    noticed_ts_ms=noticed_ts_ms,
-                    progress=9.0
-                )
+                # Heartbeat right after render returns (even on exception path)
+                _status_write(job_dir, "running", step="rendered", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=9.0)
 
         if not imgs:
             raise RuntimeError("PDF rendered but produced no crops/images.")
@@ -845,7 +802,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             print(f">>> BreakerTable API Version: {API_VERSION}")
         except Exception:
             pass
-        _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=20.0)
+        _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=10.0)
 
         debug_dir = job_dir / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -858,7 +815,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         components = [None] * total  # preserve order
         for idx, img_path in enumerate(imgs):
             if _is_canceled(job_dir):
-                pct = 20.0 + (done / max(1, total)) * 80.0
+                pct = 10.0 + (done / max(1, total)) * 80.0
                 _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
                 _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
                 print(f">>> worker canceled mid-parse: {job_id}")
@@ -900,7 +857,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
             # progress after each image completes fully (A→P→H)
             done += 1
-            pct = 20.0 + (done / max(1, total)) * 80.0
+            pct = 10.0 + (done / max(1, total)) * 80.0
             _status_write(
                 job_dir,
                 "running",

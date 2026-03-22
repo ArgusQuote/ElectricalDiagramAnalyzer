@@ -2,25 +2,29 @@
 # -*- coding: utf-8 -*-
 
 """
-Server-mirroring simultaneous capacity test.
+Closer-to-production simultaneous capacity test.
 
-Goal:
-- Simulate 1, 2, 3, 4 jobs being submitted at the same time.
-- Mirror the real server architecture where it matters:
-    * spawn multiprocessing
-    * cap thread pools before heavy imports
-    * persistent worker-style OCR/model loading
-    * EasyOCR GPU reader injection
-    * BreakerTablePipeline warmup via _ensure_analyzer/_ensure_header_parser
-    * same PageFilter / PanelBoardSearch / BreakerTablePipeline / RulesEngine flow
-- Exclude queueing behavior entirely.
+What it mirrors from server:
+- spawn multiprocessing
+- cap thread pools before heavy imports
+- module-level determinism setup
+- one persistent worker subprocess per slot
+- one EasyOCR GPU reader per worker
+- one BreakerTablePipeline per worker
+- analyzer/header warmup once per worker
+- per-slot job_q / done_q
+- same PageFilter / PanelBoardSearch / BreakerTablePipeline / RulesEngine flow
+- optional between-job gc + torch.cuda.empty_cache()
 
-What this measures:
-- Whether N simultaneous jobs complete successfully
-- Per-job elapsed processing time
-- Total wall-clock time for all simultaneous jobs
-- Slowdown vs 1-job baseline
-- Whether 2/3/4 simultaneous jobs are production-viable
+What it intentionally excludes:
+- Anvil
+- disk-backed status.json / result.json polling
+- queue timeout logic
+- owner/inflight throttling
+- dequeue thread layer
+
+This is meant to answer:
+"How does the real worker pool behave when 1/2/3/4 jobs hit at once?"
 """
 
 import os
@@ -30,6 +34,7 @@ import time
 import traceback
 from pathlib import Path
 from multiprocessing import get_context
+from queue import Empty
 from typing import Optional
 
 # ---------- PATH SETUP ----------
@@ -42,6 +47,7 @@ if project_root not in sys.path:
 # Must happen before heavy libs initialize
 from WorkerSetup import cap_thread_pools, set_runtime_determinism
 cap_thread_pools()
+set_runtime_determinism()
 
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV3 import PageFilter
@@ -54,16 +60,17 @@ from OcrLibrary.BreakerTableParserAPIv9 import (
 import RulesEngine.RulesEngine4 as RE2
 
 # ---------- CONFIG ----------
-INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucklarge.pdf").expanduser()
+INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/derekfirst.pdf").expanduser()
 TEST_ROOT = Path("~/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput").expanduser()
 TEST_ROOT.mkdir(parents=True, exist_ok=True)
 
+MAX_WORKERS = 4
 WORKER_READY_TIMEOUT_SEC = 240
-JOB_TIMEOUT_SEC = 600  # 10 min hard cap per simultaneous run
+JOB_TIMEOUT_SEC = 600
+WORKER_RECYCLE_AFTER_JOBS = 25   # for optional multi-wave runs later
 
-CONCURRENCY_LEVELS = [1, 2, 3, 4]
+CONCURRENCY_LEVELS = [6]
 
-# Keep these aligned with your real server
 SERVER_PANEL_FINDER_DEFAULTS = {
     "render_dpi": 1400,
     "aa_level": 8,
@@ -118,9 +125,6 @@ def _to_int_or_none(x):
 
 
 def _count_would_skip_breakers(breakers: list[dict], panel_limit: Optional[int]) -> int:
-    """
-    Matches server behavior for 2-strikes suppression.
-    """
     total_bad = 0
 
     def _amp_of(b):
@@ -203,9 +207,6 @@ def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
 
 
 def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
-    """
-    Same mapping logic as your server.
-    """
     stages = (result_dict or {}).get("results") or {}
     hdr = stages.get("header") or {}
     prs = stages.get("parser") or {}
@@ -269,9 +270,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
 
 
 def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list[str]:
-    """
-    Mirrors the server render path.
-    """
     img_dir.mkdir(parents=True, exist_ok=True)
     print(f">>> rendering PDF → images: {saved_pdf} -> {img_dir} (dpi={dpi})")
 
@@ -328,18 +326,10 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
     return crops
 
 
-def run_server_like_job(
-    job_idx: int,
-    input_pdf: str,
-    test_run_root: Path,
-    pipeline,
-) -> dict:
-    """
-    Mirrors your server job body but without queue/status/anvil plumbing.
-    """
+def run_server_like_job(job_name: str, input_pdf: str, test_run_root: Path, pipeline) -> dict:
     start = time.time()
 
-    job_root = test_run_root / f"job_{job_idx}"
+    job_root = test_run_root / job_name
     pdf_out_dir = job_root / "uploaded_pdfs"
     img_dir = job_root / "pdf_images"
     debug_dir = job_root / "debug"
@@ -348,7 +338,7 @@ def run_server_like_job(
         d.mkdir(parents=True, exist_ok=True)
 
     result = {
-        "job_idx": job_idx,
+        "job_name": job_name,
         "ok": False,
         "error": None,
         "crop_count": 0,
@@ -363,7 +353,6 @@ def run_server_like_job(
     try:
         reset_name_deduper()
 
-        # Save/copy PDF into job folder so structure resembles server
         src_pdf = Path(input_pdf)
         saved_pdf = pdf_out_dir / src_pdf.name
         if not saved_pdf.exists():
@@ -433,7 +422,7 @@ def run_server_like_job(
         result_json_path = job_root / "result.json"
         result_dump = {
             "ok": True,
-            "job_idx": job_idx,
+            "job_name": job_name,
             "saved_pdf": str(saved_pdf),
             "images": imgs,
             "image_count": len(imgs),
@@ -455,93 +444,102 @@ def run_server_like_job(
     return result
 
 
-# ---------- PERSISTENT WORKER ----------
-def persistent_capacity_worker(
-    worker_idx: int,
-    input_pdf: str,
-    test_run_root: str,
-    ready_queue,
-    done_queue,
-    start_event,
-):
+def _persistent_worker_main(slot_idx, job_q, done_q, test_run_root_str):
     """
-    Mirrors your persistent server worker:
-    - set determinism
-    - load easyocr gpu reader once
-    - build BreakerTablePipeline once
+    Closer to your real server worker:
+    - DO NOT call set_runtime_determinism() again here
+    - load EasyOCR once
+    - build pipeline once
     - warm analyzer/header once
-    - wait for simultaneous release
-    - run one job
+    - process jobs from a slot-owned queue
+    - optional cleanup between jobs
     """
-    set_runtime_determinism()
+    import gc
+    import torch
+    import easyocr
 
+    tag = f"slot-{slot_idx}"
     init_start = time.time()
 
     try:
-        import easyocr
-
-        print(f">>> Worker {worker_idx}: loading EasyOCR GPU reader...")
+        print(f">>> Worker [{tag}]: loading EasyOCR GPU reader...")
         gpu_reader = easyocr.Reader(["en"], gpu=True)
 
-        print(f">>> Worker {worker_idx}: building pipeline...")
+        print(f">>> Worker [{tag}]: building pipeline...")
         pipeline = BreakerTablePipeline(debug=True, reader=gpu_reader)
 
-        print(f">>> Worker {worker_idx}: warming analyzer/header...")
+        print(f">>> Worker [{tag}]: warming analyzer/header...")
         pipeline._ensure_analyzer()
         pipeline._ensure_header_parser()
 
         warmup_elapsed = round(time.time() - init_start, 2)
 
-        ready_queue.put({
-            "worker_idx": worker_idx,
+        try:
+            free_vram, total_vram = torch.cuda.mem_get_info()
+            vram = {
+                "free_gib": round(free_vram / 1024**3, 2),
+                "total_gib": round(total_vram / 1024**3, 2),
+            }
+        except Exception:
+            vram = None
+
+        done_q.put(("ready", {
+            "worker_idx": slot_idx,
             "ok": True,
             "warmup_sec": warmup_elapsed,
+            "vram": vram,
             "error": None,
-        })
+        }))
 
     except Exception as e:
-        ready_queue.put({
-            "worker_idx": worker_idx,
+        done_q.put(("ready", {
+            "worker_idx": slot_idx,
             "ok": False,
             "warmup_sec": round(time.time() - init_start, 2),
             "error": f"{type(e).__name__}: {e}",
             "traceback": traceback.format_exc(),
-        })
+        }))
         return
 
-    # Wait until parent releases all jobs simultaneously
-    start_event.wait()
+    jobs_processed = 0
+    test_run_root = Path(test_run_root_str)
 
-    # Run one job
-    try:
-        result = run_server_like_job(
-            job_idx=worker_idx,
-            input_pdf=input_pdf,
-            test_run_root=Path(test_run_root),
-            pipeline=pipeline,
-        )
-        done_queue.put(result)
+    while True:
+        msg = job_q.get()
+        if msg is None:
+            break
 
-    except Exception as e:
-        done_queue.put({
-            "job_idx": worker_idx,
-            "ok": False,
-            "error": f"{type(e).__name__}: {e}",
-            "traceback": traceback.format_exc(),
-            "elapsed_sec": None,
-        })
+        job_name = msg
+
+        try:
+            result = run_server_like_job(
+                job_name=job_name,
+                input_pdf=str(INPUT_PDF),
+                test_run_root=test_run_root,
+                pipeline=pipeline,
+            )
+            done_q.put(("done", result))
+        except Exception as e:
+            done_q.put(("done", {
+                "job_name": job_name,
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc(),
+                "elapsed_sec": None,
+            }))
+        finally:
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        jobs_processed += 1
+        if jobs_processed >= WORKER_RECYCLE_AFTER_JOBS:
+            break
 
 
-# ---------- TEST RUNNER ----------
-def run_simultaneous_capacity_test(
-    simultaneous_jobs: int,
-    baseline_single_job_time: Optional[float] = None,
-) -> dict:
-    """
-    Run N jobs at the exact same time with N persistent workers.
-    This is the closest non-queue approximation to:
-    'How many jobs can production handle if they hit at once?'
-    """
+def run_simultaneous_capacity_test(simultaneous_jobs: int, baseline_single_job_time: Optional[float] = None) -> dict:
     print(f"\n{'=' * 80}")
     print(f"SIMULTANEOUS SERVER-LIKE JOB TEST = {simultaneous_jobs}")
     print(f"{'=' * 80}")
@@ -550,42 +548,39 @@ def run_simultaneous_capacity_test(
     test_run_root.mkdir(parents=True, exist_ok=True)
 
     ctx = get_context("spawn")
-    ready_queue = ctx.Queue()
-    done_queue = ctx.Queue()
-    start_event = ctx.Event()
-
-    procs = []
+    slots = []
     ready_results = []
     job_results = []
 
-    # Spawn workers
-    spawn_start = time.time()
     for i in range(simultaneous_jobs):
-        p = ctx.Process(
-            target=persistent_capacity_worker,
-            args=(
-                i,
-                str(INPUT_PDF),
-                str(test_run_root),
-                ready_queue,
-                done_queue,
-                start_event,
-            ),
+        job_q = ctx.Queue()
+        done_q = ctx.Queue()
+        proc = ctx.Process(
+            target=_persistent_worker_main,
+            args=(i, job_q, done_q, str(test_run_root)),
+            daemon=True,
         )
-        p.start()
-        procs.append(p)
+        proc.start()
+        slots.append({
+            "idx": i,
+            "proc": proc,
+            "job_q": job_q,
+            "done_q": done_q,
+        })
 
-    # Wait for all workers to finish warmup
+    # wait for all workers to report ready
     all_ready_ok = True
-    for _ in range(simultaneous_jobs):
+    for slot in slots:
         try:
-            msg = ready_queue.get(timeout=WORKER_READY_TIMEOUT_SEC)
-            ready_results.append(msg)
-            if not msg.get("ok"):
+            msg_type, payload = slot["done_q"].get(timeout=WORKER_READY_TIMEOUT_SEC)
+            if msg_type != "ready":
+                raise RuntimeError(f"Unexpected message type during warmup: {msg_type}")
+            ready_results.append(payload)
+            if not payload.get("ok"):
                 all_ready_ok = False
         except Exception:
             ready_results.append({
-                "worker_idx": "?",
+                "worker_idx": slot["idx"],
                 "ok": False,
                 "warmup_sec": None,
                 "error": f"Worker did not report ready within {WORKER_READY_TIMEOUT_SEC}s",
@@ -593,11 +588,10 @@ def run_simultaneous_capacity_test(
             all_ready_ok = False
 
     if not all_ready_ok:
-        print("\nOne or more workers failed during warmup.")
-        for p in procs:
-            if p.is_alive():
-                p.terminate()
-                p.join(5)
+        for slot in slots:
+            if slot["proc"].is_alive():
+                slot["proc"].terminate()
+                slot["proc"].join(5)
 
         summary = {
             "simultaneous_jobs": simultaneous_jobs,
@@ -614,42 +608,40 @@ def run_simultaneous_capacity_test(
         print(f"Saved summary to: {summary_path}")
         return summary
 
-    # Release all workers simultaneously
+    # submit one job to each slot as close together as possible
     batch_start = time.time()
-    start_event.set()
+    for slot in slots:
+        slot["job_q"].put(f"job_{slot['idx']}")
 
-    # Collect all results
     deadline = time.time() + JOB_TIMEOUT_SEC
-    while len(job_results) < simultaneous_jobs and time.time() < deadline:
+    for slot in slots:
+        remaining = max(0.1, deadline - time.time())
         try:
-            timeout_remaining = max(0.1, deadline - time.time())
-            msg = done_queue.get(timeout=timeout_remaining)
-            job_results.append(msg)
+            msg_type, payload = slot["done_q"].get(timeout=remaining)
+            if msg_type != "done":
+                raise RuntimeError(f"Unexpected message type during job run: {msg_type}")
+            job_results.append(payload)
         except Exception:
-            break
-
-    batch_elapsed = round(time.time() - batch_start, 2)
-
-    # Kill any stragglers
-    for p in procs:
-        p.join(timeout=2)
-        if p.is_alive():
-            print(f"  WARNING: Worker pid={p.pid} exceeded timeout. Terminating.")
-            p.terminate()
-            p.join(5)
-
-    # Fill in missing results if needed
-    seen_job_idxs = {r.get("job_idx") for r in job_results}
-    for i in range(simultaneous_jobs):
-        if i not in seen_job_idxs:
             job_results.append({
-                "job_idx": i,
+                "job_name": f"job_{slot['idx']}",
                 "ok": False,
                 "error": "missing result (timeout/crash/no response)",
                 "elapsed_sec": None,
             })
 
-    job_results.sort(key=lambda r: r.get("job_idx", 999999))
+    batch_elapsed = round(time.time() - batch_start, 2)
+
+    for slot in slots:
+        try:
+            slot["job_q"].put(None)
+        except Exception:
+            pass
+        slot["proc"].join(timeout=2)
+        if slot["proc"].is_alive():
+            slot["proc"].terminate()
+            slot["proc"].join(5)
+
+    job_results.sort(key=lambda r: r.get("job_name", ""))
 
     success_count = sum(1 for r in job_results if r.get("ok"))
     failure_count = len(job_results) - success_count
@@ -697,7 +689,6 @@ def run_simultaneous_capacity_test(
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    # ---------- Clean terminal output ----------
     print(f"\nRESULTS FOR {simultaneous_jobs} SIMULTANEOUS JOB(S)")
     print(f"  Success:              {success_count}/{len(job_results)}")
     print(f"  Failures:             {failure_count}")
@@ -717,6 +708,7 @@ def run_simultaneous_capacity_test(
         print(
             f"    Worker {r.get('worker_idx')}: {status} | "
             f"warmup={r.get('warmup_sec')}s"
+            + (f" | vram={r.get('vram')}" if r.get("vram") else "")
             + (f" | error={r.get('error')}" if r.get("error") else "")
         )
 
@@ -724,7 +716,7 @@ def run_simultaneous_capacity_test(
     for r in job_results:
         status = "OK" if r.get("ok") else "FAIL"
         line = (
-            f"    Job {r.get('job_idx')}: {status} | "
+            f"    {r.get('job_name')}: {status} | "
             f"time={r.get('elapsed_sec')}s | "
             f"crops={r.get('crop_count')} | "
             f"components={r.get('component_count')} | "
@@ -737,21 +729,10 @@ def run_simultaneous_capacity_test(
             line += f" | error={r.get('error')}"
         print(line)
 
-    print("\n  Quick read:")
-    if failure_count > 0:
-        print("    -> Not stable at this simultaneous load.")
-    elif slowdown_vs_baseline is not None and slowdown_vs_baseline >= 3.0:
-        print("    -> Stable, but slowdown is heavy. Production use would likely feel rough.")
-    elif slowdown_vs_baseline is not None and slowdown_vs_baseline >= 2.0:
-        print("    -> Probably workable, but load is becoming noticeable.")
-    else:
-        print("    -> Looks healthy based on simultaneous completion and timing.")
-
     print(f"\n  Saved summary to: {summary_path}")
     return summary
 
 
-# ---------- MAIN ----------
 if __name__ == "__main__":
     print("API_VERSION:", API_VERSION)
     print("INPUT_PDF:", INPUT_PDF)
@@ -759,15 +740,17 @@ if __name__ == "__main__":
     if not INPUT_PDF.exists():
         raise FileNotFoundError(f"Input PDF not found: {INPUT_PDF}")
 
+    if not CONCURRENCY_LEVELS:
+        raise ValueError("CONCURRENCY_LEVELS cannot be empty")
+
     all_summaries = []
 
-    # Baseline
-    baseline_summary = run_simultaneous_capacity_test(1)
+    baseline_n = CONCURRENCY_LEVELS[0]
+    baseline_summary = run_simultaneous_capacity_test(baseline_n)
     all_summaries.append(baseline_summary)
     baseline_time = baseline_summary.get("avg_job_elapsed_sec")
 
-    # Simultaneous loads
-    for n in [2, 3, 4]:
+    for n in CONCURRENCY_LEVELS[1:]:
         summary = run_simultaneous_capacity_test(n, baseline_single_job_time=baseline_time)
         all_summaries.append(summary)
 
@@ -776,9 +759,10 @@ if __name__ == "__main__":
     print(f"{'=' * 80}")
 
     for s in all_summaries:
+        total_jobs = s.get("success_count", 0) + s.get("failure_count", 0)
         print(
             f"Simultaneous {s['simultaneous_jobs']}: "
-            f"success={s.get('success_count', 0)}/{s.get('success_count', 0) + s.get('failure_count', 0)} | "
+            f"success={s.get('success_count', 0)}/{total_jobs} | "
             f"avg={s.get('avg_job_elapsed_sec')} sec | "
             f"wall={s.get('batch_elapsed_sec')} sec | "
             f"slowdown_vs_1x={s.get('slowdown_vs_1x')}"

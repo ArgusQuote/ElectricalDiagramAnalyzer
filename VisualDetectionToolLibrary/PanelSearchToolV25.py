@@ -8,6 +8,8 @@ import pikepdf              # MPL 2.0 - PDF manipulation
 from PIL import Image
 import json
 import shutil
+import gc
+import time
 
 def _get_dbg_log_path() -> str | None:
     """
@@ -57,7 +59,7 @@ def _dbg(hyp, loc, msg, data):
         # keep non-fatal, but don't spam too hard
         print(f"[DBG ERROR] {e}")
 
-_dbg("INIT", "module_load", "PanelSearchToolV24 loaded (pypdfium2)", {"timestamp": "startup"})
+_dbg("INIT", "module_load", "PanelSearchToolV25 loaded (pypdfium2)", {"timestamp": "startup"})
 
 class PanelBoardSearch:
     """
@@ -95,6 +97,44 @@ class PanelBoardSearch:
     Public API:
         crops = PanelBoardSearch(...).readPdf("/path/to.pdf")
     """
+
+    @staticmethod
+    def _is_retryable_pdfium_render_error(exc: Exception) -> bool:
+        """
+        Retry only the known intermittent pypdfium2 bitmap-format failure:
+            KeyError: 0
+        """
+        return isinstance(exc, KeyError) and str(exc) == "0"
+
+
+    def _render_page_with_retry(self, page, scale: float, page_label: str = ""):
+        """
+        Render a page with one retry for intermittent pdfium bitmap-format failures.
+        This is intentionally narrow so we do not mask unrelated bugs.
+        """
+        last_exc = None
+
+        for attempt in range(2):  # initial try + 1 retry
+            try:
+                return page.render(scale=scale)
+
+            except Exception as e:
+                last_exc = e
+                retryable = self._is_retryable_pdfium_render_error(e)
+
+                if retryable and attempt == 0:
+                    if self.verbose:
+                        print(
+                            f"[WARN] PDF render failed ({page_label}) with "
+                            f"{type(e).__name__}: {e}. Retrying once..."
+                        )
+                    gc.collect()
+                    time.sleep(0.35)
+                    continue
+
+                raise
+
+        raise last_exc
 
     def __init__(
         self,
@@ -218,7 +258,11 @@ class PanelBoardSearch:
             void_boxes: list[tuple[int, int, int, int]] = []
 
             # 1) Detection bitmap
-            bitmap = page.render(scale=det_scale)
+            bitmap = self._render_page_with_retry(
+                page,
+                scale=det_scale,
+                page_label=f"{base} page {pidx+1} detect"
+            )
             det_bgr = self._bitmap_to_bgr(bitmap)
             H, W = det_bgr.shape[:2]
             page_area = H * W
@@ -611,7 +655,11 @@ class PanelBoardSearch:
 
                 # High-DPI PNG from the same clip using pypdfium2
                 # Render full page at render_dpi, then crop
-                render_bitmap = page.render(scale=rend_scale)
+                render_bitmap = self._render_page_with_retry(
+                    page,
+                    scale=rend_scale,
+                    page_label=f"{base} page {pidx+1} export"
+                )
                 render_pil = render_bitmap.to_pil()
                 if self.render_colorspace == "gray":
                     render_pil = render_pil.convert("L")
@@ -1459,7 +1507,11 @@ class PanelBoardSearch:
             pdfium_page = pdfium_doc[pidx]
             
             # Render at detection DPI so coords match overlays
-            bitmap = pdfium_page.render(scale=zoom)
+            bitmap = self._render_page_with_retry(
+                pdfium_page,
+                scale=zoom,
+                page_label=f"{base} page {pidx+1} raster-pass"
+            )
             page_img = self._bitmap_to_bgr(bitmap)
             H, W = page_img.shape[:2]
 
