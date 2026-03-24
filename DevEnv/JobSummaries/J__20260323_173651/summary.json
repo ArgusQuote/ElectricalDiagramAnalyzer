@@ -1,0 +1,124 @@
+{
+  "ok": true,
+  "job_id": "J__20260323_173651",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/J__20260323_173651",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/J.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/J__20260323_173651",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel04.png"
+  ],
+  "image_count": 4,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "MANUFACTURER",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel01.png",
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "BA",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel02.png",
+      "attrs": {
+        "amperage": 150,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MDP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel03.png",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "2A",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/J_electrical_filtered_page001_panel04.png",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "MANUFACTURER": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "BA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MDP": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "2A": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 66744,
+  "cycle_time_str": "00:01:06:744",
+  "noticed_ts_ms": 1774287411475,
+  "parse_done_ts_ms": 1774287478220,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PdfOutput/J_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_9",
+    "header_breakers_total": 0,
+    "table_breakers_total": 56
+  }
+}

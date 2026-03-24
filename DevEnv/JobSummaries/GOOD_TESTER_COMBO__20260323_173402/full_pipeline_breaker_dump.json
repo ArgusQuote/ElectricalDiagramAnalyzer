@@ -1,0 +1,4940 @@
+[
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel01.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel01.png",
+          "header_y": 569,
+          "header_bottom_y": 817,
+          "footer_y": 2407,
+          "footer_token_val": 41,
+          "panel_size": 42,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "HA2",
+          "spaces": 42,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 0,
+              "rowTop": 820,
+              "rowBottom": 896,
+              "amperage": 50,
+              "poles": 3,
+              "comboText": "50 3",
+              "specialFeaturesText": "Spa"
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 1047,
+              "rowBottom": 1123,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 1123,
+              "rowBottom": 1199,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 1199,
+              "rowBottom": 1274,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 1274,
+              "rowBottom": 1350,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 7,
+              "rowTop": 1350,
+              "rowBottom": 1426,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 8,
+              "rowTop": 1426,
+              "rowBottom": 1502,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 9,
+              "rowTop": 1502,
+              "rowBottom": 1577,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1577,
+              "rowBottom": 1653,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 11,
+              "rowTop": 1653,
+              "rowBottom": 1728,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "20 3",
+              "specialFeaturesText": "MIS"
+            },
+            {
+              "side": "left",
+              "rowIndex": 14,
+              "rowTop": 1880,
+              "rowBottom": 1956,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 15,
+              "rowTop": 1956,
+              "rowBottom": 2031,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 16,
+              "rowTop": 2031,
+              "rowBottom": 2107,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 17,
+              "rowTop": 2107,
+              "rowBottom": 2183,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 18,
+              "rowTop": 2183,
+              "rowBottom": 2259,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "left",
+              "rowIndex": 19,
+              "rowTop": 2259,
+              "rowBottom": 2334,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 20,
+              "rowTop": 2334,
+              "rowBottom": 2407,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1",
+              "specialFeaturesText": "OL"
+            },
+            {
+              "side": "right",
+              "rowIndex": 0,
+              "rowTop": 820,
+              "rowBottom": 896,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 896,
+              "rowBottom": 972,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 972,
+              "rowBottom": 1047,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 1047,
+              "rowBottom": 1123,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 1123,
+              "rowBottom": 1199,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 1199,
+              "rowBottom": 1274,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 6,
+              "rowTop": 1274,
+              "rowBottom": 1350,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 7,
+              "rowTop": 1350,
+              "rowBottom": 1426,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 8,
+              "rowTop": 1426,
+              "rowBottom": 1502,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 1502,
+              "rowBottom": 1577,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1577,
+              "rowBottom": 1653,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "3 20",
+              "specialFeaturesText": "MIS"
+            },
+            {
+              "side": "right",
+              "rowIndex": 13,
+              "rowTop": 1804,
+              "rowBottom": 1880,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 14,
+              "rowTop": 1880,
+              "rowBottom": 1956,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 15,
+              "rowTop": 1956,
+              "rowBottom": 2031,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 16,
+              "rowTop": 2031,
+              "rowBottom": 2107,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 17,
+              "rowTop": 2107,
+              "rowBottom": 2183,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 18,
+              "rowTop": 2183,
+              "rowBottom": 2259,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "L"
+            },
+            {
+              "side": "right",
+              "rowIndex": 19,
+              "rowTop": 2259,
+              "rowBottom": 2334,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "OL"
+            },
+            {
+              "side": "right",
+              "rowIndex": 20,
+              "rowTop": 2334,
+              "rowBottom": 2407,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "OL"
+            }
+          ],
+          "breakerCounts": {
+            "3P_50A": 1,
+            "1P_20A": 33,
+            "3P_20A": 2
+          },
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 569,
+            "band_y2": 817,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9987039216499527,
+                "box_band": [
+                  34,
+                  2,
+                  164,
+                  68
+                ],
+                "box_page": [
+                  34,
+                  571,
+                  164,
+                  637
+                ]
+              },
+              {
+                "text": "LOAD DESCRIPTION",
+                "conf": 0.8370967865344934,
+                "box_band": [
+                  376,
+                  0,
+                  945,
+                  70
+                ],
+                "box_page": [
+                  376,
+                  569,
+                  945,
+                  639
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.6211721493791459,
+                "box_band": [
+                  1156,
+                  3,
+                  1315,
+                  67
+                ],
+                "box_page": [
+                  1156,
+                  572,
+                  1315,
+                  636
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.998300455657019,
+                "box_band": [
+                  1324,
+                  3,
+                  1493,
+                  67
+                ],
+                "box_page": [
+                  1324,
+                  572,
+                  1493,
+                  636
+                ]
+              },
+              {
+                "text": "AMPS",
+                "conf": 0.9996779359952725,
+                "box_band": [
+                  1322,
+                  67,
+                  1495,
+                  133
+                ],
+                "box_page": [
+                  1322,
+                  636,
+                  1495,
+                  702
+                ]
+              },
+              {
+                "text": "IAJ",
+                "conf": 0.4717866464454848,
+                "box_band": [
+                  1360,
+                  131,
+                  1454,
+                  209
+                ],
+                "box_page": [
+                  1360,
+                  700,
+                  1454,
+                  778
+                ]
+              },
+              {
+                "text": "WIRE SIZE",
+                "conf": 0.6145128363791091,
+                "box_band": [
+                  1775,
+                  1,
+                  2075,
+                  68
+                ],
+                "box_page": [
+                  1775,
+                  570,
+                  2075,
+                  637
+                ]
+              },
+              {
+                "text": "TRIP /",
+                "conf": 0.9520042904384223,
+                "box_band": [
+                  2386,
+                  2,
+                  2557,
+                  68
+                ],
+                "box_page": [
+                  2386,
+                  571,
+                  2557,
+                  637
+                ]
+              },
+              {
+                "text": "POLE",
+                "conf": 0.9996939897537231,
+                "box_band": [
+                  2391,
+                  65,
+                  2558,
+                  133
+                ],
+                "box_page": [
+                  2391,
+                  634,
+                  2558,
+                  702
+                ]
+              },
+              {
+                "text": "IAJ",
+                "conf": 0.5616137659234952,
+                "box_band": [
+                  2428,
+                  130,
+                  2521,
+                  209
+                ],
+                "box_page": [
+                  2428,
+                  699,
+                  2521,
+                  778
+                ]
+              },
+              {
+                "text": "A",
+                "conf": 0.9999607805282871,
+                "box_band": [
+                  2785,
+                  6,
+                  2836,
+                  64
+                ],
+                "box_page": [
+                  2785,
+                  575,
+                  2836,
+                  633
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.9354509115219116,
+                "box_band": [
+                  2744,
+                  129,
+                  2876,
+                  208
+                ],
+                "box_page": [
+                  2744,
+                  698,
+                  2876,
+                  777
+                ]
+              },
+              {
+                "text": "B",
+                "conf": 0.9998635100211608,
+                "box_band": [
+                  3214,
+                  5,
+                  3264,
+                  65
+                ],
+                "box_page": [
+                  3214,
+                  574,
+                  3264,
+                  634
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.9395925402641296,
+                "box_band": [
+                  3172,
+                  129,
+                  3304,
+                  208
+                ],
+                "box_page": [
+                  3172,
+                  698,
+                  3304,
+                  777
+                ]
+              },
+              {
+                "text": "C",
+                "conf": 0.9471182851064306,
+                "box_band": [
+                  3639,
+                  4,
+                  3695,
+                  66
+                ],
+                "box_page": [
+                  3639,
+                  573,
+                  3695,
+                  635
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.965395450592041,
+                "box_band": [
+                  3601,
+                  130,
+                  3730,
+                  208
+                ],
+                "box_page": [
+                  3601,
+                  699,
+                  3730,
+                  777
+                ]
+              },
+              {
+                "text": "TRIP /",
+                "conf": 0.8630813275659838,
+                "box_band": [
+                  3914,
+                  2,
+                  4086,
+                  68
+                ],
+                "box_page": [
+                  3914,
+                  571,
+                  4086,
+                  637
+                ]
+              },
+              {
+                "text": "POLE",
+                "conf": 0.9993196129798889,
+                "box_band": [
+                  3918,
+                  65,
+                  4086,
+                  133
+                ],
+                "box_page": [
+                  3918,
+                  634,
+                  4086,
+                  702
+                ]
+              },
+              {
+                "text": "(AJ",
+                "conf": 0.3014138405762668,
+                "box_band": [
+                  3955,
+                  130,
+                  4048,
+                  209
+                ],
+                "box_page": [
+                  3955,
+                  699,
+                  4048,
+                  778
+                ]
+              },
+              {
+                "text": "WIRE SIZE",
+                "conf": 0.9990324909707154,
+                "box_band": [
+                  4402,
+                  2,
+                  4703,
+                  68
+                ],
+                "box_page": [
+                  4402,
+                  571,
+                  4703,
+                  637
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.999937891960144,
+                "box_band": [
+                  4985,
+                  3,
+                  5155,
+                  67
+                ],
+                "box_page": [
+                  4985,
+                  572,
+                  5155,
+                  636
+                ]
+              },
+              {
+                "text": "AMPS",
+                "conf": 0.999967098236084,
+                "box_band": [
+                  4983,
+                  67,
+                  5156,
+                  133
+                ],
+                "box_page": [
+                  4983,
+                  636,
+                  5156,
+                  702
+                ]
+              },
+              {
+                "text": "QAJ",
+                "conf": 0.324094813476845,
+                "box_band": [
+                  5022,
+                  131,
+                  5115,
+                  209
+                ],
+                "box_page": [
+                  5022,
+                  700,
+                  5115,
+                  778
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9986826777458191,
+                "box_band": [
+                  5158,
+                  1,
+                  5320,
+                  68
+                ],
+                "box_page": [
+                  5158,
+                  570,
+                  5320,
+                  637
+                ]
+              },
+              {
+                "text": "LOAD DESCRIPTION",
+                "conf": 0.8050044568265456,
+                "box_band": [
+                  5532,
+                  0,
+                  6101,
+                  70
+                ],
+                "box_page": [
+                  5532,
+                  569,
+                  6101,
+                  639
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9974719855561898,
+                "box_band": [
+                  6311,
+                  2,
+                  6443,
+                  68
+                ],
+                "box_page": [
+                  6311,
+                  571,
+                  6443,
+                  637
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 32,
+                "x_right": 165,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9987039216499527,
+                    "box_band": [
+                      34,
+                      2,
+                      164,
+                      68
+                    ],
+                    "box_page": [
+                      34,
+                      571,
+                      164,
+                      637
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 165,
+                "x_right": 1154,
+                "items": [
+                  {
+                    "text": "LOAD DESCRIPTION",
+                    "conf": 0.8370967865344934,
+                    "box_band": [
+                      376,
+                      0,
+                      945,
+                      70
+                    ],
+                    "box_page": [
+                      376,
+                      569,
+                      945,
+                      639
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1154,
+                "x_right": 1319,
+                "items": [
+                  {
+                    "text": "TYPE",
+                    "conf": 0.6211721493791459,
+                    "box_band": [
+                      1156,
+                      3,
+                      1315,
+                      67
+                    ],
+                    "box_page": [
+                      1156,
+                      572,
+                      1315,
+                      636
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1319,
+                "x_right": 1497,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.998300455657019,
+                    "box_band": [
+                      1324,
+                      3,
+                      1493,
+                      67
+                    ],
+                    "box_page": [
+                      1324,
+                      572,
+                      1493,
+                      636
+                    ]
+                  },
+                  {
+                    "text": "AMPS",
+                    "conf": 0.9996779359952725,
+                    "box_band": [
+                      1322,
+                      67,
+                      1495,
+                      133
+                    ],
+                    "box_page": [
+                      1322,
+                      636,
+                      1495,
+                      702
+                    ]
+                  },
+                  {
+                    "text": "IAJ",
+                    "conf": 0.4717866464454848,
+                    "box_band": [
+                      1360,
+                      131,
+                      1454,
+                      209
+                    ],
+                    "box_page": [
+                      1360,
+                      700,
+                      1454,
+                      778
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1497,
+                "x_right": 2352,
+                "items": [
+                  {
+                    "text": "WIRE SIZE",
+                    "conf": 0.6145128363791091,
+                    "box_band": [
+                      1775,
+                      1,
+                      2075,
+                      68
+                    ],
+                    "box_page": [
+                      1775,
+                      570,
+                      2075,
+                      637
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 2352,
+                "x_right": 2597,
+                "items": [
+                  {
+                    "text": "TRIP /",
+                    "conf": 0.9520042904384223,
+                    "box_band": [
+                      2386,
+                      2,
+                      2557,
+                      68
+                    ],
+                    "box_page": [
+                      2386,
+                      571,
+                      2557,
+                      637
+                    ]
+                  },
+                  {
+                    "text": "POLE",
+                    "conf": 0.9996939897537231,
+                    "box_band": [
+                      2391,
+                      65,
+                      2558,
+                      133
+                    ],
+                    "box_page": [
+                      2391,
+                      634,
+                      2558,
+                      702
+                    ]
+                  },
+                  {
+                    "text": "IAJ",
+                    "conf": 0.5616137659234952,
+                    "box_band": [
+                      2428,
+                      130,
+                      2521,
+                      209
+                    ],
+                    "box_page": [
+                      2428,
+                      699,
+                      2521,
+                      778
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2597,
+                "x_right": 3024,
+                "items": [
+                  {
+                    "text": "A",
+                    "conf": 0.9999607805282871,
+                    "box_band": [
+                      2785,
+                      6,
+                      2836,
+                      64
+                    ],
+                    "box_page": [
+                      2785,
+                      575,
+                      2836,
+                      633
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.9354509115219116,
+                    "box_band": [
+                      2744,
+                      129,
+                      2876,
+                      208
+                    ],
+                    "box_page": [
+                      2744,
+                      698,
+                      2876,
+                      777
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 3024,
+                "x_right": 3452,
+                "items": [
+                  {
+                    "text": "B",
+                    "conf": 0.9998635100211608,
+                    "box_band": [
+                      3214,
+                      5,
+                      3264,
+                      65
+                    ],
+                    "box_page": [
+                      3214,
+                      574,
+                      3264,
+                      634
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.9395925402641296,
+                    "box_band": [
+                      3172,
+                      129,
+                      3304,
+                      208
+                    ],
+                    "box_page": [
+                      3172,
+                      698,
+                      3304,
+                      777
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 3452,
+                "x_right": 3879,
+                "items": [
+                  {
+                    "text": "C",
+                    "conf": 0.9471182851064306,
+                    "box_band": [
+                      3639,
+                      4,
+                      3695,
+                      66
+                    ],
+                    "box_page": [
+                      3639,
+                      573,
+                      3695,
+                      635
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.965395450592041,
+                    "box_band": [
+                      3601,
+                      130,
+                      3730,
+                      208
+                    ],
+                    "box_page": [
+                      3601,
+                      699,
+                      3730,
+                      777
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 3879,
+                "x_right": 4124,
+                "items": [
+                  {
+                    "text": "TRIP /",
+                    "conf": 0.8630813275659838,
+                    "box_band": [
+                      3914,
+                      2,
+                      4086,
+                      68
+                    ],
+                    "box_page": [
+                      3914,
+                      571,
+                      4086,
+                      637
+                    ]
+                  },
+                  {
+                    "text": "POLE",
+                    "conf": 0.9993196129798889,
+                    "box_band": [
+                      3918,
+                      65,
+                      4086,
+                      133
+                    ],
+                    "box_page": [
+                      3918,
+                      634,
+                      4086,
+                      702
+                    ]
+                  },
+                  {
+                    "text": "(AJ",
+                    "conf": 0.3014138405762668,
+                    "box_band": [
+                      3955,
+                      130,
+                      4048,
+                      209
+                    ],
+                    "box_page": [
+                      3955,
+                      699,
+                      4048,
+                      778
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 4124,
+                "x_right": 4979,
+                "items": [
+                  {
+                    "text": "WIRE SIZE",
+                    "conf": 0.9990324909707154,
+                    "box_band": [
+                      4402,
+                      2,
+                      4703,
+                      68
+                    ],
+                    "box_page": [
+                      4402,
+                      571,
+                      4703,
+                      637
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 12,
+                "x_left": 4979,
+                "x_right": 5157,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.999937891960144,
+                    "box_band": [
+                      4985,
+                      3,
+                      5155,
+                      67
+                    ],
+                    "box_page": [
+                      4985,
+                      572,
+                      5155,
+                      636
+                    ]
+                  },
+                  {
+                    "text": "AMPS",
+                    "conf": 0.999967098236084,
+                    "box_band": [
+                      4983,
+                      67,
+                      5156,
+                      133
+                    ],
+                    "box_page": [
+                      4983,
+                      636,
+                      5156,
+                      702
+                    ]
+                  },
+                  {
+                    "text": "QAJ",
+                    "conf": 0.324094813476845,
+                    "box_band": [
+                      5022,
+                      131,
+                      5115,
+                      209
+                    ],
+                    "box_page": [
+                      5022,
+                      700,
+                      5115,
+                      778
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 13,
+                "x_left": 5157,
+                "x_right": 5322,
+                "items": [
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9986826777458191,
+                    "box_band": [
+                      5158,
+                      1,
+                      5320,
+                      68
+                    ],
+                    "box_page": [
+                      5158,
+                      570,
+                      5320,
+                      637
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 14,
+                "x_left": 5322,
+                "x_right": 6311,
+                "items": [
+                  {
+                    "text": "LOAD DESCRIPTION",
+                    "conf": 0.8050044568265456,
+                    "box_band": [
+                      5532,
+                      0,
+                      6101,
+                      70
+                    ],
+                    "box_page": [
+                      5532,
+                      569,
+                      6101,
+                      639
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 15,
+                "x_left": 6311,
+                "x_right": 6444,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9974719855561898,
+                    "box_band": [
+                      6311,
+                      2,
+                      6443,
+                      68
+                    ],
+                    "box_page": [
+                      6311,
+                      571,
+                      6443,
+                      637
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "specialFeatures": 3,
+                "combo": 6
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 32,
+                  "x_right": 165,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 165,
+                  "x_right": 1154,
+                  "texts": [
+                    "LOAD",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1154,
+                  "x_right": 1319,
+                  "texts": [
+                    "TYPE"
+                  ],
+                  "role": "specialFeatures",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1319,
+                  "x_right": 1497,
+                  "texts": [
+                    "LOAD",
+                    "AMPS",
+                    "IAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1497,
+                  "x_right": 2352,
+                  "texts": [
+                    "WIRE",
+                    "SIZE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2352,
+                  "x_right": 2597,
+                  "texts": [
+                    "TRIP",
+                    "POLE",
+                    "IAJ"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2597,
+                  "x_right": 3024,
+                  "texts": [
+                    "A",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 3024,
+                  "x_right": 3452,
+                  "texts": [
+                    "B",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 3452,
+                  "x_right": 3879,
+                  "texts": [
+                    "C",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 10,
+                  "x_left": 3879,
+                  "x_right": 4124,
+                  "texts": [
+                    "TRIP",
+                    "POLE"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 4124,
+                  "x_right": 4979,
+                  "texts": [
+                    "WIRE",
+                    "SIZE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 12,
+                  "x_left": 4979,
+                  "x_right": 5157,
+                  "texts": [
+                    "LOAD",
+                    "AMPS"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 13,
+                  "x_left": 5157,
+                  "x_right": 5322,
+                  "texts": [
+                    "TYPE"
+                  ],
+                  "role": "specialFeatures",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 14,
+                  "x_left": 5322,
+                  "x_right": 6311,
+                  "texts": [
+                    "LOAD",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 15,
+                  "x_left": 6311,
+                  "x_right": 6444,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [
+              {
+                "index": 3,
+                "role": "specialFeatures",
+                "x_left": 1154,
+                "x_right": 1319,
+                "y_top": 817,
+                "y_bottom": 2407,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col3_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 6,
+                "role": "combo",
+                "x_left": 2352,
+                "x_right": 2597,
+                "y_top": 817,
+                "y_bottom": 2407,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col6_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 10,
+                "role": "combo",
+                "x_left": 3879,
+                "x_right": 4124,
+                "y_top": 817,
+                "y_bottom": 2407,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col10_overlay.png",
+                "side": "right"
+              },
+              {
+                "index": 13,
+                "role": "specialFeatures",
+                "x_left": 5157,
+                "x_right": 5322,
+                "y_top": 817,
+                "y_bottom": 2407,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col13_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 0,
+                "rowTop": 820,
+                "rowBottom": 896,
+                "amperage": 50,
+                "poles": 3,
+                "comboText": "50 3",
+                "specialFeaturesText": "Spa"
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 1047,
+                "rowBottom": 1123,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 1123,
+                "rowBottom": 1199,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 1199,
+                "rowBottom": 1274,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 1274,
+                "rowBottom": 1350,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 7,
+                "rowTop": 1350,
+                "rowBottom": 1426,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 8,
+                "rowTop": 1426,
+                "rowBottom": 1502,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 9,
+                "rowTop": 1502,
+                "rowBottom": 1577,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1577,
+                "rowBottom": 1653,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 11,
+                "rowTop": 1653,
+                "rowBottom": 1728,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "20 3",
+                "specialFeaturesText": "MIS"
+              },
+              {
+                "side": "left",
+                "rowIndex": 14,
+                "rowTop": 1880,
+                "rowBottom": 1956,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 15,
+                "rowTop": 1956,
+                "rowBottom": 2031,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 16,
+                "rowTop": 2031,
+                "rowBottom": 2107,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 17,
+                "rowTop": 2107,
+                "rowBottom": 2183,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 18,
+                "rowTop": 2183,
+                "rowBottom": 2259,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "left",
+                "rowIndex": 19,
+                "rowTop": 2259,
+                "rowBottom": 2334,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 20,
+                "rowTop": 2334,
+                "rowBottom": 2407,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1",
+                "specialFeaturesText": "OL"
+              },
+              {
+                "side": "right",
+                "rowIndex": 0,
+                "rowTop": 820,
+                "rowBottom": 896,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 896,
+                "rowBottom": 972,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 972,
+                "rowBottom": 1047,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 1047,
+                "rowBottom": 1123,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 1123,
+                "rowBottom": 1199,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 1199,
+                "rowBottom": 1274,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 6,
+                "rowTop": 1274,
+                "rowBottom": 1350,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 7,
+                "rowTop": 1350,
+                "rowBottom": 1426,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 8,
+                "rowTop": 1426,
+                "rowBottom": 1502,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 1502,
+                "rowBottom": 1577,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1577,
+                "rowBottom": 1653,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "3 20",
+                "specialFeaturesText": "MIS"
+              },
+              {
+                "side": "right",
+                "rowIndex": 13,
+                "rowTop": 1804,
+                "rowBottom": 1880,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 14,
+                "rowTop": 1880,
+                "rowBottom": 1956,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 15,
+                "rowTop": 1956,
+                "rowBottom": 2031,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 16,
+                "rowTop": 2031,
+                "rowBottom": 2107,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 17,
+                "rowTop": 2107,
+                "rowBottom": 2183,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 18,
+                "rowTop": 2183,
+                "rowBottom": 2259,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "L"
+              },
+              {
+                "side": "right",
+                "rowIndex": 19,
+                "rowTop": 2259,
+                "rowBottom": 2334,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "OL"
+              },
+              {
+                "side": "right",
+                "rowIndex": 20,
+                "rowTop": 2334,
+                "rowBottom": 2407,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "OL"
+              }
+            ],
+            "breakerCounts": {
+              "3P_50A": 1,
+              "1P_20A": 33,
+              "3P_20A": 2
+            },
+            "gfiBreakerCounts": {}
+          },
+          "reviewOverlayPath": "review_overlays/HA2_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "HA2",
+          "attrs": {
+            "amperage": 100,
+            "voltage": 480,
+            "intRating": null,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              624,
+              30,
+              1930,
+              186
+            ],
+            "voltage": [
+              1094,
+              169,
+              1935,
+              265
+            ],
+            "bus": [
+              3539,
+              170,
+              3709,
+              254
+            ]
+          },
+          "boxImageShape": {
+            "w": 6475,
+            "h": 3815
+          },
+          "reviewOverlayPath": "review_overlays/HA2_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 0,
+        "rowTop": 820,
+        "rowBottom": 896,
+        "amperage": 50,
+        "poles": 3,
+        "comboText": "50 3",
+        "specialFeaturesText": "Spa"
+      },
+      {
+        "side": "left",
+        "rowIndex": 3,
+        "rowTop": 1047,
+        "rowBottom": 1123,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 1123,
+        "rowBottom": 1199,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 5,
+        "rowTop": 1199,
+        "rowBottom": 1274,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 6,
+        "rowTop": 1274,
+        "rowBottom": 1350,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 7,
+        "rowTop": 1350,
+        "rowBottom": 1426,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 8,
+        "rowTop": 1426,
+        "rowBottom": 1502,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 9,
+        "rowTop": 1502,
+        "rowBottom": 1577,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 10,
+        "rowTop": 1577,
+        "rowBottom": 1653,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 11,
+        "rowTop": 1653,
+        "rowBottom": 1728,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "20 3",
+        "specialFeaturesText": "MIS"
+      },
+      {
+        "side": "left",
+        "rowIndex": 14,
+        "rowTop": 1880,
+        "rowBottom": 1956,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 15,
+        "rowTop": 1956,
+        "rowBottom": 2031,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 16,
+        "rowTop": 2031,
+        "rowBottom": 2107,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 17,
+        "rowTop": 2107,
+        "rowBottom": 2183,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 18,
+        "rowTop": 2183,
+        "rowBottom": 2259,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "left",
+        "rowIndex": 19,
+        "rowTop": 2259,
+        "rowBottom": 2334,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 20,
+        "rowTop": 2334,
+        "rowBottom": 2407,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1",
+        "specialFeaturesText": "OL"
+      },
+      {
+        "side": "right",
+        "rowIndex": 0,
+        "rowTop": 820,
+        "rowBottom": 896,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 1,
+        "rowTop": 896,
+        "rowBottom": 972,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 2,
+        "rowTop": 972,
+        "rowBottom": 1047,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 3,
+        "rowTop": 1047,
+        "rowBottom": 1123,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 4,
+        "rowTop": 1123,
+        "rowBottom": 1199,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 5,
+        "rowTop": 1199,
+        "rowBottom": 1274,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 6,
+        "rowTop": 1274,
+        "rowBottom": 1350,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 7,
+        "rowTop": 1350,
+        "rowBottom": 1426,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 8,
+        "rowTop": 1426,
+        "rowBottom": 1502,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 9,
+        "rowTop": 1502,
+        "rowBottom": 1577,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 10,
+        "rowTop": 1577,
+        "rowBottom": 1653,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "3 20",
+        "specialFeaturesText": "MIS"
+      },
+      {
+        "side": "right",
+        "rowIndex": 13,
+        "rowTop": 1804,
+        "rowBottom": 1880,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 14,
+        "rowTop": 1880,
+        "rowBottom": 1956,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 15,
+        "rowTop": 1956,
+        "rowBottom": 2031,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 16,
+        "rowTop": 2031,
+        "rowBottom": 2107,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 17,
+        "rowTop": 2107,
+        "rowBottom": 2183,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 18,
+        "rowTop": 2183,
+        "rowBottom": 2259,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "L"
+      },
+      {
+        "side": "right",
+        "rowIndex": 19,
+        "rowTop": 2259,
+        "rowBottom": 2334,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "OL"
+      },
+      {
+        "side": "right",
+        "rowIndex": 20,
+        "rowTop": 2334,
+        "rowBottom": 2407,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "OL"
+      }
+    ]
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel02.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel02.png",
+          "header_y": 568,
+          "header_bottom_y": 815,
+          "footer_y": 2405,
+          "footer_token_val": 42,
+          "panel_size": 42,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "HA",
+          "spaces": 42,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 819,
+              "rowBottom": 894,
+              "amperage": 30,
+              "poles": 3,
+              "comboText": "30 3"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 1045,
+              "rowBottom": 1121,
+              "amperage": 30,
+              "poles": 3,
+              "comboText": "30 3",
+              "specialFeaturesText": "C"
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 819,
+              "rowBottom": 894,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "OL"
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 894,
+              "rowBottom": 970,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "1 20",
+              "specialFeaturesText": "OL"
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 970,
+              "rowBottom": 1045,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "3 20",
+              "specialFeaturesText": "MT"
+            }
+          ],
+          "breakerCounts": {
+            "3P_30A": 2,
+            "1P_20A": 2,
+            "3P_20A": 1
+          },
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 568,
+            "band_y2": 815,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9983449299646502,
+                "box_band": [
+                  34,
+                  1,
+                  164,
+                  67
+                ],
+                "box_page": [
+                  34,
+                  569,
+                  164,
+                  635
+                ]
+              },
+              {
+                "text": "LOAD DESCRIPTION",
+                "conf": 0.994355010037319,
+                "box_band": [
+                  376,
+                  0,
+                  945,
+                  69
+                ],
+                "box_page": [
+                  376,
+                  568,
+                  945,
+                  637
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9991407990455627,
+                "box_band": [
+                  1157,
+                  2,
+                  1315,
+                  66
+                ],
+                "box_page": [
+                  1157,
+                  570,
+                  1315,
+                  634
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.999900758266449,
+                "box_band": [
+                  1323,
+                  0,
+                  1493,
+                  67
+                ],
+                "box_page": [
+                  1323,
+                  568,
+                  1493,
+                  635
+                ]
+              },
+              {
+                "text": "AMPS",
+                "conf": 0.9997120035995885,
+                "box_band": [
+                  1322,
+                  66,
+                  1495,
+                  132
+                ],
+                "box_page": [
+                  1322,
+                  634,
+                  1495,
+                  700
+                ]
+              },
+              {
+                "text": "IAJ",
+                "conf": 0.400585136996285,
+                "box_band": [
+                  1361,
+                  131,
+                  1454,
+                  207
+                ],
+                "box_page": [
+                  1361,
+                  699,
+                  1454,
+                  775
+                ]
+              },
+              {
+                "text": "WIRE SIZE",
+                "conf": 0.9364446600162961,
+                "box_band": [
+                  1775,
+                  0,
+                  2075,
+                  67
+                ],
+                "box_page": [
+                  1775,
+                  568,
+                  2075,
+                  635
+                ]
+              },
+              {
+                "text": "TRIP /",
+                "conf": 0.9715315784909305,
+                "box_band": [
+                  2387,
+                  2,
+                  2557,
+                  66
+                ],
+                "box_page": [
+                  2387,
+                  570,
+                  2557,
+                  634
+                ]
+              },
+              {
+                "text": "POLE",
+                "conf": 0.9997256994247437,
+                "box_band": [
+                  2391,
+                  64,
+                  2558,
+                  132
+                ],
+                "box_page": [
+                  2391,
+                  632,
+                  2558,
+                  700
+                ]
+              },
+              {
+                "text": "IAJ",
+                "conf": 0.5524437565695327,
+                "box_band": [
+                  2428,
+                  129,
+                  2521,
+                  208
+                ],
+                "box_page": [
+                  2428,
+                  697,
+                  2521,
+                  776
+                ]
+              },
+              {
+                "text": "A",
+                "conf": 0.999934435965443,
+                "box_band": [
+                  2785,
+                  5,
+                  2835,
+                  63
+                ],
+                "box_page": [
+                  2785,
+                  573,
+                  2835,
+                  631
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.830129086971283,
+                "box_band": [
+                  2747,
+                  130,
+                  2875,
+                  206
+                ],
+                "box_page": [
+                  2747,
+                  698,
+                  2875,
+                  774
+                ]
+              },
+              {
+                "text": "B",
+                "conf": 0.9998692316847304,
+                "box_band": [
+                  3214,
+                  4,
+                  3264,
+                  64
+                ],
+                "box_page": [
+                  3214,
+                  572,
+                  3264,
+                  632
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.9399402737617493,
+                "box_band": [
+                  3172,
+                  128,
+                  3304,
+                  207
+                ],
+                "box_page": [
+                  3172,
+                  696,
+                  3304,
+                  775
+                ]
+              },
+              {
+                "text": "C",
+                "conf": 0.9412242027558513,
+                "box_band": [
+                  3639,
+                  3,
+                  3695,
+                  65
+                ],
+                "box_page": [
+                  3639,
+                  571,
+                  3695,
+                  633
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.9064377546310425,
+                "box_band": [
+                  3600,
+                  128,
+                  3731,
+                  207
+                ],
+                "box_page": [
+                  3600,
+                  696,
+                  3731,
+                  775
+                ]
+              },
+              {
+                "text": "TRIP /",
+                "conf": 0.9997613695896128,
+                "box_band": [
+                  3915,
+                  1,
+                  4086,
+                  67
+                ],
+                "box_page": [
+                  3915,
+                  569,
+                  4086,
+                  635
+                ]
+              },
+              {
+                "text": "POLE",
+                "conf": 0.999396026134491,
+                "box_band": [
+                  3918,
+                  64,
+                  4086,
+                  132
+                ],
+                "box_page": [
+                  3918,
+                  632,
+                  4086,
+                  700
+                ]
+              },
+              {
+                "text": "(AJ",
+                "conf": 0.2959304386476462,
+                "box_band": [
+                  3955,
+                  129,
+                  4048,
+                  208
+                ],
+                "box_page": [
+                  3955,
+                  697,
+                  4048,
+                  776
+                ]
+              },
+              {
+                "text": "WIRE SIZE",
+                "conf": 0.8629316837024078,
+                "box_band": [
+                  4402,
+                  0,
+                  4702,
+                  67
+                ],
+                "box_page": [
+                  4402,
+                  568,
+                  4702,
+                  635
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999178051948547,
+                "box_band": [
+                  4985,
+                  0,
+                  5155,
+                  66
+                ],
+                "box_page": [
+                  4985,
+                  568,
+                  5155,
+                  634
+                ]
+              },
+              {
+                "text": "AMPS",
+                "conf": 0.9999637603759766,
+                "box_band": [
+                  4983,
+                  66,
+                  5156,
+                  132
+                ],
+                "box_page": [
+                  4983,
+                  634,
+                  5156,
+                  700
+                ]
+              },
+              {
+                "text": "QAJ",
+                "conf": 0.33689501881599426,
+                "box_band": [
+                  5023,
+                  131,
+                  5115,
+                  207
+                ],
+                "box_page": [
+                  5023,
+                  699,
+                  5115,
+                  775
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9988605380058289,
+                "box_band": [
+                  5160,
+                  2,
+                  5319,
+                  66
+                ],
+                "box_page": [
+                  5160,
+                  570,
+                  5319,
+                  634
+                ]
+              },
+              {
+                "text": "LOAD DESCRIPTION",
+                "conf": 0.995289015040685,
+                "box_band": [
+                  5532,
+                  0,
+                  6101,
+                  69
+                ],
+                "box_page": [
+                  5532,
+                  568,
+                  6101,
+                  637
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9928657997679359,
+                "box_band": [
+                  6311,
+                  1,
+                  6443,
+                  67
+                ],
+                "box_page": [
+                  6311,
+                  569,
+                  6443,
+                  635
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 32,
+                "x_right": 165,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9983449299646502,
+                    "box_band": [
+                      34,
+                      1,
+                      164,
+                      67
+                    ],
+                    "box_page": [
+                      34,
+                      569,
+                      164,
+                      635
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 165,
+                "x_right": 1154,
+                "items": [
+                  {
+                    "text": "LOAD DESCRIPTION",
+                    "conf": 0.994355010037319,
+                    "box_band": [
+                      376,
+                      0,
+                      945,
+                      69
+                    ],
+                    "box_page": [
+                      376,
+                      568,
+                      945,
+                      637
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1154,
+                "x_right": 1319,
+                "items": [
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9991407990455627,
+                    "box_band": [
+                      1157,
+                      2,
+                      1315,
+                      66
+                    ],
+                    "box_page": [
+                      1157,
+                      570,
+                      1315,
+                      634
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1319,
+                "x_right": 1497,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.999900758266449,
+                    "box_band": [
+                      1323,
+                      0,
+                      1493,
+                      67
+                    ],
+                    "box_page": [
+                      1323,
+                      568,
+                      1493,
+                      635
+                    ]
+                  },
+                  {
+                    "text": "AMPS",
+                    "conf": 0.9997120035995885,
+                    "box_band": [
+                      1322,
+                      66,
+                      1495,
+                      132
+                    ],
+                    "box_page": [
+                      1322,
+                      634,
+                      1495,
+                      700
+                    ]
+                  },
+                  {
+                    "text": "IAJ",
+                    "conf": 0.400585136996285,
+                    "box_band": [
+                      1361,
+                      131,
+                      1454,
+                      207
+                    ],
+                    "box_page": [
+                      1361,
+                      699,
+                      1454,
+                      775
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1497,
+                "x_right": 2352,
+                "items": [
+                  {
+                    "text": "WIRE SIZE",
+                    "conf": 0.9364446600162961,
+                    "box_band": [
+                      1775,
+                      0,
+                      2075,
+                      67
+                    ],
+                    "box_page": [
+                      1775,
+                      568,
+                      2075,
+                      635
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 2352,
+                "x_right": 2597,
+                "items": [
+                  {
+                    "text": "TRIP /",
+                    "conf": 0.9715315784909305,
+                    "box_band": [
+                      2387,
+                      2,
+                      2557,
+                      66
+                    ],
+                    "box_page": [
+                      2387,
+                      570,
+                      2557,
+                      634
+                    ]
+                  },
+                  {
+                    "text": "POLE",
+                    "conf": 0.9997256994247437,
+                    "box_band": [
+                      2391,
+                      64,
+                      2558,
+                      132
+                    ],
+                    "box_page": [
+                      2391,
+                      632,
+                      2558,
+                      700
+                    ]
+                  },
+                  {
+                    "text": "IAJ",
+                    "conf": 0.5524437565695327,
+                    "box_band": [
+                      2428,
+                      129,
+                      2521,
+                      208
+                    ],
+                    "box_page": [
+                      2428,
+                      697,
+                      2521,
+                      776
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2597,
+                "x_right": 3024,
+                "items": [
+                  {
+                    "text": "A",
+                    "conf": 0.999934435965443,
+                    "box_band": [
+                      2785,
+                      5,
+                      2835,
+                      63
+                    ],
+                    "box_page": [
+                      2785,
+                      573,
+                      2835,
+                      631
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.830129086971283,
+                    "box_band": [
+                      2747,
+                      130,
+                      2875,
+                      206
+                    ],
+                    "box_page": [
+                      2747,
+                      698,
+                      2875,
+                      774
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 3024,
+                "x_right": 3452,
+                "items": [
+                  {
+                    "text": "B",
+                    "conf": 0.9998692316847304,
+                    "box_band": [
+                      3214,
+                      4,
+                      3264,
+                      64
+                    ],
+                    "box_page": [
+                      3214,
+                      572,
+                      3264,
+                      632
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.9399402737617493,
+                    "box_band": [
+                      3172,
+                      128,
+                      3304,
+                      207
+                    ],
+                    "box_page": [
+                      3172,
+                      696,
+                      3304,
+                      775
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 3452,
+                "x_right": 3879,
+                "items": [
+                  {
+                    "text": "C",
+                    "conf": 0.9412242027558513,
+                    "box_band": [
+                      3639,
+                      3,
+                      3695,
+                      65
+                    ],
+                    "box_page": [
+                      3639,
+                      571,
+                      3695,
+                      633
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.9064377546310425,
+                    "box_band": [
+                      3600,
+                      128,
+                      3731,
+                      207
+                    ],
+                    "box_page": [
+                      3600,
+                      696,
+                      3731,
+                      775
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 3879,
+                "x_right": 4124,
+                "items": [
+                  {
+                    "text": "TRIP /",
+                    "conf": 0.9997613695896128,
+                    "box_band": [
+                      3915,
+                      1,
+                      4086,
+                      67
+                    ],
+                    "box_page": [
+                      3915,
+                      569,
+                      4086,
+                      635
+                    ]
+                  },
+                  {
+                    "text": "POLE",
+                    "conf": 0.999396026134491,
+                    "box_band": [
+                      3918,
+                      64,
+                      4086,
+                      132
+                    ],
+                    "box_page": [
+                      3918,
+                      632,
+                      4086,
+                      700
+                    ]
+                  },
+                  {
+                    "text": "(AJ",
+                    "conf": 0.2959304386476462,
+                    "box_band": [
+                      3955,
+                      129,
+                      4048,
+                      208
+                    ],
+                    "box_page": [
+                      3955,
+                      697,
+                      4048,
+                      776
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 4124,
+                "x_right": 4979,
+                "items": [
+                  {
+                    "text": "WIRE SIZE",
+                    "conf": 0.8629316837024078,
+                    "box_band": [
+                      4402,
+                      0,
+                      4702,
+                      67
+                    ],
+                    "box_page": [
+                      4402,
+                      568,
+                      4702,
+                      635
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 12,
+                "x_left": 4979,
+                "x_right": 5157,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999178051948547,
+                    "box_band": [
+                      4985,
+                      0,
+                      5155,
+                      66
+                    ],
+                    "box_page": [
+                      4985,
+                      568,
+                      5155,
+                      634
+                    ]
+                  },
+                  {
+                    "text": "AMPS",
+                    "conf": 0.9999637603759766,
+                    "box_band": [
+                      4983,
+                      66,
+                      5156,
+                      132
+                    ],
+                    "box_page": [
+                      4983,
+                      634,
+                      5156,
+                      700
+                    ]
+                  },
+                  {
+                    "text": "QAJ",
+                    "conf": 0.33689501881599426,
+                    "box_band": [
+                      5023,
+                      131,
+                      5115,
+                      207
+                    ],
+                    "box_page": [
+                      5023,
+                      699,
+                      5115,
+                      775
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 13,
+                "x_left": 5157,
+                "x_right": 5322,
+                "items": [
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9988605380058289,
+                    "box_band": [
+                      5160,
+                      2,
+                      5319,
+                      66
+                    ],
+                    "box_page": [
+                      5160,
+                      570,
+                      5319,
+                      634
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 14,
+                "x_left": 5322,
+                "x_right": 6311,
+                "items": [
+                  {
+                    "text": "LOAD DESCRIPTION",
+                    "conf": 0.995289015040685,
+                    "box_band": [
+                      5532,
+                      0,
+                      6101,
+                      69
+                    ],
+                    "box_page": [
+                      5532,
+                      568,
+                      6101,
+                      637
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 15,
+                "x_left": 6311,
+                "x_right": 6444,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9928657997679359,
+                    "box_band": [
+                      6311,
+                      1,
+                      6443,
+                      67
+                    ],
+                    "box_page": [
+                      6311,
+                      569,
+                      6443,
+                      635
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "specialFeatures": 3,
+                "combo": 6
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 32,
+                  "x_right": 165,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 165,
+                  "x_right": 1154,
+                  "texts": [
+                    "LOAD",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1154,
+                  "x_right": 1319,
+                  "texts": [
+                    "TYPE"
+                  ],
+                  "role": "specialFeatures",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1319,
+                  "x_right": 1497,
+                  "texts": [
+                    "LOAD",
+                    "AMPS",
+                    "IAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1497,
+                  "x_right": 2352,
+                  "texts": [
+                    "WIRE",
+                    "SIZE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2352,
+                  "x_right": 2597,
+                  "texts": [
+                    "TRIP",
+                    "POLE",
+                    "IAJ"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2597,
+                  "x_right": 3024,
+                  "texts": [
+                    "A",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 3024,
+                  "x_right": 3452,
+                  "texts": [
+                    "B",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 3452,
+                  "x_right": 3879,
+                  "texts": [
+                    "C",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 10,
+                  "x_left": 3879,
+                  "x_right": 4124,
+                  "texts": [
+                    "TRIP",
+                    "POLE"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 4124,
+                  "x_right": 4979,
+                  "texts": [
+                    "WIRE",
+                    "SIZE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 12,
+                  "x_left": 4979,
+                  "x_right": 5157,
+                  "texts": [
+                    "LOAD",
+                    "AMPS"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 13,
+                  "x_left": 5157,
+                  "x_right": 5322,
+                  "texts": [
+                    "TYPE"
+                  ],
+                  "role": "specialFeatures",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 14,
+                  "x_left": 5322,
+                  "x_right": 6311,
+                  "texts": [
+                    "LOAD",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 15,
+                  "x_left": 6311,
+                  "x_right": 6444,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [
+              {
+                "index": 3,
+                "role": "specialFeatures",
+                "x_left": 1154,
+                "x_right": 1319,
+                "y_top": 815,
+                "y_bottom": 2405,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col3_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 6,
+                "role": "combo",
+                "x_left": 2352,
+                "x_right": 2597,
+                "y_top": 815,
+                "y_bottom": 2405,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col6_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 10,
+                "role": "combo",
+                "x_left": 3879,
+                "x_right": 4124,
+                "y_top": 815,
+                "y_bottom": 2405,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col10_overlay.png",
+                "side": "right"
+              },
+              {
+                "index": 13,
+                "role": "specialFeatures",
+                "x_left": 5157,
+                "x_right": 5322,
+                "y_top": 815,
+                "y_bottom": 2405,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col13_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 819,
+                "rowBottom": 894,
+                "amperage": 30,
+                "poles": 3,
+                "comboText": "30 3"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 1045,
+                "rowBottom": 1121,
+                "amperage": 30,
+                "poles": 3,
+                "comboText": "30 3",
+                "specialFeaturesText": "C"
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 819,
+                "rowBottom": 894,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "OL"
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 894,
+                "rowBottom": 970,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "1 20",
+                "specialFeaturesText": "OL"
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 970,
+                "rowBottom": 1045,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "3 20",
+                "specialFeaturesText": "MT"
+              }
+            ],
+            "breakerCounts": {
+              "3P_30A": 2,
+              "1P_20A": 2,
+              "3P_20A": 1
+            },
+            "gfiBreakerCounts": {}
+          },
+          "reviewOverlayPath": "review_overlays/HA_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "HA",
+          "attrs": {
+            "amperage": 100,
+            "voltage": 480,
+            "intRating": null,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              620,
+              28,
+              1863,
+              178
+            ],
+            "voltage": [
+              1095,
+              170,
+              1934,
+              259
+            ],
+            "bus": [
+              3545,
+              171,
+              3703,
+              248
+            ]
+          },
+          "boxImageShape": {
+            "w": 6475,
+            "h": 3815
+          },
+          "reviewOverlayPath": "review_overlays/HA_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 1,
+        "rowTop": 819,
+        "rowBottom": 894,
+        "amperage": 30,
+        "poles": 3,
+        "comboText": "30 3"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 1045,
+        "rowBottom": 1121,
+        "amperage": 30,
+        "poles": 3,
+        "comboText": "30 3",
+        "specialFeaturesText": "C"
+      },
+      {
+        "side": "right",
+        "rowIndex": 1,
+        "rowTop": 819,
+        "rowBottom": 894,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "OL"
+      },
+      {
+        "side": "right",
+        "rowIndex": 2,
+        "rowTop": 894,
+        "rowBottom": 970,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "1 20",
+        "specialFeaturesText": "OL"
+      },
+      {
+        "side": "right",
+        "rowIndex": 3,
+        "rowTop": 970,
+        "rowBottom": 1045,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "3 20",
+        "specialFeaturesText": "MT"
+      }
+    ]
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel03.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel03.png",
+          "header_y": 603,
+          "header_bottom_y": 748,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "(unnamed)",
+          "spaces": "x",
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 603,
+            "band_y2": 748,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.998829713894792,
+                "box_band": [
+                  117,
+                  3,
+                  249,
+                  66
+                ],
+                "box_page": [
+                  117,
+                  606,
+                  249,
+                  669
+                ]
+              },
+              {
+                "text": "LOAD DESCRIPTION",
+                "conf": 0.9997309680490334,
+                "box_band": [
+                  1266,
+                  0,
+                  1840,
+                  70
+                ],
+                "box_page": [
+                  1266,
+                  603,
+                  1840,
+                  673
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9998741745948792,
+                "box_band": [
+                  2904,
+                  1,
+                  3074,
+                  68
+                ],
+                "box_page": [
+                  2904,
+                  604,
+                  3074,
+                  671
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.9149020314216614,
+                "box_band": [
+                  2921,
+                  64,
+                  3053,
+                  142
+                ],
+                "box_page": [
+                  2921,
+                  667,
+                  3053,
+                  745
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999482035636902,
+                "box_band": [
+                  3221,
+                  3,
+                  3390,
+                  66
+                ],
+                "box_page": [
+                  3221,
+                  606,
+                  3390,
+                  669
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.99964839220047,
+                "box_band": [
+                  3223,
+                  67,
+                  3384,
+                  131
+                ],
+                "box_page": [
+                  3223,
+                  670,
+                  3384,
+                  734
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9452626565569363,
+                "box_band": [
+                  3465,
+                  1,
+                  3636,
+                  67
+                ],
+                "box_page": [
+                  3465,
+                  604,
+                  3636,
+                  670
+                ]
+              },
+              {
+                "text": "AMPS QAJ",
+                "conf": 0.3232441482671848,
+                "box_band": [
+                  3416,
+                  65,
+                  3684,
+                  143
+                ],
+                "box_page": [
+                  3416,
+                  668,
+                  3684,
+                  746
+                ]
+              },
+              {
+                "text": "WIRE SIZE",
+                "conf": 0.8678210862659439,
+                "box_band": [
+                  3972,
+                  0,
+                  4272,
+                  67
+                ],
+                "box_page": [
+                  3972,
+                  603,
+                  4272,
+                  670
+                ]
+              },
+              {
+                "text": "TRIP / FRAME",
+                "conf": 0.8816486076709517,
+                "box_band": [
+                  4579,
+                  1,
+                  4967,
+                  67
+                ],
+                "box_page": [
+                  4579,
+                  604,
+                  4967,
+                  670
+                ]
+              },
+              {
+                "text": "IAJ",
+                "conf": 0.45162771810043284,
+                "box_band": [
+                  4726,
+                  65,
+                  4820,
+                  144
+                ],
+                "box_page": [
+                  4726,
+                  668,
+                  4820,
+                  747
+                ]
+              },
+              {
+                "text": "POLE",
+                "conf": 0.9996652603149414,
+                "box_band": [
+                  4996,
+                  0,
+                  5162,
+                  68
+                ],
+                "box_page": [
+                  4996,
+                  603,
+                  5162,
+                  671
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel03_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel03_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 329,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.998829713894792,
+                    "box_band": [
+                      117,
+                      3,
+                      249,
+                      66
+                    ],
+                    "box_page": [
+                      117,
+                      606,
+                      249,
+                      669
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 329,
+                "x_right": 2774,
+                "items": [
+                  {
+                    "text": "LOAD DESCRIPTION",
+                    "conf": 0.9997309680490334,
+                    "box_band": [
+                      1266,
+                      0,
+                      1840,
+                      70
+                    ],
+                    "box_page": [
+                      1266,
+                      603,
+                      1840,
+                      673
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 2774,
+                "x_right": 3202,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9998741745948792,
+                    "box_band": [
+                      2904,
+                      1,
+                      3074,
+                      68
+                    ],
+                    "box_page": [
+                      2904,
+                      604,
+                      3074,
+                      671
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.9149020314216614,
+                    "box_band": [
+                      2921,
+                      64,
+                      3053,
+                      142
+                    ],
+                    "box_page": [
+                      2921,
+                      667,
+                      3053,
+                      745
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 3202,
+                "x_right": 3407,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999482035636902,
+                    "box_band": [
+                      3221,
+                      3,
+                      3390,
+                      66
+                    ],
+                    "box_page": [
+                      3221,
+                      606,
+                      3390,
+                      669
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.99964839220047,
+                    "box_band": [
+                      3223,
+                      67,
+                      3384,
+                      131
+                    ],
+                    "box_page": [
+                      3223,
+                      670,
+                      3384,
+                      734
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 3407,
+                "x_right": 3692,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9452626565569363,
+                    "box_band": [
+                      3465,
+                      1,
+                      3636,
+                      67
+                    ],
+                    "box_page": [
+                      3465,
+                      604,
+                      3636,
+                      670
+                    ]
+                  },
+                  {
+                    "text": "AMPS QAJ",
+                    "conf": 0.3232441482671848,
+                    "box_band": [
+                      3416,
+                      65,
+                      3684,
+                      143
+                    ],
+                    "box_page": [
+                      3416,
+                      668,
+                      3684,
+                      746
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 3692,
+                "x_right": 4551,
+                "items": [
+                  {
+                    "text": "WIRE SIZE",
+                    "conf": 0.8678210862659439,
+                    "box_band": [
+                      3972,
+                      0,
+                      4272,
+                      67
+                    ],
+                    "box_page": [
+                      3972,
+                      603,
+                      4272,
+                      670
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 4551,
+                "x_right": 4996,
+                "items": [
+                  {
+                    "text": "TRIP / FRAME",
+                    "conf": 0.8816486076709517,
+                    "box_band": [
+                      4579,
+                      1,
+                      4967,
+                      67
+                    ],
+                    "box_page": [
+                      4579,
+                      604,
+                      4967,
+                      670
+                    ]
+                  },
+                  {
+                    "text": "IAJ",
+                    "conf": 0.45162771810043284,
+                    "box_band": [
+                      4726,
+                      65,
+                      4820,
+                      144
+                    ],
+                    "box_page": [
+                      4726,
+                      668,
+                      4820,
+                      747
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 4996,
+                "x_right": 5163,
+                "items": [
+                  {
+                    "text": "POLE",
+                    "conf": 0.9996652603149414,
+                    "box_band": [
+                      4996,
+                      0,
+                      5162,
+                      68
+                    ],
+                    "box_page": [
+                      4996,
+                      603,
+                      5162,
+                      671
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "trip": 7,
+                "poles": 8
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 329,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 329,
+                  "x_right": 2774,
+                  "texts": [
+                    "LOAD",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 2774,
+                  "x_right": 3202,
+                  "texts": [
+                    "LOAD",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 3202,
+                  "x_right": 3407,
+                  "texts": [
+                    "LOAD",
+                    "TYPE"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 5,
+                  "x_left": 3407,
+                  "x_right": 3692,
+                  "texts": [
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 3692,
+                  "x_right": 4551,
+                  "texts": [
+                    "WIRE",
+                    "SIZE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 4551,
+                  "x_right": 4996,
+                  "texts": [
+                    "TRIP",
+                    "FRAME",
+                    "IAJ"
+                  ],
+                  "role": "trip",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 4996,
+                  "x_right": 5163,
+                  "texts": [
+                    "POLE"
+                  ],
+                  "role": "poles",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "separated"
+            }
+          },
+          "separatedScan": {
+            "layout": "separated",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "combinedScan": null,
+          "reviewOverlayPath": "review_overlays/unnamed_review_overlay.png"
+        },
+        "header": {
+          "type": "x",
+          "name": "(unnamed)",
+          "attrs": {
+            "amperage": "x",
+            "voltage": "x",
+            "intRating": "x",
+            "detected_breakers": [],
+            "mainBreakerAmperage": "x"
+          },
+          "winningBoxes": "x",
+          "boxImageShape": "x",
+          "reviewOverlayPath": "x"
+        }
+      },
+      "panelStatus": "unable to detect key information on panel ((unnamed))"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel04.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/good_tester_combo_electrical_filtered_page001_panel04.png",
+          "header_y": 598,
+          "header_bottom_y": 744,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "(unnamed) (2)",
+          "spaces": "x",
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 598,
+            "band_y2": 744,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9992466739344315,
+                "box_band": [
+                  117,
+                  2,
+                  250,
+                  68
+                ],
+                "box_page": [
+                  117,
+                  600,
+                  250,
+                  666
+                ]
+              },
+              {
+                "text": "LOAD DESCRIPTION",
+                "conf": 0.9998828970982502,
+                "box_band": [
+                  1265,
+                  0,
+                  1840,
+                  72
+                ],
+                "box_page": [
+                  1265,
+                  598,
+                  1840,
+                  670
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999335408210754,
+                "box_band": [
+                  2904,
+                  2,
+                  3075,
+                  68
+                ],
+                "box_page": [
+                  2904,
+                  600,
+                  3075,
+                  666
+                ]
+              },
+              {
+                "text": "IVAJ",
+                "conf": 0.9109668731689453,
+                "box_band": [
+                  2923,
+                  66,
+                  3053,
+                  142
+                ],
+                "box_page": [
+                  2923,
+                  664,
+                  3053,
+                  740
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999229311943054,
+                "box_band": [
+                  3220,
+                  2,
+                  3391,
+                  68
+                ],
+                "box_page": [
+                  3220,
+                  600,
+                  3391,
+                  666
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9992573261260986,
+                "box_band": [
+                  3222,
+                  67,
+                  3385,
+                  133
+                ],
+                "box_page": [
+                  3222,
+                  665,
+                  3385,
+                  731
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.7170353782672318,
+                "box_band": [
+                  3465,
+                  2,
+                  3636,
+                  68
+                ],
+                "box_page": [
+                  3465,
+                  600,
+                  3636,
+                  666
+                ]
+              },
+              {
+                "text": "AMPS (Aj",
+                "conf": 0.42126072366480405,
+                "box_band": [
+                  3416,
+                  65,
+                  3684,
+                  144
+                ],
+                "box_page": [
+                  3416,
+                  663,
+                  3684,
+                  742
+                ]
+              },
+              {
+                "text": "WIRE SIZE",
+                "conf": 0.9658978180282262,
+                "box_band": [
+                  3971,
+                  1,
+                  4272,
+                  68
+                ],
+                "box_page": [
+                  3971,
+                  599,
+                  4272,
+                  666
+                ]
+              },
+              {
+                "text": "TRIP / FRAME",
+                "conf": 0.9990415400868307,
+                "box_band": [
+                  4580,
+                  1,
+                  4967,
+                  68
+                ],
+                "box_page": [
+                  4580,
+                  599,
+                  4967,
+                  666
+                ]
+              },
+              {
+                "text": "IAJ",
+                "conf": 0.28409398563795896,
+                "box_band": [
+                  4726,
+                  66,
+                  4820,
+                  145
+                ],
+                "box_page": [
+                  4726,
+                  664,
+                  4820,
+                  743
+                ]
+              },
+              {
+                "text": "POLE",
+                "conf": 0.9995914101600647,
+                "box_band": [
+                  4996,
+                  1,
+                  5162,
+                  69
+                ],
+                "box_page": [
+                  4996,
+                  599,
+                  5162,
+                  667
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel04_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/good_tester_combo_electrical_filtered_page001_panel04_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 329,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9992466739344315,
+                    "box_band": [
+                      117,
+                      2,
+                      250,
+                      68
+                    ],
+                    "box_page": [
+                      117,
+                      600,
+                      250,
+                      666
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 329,
+                "x_right": 2774,
+                "items": [
+                  {
+                    "text": "LOAD DESCRIPTION",
+                    "conf": 0.9998828970982502,
+                    "box_band": [
+                      1265,
+                      0,
+                      1840,
+                      72
+                    ],
+                    "box_page": [
+                      1265,
+                      598,
+                      1840,
+                      670
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 2774,
+                "x_right": 3202,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999335408210754,
+                    "box_band": [
+                      2904,
+                      2,
+                      3075,
+                      68
+                    ],
+                    "box_page": [
+                      2904,
+                      600,
+                      3075,
+                      666
+                    ]
+                  },
+                  {
+                    "text": "IVAJ",
+                    "conf": 0.9109668731689453,
+                    "box_band": [
+                      2923,
+                      66,
+                      3053,
+                      142
+                    ],
+                    "box_page": [
+                      2923,
+                      664,
+                      3053,
+                      740
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 3202,
+                "x_right": 3407,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999229311943054,
+                    "box_band": [
+                      3220,
+                      2,
+                      3391,
+                      68
+                    ],
+                    "box_page": [
+                      3220,
+                      600,
+                      3391,
+                      666
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9992573261260986,
+                    "box_band": [
+                      3222,
+                      67,
+                      3385,
+                      133
+                    ],
+                    "box_page": [
+                      3222,
+                      665,
+                      3385,
+                      731
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 3407,
+                "x_right": 3692,
+                "items": [
+                  {
+                    "text": "LOAD",
+                    "conf": 0.7170353782672318,
+                    "box_band": [
+                      3465,
+                      2,
+                      3636,
+                      68
+                    ],
+                    "box_page": [
+                      3465,
+                      600,
+                      3636,
+                      666
+                    ]
+                  },
+                  {
+                    "text": "AMPS (Aj",
+                    "conf": 0.42126072366480405,
+                    "box_band": [
+                      3416,
+                      65,
+                      3684,
+                      144
+                    ],
+                    "box_page": [
+                      3416,
+                      663,
+                      3684,
+                      742
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 3692,
+                "x_right": 4551,
+                "items": [
+                  {
+                    "text": "WIRE SIZE",
+                    "conf": 0.9658978180282262,
+                    "box_band": [
+                      3971,
+                      1,
+                      4272,
+                      68
+                    ],
+                    "box_page": [
+                      3971,
+                      599,
+                      4272,
+                      666
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 4551,
+                "x_right": 4996,
+                "items": [
+                  {
+                    "text": "TRIP / FRAME",
+                    "conf": 0.9990415400868307,
+                    "box_band": [
+                      4580,
+                      1,
+                      4967,
+                      68
+                    ],
+                    "box_page": [
+                      4580,
+                      599,
+                      4967,
+                      666
+                    ]
+                  },
+                  {
+                    "text": "IAJ",
+                    "conf": 0.28409398563795896,
+                    "box_band": [
+                      4726,
+                      66,
+                      4820,
+                      145
+                    ],
+                    "box_page": [
+                      4726,
+                      664,
+                      4820,
+                      743
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 4996,
+                "x_right": 5163,
+                "items": [
+                  {
+                    "text": "POLE",
+                    "conf": 0.9995914101600647,
+                    "box_band": [
+                      4996,
+                      1,
+                      5162,
+                      69
+                    ],
+                    "box_page": [
+                      4996,
+                      599,
+                      5162,
+                      667
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "combo": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 329,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 329,
+                  "x_right": 2774,
+                  "texts": [
+                    "LOAD",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 2774,
+                  "x_right": 3202,
+                  "texts": [
+                    "LOAD",
+                    "IVAJ"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 3202,
+                  "x_right": 3407,
+                  "texts": [
+                    "LOAD",
+                    "TYPE"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 5,
+                  "x_left": 3407,
+                  "x_right": 3692,
+                  "texts": [
+                    "LOAD",
+                    "AMPS",
+                    "(Aj"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 3692,
+                  "x_right": 4551,
+                  "texts": [
+                    "WIRE",
+                    "SIZE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 4551,
+                  "x_right": 4996,
+                  "texts": [
+                    "TRIP",
+                    "FRAME"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 4996,
+                  "x_right": 5163,
+                  "texts": [
+                    "POLE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "reviewOverlayPath": "review_overlays/unnamed_2_review_overlay.png"
+        },
+        "header": {
+          "type": "x",
+          "name": "(unnamed) (2)",
+          "attrs": {
+            "amperage": "x",
+            "voltage": "x",
+            "intRating": "x",
+            "detected_breakers": [],
+            "mainBreakerAmperage": "x"
+          },
+          "winningBoxes": "x",
+          "boxImageShape": "x",
+          "reviewOverlayPath": "x"
+        }
+      },
+      "panelStatus": "unable to detect key information on panel ((unnamed) (2))"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  }
+]

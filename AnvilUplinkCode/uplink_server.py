@@ -1237,18 +1237,27 @@ def _dequeue_loop(idx: int):
 
 # ---------- Start worker pool (per-slot) ----------
 if not _IS_WORKER_SUBPROCESS:
-    for i in range(MAX_WORKERS):
-        _spawn_persistent_worker(i)
-    for i in range(MAX_WORKERS):
-        t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
-        t.start()
-        _WORKERS.append(t)
-    print(
-        f">>> Worker pool started: {MAX_WORKERS} slots, "
-        f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
-    )
+    try:
+        for i in range(MAX_WORKERS):
+            _spawn_persistent_worker(i)
+        for i in range(MAX_WORKERS):
+            t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
+            t.start()
+            _WORKERS.append(t)
+        print(
+            f">>> Worker pool started: {MAX_WORKERS} slots, "
+            f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
+        )
+    except Exception as e:
+        print(f">>> Worker pool startup failed: {e}")
+        print(traceback.format_exc())
 
 # ---------- API: submit / status / list / cancel ----------
+@anvil.server.callable
+def vm_ping():
+    print(f">>> vm_ping called | NODE_ID={NODE_ID}")
+    return {"ok": True, "node_id": NODE_ID}
+
 @anvil.server.callable
 def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email=None):
     """
@@ -1604,12 +1613,11 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
 
 @anvil.server.callable
 def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
-    """
-    List jobs owned by this user (disk-backed).
-    Includes job_name + submitted_at if present in job_note.
-    """
+    print(f">>> vm_list_jobs called | owner_id={owner_id!r} | NODE_ID={NODE_ID}")
+
     owner_id = str(owner_id or "").strip().lower()
     if not owner_id:
+        print(">>> vm_list_jobs: empty owner_id")
         return []
 
     def _safe_iso(dt_s):
@@ -1618,38 +1626,49 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
         return dt_s.strip()
 
     rows = []
-    for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
-        if not d.is_dir():
-            continue
+    try:
+        for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
+            if not d.is_dir():
+                continue
 
-        st = _json_read_or_none(_status_paths(d)["status"]) or {}
-        st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
-        if st_owner != owner_id:
-            continue
-        state = (st.get("state") or "unknown").lower()
-        if state == "error":
-            continue  # failed jobs never appear for anyone
+            st = _json_read_or_none(_status_paths(d)["status"]) or {}
+            st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+            if st_owner != owner_id:
+                continue
 
-        meta = _parse_job_note(st.get("job_note") or "")
-        job_name = (meta.get("job_name") or "").strip() or d.name
-        submitted_at_utc = (meta.get("submitted_at_utc") or "").strip()
+            state = (st.get("state") or "unknown").lower()
 
-        rows.append({
-            "job_id": d.name,
-            "job_name": job_name,
-            "submitted_at_utc": submitted_at_utc,
-            "created_at": _safe_iso(st.get("created_at")),
-            "state": (st.get("state") or "unknown"),
-            "step": (st.get("step") or ""),
-            "progress": float(st.get("progress", 0.0) or 0.0),
-            "image_count": int(st.get("image_count", 0) or 0),
-            "cycle_time_str": (st.get("cycle_time_str") or ""),
-        })
+            # TEMP: include error jobs while debugging
+            if state == "error":
+                continue
 
-        if len(rows) >= int(limit):
-            break
+            meta = _parse_job_note(st.get("job_note") or "")
+            job_name = (meta.get("job_name") or "").strip() or d.name
+            submitted_at_utc = (meta.get("submitted_at_utc") or "").strip()
 
-    return rows
+            row = {
+                "job_id": d.name,
+                "job_name": job_name,
+                "submitted_at_utc": submitted_at_utc,
+                "created_at": _safe_iso(st.get("created_at")),
+                "state": (st.get("state") or "unknown"),
+                "step": (st.get("step") or ""),
+                "progress": float(st.get("progress", 0.0) or 0.0),
+                "image_count": int(st.get("image_count", 0) or 0),
+                "cycle_time_str": (st.get("cycle_time_str") or ""),
+            }
+            rows.append(row)
+
+            if len(rows) >= int(limit):
+                break
+
+        print(f">>> vm_list_jobs returning {len(rows)} rows for {owner_id!r}")
+        return rows
+
+    except Exception as e:
+        print(f">>> vm_list_jobs ERROR: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        raise
 
 @anvil.server.callable
 def vm_cancel_job(job_id: str, owner_id: str) -> bool:
@@ -1674,6 +1693,6 @@ def vm_cancel_job(job_id: str, owner_id: str) -> bool:
     return True
 
 # ---------- MAIN ----------
-if __name__ == "__main__":
+if not _IS_WORKER_SUBPROCESS:
     print(">>> Uplink ready; waiting for calls")
     anvil.server.wait_forever()

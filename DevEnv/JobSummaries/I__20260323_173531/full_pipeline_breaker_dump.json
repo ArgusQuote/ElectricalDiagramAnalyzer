@@ -1,0 +1,6870 @@
+[
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel01.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel01.png",
+          "header_y": 367,
+          "header_bottom_y": 419,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "(unnamed)",
+          "spaces": 0,
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 367,
+            "band_y2": 419,
+            "tokens": [
+              {
+                "text": "MARK",
+                "conf": 0.9993929862976074,
+                "box_band": [
+                  185,
+                  0,
+                  364,
+                  51
+                ],
+                "box_page": [
+                  185,
+                  367,
+                  364,
+                  418
+                ]
+              },
+              {
+                "text": "#SETS",
+                "conf": 0.9924109333785843,
+                "box_band": [
+                  673,
+                  0,
+                  865,
+                  51
+                ],
+                "box_page": [
+                  673,
+                  367,
+                  865,
+                  418
+                ]
+              },
+              {
+                "text": "SIZE",
+                "conf": 0.9523675441741943,
+                "box_band": [
+                  880,
+                  0,
+                  1014,
+                  51
+                ],
+                "box_page": [
+                  880,
+                  367,
+                  1014,
+                  418
+                ]
+              },
+              {
+                "text": "CU",
+                "conf": 0.667089363409583,
+                "box_band": [
+                  1232,
+                  0,
+                  1325,
+                  51
+                ],
+                "box_page": [
+                  1232,
+                  367,
+                  1325,
+                  418
+                ]
+              },
+              {
+                "text": "QTY",
+                "conf": 0.8055742979049683,
+                "box_band": [
+                  1844,
+                  0,
+                  1978,
+                  51
+                ],
+                "box_page": [
+                  1844,
+                  367,
+                  1978,
+                  418
+                ]
+              },
+              {
+                "text": "SIZE",
+                "conf": 0.9649878740310669,
+                "box_band": [
+                  1993,
+                  0,
+                  2126,
+                  51
+                ],
+                "box_page": [
+                  1993,
+                  367,
+                  2126,
+                  418
+                ]
+              },
+              {
+                "text": "M1 PER SET UNO",
+                "conf": 0.5836812074394176,
+                "box_band": [
+                  2638,
+                  0,
+                  3077,
+                  51
+                ],
+                "box_page": [
+                  2638,
+                  367,
+                  3077,
+                  418
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel01_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel01_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 31,
+                "x_right": 520,
+                "items": [
+                  {
+                    "text": "MARK",
+                    "conf": 0.9993929862976074,
+                    "box_band": [
+                      185,
+                      0,
+                      364,
+                      51
+                    ],
+                    "box_page": [
+                      185,
+                      367,
+                      364,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 520,
+                "x_right": 671,
+                "items": []
+              },
+              {
+                "index": 3,
+                "x_left": 671,
+                "x_right": 866,
+                "items": [
+                  {
+                    "text": "#SETS",
+                    "conf": 0.9924109333785843,
+                    "box_band": [
+                      673,
+                      0,
+                      865,
+                      51
+                    ],
+                    "box_page": [
+                      673,
+                      367,
+                      865,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 866,
+                "x_right": 1145,
+                "items": [
+                  {
+                    "text": "SIZE",
+                    "conf": 0.9523675441741943,
+                    "box_band": [
+                      880,
+                      0,
+                      1014,
+                      51
+                    ],
+                    "box_page": [
+                      880,
+                      367,
+                      1014,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1145,
+                "x_right": 1412,
+                "items": [
+                  {
+                    "text": "CU",
+                    "conf": 0.667089363409583,
+                    "box_band": [
+                      1232,
+                      0,
+                      1325,
+                      51
+                    ],
+                    "box_page": [
+                      1232,
+                      367,
+                      1325,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 1412,
+                "x_right": 1844,
+                "items": []
+              },
+              {
+                "index": 7,
+                "x_left": 1844,
+                "x_right": 1979,
+                "items": [
+                  {
+                    "text": "QTY",
+                    "conf": 0.8055742979049683,
+                    "box_band": [
+                      1844,
+                      0,
+                      1978,
+                      51
+                    ],
+                    "box_page": [
+                      1844,
+                      367,
+                      1978,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 1979,
+                "x_right": 2541,
+                "items": [
+                  {
+                    "text": "SIZE",
+                    "conf": 0.9649878740310669,
+                    "box_band": [
+                      1993,
+                      0,
+                      2126,
+                      51
+                    ],
+                    "box_page": [
+                      1993,
+                      367,
+                      2126,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2541,
+                "x_right": 2638,
+                "items": []
+              },
+              {
+                "index": 10,
+                "x_left": 2638,
+                "x_right": 3078,
+                "items": [
+                  {
+                    "text": "M1 PER SET UNO",
+                    "conf": 0.5836812074394176,
+                    "box_band": [
+                      2638,
+                      0,
+                      3077,
+                      51
+                    ],
+                    "box_page": [
+                      2638,
+                      367,
+                      3077,
+                      418
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 3078,
+                "x_right": 3174,
+                "items": []
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "combo": 4
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 31,
+                  "x_right": 520,
+                  "texts": [
+                    "MARK"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 520,
+                  "x_right": 671,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 671,
+                  "x_right": 866,
+                  "texts": [
+                    "#SETS"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 866,
+                  "x_right": 1145,
+                  "texts": [
+                    "SIZE"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1145,
+                  "x_right": 1412,
+                  "texts": [
+                    "CU"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 1412,
+                  "x_right": 1844,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 1844,
+                  "x_right": 1979,
+                  "texts": [
+                    "QTY"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 1979,
+                  "x_right": 2541,
+                  "texts": [
+                    "SIZE"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 2541,
+                  "x_right": 2638,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 10,
+                  "x_left": 2638,
+                  "x_right": 3078,
+                  "texts": [
+                    "M1",
+                    "PER",
+                    "SET",
+                    "UNO"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 3078,
+                  "x_right": 3174,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "reviewOverlayPath": "review_overlays/unnamed_review_overlay.png"
+        },
+        "header": {
+          "type": "x",
+          "name": "(unnamed)",
+          "attrs": {
+            "amperage": "x",
+            "voltage": "x",
+            "intRating": "x",
+            "detected_breakers": [],
+            "mainBreakerAmperage": "x"
+          },
+          "winningBoxes": "x",
+          "boxImageShape": "x",
+          "reviewOverlayPath": "x"
+        }
+      },
+      "panelStatus": "unable to detect key information on panel ((unnamed))"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel02.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel02.png",
+          "header_y": 263,
+          "header_bottom_y": 398,
+          "footer_y": 1893,
+          "footer_token_val": 84,
+          "panel_size": 84,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "P6",
+          "spaces": 84,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 402,
+              "rowBottom": 474,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 2,
+              "rowTop": 474,
+              "rowBottom": 544,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 544,
+              "rowBottom": 616,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 616,
+              "rowBottom": 687,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 687,
+              "rowBottom": 758,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 758,
+              "rowBottom": 829,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 7,
+              "rowTop": 829,
+              "rowBottom": 900,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 8,
+              "rowTop": 900,
+              "rowBottom": 972,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 9,
+              "rowTop": 972,
+              "rowBottom": 1043,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1043,
+              "rowBottom": 1114,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 11,
+              "rowTop": 1114,
+              "rowBottom": 1186,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 12,
+              "rowTop": 1186,
+              "rowBottom": 1257,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 13,
+              "rowTop": 1257,
+              "rowBottom": 1328,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 14,
+              "rowTop": 1328,
+              "rowBottom": 1399,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 15,
+              "rowTop": 1399,
+              "rowBottom": 1471,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 16,
+              "rowTop": 1471,
+              "rowBottom": 1541,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 17,
+              "rowTop": 1541,
+              "rowBottom": 1613,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 402,
+              "rowBottom": 474,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 474,
+              "rowBottom": 544,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 687,
+              "rowBottom": 758,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 6,
+              "rowTop": 758,
+              "rowBottom": 829,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 7,
+              "rowTop": 829,
+              "rowBottom": 900,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 8,
+              "rowTop": 900,
+              "rowBottom": 972,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 972,
+              "rowBottom": 1043,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1043,
+              "rowBottom": 1114,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 11,
+              "rowTop": 1114,
+              "rowBottom": 1186,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 12,
+              "rowTop": 1186,
+              "rowBottom": 1257,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 13,
+              "rowTop": 1257,
+              "rowBottom": 1328,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            }
+          ],
+          "breakerCounts": {
+            "1P_20A": 28
+          },
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 263,
+            "band_y2": 398,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9584629214042846,
+                "box_band": [
+                  34,
+                  3,
+                  152,
+                  60
+                ],
+                "box_page": [
+                  34,
+                  266,
+                  152,
+                  323
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999996423721633,
+                "box_band": [
+                  64,
+                  64,
+                  121,
+                  121
+                ],
+                "box_page": [
+                  64,
+                  327,
+                  121,
+                  384
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.9997785033734542,
+                "box_band": [
+                  448,
+                  73,
+                  796,
+                  131
+                ],
+                "box_page": [
+                  448,
+                  336,
+                  796,
+                  394
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.9099664076897671,
+                "box_band": [
+                  1099,
+                  0,
+                  1404,
+                  56
+                ],
+                "box_page": [
+                  1099,
+                  263,
+                  1404,
+                  319
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9907294511795044,
+                "box_band": [
+                  1085,
+                  73,
+                  1230,
+                  133
+                ],
+                "box_page": [
+                  1085,
+                  336,
+                  1230,
+                  396
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.9152600724747104,
+                "box_band": [
+                  1277,
+                  74,
+                  1386,
+                  132
+                ],
+                "box_page": [
+                  1277,
+                  337,
+                  1386,
+                  395
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9888176585251143,
+                "box_band": [
+                  1452,
+                  4,
+                  1568,
+                  59
+                ],
+                "box_page": [
+                  1452,
+                  267,
+                  1568,
+                  322
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.9994513431601247,
+                "box_band": [
+                  1452,
+                  63,
+                  1571,
+                  121
+                ],
+                "box_page": [
+                  1452,
+                  326,
+                  1571,
+                  384
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9859764866160212,
+                "box_band": [
+                  1691,
+                  1,
+                  1774,
+                  56
+                ],
+                "box_page": [
+                  1691,
+                  264,
+                  1774,
+                  319
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.9738680038911693,
+                "box_band": [
+                  1613,
+                  74,
+                  1853,
+                  132
+                ],
+                "box_page": [
+                  1613,
+                  337,
+                  1853,
+                  395
+                ]
+              },
+              {
+                "text": "PH",
+                "conf": 0.9974576381849333,
+                "box_band": [
+                  1913,
+                  73,
+                  1993,
+                  129
+                ],
+                "box_page": [
+                  1913,
+                  336,
+                  1993,
+                  392
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9981540459877414,
+                "box_band": [
+                  2126,
+                  1,
+                  2211,
+                  56
+                ],
+                "box_page": [
+                  2126,
+                  264,
+                  2211,
+                  319
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.43686955860425686,
+                "box_band": [
+                  2049,
+                  74,
+                  2290,
+                  134
+                ],
+                "box_page": [
+                  2049,
+                  337,
+                  2290,
+                  397
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9947982630278824,
+                "box_band": [
+                  2333,
+                  4,
+                  2450,
+                  59
+                ],
+                "box_page": [
+                  2333,
+                  267,
+                  2450,
+                  322
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.9993411624251763,
+                "box_band": [
+                  2334,
+                  64,
+                  2453,
+                  121
+                ],
+                "box_page": [
+                  2334,
+                  327,
+                  2453,
+                  384
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.9991735101463636,
+                "box_band": [
+                  2501,
+                  0,
+                  2807,
+                  56
+                ],
+                "box_page": [
+                  2501,
+                  263,
+                  2807,
+                  319
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9819506406784058,
+                "box_band": [
+                  2488,
+                  73,
+                  2633,
+                  133
+                ],
+                "box_page": [
+                  2488,
+                  336,
+                  2633,
+                  396
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.9265572220526356,
+                "box_band": [
+                  2681,
+                  74,
+                  2789,
+                  132
+                ],
+                "box_page": [
+                  2681,
+                  337,
+                  2789,
+                  395
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.9997788112982811,
+                "box_band": [
+                  3111,
+                  73,
+                  3461,
+                  131
+                ],
+                "box_page": [
+                  3111,
+                  336,
+                  3461,
+                  394
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9888259051579271,
+                "box_band": [
+                  3750,
+                  4,
+                  3867,
+                  60
+                ],
+                "box_page": [
+                  3750,
+                  267,
+                  3867,
+                  323
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999989271166818,
+                "box_band": [
+                  3778,
+                  65,
+                  3834,
+                  120
+                ],
+                "box_page": [
+                  3778,
+                  328,
+                  3834,
+                  383
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel02_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel02_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 30,
+                "x_right": 160,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9584629214042846,
+                    "box_band": [
+                      34,
+                      3,
+                      152,
+                      60
+                    ],
+                    "box_page": [
+                      34,
+                      266,
+                      152,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999996423721633,
+                    "box_band": [
+                      64,
+                      64,
+                      121,
+                      121
+                    ],
+                    "box_page": [
+                      64,
+                      327,
+                      121,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 160,
+                "x_right": 1078,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.9997785033734542,
+                    "box_band": [
+                      448,
+                      73,
+                      796,
+                      131
+                    ],
+                    "box_page": [
+                      448,
+                      336,
+                      796,
+                      394
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1078,
+                "x_right": 1420,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.9099664076897671,
+                    "box_band": [
+                      1099,
+                      0,
+                      1404,
+                      56
+                    ],
+                    "box_page": [
+                      1099,
+                      263,
+                      1404,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9907294511795044,
+                    "box_band": [
+                      1085,
+                      73,
+                      1230,
+                      133
+                    ],
+                    "box_page": [
+                      1085,
+                      336,
+                      1230,
+                      396
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.9152600724747104,
+                    "box_band": [
+                      1277,
+                      74,
+                      1386,
+                      132
+                    ],
+                    "box_page": [
+                      1277,
+                      337,
+                      1386,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1420,
+                "x_right": 1600,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9888176585251143,
+                    "box_band": [
+                      1452,
+                      4,
+                      1568,
+                      59
+                    ],
+                    "box_page": [
+                      1452,
+                      267,
+                      1568,
+                      322
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.9994513431601247,
+                    "box_band": [
+                      1452,
+                      63,
+                      1571,
+                      121
+                    ],
+                    "box_page": [
+                      1452,
+                      326,
+                      1571,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1600,
+                "x_right": 1869,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9859764866160212,
+                    "box_band": [
+                      1691,
+                      1,
+                      1774,
+                      56
+                    ],
+                    "box_page": [
+                      1691,
+                      264,
+                      1774,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.9738680038911693,
+                    "box_band": [
+                      1613,
+                      74,
+                      1853,
+                      132
+                    ],
+                    "box_page": [
+                      1613,
+                      337,
+                      1853,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 1869,
+                "x_right": 2034,
+                "items": [
+                  {
+                    "text": "PH",
+                    "conf": 0.9974576381849333,
+                    "box_band": [
+                      1913,
+                      73,
+                      1993,
+                      129
+                    ],
+                    "box_page": [
+                      1913,
+                      336,
+                      1993,
+                      392
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2034,
+                "x_right": 2303,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9981540459877414,
+                    "box_band": [
+                      2126,
+                      1,
+                      2211,
+                      56
+                    ],
+                    "box_page": [
+                      2126,
+                      264,
+                      2211,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.43686955860425686,
+                    "box_band": [
+                      2049,
+                      74,
+                      2290,
+                      134
+                    ],
+                    "box_page": [
+                      2049,
+                      337,
+                      2290,
+                      397
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2303,
+                "x_right": 2482,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9947982630278824,
+                    "box_band": [
+                      2333,
+                      4,
+                      2450,
+                      59
+                    ],
+                    "box_page": [
+                      2333,
+                      267,
+                      2450,
+                      322
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.9993411624251763,
+                    "box_band": [
+                      2334,
+                      64,
+                      2453,
+                      121
+                    ],
+                    "box_page": [
+                      2334,
+                      327,
+                      2453,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2482,
+                "x_right": 2824,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.9991735101463636,
+                    "box_band": [
+                      2501,
+                      0,
+                      2807,
+                      56
+                    ],
+                    "box_page": [
+                      2501,
+                      263,
+                      2807,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9819506406784058,
+                    "box_band": [
+                      2488,
+                      73,
+                      2633,
+                      133
+                    ],
+                    "box_page": [
+                      2488,
+                      336,
+                      2633,
+                      396
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.9265572220526356,
+                    "box_band": [
+                      2681,
+                      74,
+                      2789,
+                      132
+                    ],
+                    "box_page": [
+                      2681,
+                      337,
+                      2789,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 2824,
+                "x_right": 3742,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.9997788112982811,
+                    "box_band": [
+                      3111,
+                      73,
+                      3461,
+                      131
+                    ],
+                    "box_page": [
+                      3111,
+                      336,
+                      3461,
+                      394
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 3742,
+                "x_right": 3876,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9888259051579271,
+                    "box_band": [
+                      3750,
+                      4,
+                      3867,
+                      60
+                    ],
+                    "box_page": [
+                      3750,
+                      267,
+                      3867,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999989271166818,
+                    "box_band": [
+                      3778,
+                      65,
+                      3834,
+                      120
+                    ],
+                    "box_page": [
+                      3778,
+                      328,
+                      3834,
+                      383
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "combo": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 30,
+                  "x_right": 160,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 160,
+                  "x_right": 1078,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1078,
+                  "x_right": 1420,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 4,
+                  "x_left": 1420,
+                  "x_right": 1600,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 5,
+                  "x_left": 1600,
+                  "x_right": 1869,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 1869,
+                  "x_right": 2034,
+                  "texts": [
+                    "PH"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2034,
+                  "x_right": 2303,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2303,
+                  "x_right": 2482,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 9,
+                  "x_left": 2482,
+                  "x_right": 2824,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 10,
+                  "x_left": 2824,
+                  "x_right": 3742,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 3742,
+                  "x_right": 3876,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [
+              {
+                "index": 5,
+                "role": "combo",
+                "x_left": 1600,
+                "x_right": 1869,
+                "y_top": 398,
+                "y_bottom": 1893,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel02_parser_body_combined_col5_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 7,
+                "role": "combo",
+                "x_left": 2034,
+                "x_right": 2303,
+                "y_top": 398,
+                "y_bottom": 1893,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel02_parser_body_combined_col7_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 402,
+                "rowBottom": 474,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 2,
+                "rowTop": 474,
+                "rowBottom": 544,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 544,
+                "rowBottom": 616,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 616,
+                "rowBottom": 687,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 687,
+                "rowBottom": 758,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 758,
+                "rowBottom": 829,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 7,
+                "rowTop": 829,
+                "rowBottom": 900,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 8,
+                "rowTop": 900,
+                "rowBottom": 972,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 9,
+                "rowTop": 972,
+                "rowBottom": 1043,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1043,
+                "rowBottom": 1114,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 11,
+                "rowTop": 1114,
+                "rowBottom": 1186,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 12,
+                "rowTop": 1186,
+                "rowBottom": 1257,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 13,
+                "rowTop": 1257,
+                "rowBottom": 1328,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 14,
+                "rowTop": 1328,
+                "rowBottom": 1399,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 15,
+                "rowTop": 1399,
+                "rowBottom": 1471,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 16,
+                "rowTop": 1471,
+                "rowBottom": 1541,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 17,
+                "rowTop": 1541,
+                "rowBottom": 1613,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 402,
+                "rowBottom": 474,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 474,
+                "rowBottom": 544,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 687,
+                "rowBottom": 758,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 6,
+                "rowTop": 758,
+                "rowBottom": 829,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 7,
+                "rowTop": 829,
+                "rowBottom": 900,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 8,
+                "rowTop": 900,
+                "rowBottom": 972,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 972,
+                "rowBottom": 1043,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1043,
+                "rowBottom": 1114,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 11,
+                "rowTop": 1114,
+                "rowBottom": 1186,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 12,
+                "rowTop": 1186,
+                "rowBottom": 1257,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 13,
+                "rowTop": 1257,
+                "rowBottom": 1328,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              }
+            ],
+            "breakerCounts": {
+              "1P_20A": 28
+            },
+            "gfiBreakerCounts": {}
+          },
+          "reviewOverlayPath": "review_overlays/P6_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "P6",
+          "attrs": {
+            "amperage": 200,
+            "voltage": 208,
+            "intRating": null,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              28,
+              31,
+              636,
+              127
+            ],
+            "voltage": [
+              1749,
+              117,
+              1924,
+              185
+            ],
+            "bus": [
+              1496,
+              190,
+              1756,
+              258
+            ]
+          },
+          "boxImageShape": {
+            "w": 3906,
+            "h": 3143
+          },
+          "reviewOverlayPath": "review_overlays/P6_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 1,
+        "rowTop": 402,
+        "rowBottom": 474,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 2,
+        "rowTop": 474,
+        "rowBottom": 544,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 3,
+        "rowTop": 544,
+        "rowBottom": 616,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 616,
+        "rowBottom": 687,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 5,
+        "rowTop": 687,
+        "rowBottom": 758,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 6,
+        "rowTop": 758,
+        "rowBottom": 829,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 7,
+        "rowTop": 829,
+        "rowBottom": 900,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 8,
+        "rowTop": 900,
+        "rowBottom": 972,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 9,
+        "rowTop": 972,
+        "rowBottom": 1043,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 10,
+        "rowTop": 1043,
+        "rowBottom": 1114,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 11,
+        "rowTop": 1114,
+        "rowBottom": 1186,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 12,
+        "rowTop": 1186,
+        "rowBottom": 1257,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 13,
+        "rowTop": 1257,
+        "rowBottom": 1328,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 14,
+        "rowTop": 1328,
+        "rowBottom": 1399,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 15,
+        "rowTop": 1399,
+        "rowBottom": 1471,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 16,
+        "rowTop": 1471,
+        "rowBottom": 1541,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 17,
+        "rowTop": 1541,
+        "rowBottom": 1613,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 1,
+        "rowTop": 402,
+        "rowBottom": 474,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 2,
+        "rowTop": 474,
+        "rowBottom": 544,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 5,
+        "rowTop": 687,
+        "rowBottom": 758,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 6,
+        "rowTop": 758,
+        "rowBottom": 829,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 7,
+        "rowTop": 829,
+        "rowBottom": 900,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 8,
+        "rowTop": 900,
+        "rowBottom": 972,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 9,
+        "rowTop": 972,
+        "rowBottom": 1043,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 10,
+        "rowTop": 1043,
+        "rowBottom": 1114,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 11,
+        "rowTop": 1114,
+        "rowBottom": 1186,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 12,
+        "rowTop": 1186,
+        "rowBottom": 1257,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 13,
+        "rowTop": 1257,
+        "rowBottom": 1328,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      }
+    ]
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel03.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel03.png",
+          "header_y": 263,
+          "header_bottom_y": 397,
+          "footer_y": 1898,
+          "footer_token_val": 41,
+          "panel_size": 42,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "P4",
+          "spaces": 42,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 402,
+              "rowBottom": 472,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 2,
+              "rowTop": 472,
+              "rowBottom": 544,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 544,
+              "rowBottom": 616,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 616,
+              "rowBottom": 687,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 687,
+              "rowBottom": 758,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 758,
+              "rowBottom": 829,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 7,
+              "rowTop": 829,
+              "rowBottom": 900,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 8,
+              "rowTop": 900,
+              "rowBottom": 971,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 9,
+              "rowTop": 971,
+              "rowBottom": 1043,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1043,
+              "rowBottom": 1113,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 11,
+              "rowTop": 1113,
+              "rowBottom": 1185,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 12,
+              "rowTop": 1185,
+              "rowBottom": 1256,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 13,
+              "rowTop": 1256,
+              "rowBottom": 1328,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 14,
+              "rowTop": 1328,
+              "rowBottom": 1399,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 18,
+              "rowTop": 1612,
+              "rowBottom": 1683,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "20 13"
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 402,
+              "rowBottom": 472,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 472,
+              "rowBottom": 544,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 544,
+              "rowBottom": 616,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 616,
+              "rowBottom": 687,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 687,
+              "rowBottom": 758,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 6,
+              "rowTop": 758,
+              "rowBottom": 829,
+              "amperage": 20,
+              "poles": 2,
+              "comboText": "20 12"
+            },
+            {
+              "side": "right",
+              "rowIndex": 8,
+              "rowTop": 900,
+              "rowBottom": 971,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 971,
+              "rowBottom": 1043,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1043,
+              "rowBottom": 1113,
+              "amperage": 30,
+              "poles": 2,
+              "comboText": "30 12"
+            },
+            {
+              "side": "right",
+              "rowIndex": 12,
+              "rowTop": 1185,
+              "rowBottom": 1256,
+              "amperage": 30,
+              "poles": 2,
+              "comboText": "30 12"
+            },
+            {
+              "side": "right",
+              "rowIndex": 14,
+              "rowTop": 1328,
+              "rowBottom": 1399,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "20 13"
+            },
+            {
+              "side": "right",
+              "rowIndex": 17,
+              "rowTop": 1541,
+              "rowBottom": 1612,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 18,
+              "rowTop": 1612,
+              "rowBottom": 1683,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 19,
+              "rowTop": 1683,
+              "rowBottom": 1755,
+              "amperage": 60,
+              "poles": 3,
+              "comboText": "60 13"
+            }
+          ],
+          "breakerCounts": {
+            "1P_20A": 23,
+            "3P_20A": 2,
+            "2P_20A": 1,
+            "2P_30A": 2,
+            "3P_60A": 1
+          },
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 263,
+            "band_y2": 397,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9839330132712373,
+                "box_band": [
+                  37,
+                  3,
+                  155,
+                  60
+                ],
+                "box_page": [
+                  37,
+                  266,
+                  155,
+                  323
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999974966064862,
+                "box_band": [
+                  65,
+                  64,
+                  122,
+                  120
+                ],
+                "box_page": [
+                  65,
+                  327,
+                  122,
+                  383
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.9993834891796252,
+                "box_band": [
+                  449,
+                  71,
+                  797,
+                  129
+                ],
+                "box_page": [
+                  449,
+                  334,
+                  797,
+                  392
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.768573323072253,
+                "box_band": [
+                  1097,
+                  0,
+                  1403,
+                  58
+                ],
+                "box_page": [
+                  1097,
+                  263,
+                  1403,
+                  321
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9947896003723145,
+                "box_band": [
+                  1082,
+                  73,
+                  1228,
+                  133
+                ],
+                "box_page": [
+                  1082,
+                  336,
+                  1228,
+                  396
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.9093584128080057,
+                "box_band": [
+                  1276,
+                  74,
+                  1384,
+                  132
+                ],
+                "box_page": [
+                  1276,
+                  337,
+                  1384,
+                  395
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9904677870111781,
+                "box_band": [
+                  1449,
+                  4,
+                  1566,
+                  60
+                ],
+                "box_page": [
+                  1449,
+                  267,
+                  1566,
+                  323
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.9996657219578715,
+                "box_band": [
+                  1450,
+                  63,
+                  1567,
+                  121
+                ],
+                "box_page": [
+                  1450,
+                  326,
+                  1567,
+                  384
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9999651868806191,
+                "box_band": [
+                  1688,
+                  1,
+                  1771,
+                  56
+                ],
+                "box_page": [
+                  1688,
+                  264,
+                  1771,
+                  319
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.9953181340021627,
+                "box_band": [
+                  1612,
+                  74,
+                  1851,
+                  133
+                ],
+                "box_page": [
+                  1612,
+                  337,
+                  1851,
+                  396
+                ]
+              },
+              {
+                "text": "PH",
+                "conf": 0.9883690050609443,
+                "box_band": [
+                  1909,
+                  71,
+                  1989,
+                  128
+                ],
+                "box_page": [
+                  1909,
+                  334,
+                  1989,
+                  391
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9995137442956511,
+                "box_band": [
+                  2121,
+                  1,
+                  2205,
+                  56
+                ],
+                "box_page": [
+                  2121,
+                  264,
+                  2205,
+                  319
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.9908374127929804,
+                "box_band": [
+                  2044,
+                  74,
+                  2283,
+                  133
+                ],
+                "box_page": [
+                  2044,
+                  337,
+                  2283,
+                  396
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9984513801713037,
+                "box_band": [
+                  2327,
+                  4,
+                  2444,
+                  60
+                ],
+                "box_page": [
+                  2327,
+                  267,
+                  2444,
+                  323
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.8550934791564941,
+                "box_band": [
+                  2328,
+                  63,
+                  2446,
+                  121
+                ],
+                "box_page": [
+                  2328,
+                  326,
+                  2446,
+                  384
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.8146202977765816,
+                "box_band": [
+                  2495,
+                  0,
+                  2800,
+                  58
+                ],
+                "box_page": [
+                  2495,
+                  263,
+                  2800,
+                  321
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9939090609550476,
+                "box_band": [
+                  2481,
+                  73,
+                  2627,
+                  133
+                ],
+                "box_page": [
+                  2481,
+                  336,
+                  2627,
+                  396
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.9288331270217896,
+                "box_band": [
+                  2674,
+                  74,
+                  2782,
+                  132
+                ],
+                "box_page": [
+                  2674,
+                  337,
+                  2782,
+                  395
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.9991013231349051,
+                "box_band": [
+                  3102,
+                  71,
+                  3451,
+                  129
+                ],
+                "box_page": [
+                  3102,
+                  334,
+                  3451,
+                  392
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9936334021180141,
+                "box_band": [
+                  3738,
+                  4,
+                  3855,
+                  60
+                ],
+                "box_page": [
+                  3738,
+                  267,
+                  3855,
+                  323
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999988079074598,
+                "box_band": [
+                  3766,
+                  65,
+                  3823,
+                  120
+                ],
+                "box_page": [
+                  3766,
+                  328,
+                  3823,
+                  383
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel03_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel03_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 163,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9839330132712373,
+                    "box_band": [
+                      37,
+                      3,
+                      155,
+                      60
+                    ],
+                    "box_page": [
+                      37,
+                      266,
+                      155,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999974966064862,
+                    "box_band": [
+                      65,
+                      64,
+                      122,
+                      120
+                    ],
+                    "box_page": [
+                      65,
+                      327,
+                      122,
+                      383
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 163,
+                "x_right": 1078,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.9993834891796252,
+                    "box_band": [
+                      449,
+                      71,
+                      797,
+                      129
+                    ],
+                    "box_page": [
+                      449,
+                      334,
+                      797,
+                      392
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1078,
+                "x_right": 1419,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.768573323072253,
+                    "box_band": [
+                      1097,
+                      0,
+                      1403,
+                      58
+                    ],
+                    "box_page": [
+                      1097,
+                      263,
+                      1403,
+                      321
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9947896003723145,
+                    "box_band": [
+                      1082,
+                      73,
+                      1228,
+                      133
+                    ],
+                    "box_page": [
+                      1082,
+                      336,
+                      1228,
+                      396
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.9093584128080057,
+                    "box_band": [
+                      1276,
+                      74,
+                      1384,
+                      132
+                    ],
+                    "box_page": [
+                      1276,
+                      337,
+                      1384,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1419,
+                "x_right": 1597,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9904677870111781,
+                    "box_band": [
+                      1449,
+                      4,
+                      1566,
+                      60
+                    ],
+                    "box_page": [
+                      1449,
+                      267,
+                      1566,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.9996657219578715,
+                    "box_band": [
+                      1450,
+                      63,
+                      1567,
+                      121
+                    ],
+                    "box_page": [
+                      1450,
+                      326,
+                      1567,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1597,
+                "x_right": 1864,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9999651868806191,
+                    "box_band": [
+                      1688,
+                      1,
+                      1771,
+                      56
+                    ],
+                    "box_page": [
+                      1688,
+                      264,
+                      1771,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.9953181340021627,
+                    "box_band": [
+                      1612,
+                      74,
+                      1851,
+                      133
+                    ],
+                    "box_page": [
+                      1612,
+                      337,
+                      1851,
+                      396
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 1864,
+                "x_right": 2029,
+                "items": [
+                  {
+                    "text": "PH",
+                    "conf": 0.9883690050609443,
+                    "box_band": [
+                      1909,
+                      71,
+                      1989,
+                      128
+                    ],
+                    "box_page": [
+                      1909,
+                      334,
+                      1989,
+                      391
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2029,
+                "x_right": 2297,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9995137442956511,
+                    "box_band": [
+                      2121,
+                      1,
+                      2205,
+                      56
+                    ],
+                    "box_page": [
+                      2121,
+                      264,
+                      2205,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.9908374127929804,
+                    "box_band": [
+                      2044,
+                      74,
+                      2283,
+                      133
+                    ],
+                    "box_page": [
+                      2044,
+                      337,
+                      2283,
+                      396
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2297,
+                "x_right": 2475,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9984513801713037,
+                    "box_band": [
+                      2327,
+                      4,
+                      2444,
+                      60
+                    ],
+                    "box_page": [
+                      2327,
+                      267,
+                      2444,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.8550934791564941,
+                    "box_band": [
+                      2328,
+                      63,
+                      2446,
+                      121
+                    ],
+                    "box_page": [
+                      2328,
+                      326,
+                      2446,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2475,
+                "x_right": 2817,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.8146202977765816,
+                    "box_band": [
+                      2495,
+                      0,
+                      2800,
+                      58
+                    ],
+                    "box_page": [
+                      2495,
+                      263,
+                      2800,
+                      321
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9939090609550476,
+                    "box_band": [
+                      2481,
+                      73,
+                      2627,
+                      133
+                    ],
+                    "box_page": [
+                      2481,
+                      336,
+                      2627,
+                      396
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.9288331270217896,
+                    "box_band": [
+                      2674,
+                      74,
+                      2782,
+                      132
+                    ],
+                    "box_page": [
+                      2674,
+                      337,
+                      2782,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 2817,
+                "x_right": 3730,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.9991013231349051,
+                    "box_band": [
+                      3102,
+                      71,
+                      3451,
+                      129
+                    ],
+                    "box_page": [
+                      3102,
+                      334,
+                      3451,
+                      392
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 3730,
+                "x_right": 3864,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9936334021180141,
+                    "box_band": [
+                      3738,
+                      4,
+                      3855,
+                      60
+                    ],
+                    "box_page": [
+                      3738,
+                      267,
+                      3855,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999988079074598,
+                    "box_band": [
+                      3766,
+                      65,
+                      3823,
+                      120
+                    ],
+                    "box_page": [
+                      3766,
+                      328,
+                      3823,
+                      383
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "combo": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 163,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 163,
+                  "x_right": 1078,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1078,
+                  "x_right": 1419,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 4,
+                  "x_left": 1419,
+                  "x_right": 1597,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 5,
+                  "x_left": 1597,
+                  "x_right": 1864,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 1864,
+                  "x_right": 2029,
+                  "texts": [
+                    "PH"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2029,
+                  "x_right": 2297,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2297,
+                  "x_right": 2475,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 9,
+                  "x_left": 2475,
+                  "x_right": 2817,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 10,
+                  "x_left": 2817,
+                  "x_right": 3730,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 3730,
+                  "x_right": 3864,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [
+              {
+                "index": 5,
+                "role": "combo",
+                "x_left": 1597,
+                "x_right": 1864,
+                "y_top": 397,
+                "y_bottom": 1898,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel03_parser_body_combined_col5_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 7,
+                "role": "combo",
+                "x_left": 2029,
+                "x_right": 2297,
+                "y_top": 397,
+                "y_bottom": 1898,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel03_parser_body_combined_col7_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 402,
+                "rowBottom": 472,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 2,
+                "rowTop": 472,
+                "rowBottom": 544,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 544,
+                "rowBottom": 616,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 616,
+                "rowBottom": 687,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 687,
+                "rowBottom": 758,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 758,
+                "rowBottom": 829,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 7,
+                "rowTop": 829,
+                "rowBottom": 900,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 8,
+                "rowTop": 900,
+                "rowBottom": 971,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 9,
+                "rowTop": 971,
+                "rowBottom": 1043,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1043,
+                "rowBottom": 1113,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 11,
+                "rowTop": 1113,
+                "rowBottom": 1185,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 12,
+                "rowTop": 1185,
+                "rowBottom": 1256,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 13,
+                "rowTop": 1256,
+                "rowBottom": 1328,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 14,
+                "rowTop": 1328,
+                "rowBottom": 1399,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 18,
+                "rowTop": 1612,
+                "rowBottom": 1683,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "20 13"
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 402,
+                "rowBottom": 472,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 472,
+                "rowBottom": 544,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 544,
+                "rowBottom": 616,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 616,
+                "rowBottom": 687,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 687,
+                "rowBottom": 758,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 6,
+                "rowTop": 758,
+                "rowBottom": 829,
+                "amperage": 20,
+                "poles": 2,
+                "comboText": "20 12"
+              },
+              {
+                "side": "right",
+                "rowIndex": 8,
+                "rowTop": 900,
+                "rowBottom": 971,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 971,
+                "rowBottom": 1043,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1043,
+                "rowBottom": 1113,
+                "amperage": 30,
+                "poles": 2,
+                "comboText": "30 12"
+              },
+              {
+                "side": "right",
+                "rowIndex": 12,
+                "rowTop": 1185,
+                "rowBottom": 1256,
+                "amperage": 30,
+                "poles": 2,
+                "comboText": "30 12"
+              },
+              {
+                "side": "right",
+                "rowIndex": 14,
+                "rowTop": 1328,
+                "rowBottom": 1399,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "20 13"
+              },
+              {
+                "side": "right",
+                "rowIndex": 17,
+                "rowTop": 1541,
+                "rowBottom": 1612,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 18,
+                "rowTop": 1612,
+                "rowBottom": 1683,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 19,
+                "rowTop": 1683,
+                "rowBottom": 1755,
+                "amperage": 60,
+                "poles": 3,
+                "comboText": "60 13"
+              }
+            ],
+            "breakerCounts": {
+              "1P_20A": 23,
+              "3P_20A": 2,
+              "2P_20A": 1,
+              "2P_30A": 2,
+              "3P_60A": 1
+            },
+            "gfiBreakerCounts": {}
+          },
+          "reviewOverlayPath": "review_overlays/P4_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "P4",
+          "attrs": {
+            "amperage": 400,
+            "voltage": 208,
+            "intRating": null,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              31,
+              31,
+              640,
+              129
+            ],
+            "voltage": [
+              1741,
+              114,
+              1920,
+              187
+            ],
+            "bus": [
+              1495,
+              192,
+              1751,
+              257
+            ]
+          },
+          "boxImageShape": {
+            "w": 3895,
+            "h": 3146
+          },
+          "reviewOverlayPath": "review_overlays/P4_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 1,
+        "rowTop": 402,
+        "rowBottom": 472,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 2,
+        "rowTop": 472,
+        "rowBottom": 544,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 3,
+        "rowTop": 544,
+        "rowBottom": 616,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 616,
+        "rowBottom": 687,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 5,
+        "rowTop": 687,
+        "rowBottom": 758,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 6,
+        "rowTop": 758,
+        "rowBottom": 829,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 7,
+        "rowTop": 829,
+        "rowBottom": 900,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 8,
+        "rowTop": 900,
+        "rowBottom": 971,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 9,
+        "rowTop": 971,
+        "rowBottom": 1043,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 10,
+        "rowTop": 1043,
+        "rowBottom": 1113,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 11,
+        "rowTop": 1113,
+        "rowBottom": 1185,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 12,
+        "rowTop": 1185,
+        "rowBottom": 1256,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 13,
+        "rowTop": 1256,
+        "rowBottom": 1328,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 14,
+        "rowTop": 1328,
+        "rowBottom": 1399,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 18,
+        "rowTop": 1612,
+        "rowBottom": 1683,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "20 13"
+      },
+      {
+        "side": "right",
+        "rowIndex": 1,
+        "rowTop": 402,
+        "rowBottom": 472,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 2,
+        "rowTop": 472,
+        "rowBottom": 544,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 3,
+        "rowTop": 544,
+        "rowBottom": 616,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 4,
+        "rowTop": 616,
+        "rowBottom": 687,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 5,
+        "rowTop": 687,
+        "rowBottom": 758,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 6,
+        "rowTop": 758,
+        "rowBottom": 829,
+        "amperage": 20,
+        "poles": 2,
+        "comboText": "20 12"
+      },
+      {
+        "side": "right",
+        "rowIndex": 8,
+        "rowTop": 900,
+        "rowBottom": 971,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 9,
+        "rowTop": 971,
+        "rowBottom": 1043,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 10,
+        "rowTop": 1043,
+        "rowBottom": 1113,
+        "amperage": 30,
+        "poles": 2,
+        "comboText": "30 12"
+      },
+      {
+        "side": "right",
+        "rowIndex": 12,
+        "rowTop": 1185,
+        "rowBottom": 1256,
+        "amperage": 30,
+        "poles": 2,
+        "comboText": "30 12"
+      },
+      {
+        "side": "right",
+        "rowIndex": 14,
+        "rowTop": 1328,
+        "rowBottom": 1399,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "20 13"
+      },
+      {
+        "side": "right",
+        "rowIndex": 17,
+        "rowTop": 1541,
+        "rowBottom": 1612,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 18,
+        "rowTop": 1612,
+        "rowBottom": 1683,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 19,
+        "rowTop": 1683,
+        "rowBottom": 1755,
+        "amperage": 60,
+        "poles": 3,
+        "comboText": "60 13"
+      }
+    ]
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel04.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel04.png",
+          "header_y": 263,
+          "header_bottom_y": 398,
+          "footer_y": 1893,
+          "footer_token_val": 42,
+          "panel_size": 42,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "P6 (2)",
+          "spaces": 42,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 402,
+              "rowBottom": 474,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "20 13"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 616,
+              "rowBottom": 687,
+              "amperage": 20,
+              "poles": 3,
+              "comboText": "20 13"
+            },
+            {
+              "side": "left",
+              "rowIndex": 7,
+              "rowTop": 829,
+              "rowBottom": 900,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 3"
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1043,
+              "rowBottom": 1114,
+              "amperage": 50,
+              "poles": 2,
+              "comboText": "50 12"
+            },
+            {
+              "side": "left",
+              "rowIndex": 13,
+              "rowTop": 1257,
+              "rowBottom": 1328,
+              "amperage": 30,
+              "poles": 3,
+              "comboText": "30 13"
+            },
+            {
+              "side": "left",
+              "rowIndex": 16,
+              "rowTop": 1471,
+              "rowBottom": 1541,
+              "amperage": 30,
+              "poles": 3,
+              "comboText": "30 13"
+            },
+            {
+              "side": "left",
+              "rowIndex": 19,
+              "rowTop": 1684,
+              "rowBottom": 1755,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 402,
+              "rowBottom": 474,
+              "amperage": 30,
+              "poles": 3,
+              "comboText": "30 13"
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 616,
+              "rowBottom": 687,
+              "amperage": 15,
+              "poles": 1,
+              "comboText": "15 1 2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 6,
+              "rowTop": 758,
+              "rowBottom": 829,
+              "amperage": 15,
+              "poles": 2,
+              "comboText": "15 12"
+            },
+            {
+              "side": "right",
+              "rowIndex": 8,
+              "rowTop": 900,
+              "rowBottom": 972,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 972,
+              "rowBottom": 1043,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1043,
+              "rowBottom": 1114,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 11,
+              "rowTop": 1114,
+              "rowBottom": 1186,
+              "amperage": 15,
+              "poles": 1,
+              "comboText": "15 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 12,
+              "rowTop": 1186,
+              "rowBottom": 1257,
+              "amperage": 15,
+              "poles": 1,
+              "comboText": "15 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 13,
+              "rowTop": 1257,
+              "rowBottom": 1328,
+              "amperage": 15,
+              "poles": 1,
+              "comboText": "15 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 14,
+              "rowTop": 1328,
+              "rowBottom": 1399,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 15,
+              "rowTop": 1399,
+              "rowBottom": 1471,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 16,
+              "rowTop": 1471,
+              "rowBottom": 1541,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "right",
+              "rowIndex": 17,
+              "rowTop": 1541,
+              "rowBottom": 1613,
+              "amperage": 20,
+              "poles": 2,
+              "comboText": "20 12"
+            }
+          ],
+          "breakerCounts": {
+            "3P_20A": 2,
+            "1P_20A": 8,
+            "2P_50A": 1,
+            "3P_30A": 3,
+            "1P_15A": 4,
+            "2P_15A": 1,
+            "2P_20A": 1
+          },
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 263,
+            "band_y2": 398,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9592708473217989,
+                "box_band": [
+                  36,
+                  3,
+                  154,
+                  60
+                ],
+                "box_page": [
+                  36,
+                  266,
+                  154,
+                  323
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999977350247811,
+                "box_band": [
+                  64,
+                  65,
+                  121,
+                  121
+                ],
+                "box_page": [
+                  64,
+                  328,
+                  121,
+                  384
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.9996665206170049,
+                "box_band": [
+                  448,
+                  73,
+                  796,
+                  131
+                ],
+                "box_page": [
+                  448,
+                  336,
+                  796,
+                  394
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.7870897829890083,
+                "box_band": [
+                  1096,
+                  0,
+                  1401,
+                  57
+                ],
+                "box_page": [
+                  1096,
+                  263,
+                  1401,
+                  320
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9951140880584717,
+                "box_band": [
+                  1082,
+                  74,
+                  1227,
+                  132
+                ],
+                "box_page": [
+                  1082,
+                  337,
+                  1227,
+                  395
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.7973318696022034,
+                "box_band": [
+                  1275,
+                  74,
+                  1383,
+                  132
+                ],
+                "box_page": [
+                  1275,
+                  337,
+                  1383,
+                  395
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9887237162833505,
+                "box_band": [
+                  1448,
+                  4,
+                  1565,
+                  60
+                ],
+                "box_page": [
+                  1448,
+                  267,
+                  1565,
+                  323
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.9993938783014352,
+                "box_band": [
+                  1449,
+                  64,
+                  1566,
+                  121
+                ],
+                "box_page": [
+                  1449,
+                  327,
+                  1566,
+                  384
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9999430179363306,
+                "box_band": [
+                  1687,
+                  1,
+                  1770,
+                  56
+                ],
+                "box_page": [
+                  1687,
+                  264,
+                  1770,
+                  319
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.8930245254381414,
+                "box_band": [
+                  1610,
+                  73,
+                  1848,
+                  133
+                ],
+                "box_page": [
+                  1610,
+                  336,
+                  1848,
+                  396
+                ]
+              },
+              {
+                "text": "PH",
+                "conf": 0.9950053821152471,
+                "box_band": [
+                  1908,
+                  73,
+                  1988,
+                  129
+                ],
+                "box_page": [
+                  1908,
+                  336,
+                  1988,
+                  392
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9994323291545549,
+                "box_band": [
+                  2119,
+                  1,
+                  2204,
+                  56
+                ],
+                "box_page": [
+                  2119,
+                  264,
+                  2204,
+                  319
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.9731066257906017,
+                "box_band": [
+                  2043,
+                  74,
+                  2281,
+                  132
+                ],
+                "box_page": [
+                  2043,
+                  337,
+                  2281,
+                  395
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9976208061574289,
+                "box_band": [
+                  2326,
+                  4,
+                  2443,
+                  60
+                ],
+                "box_page": [
+                  2326,
+                  267,
+                  2443,
+                  323
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.8547890186309814,
+                "box_band": [
+                  2327,
+                  63,
+                  2445,
+                  121
+                ],
+                "box_page": [
+                  2327,
+                  326,
+                  2445,
+                  384
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.9711620182486789,
+                "box_band": [
+                  2494,
+                  0,
+                  2799,
+                  58
+                ],
+                "box_page": [
+                  2494,
+                  263,
+                  2799,
+                  321
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9928666353225708,
+                "box_band": [
+                  2481,
+                  73,
+                  2625,
+                  133
+                ],
+                "box_page": [
+                  2481,
+                  336,
+                  2625,
+                  396
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.8407386729026032,
+                "box_band": [
+                  2673,
+                  74,
+                  2782,
+                  134
+                ],
+                "box_page": [
+                  2673,
+                  337,
+                  2782,
+                  397
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.5326339214232665,
+                "box_band": [
+                  3101,
+                  73,
+                  3450,
+                  131
+                ],
+                "box_page": [
+                  3101,
+                  336,
+                  3450,
+                  394
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9902326406012792,
+                "box_band": [
+                  3737,
+                  4,
+                  3854,
+                  60
+                ],
+                "box_page": [
+                  3737,
+                  267,
+                  3854,
+                  323
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9492977401346513,
+                "box_band": [
+                  3766,
+                  65,
+                  3821,
+                  120
+                ],
+                "box_page": [
+                  3766,
+                  328,
+                  3821,
+                  383
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel04_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel04_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 32,
+                "x_right": 162,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9592708473217989,
+                    "box_band": [
+                      36,
+                      3,
+                      154,
+                      60
+                    ],
+                    "box_page": [
+                      36,
+                      266,
+                      154,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999977350247811,
+                    "box_band": [
+                      64,
+                      65,
+                      121,
+                      121
+                    ],
+                    "box_page": [
+                      64,
+                      328,
+                      121,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 162,
+                "x_right": 1077,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.9996665206170049,
+                    "box_band": [
+                      448,
+                      73,
+                      796,
+                      131
+                    ],
+                    "box_page": [
+                      448,
+                      336,
+                      796,
+                      394
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1077,
+                "x_right": 1418,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.7870897829890083,
+                    "box_band": [
+                      1096,
+                      0,
+                      1401,
+                      57
+                    ],
+                    "box_page": [
+                      1096,
+                      263,
+                      1401,
+                      320
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9951140880584717,
+                    "box_band": [
+                      1082,
+                      74,
+                      1227,
+                      132
+                    ],
+                    "box_page": [
+                      1082,
+                      337,
+                      1227,
+                      395
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.7973318696022034,
+                    "box_band": [
+                      1275,
+                      74,
+                      1383,
+                      132
+                    ],
+                    "box_page": [
+                      1275,
+                      337,
+                      1383,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1418,
+                "x_right": 1596,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9887237162833505,
+                    "box_band": [
+                      1448,
+                      4,
+                      1565,
+                      60
+                    ],
+                    "box_page": [
+                      1448,
+                      267,
+                      1565,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.9993938783014352,
+                    "box_band": [
+                      1449,
+                      64,
+                      1566,
+                      121
+                    ],
+                    "box_page": [
+                      1449,
+                      327,
+                      1566,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1596,
+                "x_right": 1863,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9999430179363306,
+                    "box_band": [
+                      1687,
+                      1,
+                      1770,
+                      56
+                    ],
+                    "box_page": [
+                      1687,
+                      264,
+                      1770,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.8930245254381414,
+                    "box_band": [
+                      1610,
+                      73,
+                      1848,
+                      133
+                    ],
+                    "box_page": [
+                      1610,
+                      336,
+                      1848,
+                      396
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 1863,
+                "x_right": 2028,
+                "items": [
+                  {
+                    "text": "PH",
+                    "conf": 0.9950053821152471,
+                    "box_band": [
+                      1908,
+                      73,
+                      1988,
+                      129
+                    ],
+                    "box_page": [
+                      1908,
+                      336,
+                      1988,
+                      392
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2028,
+                "x_right": 2296,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9994323291545549,
+                    "box_band": [
+                      2119,
+                      1,
+                      2204,
+                      56
+                    ],
+                    "box_page": [
+                      2119,
+                      264,
+                      2204,
+                      319
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.9731066257906017,
+                    "box_band": [
+                      2043,
+                      74,
+                      2281,
+                      132
+                    ],
+                    "box_page": [
+                      2043,
+                      337,
+                      2281,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2296,
+                "x_right": 2474,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9976208061574289,
+                    "box_band": [
+                      2326,
+                      4,
+                      2443,
+                      60
+                    ],
+                    "box_page": [
+                      2326,
+                      267,
+                      2443,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.8547890186309814,
+                    "box_band": [
+                      2327,
+                      63,
+                      2445,
+                      121
+                    ],
+                    "box_page": [
+                      2327,
+                      326,
+                      2445,
+                      384
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2474,
+                "x_right": 2816,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.9711620182486789,
+                    "box_band": [
+                      2494,
+                      0,
+                      2799,
+                      58
+                    ],
+                    "box_page": [
+                      2494,
+                      263,
+                      2799,
+                      321
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9928666353225708,
+                    "box_band": [
+                      2481,
+                      73,
+                      2625,
+                      133
+                    ],
+                    "box_page": [
+                      2481,
+                      336,
+                      2625,
+                      396
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.8407386729026032,
+                    "box_band": [
+                      2673,
+                      74,
+                      2782,
+                      134
+                    ],
+                    "box_page": [
+                      2673,
+                      337,
+                      2782,
+                      397
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 2816,
+                "x_right": 3729,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.5326339214232665,
+                    "box_band": [
+                      3101,
+                      73,
+                      3450,
+                      131
+                    ],
+                    "box_page": [
+                      3101,
+                      336,
+                      3450,
+                      394
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 3729,
+                "x_right": 3863,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9902326406012792,
+                    "box_band": [
+                      3737,
+                      4,
+                      3854,
+                      60
+                    ],
+                    "box_page": [
+                      3737,
+                      267,
+                      3854,
+                      323
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9492977401346513,
+                    "box_band": [
+                      3766,
+                      65,
+                      3821,
+                      120
+                    ],
+                    "box_page": [
+                      3766,
+                      328,
+                      3821,
+                      383
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "combo": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 32,
+                  "x_right": 162,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 162,
+                  "x_right": 1077,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1077,
+                  "x_right": 1418,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 4,
+                  "x_left": 1418,
+                  "x_right": 1596,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 5,
+                  "x_left": 1596,
+                  "x_right": 1863,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 1863,
+                  "x_right": 2028,
+                  "texts": [
+                    "PH"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2028,
+                  "x_right": 2296,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2296,
+                  "x_right": 2474,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 9,
+                  "x_left": 2474,
+                  "x_right": 2816,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 10,
+                  "x_left": 2816,
+                  "x_right": 3729,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 3729,
+                  "x_right": 3863,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [
+              {
+                "index": 5,
+                "role": "combo",
+                "x_left": 1596,
+                "x_right": 1863,
+                "y_top": 398,
+                "y_bottom": 1893,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel04_parser_body_combined_col5_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 7,
+                "role": "combo",
+                "x_left": 2028,
+                "x_right": 2296,
+                "y_top": 398,
+                "y_bottom": 1893,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel04_parser_body_combined_col7_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 402,
+                "rowBottom": 474,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "20 13"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 616,
+                "rowBottom": 687,
+                "amperage": 20,
+                "poles": 3,
+                "comboText": "20 13"
+              },
+              {
+                "side": "left",
+                "rowIndex": 7,
+                "rowTop": 829,
+                "rowBottom": 900,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 3"
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1043,
+                "rowBottom": 1114,
+                "amperage": 50,
+                "poles": 2,
+                "comboText": "50 12"
+              },
+              {
+                "side": "left",
+                "rowIndex": 13,
+                "rowTop": 1257,
+                "rowBottom": 1328,
+                "amperage": 30,
+                "poles": 3,
+                "comboText": "30 13"
+              },
+              {
+                "side": "left",
+                "rowIndex": 16,
+                "rowTop": 1471,
+                "rowBottom": 1541,
+                "amperage": 30,
+                "poles": 3,
+                "comboText": "30 13"
+              },
+              {
+                "side": "left",
+                "rowIndex": 19,
+                "rowTop": 1684,
+                "rowBottom": 1755,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 402,
+                "rowBottom": 474,
+                "amperage": 30,
+                "poles": 3,
+                "comboText": "30 13"
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 616,
+                "rowBottom": 687,
+                "amperage": 15,
+                "poles": 1,
+                "comboText": "15 1 2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 6,
+                "rowTop": 758,
+                "rowBottom": 829,
+                "amperage": 15,
+                "poles": 2,
+                "comboText": "15 12"
+              },
+              {
+                "side": "right",
+                "rowIndex": 8,
+                "rowTop": 900,
+                "rowBottom": 972,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 972,
+                "rowBottom": 1043,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1043,
+                "rowBottom": 1114,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 11,
+                "rowTop": 1114,
+                "rowBottom": 1186,
+                "amperage": 15,
+                "poles": 1,
+                "comboText": "15 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 12,
+                "rowTop": 1186,
+                "rowBottom": 1257,
+                "amperage": 15,
+                "poles": 1,
+                "comboText": "15 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 13,
+                "rowTop": 1257,
+                "rowBottom": 1328,
+                "amperage": 15,
+                "poles": 1,
+                "comboText": "15 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 14,
+                "rowTop": 1328,
+                "rowBottom": 1399,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 15,
+                "rowTop": 1399,
+                "rowBottom": 1471,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 16,
+                "rowTop": 1471,
+                "rowBottom": 1541,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "right",
+                "rowIndex": 17,
+                "rowTop": 1541,
+                "rowBottom": 1613,
+                "amperage": 20,
+                "poles": 2,
+                "comboText": "20 12"
+              }
+            ],
+            "breakerCounts": {
+              "3P_20A": 2,
+              "1P_20A": 8,
+              "2P_50A": 1,
+              "3P_30A": 3,
+              "1P_15A": 4,
+              "2P_15A": 1,
+              "2P_20A": 1
+            },
+            "gfiBreakerCounts": {}
+          },
+          "reviewOverlayPath": "review_overlays/P6_2_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "P6 (2)",
+          "attrs": {
+            "amperage": 200,
+            "voltage": 208,
+            "intRating": null,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              28,
+              31,
+              637,
+              129
+            ],
+            "voltage": [
+              1741,
+              116,
+              1919,
+              184
+            ],
+            "bus": [
+              1495,
+              192,
+              1751,
+              257
+            ]
+          },
+          "boxImageShape": {
+            "w": 3895,
+            "h": 3143
+          },
+          "reviewOverlayPath": "review_overlays/P6_2_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 1,
+        "rowTop": 402,
+        "rowBottom": 474,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "20 13"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 616,
+        "rowBottom": 687,
+        "amperage": 20,
+        "poles": 3,
+        "comboText": "20 13"
+      },
+      {
+        "side": "left",
+        "rowIndex": 7,
+        "rowTop": 829,
+        "rowBottom": 900,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 3"
+      },
+      {
+        "side": "left",
+        "rowIndex": 10,
+        "rowTop": 1043,
+        "rowBottom": 1114,
+        "amperage": 50,
+        "poles": 2,
+        "comboText": "50 12"
+      },
+      {
+        "side": "left",
+        "rowIndex": 13,
+        "rowTop": 1257,
+        "rowBottom": 1328,
+        "amperage": 30,
+        "poles": 3,
+        "comboText": "30 13"
+      },
+      {
+        "side": "left",
+        "rowIndex": 16,
+        "rowTop": 1471,
+        "rowBottom": 1541,
+        "amperage": 30,
+        "poles": 3,
+        "comboText": "30 13"
+      },
+      {
+        "side": "left",
+        "rowIndex": 19,
+        "rowTop": 1684,
+        "rowBottom": 1755,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 1,
+        "rowTop": 402,
+        "rowBottom": 474,
+        "amperage": 30,
+        "poles": 3,
+        "comboText": "30 13"
+      },
+      {
+        "side": "right",
+        "rowIndex": 4,
+        "rowTop": 616,
+        "rowBottom": 687,
+        "amperage": 15,
+        "poles": 1,
+        "comboText": "15 1 2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 6,
+        "rowTop": 758,
+        "rowBottom": 829,
+        "amperage": 15,
+        "poles": 2,
+        "comboText": "15 12"
+      },
+      {
+        "side": "right",
+        "rowIndex": 8,
+        "rowTop": 900,
+        "rowBottom": 972,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 9,
+        "rowTop": 972,
+        "rowBottom": 1043,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 10,
+        "rowTop": 1043,
+        "rowBottom": 1114,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 11,
+        "rowTop": 1114,
+        "rowBottom": 1186,
+        "amperage": 15,
+        "poles": 1,
+        "comboText": "15 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 12,
+        "rowTop": 1186,
+        "rowBottom": 1257,
+        "amperage": 15,
+        "poles": 1,
+        "comboText": "15 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 13,
+        "rowTop": 1257,
+        "rowBottom": 1328,
+        "amperage": 15,
+        "poles": 1,
+        "comboText": "15 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 14,
+        "rowTop": 1328,
+        "rowBottom": 1399,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 15,
+        "rowTop": 1399,
+        "rowBottom": 1471,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 16,
+        "rowTop": 1471,
+        "rowBottom": 1541,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "right",
+        "rowIndex": 17,
+        "rowTop": 1541,
+        "rowBottom": 1613,
+        "amperage": 20,
+        "poles": 2,
+        "comboText": "20 12"
+      }
+    ]
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel05.png",
+    "results": {
+      "apiVersion": "API_9",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv9.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/I_electrical_filtered_page001_panel05.png",
+          "header_y": 266,
+          "header_bottom_y": 400,
+          "footer_y": 1040,
+          "footer_token_val": 17,
+          "panel_size": 18,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "S",
+          "spaces": 18,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 404,
+              "rowBottom": 476,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 2,
+              "rowTop": 476,
+              "rowBottom": 546,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 546,
+              "rowBottom": 618,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 618,
+              "rowBottom": 689,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 689,
+              "rowBottom": 760,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 11"
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 760,
+              "rowBottom": 831,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 7,
+              "rowTop": 831,
+              "rowBottom": 902,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 546,
+              "rowBottom": 618,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 618,
+              "rowBottom": 689,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 689,
+              "rowBottom": 760,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 6,
+              "rowTop": 760,
+              "rowBottom": 831,
+              "amperage": 20,
+              "poles": 1,
+              "comboText": "20 1 1"
+            }
+          ],
+          "breakerCounts": {
+            "1P_20A": 11
+          },
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 266,
+            "band_y2": 400,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.6816371322053653,
+                "box_band": [
+                  36,
+                  2,
+                  157,
+                  63
+                ],
+                "box_page": [
+                  36,
+                  268,
+                  157,
+                  329
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999997615814351,
+                "box_band": [
+                  65,
+                  64,
+                  122,
+                  121
+                ],
+                "box_page": [
+                  65,
+                  330,
+                  122,
+                  387
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.979192091463673,
+                "box_band": [
+                  450,
+                  70,
+                  800,
+                  131
+                ],
+                "box_page": [
+                  450,
+                  336,
+                  800,
+                  397
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.9881126117489009,
+                "box_band": [
+                  1100,
+                  0,
+                  1404,
+                  56
+                ],
+                "box_page": [
+                  1100,
+                  266,
+                  1404,
+                  322
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9949253797531128,
+                "box_band": [
+                  1086,
+                  73,
+                  1229,
+                  133
+                ],
+                "box_page": [
+                  1086,
+                  339,
+                  1229,
+                  399
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.6547149173454346,
+                "box_band": [
+                  1278,
+                  74,
+                  1388,
+                  133
+                ],
+                "box_page": [
+                  1278,
+                  340,
+                  1388,
+                  399
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9838623456752171,
+                "box_band": [
+                  1452,
+                  4,
+                  1570,
+                  60
+                ],
+                "box_page": [
+                  1452,
+                  270,
+                  1570,
+                  326
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.9993439840226935,
+                "box_band": [
+                  1453,
+                  63,
+                  1570,
+                  121
+                ],
+                "box_page": [
+                  1453,
+                  329,
+                  1570,
+                  387
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9978595273848081,
+                "box_band": [
+                  1691,
+                  1,
+                  1776,
+                  56
+                ],
+                "box_page": [
+                  1691,
+                  267,
+                  1776,
+                  322
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.8544165799725194,
+                "box_band": [
+                  1615,
+                  73,
+                  1855,
+                  133
+                ],
+                "box_page": [
+                  1615,
+                  339,
+                  1855,
+                  399
+                ]
+              },
+              {
+                "text": "PH",
+                "conf": 0.9985530683094603,
+                "box_band": [
+                  1913,
+                  72,
+                  1993,
+                  129
+                ],
+                "box_page": [
+                  1913,
+                  338,
+                  1993,
+                  395
+                ]
+              },
+              {
+                "text": "CB",
+                "conf": 0.9997070919688392,
+                "box_band": [
+                  2126,
+                  1,
+                  2208,
+                  56
+                ],
+                "box_page": [
+                  2126,
+                  267,
+                  2208,
+                  322
+                ]
+              },
+              {
+                "text": "AMPSI #P",
+                "conf": 0.8514374492106154,
+                "box_band": [
+                  2047,
+                  74,
+                  2288,
+                  133
+                ],
+                "box_page": [
+                  2047,
+                  340,
+                  2288,
+                  399
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.8463591148398921,
+                "box_band": [
+                  2331,
+                  4,
+                  2450,
+                  60
+                ],
+                "box_page": [
+                  2331,
+                  270,
+                  2450,
+                  326
+                ]
+              },
+              {
+                "text": "TAG",
+                "conf": 0.8877102732658386,
+                "box_band": [
+                  2332,
+                  64,
+                  2451,
+                  121
+                ],
+                "box_page": [
+                  2332,
+                  330,
+                  2451,
+                  387
+                ]
+              },
+              {
+                "text": "CONN LOAD",
+                "conf": 0.9896405439193284,
+                "box_band": [
+                  2501,
+                  0,
+                  2806,
+                  58
+                ],
+                "box_page": [
+                  2501,
+                  266,
+                  2806,
+                  324
+                ]
+              },
+              {
+                "text": "TYPE",
+                "conf": 0.9970701932907104,
+                "box_band": [
+                  2486,
+                  73,
+                  2632,
+                  133
+                ],
+                "box_page": [
+                  2486,
+                  339,
+                  2632,
+                  399
+                ]
+              },
+              {
+                "text": "kVA",
+                "conf": 0.9378962612852624,
+                "box_band": [
+                  2679,
+                  74,
+                  2787,
+                  132
+                ],
+                "box_page": [
+                  2679,
+                  340,
+                  2787,
+                  398
+                ]
+              },
+              {
+                "text": "DESCRIPTION",
+                "conf": 0.9998742663460922,
+                "box_band": [
+                  3108,
+                  70,
+                  3458,
+                  131
+                ],
+                "box_page": [
+                  3108,
+                  336,
+                  3458,
+                  397
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.991777897644664,
+                "box_band": [
+                  3746,
+                  4,
+                  3863,
+                  60
+                ],
+                "box_page": [
+                  3746,
+                  270,
+                  3863,
+                  326
+                ]
+              },
+              {
+                "text": "#",
+                "conf": 0.9999989271166818,
+                "box_band": [
+                  3774,
+                  65,
+                  3831,
+                  120
+                ],
+                "box_page": [
+                  3774,
+                  331,
+                  3831,
+                  386
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel05_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel05_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 163,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.6816371322053653,
+                    "box_band": [
+                      36,
+                      2,
+                      157,
+                      63
+                    ],
+                    "box_page": [
+                      36,
+                      268,
+                      157,
+                      329
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999997615814351,
+                    "box_band": [
+                      65,
+                      64,
+                      122,
+                      121
+                    ],
+                    "box_page": [
+                      65,
+                      330,
+                      122,
+                      387
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 163,
+                "x_right": 1080,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.979192091463673,
+                    "box_band": [
+                      450,
+                      70,
+                      800,
+                      131
+                    ],
+                    "box_page": [
+                      450,
+                      336,
+                      800,
+                      397
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1080,
+                "x_right": 1422,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.9881126117489009,
+                    "box_band": [
+                      1100,
+                      0,
+                      1404,
+                      56
+                    ],
+                    "box_page": [
+                      1100,
+                      266,
+                      1404,
+                      322
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9949253797531128,
+                    "box_band": [
+                      1086,
+                      73,
+                      1229,
+                      133
+                    ],
+                    "box_page": [
+                      1086,
+                      339,
+                      1229,
+                      399
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.6547149173454346,
+                    "box_band": [
+                      1278,
+                      74,
+                      1388,
+                      133
+                    ],
+                    "box_page": [
+                      1278,
+                      340,
+                      1388,
+                      399
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1422,
+                "x_right": 1600,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9838623456752171,
+                    "box_band": [
+                      1452,
+                      4,
+                      1570,
+                      60
+                    ],
+                    "box_page": [
+                      1452,
+                      270,
+                      1570,
+                      326
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.9993439840226935,
+                    "box_band": [
+                      1453,
+                      63,
+                      1570,
+                      121
+                    ],
+                    "box_page": [
+                      1453,
+                      329,
+                      1570,
+                      387
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1600,
+                "x_right": 1868,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9978595273848081,
+                    "box_band": [
+                      1691,
+                      1,
+                      1776,
+                      56
+                    ],
+                    "box_page": [
+                      1691,
+                      267,
+                      1776,
+                      322
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.8544165799725194,
+                    "box_band": [
+                      1615,
+                      73,
+                      1855,
+                      133
+                    ],
+                    "box_page": [
+                      1615,
+                      339,
+                      1855,
+                      399
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 1868,
+                "x_right": 2034,
+                "items": [
+                  {
+                    "text": "PH",
+                    "conf": 0.9985530683094603,
+                    "box_band": [
+                      1913,
+                      72,
+                      1993,
+                      129
+                    ],
+                    "box_page": [
+                      1913,
+                      338,
+                      1993,
+                      395
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2034,
+                "x_right": 2301,
+                "items": [
+                  {
+                    "text": "CB",
+                    "conf": 0.9997070919688392,
+                    "box_band": [
+                      2126,
+                      1,
+                      2208,
+                      56
+                    ],
+                    "box_page": [
+                      2126,
+                      267,
+                      2208,
+                      322
+                    ]
+                  },
+                  {
+                    "text": "AMPSI #P",
+                    "conf": 0.8514374492106154,
+                    "box_band": [
+                      2047,
+                      74,
+                      2288,
+                      133
+                    ],
+                    "box_page": [
+                      2047,
+                      340,
+                      2288,
+                      399
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2301,
+                "x_right": 2480,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.8463591148398921,
+                    "box_band": [
+                      2331,
+                      4,
+                      2450,
+                      60
+                    ],
+                    "box_page": [
+                      2331,
+                      270,
+                      2450,
+                      326
+                    ]
+                  },
+                  {
+                    "text": "TAG",
+                    "conf": 0.8877102732658386,
+                    "box_band": [
+                      2332,
+                      64,
+                      2451,
+                      121
+                    ],
+                    "box_page": [
+                      2332,
+                      330,
+                      2451,
+                      387
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2480,
+                "x_right": 2822,
+                "items": [
+                  {
+                    "text": "CONN LOAD",
+                    "conf": 0.9896405439193284,
+                    "box_band": [
+                      2501,
+                      0,
+                      2806,
+                      58
+                    ],
+                    "box_page": [
+                      2501,
+                      266,
+                      2806,
+                      324
+                    ]
+                  },
+                  {
+                    "text": "TYPE",
+                    "conf": 0.9970701932907104,
+                    "box_band": [
+                      2486,
+                      73,
+                      2632,
+                      133
+                    ],
+                    "box_page": [
+                      2486,
+                      339,
+                      2632,
+                      399
+                    ]
+                  },
+                  {
+                    "text": "kVA",
+                    "conf": 0.9378962612852624,
+                    "box_band": [
+                      2679,
+                      74,
+                      2787,
+                      132
+                    ],
+                    "box_page": [
+                      2679,
+                      340,
+                      2787,
+                      398
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 2822,
+                "x_right": 3738,
+                "items": [
+                  {
+                    "text": "DESCRIPTION",
+                    "conf": 0.9998742663460922,
+                    "box_band": [
+                      3108,
+                      70,
+                      3458,
+                      131
+                    ],
+                    "box_page": [
+                      3108,
+                      336,
+                      3458,
+                      397
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 3738,
+                "x_right": 3872,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.991777897644664,
+                    "box_band": [
+                      3746,
+                      4,
+                      3863,
+                      60
+                    ],
+                    "box_page": [
+                      3746,
+                      270,
+                      3863,
+                      326
+                    ]
+                  },
+                  {
+                    "text": "#",
+                    "conf": 0.9999989271166818,
+                    "box_band": [
+                      3774,
+                      65,
+                      3831,
+                      120
+                    ],
+                    "box_page": [
+                      3774,
+                      331,
+                      3831,
+                      386
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 2,
+                "combo": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 163,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 163,
+                  "x_right": 1080,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1080,
+                  "x_right": 1422,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 4,
+                  "x_left": 1422,
+                  "x_right": 1600,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 5,
+                  "x_left": 1600,
+                  "x_right": 1868,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 1868,
+                  "x_right": 2034,
+                  "texts": [
+                    "PH"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2034,
+                  "x_right": 2301,
+                  "texts": [
+                    "CB",
+                    "AMPSI",
+                    "#P"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2301,
+                  "x_right": 2480,
+                  "texts": [
+                    "CKT",
+                    "TAG"
+                  ],
+                  "role": null,
+                  "ignoredReason": "secondaryCkt"
+                },
+                {
+                  "index": 9,
+                  "x_left": 2480,
+                  "x_right": 2822,
+                  "texts": [
+                    "CONN",
+                    "LOAD",
+                    "TYPE",
+                    "kVA"
+                  ],
+                  "role": null,
+                  "ignoredReason": "specialFeaturesJunk"
+                },
+                {
+                  "index": 10,
+                  "x_left": 2822,
+                  "x_right": 3738,
+                  "texts": [
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 3738,
+                  "x_right": 3872,
+                  "texts": [
+                    "CKT",
+                    "#"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [
+              {
+                "index": 5,
+                "role": "combo",
+                "x_left": 1600,
+                "x_right": 1868,
+                "y_top": 400,
+                "y_bottom": 1040,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel05_parser_body_combined_col5_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 7,
+                "role": "combo",
+                "x_left": 2034,
+                "x_right": 2301,
+                "y_top": 400,
+                "y_bottom": 1040,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/I_electrical_filtered_page001_panel05_parser_body_combined_col7_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 404,
+                "rowBottom": 476,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 2,
+                "rowTop": 476,
+                "rowBottom": 546,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 546,
+                "rowBottom": 618,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 618,
+                "rowBottom": 689,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 689,
+                "rowBottom": 760,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 11"
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 760,
+                "rowBottom": 831,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 7,
+                "rowTop": 831,
+                "rowBottom": 902,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 546,
+                "rowBottom": 618,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 618,
+                "rowBottom": 689,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 689,
+                "rowBottom": 760,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 6,
+                "rowTop": 760,
+                "rowBottom": 831,
+                "amperage": 20,
+                "poles": 1,
+                "comboText": "20 1 1"
+              }
+            ],
+            "breakerCounts": {
+              "1P_20A": 11
+            },
+            "gfiBreakerCounts": {}
+          },
+          "reviewOverlayPath": "review_overlays/S_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "S",
+          "attrs": {
+            "amperage": 100,
+            "voltage": 208,
+            "intRating": null,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              31,
+              31,
+              602,
+              133
+            ],
+            "bus": [
+              1522,
+              193,
+              1755,
+              261
+            ]
+          },
+          "boxImageShape": {
+            "w": 3903,
+            "h": 2289
+          },
+          "reviewOverlayPath": "review_overlays/S_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 1,
+        "rowTop": 404,
+        "rowBottom": 476,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 2,
+        "rowTop": 476,
+        "rowBottom": 546,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 3,
+        "rowTop": 546,
+        "rowBottom": 618,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 618,
+        "rowBottom": 689,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 5,
+        "rowTop": 689,
+        "rowBottom": 760,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 11"
+      },
+      {
+        "side": "left",
+        "rowIndex": 6,
+        "rowTop": 760,
+        "rowBottom": 831,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 7,
+        "rowTop": 831,
+        "rowBottom": 902,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 3,
+        "rowTop": 546,
+        "rowBottom": 618,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 4,
+        "rowTop": 618,
+        "rowBottom": 689,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 5,
+        "rowTop": 689,
+        "rowBottom": 760,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 6,
+        "rowTop": 760,
+        "rowBottom": 831,
+        "amperage": 20,
+        "poles": 1,
+        "comboText": "20 1 1"
+      }
+    ]
+  }
+]
