@@ -1,4 +1,4 @@
-# OcrLibrary/PanelHeaderParserV9.py
+# OcrLibrary/PanelHeaderParserV10.py
 from __future__ import annotations
 import os, re, cv2, json, numpy as np
 from typing import Dict, List, Tuple, Optional
@@ -14,7 +14,7 @@ from OcrLibrary.ocr_timeout import readtext_with_timeout
 
 class PanelParser:
     """
-    Panel Header Parser V9 
+    Panel Header Parser V10
     - Robust label/value association with wrong-context penalties
     - Handles 65kA / 65000 A / 480Y/277V / 277/480V / 208/120, etc.
     - Clamps header to label cluster to avoid breaker table bleed
@@ -43,42 +43,52 @@ class PanelParser:
 
     # ===== Label-led first, value-led fallback only if shape is very strong =====
     _GATE = {
-        "LBL_MIN": {          # minimum label affinity when labels for that role exist
-            "VOLTAGE": 0.22,
-            "BUS":     0.20,
-            "MAIN":    0.20,
-            "AIC":     0.20,
-            "NAME":    0.15,
+        "LBL_MIN": {
+            "VOLTAGE":   0.22,
+            "BUS":       0.20,
+            "MAIN":      0.20,
+            "AIC":       0.20,
+            "NAME":      0.15,
+            "MOUNTING":  0.00,
+            "ENCLOSURE": 0.00,
         },
-        "SHAPE_STRONG": {     # minimum shape for "value-led override" when labels exist but are weak/misleading
-            "VOLTAGE": 0.88,
-            "BUS":     0.82,
-            "MAIN":    0.82,
-            "AIC":     0.85,
-            "NAME":    0.78,
+        "SHAPE_STRONG": {
+            "VOLTAGE":   0.88,
+            "BUS":       0.82,
+            "MAIN":      0.82,
+            "AIC":       0.85,
+            "NAME":      0.78,
+            "MOUNTING":  0.70,
+            "ENCLOSURE": 0.70,
         },
-        "SHAPE_STRONG_NO_LABEL": {  # stricter when no labels exist on page at all for that role
-            "VOLTAGE": 0.90,
-            "BUS":     0.85,
-            "MAIN":    0.85,
-            "AIC":     0.88,
-            "NAME":    0.82,
+        "SHAPE_STRONG_NO_LABEL": {
+            "VOLTAGE":   0.90,
+            "BUS":       0.85,
+            "MAIN":      0.85,
+            "AIC":       0.88,
+            "NAME":      0.82,
+            "MOUNTING":  0.70,
+            "ENCLOSURE": 0.70,
         },
-        "CONF_MIN_NO_LABEL": {  # minimum OCR confidence when running value-led in unlabeled drawings
-            "VOLTAGE": 0.45,
-            "BUS":     0.45,
-            "MAIN":    0.45,
-            "AIC":     0.40,
-            "NAME":    0.45,
+        "CONF_MIN_NO_LABEL": {
+            "VOLTAGE":   0.45,
+            "BUS":       0.45,
+            "MAIN":      0.45,
+            "AIC":       0.40,
+            "NAME":      0.45,
+            "MOUNTING":  0.45,
+            "ENCLOSURE": 0.45,
         },
-        "MIN_SHAPE_ALWAYS": {   # even label-led picks must at least look like the right kind of value
-            "VOLTAGE": 0.60,    # singles are ~0.62, pairs ~0.92 in the collector
-            "BUS":     0.65,    # bare nums are ~0.68, unit amps ~0.90
-            "MAIN":    0.65,
-            "AIC":     0.75,    # AIC shapes are 0.85-0.90 typically
-            "NAME":    0.55,    # the name injector/logic already filters heavily
+        "MIN_SHAPE_ALWAYS": {
+            "VOLTAGE":   0.60,
+            "BUS":       0.65,
+            "MAIN":      0.65,
+            "AIC":       0.75,
+            "NAME":      0.55,
+            "MOUNTING":  0.60,
+            "ENCLOSURE": 0.60,
         },
-        "WRONG_MAX": 0.55,    # if candidate is too close to WRONG labels, reject unless label affinity is strong
+        "WRONG_MAX": 0.55,
     }
 
     # ====== Label families (regex) ======
@@ -100,7 +110,17 @@ class PanelParser:
                  r"\bMLO\b", r"\bMAIN\s*LUGS?\b", r"\bMAIN\s*TYPE\b", r"\bMAINS?\b", r"\bMAIN\b"
         ],
 
-        # NEW: generic rating labels (used only when BUS/MAIN explicit labels are missing)
+        "MOUNTING": [
+            r"\bMOUNT(?:ING)?\b",
+            r"\bM0UNT(?:ING)?\b",
+        ],
+
+        "ENCLOSURE": [
+            r"\bENCLOSURE\b",
+            r"\bENCL(?:OSURE)?\b",
+        ],
+
+        # Generic rating labels (used only when BUS/MAIN explicit labels are missing)
         "RATING": [
             r"\bPANEL\s*RATING\b",
             r"\bAMPACITY\b",
@@ -125,10 +145,12 @@ class PanelParser:
         "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.12, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
-        "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35)
+        "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35),
+        "MOUNTING": dict(W_shape=0.55, W_conf=0.12, W_lbl=0.24, W_side=0.14, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
+        "ENCLOSURE": dict(W_shape=0.55, W_conf=0.12, W_lbl=0.24, W_side=0.14, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
     }
 
-    _THRESH = {"VOLTAGE":0.55, "BUS":0.54, "MAIN":0.54, "AIC":0.54, "NAME":0.50}
+    _THRESH = {"VOLTAGE":0.55, "BUS":0.54, "MAIN":0.54, "AIC":0.54, "NAME":0.50, "MOUNTING": 0.52, "ENCLOSURE": 0.52,}
 
     _SIGMA_PX = 80.0
 
@@ -331,7 +353,7 @@ class PanelParser:
             med_h = float(np.median(lbl_heights)) if lbl_heights else 18.0
             header_bottom = max(L["y2"] for L in header_labels) + int(1.2 * med_h)
             header_bottom = min(header_bottom, by2)
-            for _role in ("BUS", "MAIN", "AIC", "VOLTAGE", "NAME"):
+            for _role in ("BUS", "MAIN", "AIC", "VOLTAGE", "MOUNTING", "ENCLOSURE", "NAME"):
                 value_cands[_role] = [c for c in value_cands.get(_role, []) if c["y2"] <= header_bottom]
 
         main_mode = self._scan_main_mode(items)  # "MLO" / "MCB" / None
@@ -339,7 +361,7 @@ class PanelParser:
 
         ranked_map = {}
         chosen_map = {}
-        ROLE_ORDER = ("VOLTAGE", "AIC", "BUS", "MAIN", "NAME")
+        ROLE_ORDER = ("VOLTAGE", "AIC", "BUS", "MAIN", "MOUNTING", "ENCLOSURE", "NAME")
 
         # ===== Consume-as-we-go =====
         used = set()
@@ -465,8 +487,13 @@ class PanelParser:
                 return is_vpair or has_volt_words
 
             if role == "NAME":
-                # never allow amps/aic/voltage-shaped tokens to be treated as a panel name
                 return is_amps or is_aic or is_vpair or has_volt_words
+
+            if role == "MOUNTING":
+                return is_amps or is_aic or is_vpair
+
+            if role == "ENCLOSURE":
+                return is_amps or is_aic or is_vpair
 
             return False
 
@@ -1141,6 +1168,18 @@ class PanelParser:
                         if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', t_fix):
                             int_rating_ka = n
 
+        mounting_style = None
+        mounting_enclosure = None
+        if chosen_map.get("MOUNTING"):
+            mounting_style, mounting_enclosure = self._normalize_mounting_output(
+                chosen_map["MOUNTING"]["text"]
+            )
+
+        enclosure_val = None
+        if mounting_enclosure is None and chosen_map.get("ENCLOSURE"):
+            enclosure_val = self._normalize_enclosure_output(
+                chosen_map["ENCLOSURE"]["text"]
+            )
 
         # Prefer the explicit tag on the CHOSEN MAIN value (if present).
         # If that’s absent, fall back to the global scan.
@@ -1183,11 +1222,20 @@ class PanelParser:
         attrs = {
             "amperage": bus_i,
             "voltage": voltage_i,
-            "intRating": aic_i,          # kA as plain int
+            "intRating": aic_i,
             "detected_breakers": [],
         }
+
         if mode != "MLO":
             attrs["mainBreakerAmperage"] = main_i
+
+        if mounting_style is not None:
+            attrs["trimStyle"] = mounting_style
+
+        if mounting_enclosure is not None:
+            attrs["enclosure"] = mounting_enclosure
+        elif enclosure_val is not None:
+            attrs["enclosure"] = enclosure_val
 
         result = {
             "type": "panelboard",
@@ -1208,6 +1256,10 @@ class PanelParser:
             winning["bus"] = _rect4(chosen_map["BUS"])
         if chosen_map.get("MAIN"):
             winning["main"] = _rect4(chosen_map["MAIN"])
+        if chosen_map.get("MOUNTING"):
+            winning["mounting"] = _rect4(chosen_map["MOUNTING"])
+        if chosen_map.get("ENCLOSURE"):
+            winning["enclosure"] = _rect4(chosen_map["ENCLOSURE"])
         if chosen_map.get("AIC"):
             winning["aic"] = _rect4(chosen_map["AIC"])
 
@@ -1220,12 +1272,14 @@ class PanelParser:
             # ===== FULL TOKEN TRACE (labels, value-shapes, and candidate ranks) =====
             print("\n==== PANEL HEADER RAW TRACE ====")
 
-            # Map role -> human label
+            # Map role
             _role_human = {
                 "NAME": "name",
                 "VOLTAGE": "volts",
                 "BUS": "bus amps",
                 "MAIN": "main amps",
+                "MOUNTING": "mounting",
+                "ENCLOSURE": "enclosure",
                 "AIC": "AIC",
                 "WRONG": "not of interest",
             }
@@ -1234,7 +1288,7 @@ class PanelParser:
             def _key(c):
                 return (int(round(c["x1"])), int(round(c["y1"])),
                         int(round(c["x2"])), int(round(c["y2"])), (c.get("text","")).strip())
-            role_idx = {r:{} for r in ("NAME","VOLTAGE","BUS","MAIN","AIC")}
+            role_idx = {r:{} for r in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC")}
             for r in role_idx:
                 for c in ranked_map.get(r, []) or []:
                     role_idx[r][_key(c)] = float(c.get("rank", 0.0))
@@ -1253,7 +1307,7 @@ class PanelParser:
 
             # Precompile label regex
             comp_labels = {role:[re.compile(rx, re.I) for rx in self._LABELS.get(role, [])]
-                        for role in ("NAME","VOLTAGE","BUS","MAIN","AIC","WRONG")}
+                        for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC","WRONG")}
 
             for it in items:
                 raw = (it["text"] or "").strip()
@@ -1283,13 +1337,21 @@ class PanelParser:
                 re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)\b", up):
                     value_roles.append("AIC")
 
+                # Mounting
+                if re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up) or re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up):
+                    value_roles.append("MOUNTING")
+
+                # Enclosure
+                if re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up):
+                    value_roles.append("ENCLOSURE")
+
                 # Name-ish: short alphanum
                 if re.fullmatch(r"[A-Z0-9][A-Z0-9._\-\/]{0,12}", up):
                     value_roles.append("NAME")
 
                 # Candidate ranks (if any) for each role
                 ranks_bits = []
-                for role in ("NAME","VOLTAGE","BUS","MAIN","AIC"):
+                for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC"):
                     rr = _rank_for(it, role)
                     if rr is not None:
                         ranks_bits.append(f"{_role_human[role]}:{rr:.2f}")
@@ -1320,7 +1382,7 @@ class PanelParser:
 
             print("\n==== PANEL HEADER CLASSIFY (revised) ====")
             print(f"Band: y=[0,{by2}]  items={len(items)}")
-            for role in ("NAME","VOLTAGE","BUS","MAIN","AIC"):
+            for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC"):
                 lst = ranked_map.get(role, [])
                 print(f"\n[{role}] candidates (top 10):")
                 if not lst:
@@ -1336,7 +1398,7 @@ class PanelParser:
                           f'ybias={p.get("y",0):.2f}  →  rank={c["rank"]:.2f}')
 
             print("\nFinal picks:")
-            for role in ("NAME","VOLTAGE","BUS","MAIN","AIC"):
+            for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC"):
                 it = chosen_map.get(role)
                 if not it:
                     print(f"  {role}: None")
@@ -1373,6 +1435,46 @@ class PanelParser:
         u = re.sub(r'\s{2,}', ' ', u).strip()
         return u
 
+    def _normalize_mounting_output(self, s: str) -> tuple[Optional[str], Optional[str]]:
+        if not s:
+            return None, None
+
+        u = self._normalize_digits(str(s).upper())
+        u = re.sub(r"\s+", " ", u).strip()
+
+        trim_style = None
+        enclosure = None
+
+        if re.search(r"\b(FLUSH|RECESSED)\b", u):
+            trim_style = "FLUSH"
+        elif re.search(r"\bSURFACE\b", u):
+            trim_style = "SURFACE"
+
+        if re.search(r"\bNEMA\s*3R\b|\bN3R\b", u):
+            enclosure = "Nema3R"
+        elif re.search(r"\bNEMA\s*1\b|\bN1\b", u):
+            enclosure = "Nema1"
+
+        # Nema3R makes flush/surface irrelevant for downstream panel use
+        if enclosure == "Nema3R":
+            trim_style = None
+
+        return trim_style, enclosure
+    
+    def _normalize_enclosure_output(self, s: str) -> Optional[str]:
+        if not s:
+            return None
+
+        u = self._normalize_digits(str(s).upper())
+        u = re.sub(r"\s+", " ", u).strip()
+
+        if re.search(r"\bNEMA\s*3R\b|\bN3R\b|\bTYPE\s*3R\b", u):
+            return "Nema3R"
+        if re.search(r"\bNEMA\s*1\b|\bN1\b|\bTYPE\s*1\b", u):
+            return "Nema1"
+
+        return None
+    
     def _simple_name_from_top(self, lines) -> Optional[dict]:
         """
         Robust name extraction:
@@ -1677,7 +1779,7 @@ class PanelParser:
 
     def _collect_label_candidates(self, items: list) -> dict:
         import re
-        role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","RATING","AIC","NAME","WRONG")}
+        role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","RATING","AIC","NAME","WRONG")}
         comp = {role: [re.compile(rx, re.I) for rx in rxs] for role, rxs in self._LABELS.items()}
         for it in items:
             txt = str(it["text"])
@@ -1691,7 +1793,7 @@ class PanelParser:
 
     def _collect_value_candidates(self, items: list) -> dict:
         import re
-        out = {k: [] for k in ("NAME","VOLTAGE","BUS","MAIN","AIC")}
+        out = {k: [] for k in ("NAME","VOLTAGE","BUS","MAIN","AIC","MOUNTING","ENCLOSURE")}
         heights = [abs(it2["y2"] - it2["y1"]) for it2 in items] or [1]
         med_h = float(np.median(heights)) if hasattr(np, "median") else (sum(heights) / len(heights))
 
@@ -1733,6 +1835,52 @@ class PanelParser:
                 r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b',
                 txtN,
             )
+
+            # MOUNTING value candidates
+            up_mount = raw.strip().upper()
+            up_mount = self._normalize_digits(up_mount)
+
+            has_mount_word = bool(re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up_mount))
+            has_nema_word = bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up_mount))
+
+            if has_mount_word or has_nema_word:
+                shape = 0.0
+                if has_mount_word:
+                    shape += 0.72
+                if has_nema_word:
+                    shape += 0.16
+
+                # extra context if token itself includes mounting-ish wording
+                ctx = 0.0
+                if re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up_mount):
+                    ctx += 0.10
+                if re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up_mount):
+                    ctx += 0.05
+
+                out["MOUNTING"].append({
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                    "xc": xc, "yc": yc,
+                    "conf": conf,
+                    "text": raw,
+                    "shape": min(1.0, shape),
+                    "ctx": min(1.0, ctx),
+                })
+
+            # ENCLOSURE value candidates
+            has_enclosure_word = bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up_mount))
+
+            if has_enclosure_word:
+                shape = 0.72
+                ctx = 0.10
+
+                out["ENCLOSURE"].append({
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                    "xc": xc, "yc": yc,
+                    "conf": conf,
+                    "text": raw,
+                    "shape": min(1.0, shape),
+                    "ctx": min(1.0, ctx),
+                })
 
             # If it looks AIC-like and has no clear voltage context or separators,
             # kill the pair match so things like "18000" don't become VOLTAGE.
@@ -2256,11 +2404,13 @@ class PanelParser:
         WHITE  = (255, 255, 255)
         BAND   = (60, 60, 60)
         COLORS = {
-            "NAME":    (255, 128,   0),
-            "VOLTAGE": (255, 200, 100),
-            "BUS":     (  0, 200,   0),
-            "MAIN":    (180,   0, 180),
-            "AIC":     (  0,   0, 255),
+            "NAME":      (255, 128,   0),
+            "VOLTAGE":   (255, 200, 100),
+            "BUS":       (  0, 200,   0),
+            "MAIN":      (180,   0, 180),
+            "MOUNTING":  (  0, 165, 255),
+            "ENCLOSURE": (255, 255,   0),
+            "AIC":       (  0,   0, 255),
         }
 
         def put_text(img, text, org, color, scale=0.55, thick=2):
@@ -2307,6 +2457,8 @@ class PanelParser:
             "VOLTAGE (light orange) candidates",
             "BUS (green) candidates",
             "MAIN (magenta) candidates",
+            "MOUNTING (orange-blue) candidates",
+            "ENCLOSURE (yellow) candidates",
             "AIC (red) candidates",
             "Thick box = chosen",
         ]

@@ -92,7 +92,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv10 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
@@ -697,23 +697,11 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
                     return iv
         return None
 
-    def _get_text_from_header(*keys):
-        for k in keys:
-            v = h_attrs.get(k)
-            if v is None:
-                continue
-            s = str(v).strip()
-            if s:
-                return s
-        return None
-
     amperage   = _get_int_from_header("amperage", "main_amp", "mainAmperage")
     spaces_h   = _get_int_from_header("spaces")
     voltage    = _get_int_from_header("voltage")
     intRating  = _get_int_from_header("intRating", "interrupt_rating", "interruptRating", "kaic", "kaic_rating")
     main_amp   = _get_int_from_header("mainBreakerAmperage", "main_breaker_amperage", "main_breaker", "mainBreaker")
-    trim_style = _get_text_from_header("trimStyle", "trim_style")
-    enclosure  = _get_text_from_header("enclosure")
     hdr_brkrs  = list(h_attrs.get("detected_breakers") or [])
 
     # Table fields
@@ -746,8 +734,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
             "voltage": voltage,
             "intRating": intRating,
             "mainBreakerAmperage": main_amp,
-            "trimStyle": trim_style,
-            "enclosure": enclosure,
             "detected_breakers": det_brkrs,
         },
     }
@@ -897,8 +883,6 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
                 print(f"    Voltage: {attrs.get('voltage')}")
                 print(f"    IntRating: {attrs.get('intRating')}")
                 print(f"    MainBreakerAmperage: {attrs.get('mainBreakerAmperage')}")
-                print(f"    TrimStyle: {attrs.get('trimStyle')}")
-                print(f"    Enclosure: {attrs.get('enclosure')}")
                 print(f"    Spaces (merged): {attrs.get('spaces')}")
                 print(f"    Detected breakers: {len(attrs.get('detected_breakers') or [])}")
                 components[idx] = comp
