@@ -12,7 +12,6 @@ import os as _os
 from anvil import BlobMedia
 
 # ---------- CONFIG ----------
-# Ensure your repo is on sys.path (for imports below)
 REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -23,7 +22,6 @@ BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
 PANEL_FINDER_DEFAULTS = {
-    # Same knobs you use in your dev env script
     "render_dpi": 1400,
     "aa_level": 8,
     "render_colorspace": "gray",
@@ -527,7 +525,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
 
     # Choose which PDF to feed into the finder:
     # - if filter kept at least one page, use filtered_pdf
-    # - else fall back to the original PDF (or return empty if you prefer)
+    # - else fall back to the original PDF
     pdf_for_finder = filtered_pdf if (filtered_pdf and len(kept_pages) > 0) else str(saved_pdf)
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
@@ -536,7 +534,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
     local_finder = PanelBoardSearch(
         output_dir=str(img_dir),
         dpi=dpi,
-        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match your dev env
+        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match dev env
         render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
         aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
         render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
@@ -678,7 +676,7 @@ def _count_would_skip_breakers(breakers: list[dict], panel_limit: int | None) ->
 def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     """
     Map BreakerTablePipeline result → component schema expected by RulesEngine.
-    Applies your 4-strikes suppression rule.
+    Applies 4-strikes suppression rule.
     """
     stages = (result_dict or {}).get("results") or {}
     hdr    = stages.get("header")  or {}
@@ -981,7 +979,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
         # ---- AUTO CLEANUP (keep only what UI uses) ----
         try:
-            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)  # set True if you want to keep the original PDF
+            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)
             _cleanup_job_dir(job_dir, keep)
             print(f">>> cleanup complete: kept {len(keep)} files")
         except Exception as ce:
@@ -1379,7 +1377,7 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
     if not pdf_images.is_dir():
         return []
 
-    # 1) Preferred / common directories (adjust if your generator uses a specific one)
+    # 1) Preferred / common directories
     candidate_dirs = [
         pdf_images / "magenta_overlays",
         pdf_images / "magenta_overlay",
@@ -1394,7 +1392,7 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
             found.extend(list(d.glob("*.png")))
 
     # 2) Fallback: search for filenames containing "magenta" anywhere under pdf_images,
-    # but EXCLUDE review_overlays (those are your per-panel items)
+    # but EXCLUDE review_overlays 
     if not found:
         for p in pdf_images.rglob("*.png"):
             if "review_overlays" in p.parts:

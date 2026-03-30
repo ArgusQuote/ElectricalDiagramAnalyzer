@@ -17,7 +17,6 @@ if project_root not in sys.path:
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-# Use the SAME Parser API you used in your analyzer tests:
 from OcrLibrary.BreakerTableParserAPIv10 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
