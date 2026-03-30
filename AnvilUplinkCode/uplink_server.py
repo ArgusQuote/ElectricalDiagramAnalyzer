@@ -712,6 +712,10 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     main_amp   = _get_int_from_header("mainBreakerAmperage", "main_breaker_amperage", "main_breaker", "mainBreaker")
     trim_style = _get_text_from_header("trimStyle", "trim_style")
     enclosure  = _get_text_from_header("enclosure")
+    if trim_style and not enclosure:
+        enclosure = "Nema1"
+    if str(enclosure or "").strip().upper() == "NEMA3R":
+        trim_style = None
     hdr_brkrs  = list(h_attrs.get("detected_breakers") or [])
 
     # Table fields
