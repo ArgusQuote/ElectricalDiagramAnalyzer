@@ -151,9 +151,34 @@ If Path A still cannot reach 0.85 mAP@0.5, switch to **RF-DETR**
 Existing COCO annotations can be reused. Requires writing a new training
 script. See `training-panel-detector` skill for details.
 
+### v4 Retrain Results (2026-04-01)
+
+Two new annotated pages added (`derek2.pdf` page 9, `derekfirst.pdf` page 7),
+bringing the dataset to 27 images / 140 annotations. Retrained with medium
+dataset recipe: 15 epochs, LR 1e-5, weight decay 0.01, batch size 1, 15% val
+split. Training completed in ~2m43s on local GPU (RTX 500 Ada, 4 GB VRAM).
+
+**Metrics:** Final val mAP@0.5 = 0.376 (up from 0.21 in v2), recall@100 = 0.783.
+
+**Verification on `derekfirst.pdf`:** Model detected tables on all 10 pages,
+including 4 panels on the target page 7. However, the `enforce_one_box`
+post-processing over-splits crops (re-runs detection on already-cropped panels,
+splitting single tables into 10+ fragments). This should be disabled or its
+confidence threshold raised before production use.
+
+**Remaining issues:**
+- `enforce_one_box` causes aggressive over-splitting of valid crops
+- PIL `DecompressionBombError` at default `render_dpi=1200`; must use
+  `render_dpi=400` or raise `PIL.Image.MAX_IMAGE_PIXELS`
+- mAP@0.5 of 0.376 still below the 0.85 target
+- Dataset still below 50+ image recommendation
+
+**Model location:** `~/Documents/TableAnnotations/models_v4/best/`
+
 ### Comparison Overlays
 
 - Heuristic (v2 eval): `~/Documents/ML_Test/eval_v2/heuristic/magenta_overlays/`
 - ML model (v2 eval):  `~/Documents/ML_Test/eval_v2/ml/magenta_overlays/`
 - ML model (v1 eval):  `~/Documents/ML_Test/finetuned_conf0.7/magenta_overlays/`
+- ML model (v4 test):  `/tmp/test_detect/magenta_overlays/`
 - Heuristic (v1 eval): `~/Documents/TestScan/magenta_overlays/`
