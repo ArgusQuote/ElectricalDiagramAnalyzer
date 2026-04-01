@@ -47,8 +47,9 @@ from OcrLibrary.PanelHeaderParserV9   import PanelParser as PanelHeaderParser
 from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
  
 class BreakerTablePipeline:
-    def __init__(self, *, debug: bool = True):
+    def __init__(self, *, debug: bool = True, reader=None):
         self.debug = bool(debug)
+        self._shared_reader = reader
         self._analyzer = None
         self._header_parser = None
 
@@ -325,12 +326,12 @@ class BreakerTablePipeline:
 
     def _ensure_analyzer(self):
         if self._analyzer is None:
-            self._analyzer = BreakerTableAnalyzer(debug=self.debug)
+            self._analyzer = BreakerTableAnalyzer(debug=self.debug, reader=self._shared_reader)
         return self._analyzer
 
     def _ensure_header_parser(self):
         if self._header_parser is None:
-            self._header_parser = PanelHeaderParser(debug=self.debug)
+            self._header_parser = PanelHeaderParser(debug=self.debug, reader=self._shared_reader)
         return self._header_parser
 
     def run(

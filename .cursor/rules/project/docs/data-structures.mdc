@@ -10,20 +10,20 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Pipeline Payloads
 
 ### BreakerTablePipeline Output
-- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv8.BreakerTablePipeline.run()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv9.BreakerTablePipeline.run()`
 - **Used by**: `_merge_component_from_btp()` in uplink_server.py
 - **Fields**:
-  - `apiVersion` -- str, pipeline API version
+  - `apiVersion` -- str, pipeline API version (currently `"API_9"`)
   - `origin` -- str, source image path
   - `panelStatus` -- None if OK, str error message otherwise
   - `stages` -- dict of stage metadata (analyzer, parser, header)
   - `results` -- dict containing the three stage outputs:
     - `results.analyzer` -- dict: `src_path`, `header_y`, `header_bottom_y`, `footer_y`, `footer_token_val`, `panel_size`, `debug_dir`, `gray`
-    - `results.header` -- dict: `type`, `name`, `attrs`, `winningBoxes`, `boxImageShape`
-    - `results.parser` -- dict: `parserVersion`, `name`, `spaces`, `detected_breakers`, `breakerCounts`, `gfiBreakerCounts`, `headerScan`, `separatedScan`, `combinedScan`
+    - `results.header` -- dict: `type`, `name`, `attrs`, `winningBoxes`, `boxImageShape`, `reviewOverlayPath`
+    - `results.parser` -- dict: `parserVersion`, `name`, `spaces`, `detected_breakers`, `breakerCounts`, `gfiBreakerCounts`, `headerScan`, `separatedScan`, `combinedScan`, `reviewOverlayPath`
 
 ### Header Parser Output (results.header)
-- **Location**: Returned by `OcrLibrary/PanelHeaderParserV7.PanelParser.parse_panel()`
+- **Location**: Returned by `OcrLibrary/PanelHeaderParserV9.PanelParser.parse_panel()`
 - **Fields**:
   - `type` -- str, always "panelboard"
   - `name` -- str, detected panel name
@@ -34,6 +34,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `attrs.detected_breakers` -- list of breaker dicts from header scan
   - `winningBoxes` -- dict of bounding rects: `name`, `voltage`, `bus`, `main`, `aic`
   - `boxImageShape` -- dict: `w`, `h`
+  - `reviewOverlayPath` -- str or None, path to review overlay image
 
 ### Table Parser Output (results.parser)
 - **Location**: Returned by `OcrLibrary/BreakerTableParser10.BreakerTableParser.parse_from_analyzer()`
@@ -45,6 +46,9 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `breakerCounts` -- dict of amperage-to-count mappings
   - `gfiBreakerCounts` -- dict of GFI breaker counts
   - `headerScan.normalizedColumns` -- column layout info
+  - `separatedScan` -- dict or None, separated layout parse results
+  - `combinedScan` -- dict or None, combined layout parse results
+  - `reviewOverlayPath` -- str or None, path to review overlay image
 
 ### Analyzer Output (results.analyzer)
 - **Location**: Returned by `OcrLibrary/BreakerTableAnalyzer12.BreakerTableAnalyzer.analyze()`
@@ -53,8 +57,8 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `header_y` -- int, pixel y-position of header top
   - `header_bottom_y` -- int, pixel y-position of header bottom
   - `footer_y` -- int, pixel y-position of footer
-  - `footer_token_val` -- str or None, detected footer token
-  - `panel_size` -- tuple, image dimensions
+  - `footer_token_val` -- int or None, detected footer token (panel space count)
+  - `panel_size` -- int or None, detected panel size (e.g., 42, 84)
   - `gray` -- numpy array, preprocessed grayscale image
   - `debug_dir` -- str or None, debug output path
 
@@ -130,23 +134,24 @@ Each job lives at `~/jobs/{job_id}/`:
 ## Configuration Dicts
 
 ### PANEL_FINDER_DEFAULTS
-- **Location**: `uplink_server.py` lines 26-41
+- **Location**: `uplink_server.py` lines 25-39
 - **Purpose**: Knobs for heuristic panel detection (PanelBoardSearch)
-- **Key fields**: `render_dpi` (1400), `min_void_area_fr`, `void_w_fr_range`, `void_h_fr_range`, `margin_shave_px`, `pad`
+- **Key fields**: `render_dpi` (1400), `aa_level`, `render_colorspace`, `min_void_area_fr`, `min_void_w_px`, `min_void_h_px`, `max_void_area_fr`, `void_w_fr_range`, `void_h_fr_range`, `min_whitespace_area_fr`, `margin_shave_px`, `pad`, `verbose`
 
 ### _DEFAULT_OVERRIDES
-- **Location**: `uplink_server.py` lines 339-366
+- **Location**: `uplink_server.py` lines 329-353
 - **Purpose**: Default UI override settings for part number selection
-- **Sub-dicts**: panelboard defaults, transformer defaults, disconnect defaults
+- **Sub-dicts**: panelboards (bussing, breakers, rating, trim, enclosure, SPD), transformers (winding, temp, type, mounting), disconnects (switch type, enclosure, fusible, grounding)
 
 ## Constants
 
 | Constant | Location | Value |
 |---|---|---|
-| `MAX_WORKERS` | uplink_server.py | 3 |
+| `MAX_WORKERS` | uplink_server.py | 1 |
 | `MAX_INFLIGHT_PER_USER` | uplink_server.py | 1 |
-| `WATCHDOG_TIMEOUT_MIN` | uplink_server.py (env) | 15 |
+| `WATCHDOG_TIMEOUT_MIN` | uplink_server.py (env) | 10 |
 | `WATCHDOG_KILL_GRACE_SEC` | uplink_server.py (env) | 3 |
+| `QUEUE_TIMEOUT_MIN` | uplink_server.py (env) | 25 |
 
 Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine4 and PartNumberBuilder.
 

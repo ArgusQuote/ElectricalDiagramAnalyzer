@@ -2,7 +2,6 @@
 # -------------------------------
 import os, re, json, sys, threading, traceback
 import contextlib
-import concurrent.futures
 from multiprocessing import get_context
 from queue import Queue, Empty
 from pathlib import Path
@@ -113,37 +112,23 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
-# ---------- PANEL DETECTION: ML or Heuristic ----------
-# Set USE_ML_DETECTOR=True to use ML-based table detection (requires trained model)
-# Set USE_ML_DETECTOR=False to use heuristic detection (PanelBoardSearch)
-USE_ML_DETECTOR = os.environ.get("USE_ML_DETECTOR", "false").lower() in ("true", "1", "yes")
-ML_MODEL_PATH = os.environ.get("ML_MODEL_PATH", None)  # Path to trained YOLO model
-
-if USE_ML_DETECTOR:
-    try:
-        from MLTableDetection.TableDetectorML import TableDetectorML as PanelBoardSearch
-        print(f">>> Using ML-based table detection")
-        if ML_MODEL_PATH:
-            print(f">>> ML model path: {ML_MODEL_PATH}")
-    except ImportError as e:
-        print(f">>> ML detector not available ({e}), falling back to heuristic")
-        from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-else:
-    from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-    print(f">>> Using heuristic table detection (PanelSearchToolV25)")
+# Persistent worker subprocesses set this env var so module-level
+# initialization (Anvil connection, warmup, worker threads) is skipped.
+_IS_WORKER_SUBPROCESS = os.environ.get("_EDA_WORKER_SUBPROCESS") == "1"
 
 # ---------- CONNECT UPLINK ----------
-ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
-if not ANVIL_UPLINK_KEY:
-    raise RuntimeError("Set ANVIL_UPLINK_KEY in environment (ANVIL_UPLINK_KEY).")
-anvil.server.connect(ANVIL_UPLINK_KEY)
-print(">>> ENTRY OK")
-# Identify this connected process (used for sticky routing diagnostics)
-NODE_ID = f"{platform.node()}:{_os.getpid()}"
-print(f">>> NODE_ID={NODE_ID}")
+NODE_ID = ""
+if not _IS_WORKER_SUBPROCESS:
+    ANVIL_UPLINK_KEY = os.environ.get("ANVIL_UPLINK_KEY", "")
+    if not ANVIL_UPLINK_KEY:
+        raise RuntimeError("Set ANVIL_UPLINK_KEY in environment (ANVIL_UPLINK_KEY).")
+    anvil.server.connect(ANVIL_UPLINK_KEY)
+    print(">>> ENTRY OK")
+    NODE_ID = f"{platform.node()}:{_os.getpid()}"
+    print(f">>> NODE_ID={NODE_ID}")
 
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
@@ -173,7 +158,8 @@ def _warmup_ocr_once():
     except Exception as e:
         print(f">>> OCR warmup skipped: {e}")
 
-_warmup_ocr_once()
+if not _IS_WORKER_SUBPROCESS:
+    _warmup_ocr_once()
 
 # ---------- UTILITIES ----------
 def _now_utc():
@@ -616,6 +602,13 @@ _Q_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
 
+# Persistent worker process state
+_WORKER_LOCK = threading.Lock()
+_WORKER_PROC = None          # multiprocessing.Process
+_WORKER_JOB_Q = None         # mp Queue: main → worker (job_id str or None for shutdown)
+_WORKER_DONE_Q = None        # mp Queue: worker → main (status, job_id, error_msg)
+_WORKER_READY_TIMEOUT = 120  # seconds to wait for worker model loading
+
 def _enqueue_job(job_id: str, owner_id: str):
     """Put a (job_id, owner_id) tuple onto the shared job queue for worker threads to dequeue."""
     _JOB_Q.put((job_id, owner_id))
@@ -779,44 +772,16 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
 
     return comp
 
-# ---------- Worker-side call for one image ----------
-def _btp_run_once(
-    image_path: str,
-    *,
-    run_analyzer: bool = True,
-    run_parser: bool = True,
-    run_header: bool = True,
-    debug: bool = True
-) -> dict:
-    """
-    Construct a BreakerTablePipeline (v6) and run it for this image.
-    (No global caching; per your request.)
-    """
-    pipe = BreakerTablePipeline(debug=debug)
-    return pipe.run(
-        image_path,
-        run_analyzer=run_analyzer,
-        run_parser=run_parser,
-        run_header=run_header,
-    )
-
-def _run_job_target(job_id: str):
-  """
-  Subprocess entrypoint that runs the actual job logic.
-  Keeping this thin ensures termination is clean.
-  """
-  try:
-    _process_job(job_id)
-  except Exception as e:
-    # _process_job already writes status on exceptions, but as a backstop:
-    job_dir = BASE_JOBS_DIR / job_id
-    _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
-
 # ---------- Core job processing ----------
-def _process_job(job_id: str):
+def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
     """
-    Worker thread: read images → parse panel (Analyzer+Parser+Header) → run rules (with defaults) → write result.
+    Process a single job: render PDF, parse panels via BTP, run rules, write result.
+    When ``pipeline`` is provided (persistent worker), it is reused across all
+    images, avoiding per-image model reload.  When None, a fresh pipeline is
+    created once for this job.
     """
+    if pipeline is None:
+        pipeline = BreakerTablePipeline(debug=True)
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
 
@@ -905,13 +870,11 @@ def _process_job(job_id: str):
                 return
 
             try:
-                # Run OCR/analysis sequentially
-                raw = _btp_run_once(
+                raw = pipeline.run(
                     img_path,
                     run_analyzer=True,
                     run_parser=True,
                     run_header=True,
-                    debug=True
                 )
                 if isinstance(raw, dict) and "_error" in raw:
                     raise RuntimeError(raw["_error"])
@@ -1019,136 +982,226 @@ def _process_job(job_id: str):
         _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
         _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=f"{type(e).__name__}: {e}")
 
-# ---------- Worker pool ----------
-def _dequeue_loop(idx: int):
-  """Worker loop: dequeue jobs, enforce per-user cap, spawn subprocesses, and run watchdog timeout."""
-  threading.current_thread().name = f"pool-worker-{idx}"
-  mp = get_context("spawn")  # safer than fork for libs like torch/opencv
+# ---------- Persistent worker subprocess ----------
 
-  while not _STOP.is_set():
+def _persistent_worker_main(job_q, done_q):
+    """Long-lived subprocess that loads GPU models once and processes jobs."""
+    _set_runtime_determinism()
+    _log_run_fingerprint("persistent_worker_init")
+
+    import easyocr
+    print(">>> Persistent worker: loading GPU EasyOCR reader ...")
+    gpu_reader = easyocr.Reader(["en"], gpu=True)
+    pipeline = BreakerTablePipeline(debug=True, reader=gpu_reader)
+    # Force lazy init so analyzer + header parser are ready before first job
+    pipeline._ensure_analyzer()
+    pipeline._ensure_header_parser()
+    print(f">>> Persistent worker: models loaded | API_VERSION={API_VERSION}")
+
+    done_q.put(("ready", None, None))
+
+    while True:
+        try:
+            msg = job_q.get()
+        except Exception:
+            continue
+        if msg is None:
+            break
+        job_id = msg
+        try:
+            reset_name_deduper()
+            _process_job(job_id, pipeline)
+            done_q.put(("done", job_id, None))
+        except Exception as e:
+            tb = traceback.format_exc()
+            print(f">>> persistent worker job error [{job_id}]: {e}\n{tb}")
+            try:
+                job_dir = BASE_JOBS_DIR / job_id
+                _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
+            except Exception:
+                pass
+            done_q.put(("error", job_id, f"{type(e).__name__}: {e}"))
+
+    print(">>> Persistent worker: shutdown")
+
+
+# ---------- Worker lifecycle ----------
+
+def _spawn_persistent_worker():
+    """Spawn (or respawn) the persistent worker process. Returns when ready."""
+    global _WORKER_PROC, _WORKER_JOB_Q, _WORKER_DONE_Q
+
+    mp_ctx = get_context("spawn")
+    _WORKER_JOB_Q = mp_ctx.Queue()
+    _WORKER_DONE_Q = mp_ctx.Queue()
+
+    os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
+    _WORKER_PROC = mp_ctx.Process(
+        target=_persistent_worker_main,
+        args=(_WORKER_JOB_Q, _WORKER_DONE_Q),
+        daemon=True,
+    )
+    _WORKER_PROC.start()
+    os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
+
+    print(f">>> Persistent worker spawned (pid={_WORKER_PROC.pid}), waiting for ready ...")
     try:
-      job_id, owner_id = _JOB_Q.get(timeout=0.5)
+        status, _, _ = _WORKER_DONE_Q.get(timeout=_WORKER_READY_TIMEOUT)
+        if status != "ready":
+            raise RuntimeError(f"unexpected worker init status: {status}")
     except Empty:
-      continue
-
-    job_dir = BASE_JOBS_DIR / job_id
-
-    # If the job disappeared somehow, just drop it
-    if not job_dir.exists():
-      _JOB_Q.task_done()
-      continue
-
-    # Check current status snapshot
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-    current_state = str(st.get("state") or "").lower()
-
-    # If already finished/canceled/errored, drop it
-    if current_state in ("done", "error", "canceled"):
-      _JOB_Q.task_done()
-      continue
-
-    # Queue timeout applies only before the job starts running
-    timed_out, age_ms = _is_queue_timed_out(job_dir)
-    if current_state == "queued" and timed_out:
-      msg = QUEUE_TIMEOUT_ERROR_MSG
-      age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
-      _status_write(
-          job_dir,
-          "error",
-          error=msg,
-          queue_timeout=True,
-          queue_timeout_min=QUEUE_TIMEOUT_MIN,
-          queue_age_ms=age_ms,
-          queue_age_str=age_str,
-          progress=0.0
-      )
-      _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-      print(f">>> queue timeout: {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
-      _JOB_Q.task_done()
-      continue
-
-    # enforce per-user cap
-    if not _enter_inflight(owner_id):
-        threading.Timer(0.05, lambda j=job_id, o=owner_id: _enqueue_job(j, o)).start()
-        _JOB_Q.task_done()
-        continue
-
-    proc = None
-    try:
-      # Re-check queue timeout one last time right before starting
-      st = _json_read_or_none(sp["status"]) or {}
-      current_state = str(st.get("state") or "").lower()
-      timed_out, age_ms = _is_queue_timed_out(job_dir)
-
-      if current_state == "queued" and timed_out:
-        msg = QUEUE_TIMEOUT_ERROR_MSG
-        age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
-        _status_write(
-            job_dir,
-            "error",
-            error=msg,
-            step="queue_timeout",
-            queue_timeout=True,
-            queue_timeout_min=QUEUE_TIMEOUT_MIN,
-            queue_age_ms=age_ms,
-            queue_age_str=age_str,
-            progress=0.0
+        raise RuntimeError(
+            f"persistent worker did not become ready within {_WORKER_READY_TIMEOUT}s"
         )
-        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
-        print(f">>> queue timeout (pre-start): {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
-        continue
+    print(">>> Persistent worker ready")
 
-      # Spawn child process for this job
-      proc = mp.Process(target=_run_job_target, args=(job_id,), daemon=True)
-      proc.start()
 
-      # Watchdog wait
-      timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
-      proc.join(timeout=timeout_sec)
-
-      if proc.is_alive():
-        # Timed out: mark canceled/error, terminate child, clean up
-        # Mark cancel file so future reads show canceled intent
+def _kill_persistent_worker():
+    """Terminate and join the persistent worker process."""
+    global _WORKER_PROC
+    if _WORKER_PROC is None:
+        return
+    try:
+        _WORKER_PROC.terminate()
+    except Exception:
+        pass
+    _WORKER_PROC.join(timeout=WATCHDOG_KILL_GRACE_SEC)
+    if _WORKER_PROC.is_alive():
         try:
-          with open(_cancel_path(job_dir), "w") as f:
-            f.write("1")
-        except Exception:
-          pass
-
-        # Write an error status/result snapshot with message
-        msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
-        _status_write(job_dir, "error", error=msg)
-        try:
-            _cleanup_job_dir(job_dir, {"status.json"})
+            _WORKER_PROC.kill()
         except Exception:
             pass
-        _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
+        _WORKER_PROC.join(timeout=1)
+    _WORKER_PROC = None
 
-        # Try graceful term then hard kill
+
+def _ensure_worker_alive():
+    """If the persistent worker died, respawn it."""
+    global _WORKER_PROC
+    if _WORKER_PROC is not None and _WORKER_PROC.is_alive():
+        return
+    if _WORKER_PROC is not None:
+        print(">>> Persistent worker died — respawning")
+    _kill_persistent_worker()
+    _spawn_persistent_worker()
+
+
+# ---------- Dequeue loop (persistent worker) ----------
+
+def _dequeue_loop(idx: int):
+    threading.current_thread().name = f"pool-worker-{idx}"
+
+    while not _STOP.is_set():
         try:
-          proc.terminate()
-        except Exception:
-          pass
-        proc.join(timeout=WATCHDOG_KILL_GRACE_SEC)
-        if proc.is_alive():
-          try:
-            proc.kill()  # Python 3.9+ on POSIX
-          except Exception:
-            pass
-          proc.join(timeout=1)
+            job_id, owner_id = _JOB_Q.get(timeout=0.5)
+        except Empty:
+            continue
 
-    finally:
-      _leave_inflight(owner_id)
-      _JOB_Q.task_done()
+        job_dir = BASE_JOBS_DIR / job_id
 
-for i in range(MAX_WORKERS):
-    t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
-    t.start()
-    _WORKERS.append(t)
-print(f">>> Worker pool started: {MAX_WORKERS} threads, per-user cap={MAX_INFLIGHT_PER_USER}")
+        if not job_dir.exists():
+            _JOB_Q.task_done()
+            continue
+
+        sp = _status_paths(job_dir)
+        st = _json_read_or_none(sp["status"]) or {}
+        current_state = str(st.get("state") or "").lower()
+
+        if current_state in ("done", "error", "canceled"):
+            _JOB_Q.task_done()
+            continue
+
+        # Queue timeout check
+        timed_out, age_ms = _is_queue_timed_out(job_dir)
+        if current_state == "queued" and timed_out:
+            msg = QUEUE_TIMEOUT_ERROR_MSG
+            age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
+            _status_write(
+                job_dir, "error", error=msg,
+                queue_timeout=True, queue_timeout_min=QUEUE_TIMEOUT_MIN,
+                queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
+            )
+            _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
+            print(f">>> queue timeout: {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
+            _JOB_Q.task_done()
+            continue
+
+        if not _enter_inflight(owner_id):
+            threading.Timer(0.05, lambda j=job_id, o=owner_id: _enqueue_job(j, o)).start()
+            _JOB_Q.task_done()
+            continue
+
+        try:
+            # Re-check queue timeout right before dispatching
+            st = _json_read_or_none(sp["status"]) or {}
+            current_state = str(st.get("state") or "").lower()
+            timed_out, age_ms = _is_queue_timed_out(job_dir)
+            if current_state == "queued" and timed_out:
+                msg = QUEUE_TIMEOUT_ERROR_MSG
+                age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
+                _status_write(
+                    job_dir, "error", error=msg, step="queue_timeout",
+                    queue_timeout=True, queue_timeout_min=QUEUE_TIMEOUT_MIN,
+                    queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
+                )
+                _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
+                print(f">>> queue timeout (pre-start): {job_id} | age={age_str}")
+                continue
+
+            with _WORKER_LOCK:
+                _ensure_worker_alive()
+
+            _WORKER_JOB_Q.put(job_id)
+
+            # Wait for completion with watchdog timeout
+            timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
+            worker_ok = True
+            try:
+                status, done_job_id, err_msg = _WORKER_DONE_Q.get(timeout=timeout_sec)
+            except Empty:
+                # Watchdog fired — the worker is stuck
+                worker_ok = False
+
+            if not worker_ok or (_WORKER_PROC is not None and not _WORKER_PROC.is_alive()):
+                # Worker timed out or crashed mid-job
+                try:
+                    with open(_cancel_path(job_dir), "w") as f:
+                        f.write("1")
+                except Exception:
+                    pass
+
+                if not worker_ok:
+                    msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
+                    print(f">>> watchdog timeout: {job_id}")
+                else:
+                    msg = "Worker process crashed during this job. Please try again."
+                    print(f">>> worker crash detected during: {job_id}")
+
+                _status_write(job_dir, "error", error=msg)
+                try:
+                    _cleanup_job_dir(job_dir, {"status.json"})
+                except Exception:
+                    pass
+                _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
+
+                # Kill and respawn the worker for subsequent jobs
+                with _WORKER_LOCK:
+                    _kill_persistent_worker()
+                    _spawn_persistent_worker()
+
+        finally:
+            _leave_inflight(owner_id)
+            _JOB_Q.task_done()
+
+
+# ---------- Start worker pool ----------
+if not _IS_WORKER_SUBPROCESS:
+    _spawn_persistent_worker()
+    for i in range(MAX_WORKERS):
+        t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
+        t.start()
+        _WORKERS.append(t)
+    print(f">>> Worker pool started: {MAX_WORKERS} threads, per-user cap={MAX_INFLIGHT_PER_USER}")
 
 # ---------- API: submit / status / list / cancel ----------
 @anvil.server.callable

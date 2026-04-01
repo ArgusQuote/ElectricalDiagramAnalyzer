@@ -63,12 +63,11 @@ class BreakerTableAnalyzer:
         debug/<base>_hf_overlay.png
     """
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, reader=None):
         self.debug = debug
-        self.reader = None
+        self.reader = reader
 
-        # OCR reader shared by header + footer
-        if _HAS_OCR:
+        if self.reader is None and _HAS_OCR:
             try:
                 self.reader = easyocr.Reader(["en"], gpu=True)
             except Exception:

@@ -19,6 +19,8 @@ deferred work items.
 
 ## Current Open Issues
 
-- **ML Table Detection underperforms heuristic baseline** -- The fine-tuned Table
-  Transformer model detects fewer tables with less precision than `PanelSearchToolV25`.
-  Needs more training data and tuning. See `KNOWN_ISSUES.md` for details.
+- **ML Table Detection not yet implemented** -- The `MLTableDetection/` directory
+  and `TableDetectorML.py` do not exist in the repo. ML-based panel detection is a
+  planned future feature. The `.cursor/skills/training-panel-detector/` skill contains
+  guidance for building it. Currently only heuristic detection via `PanelSearchToolV25`
+  is available. See `KNOWN_ISSUES.md` for details.
