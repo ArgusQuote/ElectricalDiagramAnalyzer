@@ -2,9 +2,9 @@
 
 ## ML Table Detection Model Underperforms Heuristic Baseline
 
-**Status:** In Progress (v2 retrain completed, still underperforming)
+**Status:** In Progress (v4 retrain completed, still underperforming)
 **Date:** 2026-02-14
-**Updated:** 2026-03-11
+**Updated:** 2026-04-05
 **Component:** `MLTableDetection/TableDetectorML.py`, `MLTableDetection/train_table_transformer.py`
 
 ### Problem
@@ -105,52 +105,6 @@ Training loss dropped from 7.0 to 2.7. Validation mAP@0.5 plateaued at ~0.21.
 Improved from previous attempt (4/6 at conf=0.7 with imprecise boxes) but
 still significantly behind the heuristic.
 
-### Root Cause Analysis
-
-The model is learning (loss decreases, detections improved) but lacks
-sufficient data diversity to generalise:
-
-- **No hard negatives** -- All 25 training images contain panel schedules.
-  The model has never seen a page WITHOUT tables, so it cannot distinguish
-  panel schedules from other rectangular elements (title blocks, legends,
-  notes, one-line diagrams).
-
-- **Still below minimum data threshold** -- 25 images is below the 50+
-  recommended by the training skill. Limited variety in drawing styles
-  and layouts.
-
-- **Tiny validation set** -- Only ~4 images held out (15% of 25), making
-  mAP metrics noisy and best-model selection unreliable.
-
-### Next Steps
-
-#### Path A: Improve data and retrain (recommended first)
-
-1. Add **hard negative pages** -- render pages with NO panel schedules
-   (cover sheets, one-line diagrams, lighting plans) and submit them in
-   Label Studio with zero annotations. Aim for 10-15 negatives.
-
-2. Expand to **50+ total images** -- render and annotate additional pages
-   from the 20 source PDFs in `~/Documents/pdfToScan/`.
-
-3. Retrain with expanded dataset:
-
-```bash
-source ~/venv/bin/activate
-python MLTableDetection/train_table_transformer.py \
-  --data ~/Documents/TableAnnotations \
-  --output ~/Documents/TableAnnotations/models_v3 \
-  --epochs 25 --learning-rate 5e-6 --weight-decay 0.05 \
-  --warmup-steps 100 --val-split 0.15
-```
-
-#### Path B: Escalate to Tier 3 architecture
-
-If Path A still cannot reach 0.85 mAP@0.5, switch to **RF-DETR**
-(Apache 2.0, Roboflow) which is designed for small-dataset fine-tuning.
-Existing COCO annotations can be reused. Requires writing a new training
-script. See `training-panel-detector` skill for details.
-
 ### v4 Retrain Results (2026-04-01)
 
 Two new annotated pages added (`derek2.pdf` page 9, `derekfirst.pdf` page 7),
@@ -175,8 +129,101 @@ confidence threshold raised before production use.
 
 **Model location:** `~/Documents/TableAnnotations/models_v4/best/`
 
+### Box-Level Comparison Added (2026-04-05)
+
+A proper box-level evaluation was added to `evaluate_model.py` that compares
+bounding box positions and sizes between the ML model and heuristic detector,
+treating the heuristic as ground truth. Previously the comparison only counted
+detections without measuring spatial accuracy.
+
+Both `PanelSearchToolV25` and `TableDetectorML` now expose
+`last_detection_boxes` (per-page bounding boxes in PDF point coordinates)
+after each `readPdf()` call. `TableDetectorML` also exposes
+`last_detection_confidences`.
+
+**v4 Box-Level Results on `generic3.pdf`** (6 known panel schedules):
+
+| Metric | Value |
+|---|---|
+| Heuristic boxes (GT) | 6 |
+| ML model boxes | 4 |
+| mAP@0.5 | 0.6634 |
+| mAP@0.75 | 0.2805 |
+| mAP@0.5:0.95 | 0.2842 |
+| Precision (IoU>0.5) | 1.0000 (4/4 predictions correct) |
+| Recall (IoU>0.5) | 0.6667 (4/6 GT found) |
+| Mean IoU (matched) | 0.7037 |
+
+Per-box breakdown (page 1):
+- GT[0] (320.6, 181.8, 493.7, 428.0) -- MATCHED, IoU=0.6461
+- GT[1] (141.5, 212.2, 314.6, 458.5) -- MATCHED, IoU=0.5575
+- GT[2] (499.9, 33.5, 672.8, 279.7) -- MATCHED, IoU=0.8336
+- GT[3] (499.9, 282.4, 672.8, 528.7) -- MATCHED, IoU=0.7778
+- GT[4] (141.5, 33.5, 314.6, 209.7) -- **MISSED**
+- GT[5] (320.6, 33.5, 493.7, 179.6) -- **MISSED**
+
+**Key findings:**
+- The model has zero false positives (100% precision), so it has learned what
+  panels look like, but it misses 2 of the top-row panels entirely.
+- Matched boxes have a mean IoU of only 0.70, meaning ML boundaries are ~30%
+  looser than the heuristic's. The mAP@0.75 drops sharply to 0.28.
+- Right-side panels match better (IoU 0.78-0.83) than left-side (IoU 0.56-0.65),
+  suggesting spatial bias from limited training layouts.
+
+**Usage:**
+
+```bash
+python MLTableDetection/evaluate_model.py \
+  --model ~/Documents/TableAnnotations/models_v4/best \
+  --pdf ~/Documents/SinglePdf/generic3.pdf \
+  --output ~/Documents/ML_Test/box_comparison_v4
+```
+
+### Root Cause Analysis (Updated 2026-04-05)
+
+The model is learning (loss decreases, detections improved, zero false
+positives) but lacks sufficient data diversity to generalise:
+
+- **No hard negatives** -- All 27 training images contain panel schedules.
+  The model has never seen a page WITHOUT tables. This is the single
+  highest-impact gap. Published DETR fine-tuning guidance recommends
+  20-30% of the dataset be negative examples.
+
+- **Still below minimum data threshold** -- 27 images is below the 50+
+  recommended minimum. Limited variety in drawing styles and layouts.
+
+- **Tiny validation set** -- Only ~4 images held out (15% of 27), making
+  mAP metrics noisy and best-model selection unreliable.
+
+- **Possible annotation looseness** -- Mean matched IoU of 0.70 may partly
+  reflect loose training annotations. Auditing annotation tightness against
+  the heuristic overlays could improve box precision.
+
+### Next Steps (Updated 2026-04-05)
+
+Prioritised by expected impact-to-effort ratio:
+
+1. **Add hard negatives (HIGH impact, LOW effort)** -- Render non-panel
+   pages from existing PDFs (derek2.pdf has 10 unused pages, derekfirst.pdf
+   has 9 unused pages, A.pdf has 2 unrendered pages). Submit in Label Studio
+   with zero annotations. Target 10-15 negatives.
+
+2. **Audit annotation tightness (MEDIUM impact, LOW effort)** -- Compare
+   existing Label Studio boxes against heuristic overlays at
+   `~/Documents/ML_Test/box_comparison_v4/heuristic/magenta_overlays/`.
+   Tighten any loose boxes.
+
+3. **Retrain as v5** with expanded dataset (same hyperparameters as v4).
+
+4. **Re-evaluate with box comparison** to check if mAP@0.5 >= 0.85.
+
+5. **If still below target** -- consider switching to RF-DETR (Apache 2.0)
+   which is designed for small-dataset fine-tuning. Existing COCO annotations
+   can be reused. See `training-panel-detector` skill for details.
+
 ### Comparison Overlays
 
+- Box comparison (v4): `~/Documents/ML_Test/box_comparison_v4/` (heuristic + ML overlays and `box_comparison.json`)
 - Heuristic (v2 eval): `~/Documents/ML_Test/eval_v2/heuristic/magenta_overlays/`
 - ML model (v2 eval):  `~/Documents/ML_Test/eval_v2/ml/magenta_overlays/`
 - ML model (v1 eval):  `~/Documents/ML_Test/finetuned_conf0.7/magenta_overlays/`

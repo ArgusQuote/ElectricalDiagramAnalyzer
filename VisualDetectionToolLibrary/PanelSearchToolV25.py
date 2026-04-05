@@ -189,6 +189,10 @@ class PanelBoardSearch:
         self.onebox_aspect_range = onebox_aspect_range
         self.onebox_min_side_px = onebox_min_side_px
 
+        # Per-page detection boxes in PDF points, populated by readPdf().
+        # Maps page index (0-based) -> list of (x0, y0, x1, y1) tuples.
+        self.last_detection_boxes: dict[int, list[tuple[float, float, float, float]]] = {}
+
     # ----------------- Public API -----------------
     def readPdf(self, pdf_path: str) -> list[str]:
         """Detect panel-board voids on each PDF page, export vector-PDF clips and hi-DPI PNG crops, and return the list of PNG paths."""
@@ -199,6 +203,7 @@ class PanelBoardSearch:
         doc = pdfium.PdfDocument(pdf_path_str)
         base = Path(pdf_path_str).stem
         all_pngs: list[str] = []
+        self.last_detection_boxes = {}
 
         if self.verbose:
             print(f"[INFO] Detecting with pypdfium2 @ {self.dpi} DPI")
@@ -583,6 +588,9 @@ class PanelBoardSearch:
                 candidates = deduped_tuples
                 if self.verbose and len(deduped_tuples) < len(rect_tuples):
                     print(f"[INFO] Page {pidx+1}: deduplicated {len(rect_tuples)} -> {len(deduped_tuples)} candidates")
+
+            # Store final detection boxes for this page (PDF point coords)
+            self.last_detection_boxes[pidx] = list(candidates)
 
             # ---- Export vector PDF + hi-DPI PNG for each candidate ----
             # #region agent log

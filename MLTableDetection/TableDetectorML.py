@@ -135,6 +135,12 @@ class TableDetectorML:
         if model_path is None and backend == self.BACKEND_TATR:
             self.model_path = self.DEFAULT_TATR_MODEL
         
+        # Per-page detection boxes in PDF points, populated by readPdf().
+        # Maps page index (0-based) -> list of (x0, y0, x1, y1) tuples.
+        self.last_detection_boxes: dict[int, list[tuple[float, float, float, float]]] = {}
+        # Per-page confidence scores, parallel to last_detection_boxes.
+        self.last_detection_confidences: dict[int, list[float]] = {}
+
         # Load model based on backend
         self.model = None
         self.processor = None
@@ -307,7 +313,9 @@ class TableDetectorML:
         doc = pdfium.PdfDocument(pdf_path_str)
         base = Path(pdf_path_str).stem
         all_pngs: list[str] = []
-        
+        self.last_detection_boxes = {}
+        self.last_detection_confidences = {}
+
         if self.verbose:
             backend_name = "Table Transformer" if self.backend == self.BACKEND_TATR else "Detectron2"
             print(f"[INFO] ML Detection with {backend_name} @ {self.dpi} DPI")
@@ -418,6 +426,12 @@ class TableDetectorML:
                     2,
                 )
             
+            # Store final detection boxes and confidences for this page
+            self.last_detection_boxes[pidx] = list(candidates)
+            self.last_detection_confidences[pidx] = [
+                all_pixel_boxes[i][4] for i in sorted(kept_indices)
+            ] if kept_indices else []
+
             # Export crops
             saved_idx = 0
             for clip in candidates:

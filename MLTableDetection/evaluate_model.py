@@ -375,7 +375,7 @@ def run_inference_on_images(
 
 
 # ---------------------------------------------------------------------------
-# Compare with heuristic
+# Compare with heuristic (count-only, legacy)
 # ---------------------------------------------------------------------------
 
 def compare_with_heuristic(
@@ -478,6 +478,336 @@ def compare_with_heuristic(
 
 
 # ---------------------------------------------------------------------------
+# Box-level comparison with heuristic as ground truth
+# ---------------------------------------------------------------------------
+
+def _compute_iou(box_a: tuple, box_b: tuple) -> float:
+    """Compute IoU between two (x0, y0, x1, y1) boxes."""
+    ax0, ay0, ax1, ay1 = box_a
+    bx0, by0, bx1, by1 = box_b
+
+    inter_x0 = max(ax0, bx0)
+    inter_y0 = max(ay0, by0)
+    inter_x1 = min(ax1, bx1)
+    inter_y1 = min(ay1, by1)
+
+    inter_w = max(0.0, inter_x1 - inter_x0)
+    inter_h = max(0.0, inter_y1 - inter_y0)
+    intersection = inter_w * inter_h
+
+    area_a = (ax1 - ax0) * (ay1 - ay0)
+    area_b = (bx1 - bx0) * (by1 - by0)
+    union = area_a + area_b - intersection
+
+    if union <= 0:
+        return 0.0
+    return intersection / union
+
+
+def _greedy_match(
+    gt_boxes: list[tuple],
+    pred_boxes: list[tuple],
+    iou_threshold: float = 0.5,
+) -> list[dict]:
+    """
+    Greedily match predicted boxes to ground-truth boxes by IoU.
+
+    Each GT box is matched to at most one prediction (highest IoU first).
+
+    Returns a list of match dicts, one per GT box:
+        {"gt_idx", "gt_box", "pred_idx" | None, "pred_box" | None, "iou"}
+    """
+    n_gt = len(gt_boxes)
+    n_pred = len(pred_boxes)
+
+    if n_gt == 0:
+        return []
+
+    # Build IoU matrix
+    iou_matrix: list[list[float]] = []
+    for gi in range(n_gt):
+        row = []
+        for pi in range(n_pred):
+            row.append(_compute_iou(gt_boxes[gi], pred_boxes[pi]))
+        iou_matrix.append(row)
+
+    matched_gt: set[int] = set()
+    matched_pred: set[int] = set()
+    matches: list[tuple[int, int, float]] = []
+
+    # Collect all (gt, pred, iou) pairs above threshold, sort descending
+    pairs = []
+    for gi in range(n_gt):
+        for pi in range(n_pred):
+            if iou_matrix[gi][pi] >= iou_threshold:
+                pairs.append((gi, pi, iou_matrix[gi][pi]))
+    pairs.sort(key=lambda x: x[2], reverse=True)
+
+    for gi, pi, iou_val in pairs:
+        if gi in matched_gt or pi in matched_pred:
+            continue
+        matches.append((gi, pi, iou_val))
+        matched_gt.add(gi)
+        matched_pred.add(pi)
+
+    results = []
+    for gi in range(n_gt):
+        match = next((m for m in matches if m[0] == gi), None)
+        if match:
+            _, pi, iou_val = match
+            results.append({
+                "gt_idx": gi,
+                "gt_box": gt_boxes[gi],
+                "pred_idx": pi,
+                "pred_box": pred_boxes[pi],
+                "iou": round(iou_val, 4),
+            })
+        else:
+            results.append({
+                "gt_idx": gi,
+                "gt_box": gt_boxes[gi],
+                "pred_idx": None,
+                "pred_box": None,
+                "iou": 0.0,
+            })
+
+    return results
+
+
+def compare_boxes(
+    model_path: str,
+    pdf_path: str,
+    output_dir: Optional[str] = None,
+    conf_threshold: float = 0.5,
+    iou_threshold: float = 0.5,
+    verbose: bool = True,
+) -> dict:
+    """
+    Box-level comparison of ML vs heuristic, treating heuristic as ground truth.
+
+    Runs both detectors on *pdf_path*, extracts per-page bounding boxes,
+    and computes:
+      - mAP@0.5, mAP@0.75, mAP@0.5:0.95 (torchmetrics, heuristic = GT)
+      - Greedy per-box IoU matching at *iou_threshold*
+      - Precision, recall, mean IoU of matched boxes
+      - Per-page breakdown
+
+    Args:
+        model_path: Path to a fine-tuned Table Transformer directory.
+        pdf_path: Path to a test PDF.
+        output_dir: Where to save results and overlays.
+        conf_threshold: Confidence threshold for ML detections.
+        iou_threshold: IoU threshold for the greedy matching report.
+        verbose: Print progress and summary table.
+
+    Returns:
+        Dictionary with all metrics and per-page details.
+    """
+    import torch
+    from torchmetrics.detection.mean_ap import MeanAveragePrecision
+    from MLTableDetection.TableDetectorML import TableDetectorML
+
+    try:
+        from VisualDetectionToolLibrary.PanelSearchToolV25 import (
+            PanelBoardSearch,
+        )
+    except ImportError:
+        print("[ERROR] PanelSearchToolV25 not found. "
+              "Cannot run heuristic comparison.")
+        raise
+
+    pdf_path = Path(pdf_path)
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+    if output_dir:
+        output_dir = Path(output_dir)
+    else:
+        output_dir = Path("comparison_results")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if verbose:
+        print(f"[INFO] Box-level comparison: ML vs Heuristic (ground truth)")
+        print(f"[INFO] PDF: {pdf_path.name}")
+
+    # --- run heuristic (ground truth) ---
+    heuristic_dir = output_dir / "heuristic"
+    heuristic = PanelBoardSearch(
+        output_dir=str(heuristic_dir),
+        dpi=400,
+        verbose=False,
+    )
+    h_pngs = heuristic.readPdf(str(pdf_path))
+
+    # --- run ML model ---
+    ml_dir = output_dir / "ml"
+    ml = TableDetectorML(
+        output_dir=str(ml_dir),
+        model_path=str(model_path),
+        conf_threshold=conf_threshold,
+        dpi=400,
+        enforce_one_box=False,
+        verbose=False,
+    )
+    ml_pngs = ml.readPdf(str(pdf_path))
+
+    # --- collect per-page boxes ---
+    all_pages = sorted(
+        set(heuristic.last_detection_boxes) | set(ml.last_detection_boxes)
+    )
+
+    metric = MeanAveragePrecision(box_format="xyxy", class_metrics=False)
+
+    total_gt = 0
+    total_pred = 0
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+    matched_ious: list[float] = []
+    page_details: list[dict] = []
+
+    for pidx in all_pages:
+        gt_boxes = heuristic.last_detection_boxes.get(pidx, [])
+        pred_boxes = ml.last_detection_boxes.get(pidx, [])
+        pred_confs = ml.last_detection_confidences.get(pidx, [])
+
+        # Fall back to uniform confidence if not available
+        if len(pred_confs) != len(pred_boxes):
+            pred_confs = [1.0] * len(pred_boxes)
+
+        n_gt = len(gt_boxes)
+        n_pred = len(pred_boxes)
+        total_gt += n_gt
+        total_pred += n_pred
+
+        # torchmetrics update
+        if pred_boxes:
+            pred_t = torch.tensor(pred_boxes, dtype=torch.float32)
+            score_t = torch.tensor(pred_confs, dtype=torch.float32)
+            plabel_t = torch.zeros(n_pred, dtype=torch.int64)
+        else:
+            pred_t = torch.zeros((0, 4), dtype=torch.float32)
+            score_t = torch.zeros(0, dtype=torch.float32)
+            plabel_t = torch.zeros(0, dtype=torch.int64)
+
+        if gt_boxes:
+            gt_t = torch.tensor(gt_boxes, dtype=torch.float32)
+            glabel_t = torch.zeros(n_gt, dtype=torch.int64)
+        else:
+            gt_t = torch.zeros((0, 4), dtype=torch.float32)
+            glabel_t = torch.zeros(0, dtype=torch.int64)
+
+        metric.update(
+            preds=[{"boxes": pred_t, "scores": score_t, "labels": plabel_t}],
+            target=[{"boxes": gt_t, "labels": glabel_t}],
+        )
+
+        # Greedy matching for detailed report
+        matches = _greedy_match(gt_boxes, pred_boxes, iou_threshold)
+        page_tp = sum(1 for m in matches if m["pred_idx"] is not None)
+        page_fn = n_gt - page_tp
+        # Unmatched predictions are false positives
+        matched_pred_ids = {m["pred_idx"] for m in matches
+                           if m["pred_idx"] is not None}
+        page_fp = n_pred - len(matched_pred_ids)
+
+        total_tp += page_tp
+        total_fn += page_fn
+        total_fp += page_fp
+
+        page_ious = [m["iou"] for m in matches if m["pred_idx"] is not None]
+        matched_ious.extend(page_ious)
+
+        page_details.append({
+            "page": pidx + 1,
+            "gt_count": n_gt,
+            "pred_count": n_pred,
+            "true_positives": page_tp,
+            "false_positives": page_fp,
+            "false_negatives": page_fn,
+            "mean_iou": round(sum(page_ious) / len(page_ious), 4)
+                        if page_ious else 0.0,
+            "matches": matches,
+        })
+
+    # --- aggregate metrics ---
+    map_result = metric.compute()
+
+    precision = total_tp / max(total_tp + total_fp, 1)
+    recall = total_tp / max(total_gt, 1)
+    mean_iou = (sum(matched_ious) / len(matched_ious)
+                if matched_ious else 0.0)
+
+    metrics = {
+        "mAP@0.5": round(float(map_result["map_50"]), 4),
+        "mAP@0.75": round(float(map_result["map_75"]), 4),
+        "mAP@0.5:0.95": round(float(map_result["map"]), 4),
+        "recall@100": round(float(map_result["mar_100"]), 4),
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "mean_matched_iou": round(mean_iou, 4),
+        "true_positives": total_tp,
+        "false_positives": total_fp,
+        "false_negatives": total_fn,
+    }
+
+    comparison = {
+        "pdf": str(pdf_path),
+        "model": str(model_path),
+        "conf_threshold": conf_threshold,
+        "iou_threshold": iou_threshold,
+        "ground_truth": "heuristic (PanelSearchToolV25)",
+        "heuristic_total_boxes": total_gt,
+        "ml_total_boxes": total_pred,
+        "heuristic_output_files": h_pngs,
+        "ml_output_files": ml_pngs,
+        "metrics": metrics,
+        "per_page": page_details,
+    }
+
+    comparison_file = output_dir / "box_comparison.json"
+    with open(comparison_file, "w") as f:
+        json.dump(comparison, f, indent=2)
+
+    if verbose:
+        print(f"\n{'=' * 60}")
+        print("BOX-LEVEL COMPARISON  (heuristic = ground truth)")
+        print(f"{'=' * 60}")
+        print(f"  Heuristic boxes (GT): {total_gt}")
+        print(f"  ML model boxes:       {total_pred}")
+        print()
+        print(f"  mAP@0.5:              {metrics['mAP@0.5']:.4f}")
+        print(f"  mAP@0.75:             {metrics['mAP@0.75']:.4f}")
+        print(f"  mAP@0.5:0.95:         {metrics['mAP@0.5:0.95']:.4f}")
+        print()
+        print(f"  Precision (IoU>{iou_threshold}):  "
+              f"{metrics['precision']:.4f}  "
+              f"({total_tp} TP / {total_tp + total_fp} predictions)")
+        print(f"  Recall    (IoU>{iou_threshold}):  "
+              f"{metrics['recall']:.4f}  "
+              f"({total_tp} TP / {total_gt} GT)")
+        print(f"  Mean IoU (matched):   {metrics['mean_matched_iou']:.4f}")
+
+        print(f"\n  {'Page':>4}  {'GT':>3}  {'Pred':>4}  {'TP':>3}  "
+              f"{'FP':>3}  {'FN':>3}  {'Mean IoU':>8}")
+        print(f"  {'-'*4}  {'-'*3}  {'-'*4}  {'-'*3}  "
+              f"{'-'*3}  {'-'*3}  {'-'*8}")
+        for pd in page_details:
+            if pd["gt_count"] == 0 and pd["pred_count"] == 0:
+                continue
+            print(f"  {pd['page']:>4}  {pd['gt_count']:>3}  "
+                  f"{pd['pred_count']:>4}  {pd['true_positives']:>3}  "
+                  f"{pd['false_positives']:>3}  {pd['false_negatives']:>3}  "
+                  f"{pd['mean_iou']:>8.4f}")
+
+        print(f"\n  Heuristic overlays: {heuristic_dir / 'magenta_overlays'}")
+        print(f"  ML overlays:        {ml_dir / 'magenta_overlays'}")
+        print(f"  Results saved to:   {comparison_file}")
+
+    return comparison
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -500,7 +830,12 @@ def main():
     )
     parser.add_argument(
         "--pdf",
-        help="PDF file for comparison with heuristic detector",
+        help="PDF file for box-level comparison with heuristic detector "
+             "(heuristic = ground truth)",
+    )
+    parser.add_argument(
+        "--pdf-count-only",
+        help="PDF file for count-only comparison (legacy mode, no IoU)",
     )
     parser.add_argument(
         "--output", "-o",
@@ -509,6 +844,10 @@ def main():
     parser.add_argument(
         "--conf", type=float, default=0.5,
         help="Confidence threshold (default: 0.5)",
+    )
+    parser.add_argument(
+        "--iou", type=float, default=0.5,
+        help="IoU threshold for box matching (default: 0.5)",
     )
     parser.add_argument(
         "--no-visualizations", action="store_true",
@@ -548,6 +887,16 @@ def main():
         )
     elif args.pdf:
         pdf_path = os.path.expanduser(args.pdf)
+        compare_boxes(
+            model_path=model_path,
+            pdf_path=pdf_path,
+            output_dir=args.output,
+            conf_threshold=args.conf,
+            iou_threshold=args.iou,
+            verbose=verbose,
+        )
+    elif args.pdf_count_only:
+        pdf_path = os.path.expanduser(args.pdf_count_only)
         compare_with_heuristic(
             model_path=model_path,
             pdf_path=pdf_path,
