@@ -1362,6 +1362,128 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "deferred_render": True
     }
 
+@anvil.server.callable
+def vm_analyze_specs_pdf(media, owner_email=None, job_name=""):
+    """
+    Save uploaded specs PDF, run specs analyzer, and return UI-friendly results.
+    """
+    if not owner_email or not str(owner_email).strip():
+        raise RuntimeError("owner_email required")
+
+    owner_email = str(owner_email).strip().lower()
+
+    safe_job_name = _slugify(job_name or Path(getattr(media, "name", "specs.pdf")).stem)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    job_id = f"specs_{safe_job_name}__{stamp}"
+
+    job_dir = BASE_JOBS_DIR / job_id
+    pdf_dir = job_dir / "uploaded_pdfs"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_pdf = _save_media_to_disk(media, pdf_dir)
+
+    _status_write(
+        job_dir,
+        "running",
+        created_at=_now_utc().isoformat(),
+        file_path=str(saved_pdf),
+        job_dir_path=str(job_dir),
+        owner_email=owner_email,
+        owner_id=owner_email,
+        node_id=NODE_ID,
+        step="specs_importing",
+        progress=5.0
+    )
+
+    try:
+        module_path = Path("/home/paperspace/Spec_Sheet_Analysis/Specs_AnalyzerV4.py")
+        print(f">>> SPECS DEBUG selected module_path={module_path}")
+
+        if not module_path.is_file():
+            raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
+
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "argus_specs_analyzer_v4",
+            str(module_path)
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create import spec for {module_path}")
+
+        spec_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(spec_module)
+
+        print(f">>> SPECS DEBUG imported module: {spec_module}")
+
+        analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
+        if analyze_specs_pdf_for_ui is None:
+            raise AttributeError("Specs_AnalyzerV4.py does not define analyze_specs_pdf_for_ui")
+
+        print(">>> SPECS DEBUG got analyze_specs_pdf_for_ui")
+
+        _status_write(
+            job_dir,
+            "running",
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_analyzing",
+            progress=15.0
+        )
+
+        result = analyze_specs_pdf_for_ui(
+            pdf_path=str(saved_pdf),
+            job_dir=str(job_dir)
+        ) or {}
+
+        result = dict(result)
+        result["job_id"] = job_id
+        result["job_dir"] = str(job_dir)
+        result["saved_pdf"] = str(saved_pdf)
+        result["owner_email"] = owner_email
+        result["owner_id"] = owner_email
+
+        _result_write(job_dir, result)
+
+        _status_write(
+            job_dir,
+            "done",
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_complete",
+            progress=100.0
+        )
+
+        return result
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f">>> SPECS DEBUG ERROR: {tb}")
+
+        _status_write(
+            job_dir,
+            "error",
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_error",
+            error=f"{type(e).__name__}: {e}",
+            traceback=tb,
+            progress=100.0
+        )
+        raise
+
 def _natural_key(p: Path):
     # Sort like page2 before page10
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
