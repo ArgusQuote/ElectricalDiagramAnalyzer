@@ -1396,7 +1396,7 @@ def vm_analyze_specs_pdf(media, owner_email=None, job_name=""):
     )
 
     try:
-        module_path = Path("/home/paperspace/Spec_Sheet_Analysis/Specs_AnalyzerV4.py")
+        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV4.py"
         print(f">>> SPECS DEBUG selected module_path={module_path}")
 
         if not module_path.is_file():
@@ -1483,6 +1483,39 @@ def vm_analyze_specs_pdf(media, owner_email=None, job_name=""):
             progress=100.0
         )
         raise
+
+@anvil.server.callable
+def vm_delete_specs_job(job_id: str, owner_email: str) -> bool:
+    """
+    Delete a specs-only temp job folder after the results modal is finished.
+    Only allows deletion of specs_* jobs owned by the requesting user.
+    """
+    if not job_id or not owner_email:
+        return False
+
+    owner_email = str(owner_email).strip().lower()
+    if not job_id.startswith("specs_"):
+        return False
+
+    job_dir = BASE_JOBS_DIR / job_id
+    if not job_dir.exists() or not job_dir.is_dir():
+        return False
+
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
+    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+
+    if not job_owner or job_owner != owner_email:
+        return False
+
+    import shutil
+    try:
+        shutil.rmtree(job_dir, ignore_errors=False)
+        print(f">>> deleted specs temp job folder: {job_dir}")
+        return True
+    except Exception as e:
+        print(f">>> failed deleting specs temp job folder {job_dir}: {e}")
+        return False
 
 def _natural_key(p: Path):
     # Sort like page2 before page10
