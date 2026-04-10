@@ -1,14 +1,34 @@
 from ._anvil_designer import uploadTemplate
 from anvil import *
+from routing import router
+import stripe.checkout
 import anvil.server, anvil.users, json
+from anvil import js
+from .. import router_state
+from ..AccessCodeDialog import AccessCodeDialog
 
-USE_UI_OVERRIDES = True  # flip to True to send overrides
+USE_UI_OVERRIDES = True
 
 class upload(uploadTemplate):
   def __init__(self, **properties):
     self.init_components(**properties)
+
+    # FULL WIDTH
+    self.set_event_handler("show", self._force_full_width_everywhere)
+
     if not anvil.users.get_user():
-      open_form('login'); return
+      js.window.location.hash = "landing"
+      return
+    # --- Entitlement gate (access code) ---
+    try:
+      anvil.server.call("auto_claim_reserved_admin_seat")
+    except Exception:
+      pass
+
+    if not self._ensure_entitled():
+      # _ensure_entitled() already showed messaging
+      js.window.location.hash = "landing"
+      return
 
     self._job_name = None
     self._job_start_ts_ms = 0
@@ -18,6 +38,12 @@ class upload(uploadTemplate):
 
     if hasattr(self, "instructions_btn"):
       self.instructions_btn.set_event_handler('click', self.instructions_btn_click)
+
+    if hasattr(self, "jobs_btn"):
+      self.jobs_btn.set_event_handler('click', self.jobs_btn_click)
+
+    if hasattr(self, "logout_btn"):
+      self.logout_btn.set_event_handler('click', self.logout_btn_click)
 
     if hasattr(self, "enclosure_style_dd"):
       self.enclosure_style_dd.items = [
@@ -44,6 +70,121 @@ class upload(uploadTemplate):
     self._job_id = None
     self._node_id = None  # owner is always resolved server-side by email
 
+  def _ensure_entitled(self) -> bool:
+    """
+    Returns True if user is allowed to use the app.
+    If not entitled, prompts for code redemption.
+    """
+    # 1) Are we already entitled?
+    try:
+      status = anvil.server.call("is_current_user_entitled") or {}
+    except Exception as e:
+      alert(f"Server error checking access:\n{e}")
+      return False
+
+    if status.get("ok"):
+      return True
+
+    # 2) Not entitled -> prompt for access code
+    msg = status.get("message") or "Not entitled."
+    if status.get("trialErr") or ("trialOk" in status) or ("internalAdmin" in status):
+      msg += (
+        f"\n\nemail={status.get('email')}"
+        f"\ninternalAdmin={status.get('internalAdmin')}"
+        f"\ntrialOk={status.get('trialOk')}"
+        f"\ntrialErr={status.get('trialErr')}"
+      )
+    Notification(msg, style="warning").show()
+
+    code = self._prompt_for_access_code()
+    if not code:
+      return False
+
+    # 3) Try redeem
+    try:
+      res = anvil.server.call("redeem_access_code", code) or {}
+    except Exception as e:
+      alert(f"Could not redeem access code:\n{e}")
+      return False
+
+    if not res.get("ok"):
+      alert(res.get("message") or "Access code rejected.")
+      return False
+
+    # 4) Re-check entitlement (should now pass)
+    try:
+      status2 = anvil.server.call("is_current_user_entitled") or {}
+    except Exception:
+      status2 = {}
+
+    if status2.get("ok"):
+      Notification("Access code accepted.", style="success").show()
+      return True
+
+    alert(status2.get("message") or "Access still not active.")
+    return False
+
+  def _prompt_for_access_code(self) -> str:
+    code = alert(
+      content=AccessCodeDialog(),
+      title="Access Code Required",
+      buttons=[],
+      large=False,
+      dismissible=False
+    )
+    return (code or "").strip().upper()
+
+  def _force_full_width_everywhere(self, **e):
+    try:
+      js.window.setTimeout(self._force_full_width_now, 0)
+    except Exception:
+      self._force_full_width_now()
+
+  def _force_full_width_now(self):
+    try:
+      node = js.get_dom_node(self)
+
+      # Walk up and kill max-width on every ancestor
+      el = node
+      hops = 0
+      while el is not None and hops < 50:
+        try:
+          s = el.style
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("width", "100%", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+        except Exception:
+          pass
+
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+
+        hops += 1
+
+      # Also force root elements
+      for root in [js.document.documentElement, js.document.body]:
+        try:
+          root.style.setProperty("max-width", "none", "important")
+          root.style.setProperty("width", "100%", "important")
+          root.style.setProperty("margin", "0", "important")
+        except Exception:
+          pass
+
+      # Common Anvil mount point
+      try:
+        agh = js.document.getElementById("appGoesHere")
+        if agh:
+          agh.style.setProperty("max-width", "none", "important")
+          agh.style.setProperty("width", "100%", "important")
+      except Exception:
+        pass
+
+    except Exception:
+      pass
+
   # --- make the job note string ---
   def _build_job_note(self, file_media):
     if hasattr(self, "text_box_1") and self.text_box_1.text:
@@ -58,7 +199,6 @@ class upload(uploadTemplate):
     self._job_name = job_name
 
     try:
-      from anvil import js
       submitted_at_utc = js.window.Date().toISOString()
       submitted_local  = js.window.Date().toLocaleString()
       tz_offset_min    = int(js.window.Date().getTimezoneOffset())
@@ -127,7 +267,8 @@ class upload(uploadTemplate):
 
   def go_btn_click(self, **event_args):
     if not anvil.users.get_user():
-      open_form('login'); return
+      js.window.location.hash = "landing"
+      return
   
     f = getattr(self.file_loader, "file", None)
     if not self._is_pdf(f):
@@ -148,7 +289,16 @@ class upload(uploadTemplate):
       #   - Show progress and elapsed time
       #   - Poll until done
       #   - Navigate to output on completion
-      open_form('processing', file=f, ui_overrides=ui_overrides, job_note=job_note, job_name=self._job_name)
+      # Router navigation (do NOT open_form)
+      router_state.processing_args = {
+        "file": f,
+        "ui_overrides": ui_overrides,
+        "job_note": job_note,
+        "job_name": self._job_name
+      }
+      js.window.location.hash = "processing"
+      return
+
   
     except Exception as e:
       msg = (getattr(e, "args", [""]) or [""])[0] or str(e) or type(e).__name__
@@ -224,7 +374,9 @@ class upload(uploadTemplate):
       self.go_btn.text = "Generate BOM"
 
   def _render_finished(self, resp: dict):
-    open_form('output', result=resp, job_name=self._job_name)
+    router_state.output_args = {"result": resp, "job_name": self._job_name}
+    js.window.location.hash = "output"
+    return
 
     summary = (
       f"✅ Saved PDF: {resp.get('saved_pdf','(n/a)')}\n"
@@ -250,7 +402,14 @@ class upload(uploadTemplate):
   def logout_btn_click(self, **event_args):
     anvil.users.logout()
     Notification("Logged out", timeout=1.5).show()
-    open_form('login')
+    js.window.location.hash = "landing"
 
   def instructions_btn_click(self, **event_args):
-    open_form('instructions')
+    js.window.location.hash = "instructions"
+
+  def jobs_btn_click(self, **event_args):
+    js.window.location.hash = "myjobs"
+
+  @handle("button_1", "click")
+  def button_1_click(self, **event_args):
+    js.window.location.hash = "coveragemap"
