@@ -24,7 +24,7 @@ if project_root not in sys.path:
 
 
 # ---------- IO PATHS ----------
-INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S17.pdf").expanduser()
+INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S19.pdf").expanduser()
 SPEC_OUTPUT_ROOT = Path("~/Spec_Sheet_Analysis/Results").expanduser()
 SPEC_DATA_ROOT = Path("~/Spec_Sheet_Analysis/data").expanduser()
 
@@ -116,19 +116,54 @@ class SpecAnalysisResult:
 # Config
 # ============================================================
 
-PANELBOARD_SECTION_PRIORITY = {
-    "26 24 16.16": 0,   # highest priority
-    "26 24 16.13": 1,
-    "26 24 16": 2,
-}
+PANELBOARD_TITLE_PATTERNS = [
+    re.compile(r"\bpanelboards?\b", re.IGNORECASE),
+    re.compile(r"\bpanelboards?\s+breaker\s+type\b", re.IGNORECASE),
+    re.compile(r"\bdistribution\s+panelboards?\b", re.IGNORECASE),
+    re.compile(r"\bpower\s+and\s+lighting\s+panelboards?\b", re.IGNORECASE),
+    re.compile(r"\blighting\s+and\s+appliance\s+panelboards?\b", re.IGNORECASE),
+    re.compile(r"\blow\s+voltage\s+panelboards?\b", re.IGNORECASE),
+]
 
-PANELBOARD_SECTION_HEADER_PATTERNS = [
-    (re.compile(r"\bsection\s+26\s+24\s+16\s+16\b", re.IGNORECASE), "26 24 16.16"),
-    (re.compile(r"\bsection\s+26\s+24\s+16\s+13\b", re.IGNORECASE), "26 24 16.13"),
-    (re.compile(r"\bsection\s+26\s+24\s+16\b", re.IGNORECASE), "26 24 16"),
-    (re.compile(r"\b26\s+24\s+16\s+16\b", re.IGNORECASE), "26 24 16.16"),
-    (re.compile(r"\b26\s+24\s+16\s+13\b", re.IGNORECASE), "26 24 16.13"),
-    (re.compile(r"\b26\s+24\s+16\b", re.IGNORECASE), "26 24 16"),
+PANELBOARD_SUPPORT_TERMS = [
+    "panelboard",
+    "panelboards",
+    "breaker",
+    "breakers",
+    "bolt on",
+    "bolt in",
+    "plug on",
+    "plug in",
+    "bus",
+    "buses",
+    "bussing",
+    "main breaker",
+    "neutral",
+    "ground bar",
+    "circuit directory",
+]
+
+PANELBOARD_STOP_TERMS = [
+    "transformers",
+    "transformer",
+    "disconnect switches",
+    "disconnect switch",
+    "wiring devices",
+    "surge suppressors",
+    "lighting",
+    "exit signs",
+    "grounding",
+    "splitters",
+    "junction boxes",
+    "conduit",
+]
+
+PANELBOARD_REFERENCE_PENALTIES = [
+    "related sections",
+    "related section",
+    "references",
+    "table of contents",
+    "contents",
 ]
 
 MANUFACTURER_TOKENS = [
@@ -167,6 +202,75 @@ def ms_to_readable(ms: int | float | None) -> str:
 
     return f"{hours:02}:{minutes:02}:{seconds:02}:{milliseconds:03}"
 
+
+def _extract_section_code(text: str) -> Optional[Tuple[int, int, int]]:
+    """
+    Extract section code like:
+      262417
+      26 24 17
+      SECTION 262400
+      SECTION 26 24 17
+
+    Returns:
+      (26, 24, 17) style tuple if found
+      otherwise None
+    """
+    raw = text or ""
+
+    patterns = [
+        r"\bsection\s*(\d{2})\s*(\d{2})\s*(\d{2})\b",
+        r"\bsection\s+(\d{2})\s+(\d{2})\s+(\d{2})\b",
+        r"\b(\d{2})\s*(\d{2})\s*(\d{2})\b",
+        r"\b(\d{2})\s+(\d{2})\s+(\d{2})\b",
+    ]
+
+    for pat in patterns:
+        m = re.search(pat, raw, re.IGNORECASE)
+        if m:
+            a, b, c = m.groups()
+            return (int(a), int(b), int(c))
+
+    return None
+
+def _score_section_code_proximity(page_dict: dict) -> float:
+    """
+    Strongly prefer Division 26 / Section group 24.
+    Use this as a guide, not a hard gate.
+    """
+    candidate_regions = [
+        page_dict["regions"]["top_left"],
+        page_dict["regions"]["top_center"],
+        page_dict["regions"]["top_right"],
+        page_dict["regions"]["top_band"],
+        page_dict["text"],
+    ]
+
+    best_score = 0.0
+
+    for region_text in candidate_regions:
+        code = _extract_section_code(region_text)
+        if not code:
+            continue
+
+        div, group, item = code
+
+        score = 0.0
+
+        if div == 26:
+            score += 8.0
+        else:
+            score -= 12.0
+
+        if div == 26 and group == 24:
+            score += 20.0
+        elif div == 26 and group < 24:
+            score -= 10.0
+        elif div == 26 and group > 24:
+            score -= 8.0
+
+        best_score = max(best_score, score)
+
+    return best_score
 
 def now_ts_ms() -> int:
     return int(time.time() * 1000)
@@ -746,164 +850,137 @@ def normalize_for_matching(text: str) -> str:
 # Section Finding
 # ============================================================
 
+def _top_region_text(page_dict: dict) -> str:
+    return normalize_for_matching(
+        " ".join([
+            page_dict["regions"]["top_left"],
+            page_dict["regions"]["top_center"],
+            page_dict["regions"]["top_right"],
+            page_dict["regions"]["top_band"],
+        ])
+    )
+
+
+def _full_region_text(page_dict: dict) -> str:
+    return normalize_for_matching(page_dict["text"] or "")
+
+
+def _has_panelboard_title(text: str) -> bool:
+    return any(p.search(text) for p in PANELBOARD_TITLE_PATTERNS)
+
+
+def _panelboard_support_score(text: str) -> int:
+    score = 0
+    for term in PANELBOARD_SUPPORT_TERMS:
+        if term in text:
+            score += 1
+    return score
+
+
+def _panelboard_stop_score(text: str) -> int:
+    score = 0
+    for term in PANELBOARD_STOP_TERMS:
+        if term in text:
+            score += 1
+    return score
+
+
+def _panelboard_reference_penalty(text: str) -> int:
+    score = 0
+    for term in PANELBOARD_REFERENCE_PENALTIES:
+        if term in text:
+            score += 1
+    return score
+
+
+def _looks_like_panelboard_section_start(page_dict: dict) -> bool:
+    top_text = _top_region_text(page_dict)
+    full_text = _full_region_text(page_dict)
+
+    # Primary signal = panelboard naming
+    if _has_panelboard_title(top_text):
+        return True
+
+    # Secondary signal = "section ..." plus panelboard title somewhere on page
+    has_section_word = "section" in top_text or "section" in full_text
+    has_panelboard = _has_panelboard_title(full_text)
+
+    if has_section_word and has_panelboard:
+        return True
+
+    return False
+
+
 def score_page_for_panelboard_relevance(page_dict: dict) -> float:
     score = 0.0
 
-    full_text = page_dict["text"] or ""
-    norm_full = normalize_for_matching(full_text)
+    top_text = _top_region_text(page_dict)
+    full_text = _full_region_text(page_dict)
 
-    top_band = normalize_for_matching(page_dict["regions"]["top_band"])
-    top_left = normalize_for_matching(page_dict["regions"]["top_left"])
-    top_center = normalize_for_matching(page_dict["regions"]["top_center"])
-    top_right = normalize_for_matching(page_dict["regions"]["top_right"])
-    top_regions = [top_center, top_left, top_right, top_band]
+    # ---- naming / title first ----
+    if _has_panelboard_title(top_text):
+        score += 30.0
+    elif _has_panelboard_title(full_text):
+        score += 14.0
 
-    if re.search(r"\bsection\s+26\s+24\s+16\b", norm_full):
-        score += 20.0
-
-    if any(re.search(r"\bsection\s+26\s+24\s+16\b", r) for r in top_regions):
-        score += 18.0
-
-    if any(re.search(r"\b26\s+24\s+16\b", r) for r in top_regions):
-        score += 10.0
-
-    if any("distribution panelboards" in r for r in top_regions):
+    if "panelboards breaker type" in top_text:
         score += 16.0
-    elif any("lighting and appliance panelboards" in r for r in top_regions):
+    if "distribution panelboards" in top_text:
+        score += 16.0
+    if "power and lighting panelboards" in top_text:
+        score += 16.0
+    if "lighting and appliance panelboards" in top_text:
         score += 14.0
-    elif any("low voltage panelboards" in r for r in top_regions):
+    if "low voltage panelboards" in top_text:
         score += 14.0
-    elif any("panelboards" in r for r in top_regions):
-        score += 6.0
 
-    if re.search(r"\b26\s+24\s+16(?:\s+\d+)?\s*1\b", norm_full):
-        score += 18.0
+    # ---- numbers only help, never decide ----
+    if re.search(r"\bsection\s+26\s+24\s+\d{2}(?:\s+\d+)?\b", top_text):
+        score += 8.0
+    elif re.search(r"\b26\s+24\s+\d{2}(?:\s+\d+)?\b", top_text):
+        score += 4.0
 
-    support_terms = [
-        "bolt on",
-        "bolt in",
-        "fully rated",
-        "copper",
-        "manufacturers",
-        "breaker",
-        "breakers",
-        "bus",
-        "buses",
-        "panelboard buses",
-    ]
-    for term in support_terms:
-        if term in norm_full:
-            score += 1.0
+    # ---- content support ----
+    score += float(_panelboard_support_score(full_text))
 
-    reference_terms = [
-        "related work",
-        "references",
-        "section includes the following",
-        "this section includes the following",
-        "table of contents",
-        "contents",
-    ]
-    for term in reference_terms:
-        if term in norm_full:
-            score -= 8.0
-
-    all_section_refs = re.findall(r"\b26\s+\d{2}\s+\d{2}(?:\.\d+)?\b", norm_full)
-    unique_refs = set(all_section_refs)
-    if len(unique_refs) >= 4:
-        score -= 18.0
-    elif len(unique_refs) >= 2:
-        score -= 6.0
-
-    if re.search(r"\b26\s+24\s+16\.\d+\b", norm_full) and "section 26 24 16" not in norm_full:
-        score -= 8.0
+    # ---- penalties ----
+    score -= float(_panelboard_reference_penalty(full_text)) * 8.0
+    score -= float(_panelboard_stop_score(top_text)) * 10.0
+    score -= float(_panelboard_stop_score(full_text)) * 2.0
+    score += _score_section_code_proximity(page_dict)
 
     return score
 
 
 def score_section_header_candidate(page_dict: dict) -> int:
-    full_text = normalize_for_matching(page_dict["text"])
-
-    top_band = normalize_for_matching(page_dict["regions"]["top_band"])
-    middle_band = normalize_for_matching(page_dict["regions"]["middle_band"])
-    bottom_band = normalize_for_matching(page_dict["regions"]["bottom_band"])
-
-    top_left = normalize_for_matching(page_dict["regions"]["top_left"])
-    top_center = normalize_for_matching(page_dict["regions"]["top_center"])
-    top_right = normalize_for_matching(page_dict["regions"]["top_right"])
-
-    bottom_left = normalize_for_matching(page_dict["regions"]["bottom_left"])
-    bottom_center = normalize_for_matching(page_dict["regions"]["bottom_center"])
-    bottom_right = normalize_for_matching(page_dict["regions"]["bottom_right"])
-
     score = 0
-    top_regions = [top_center, top_left, top_right, top_band]
-    bottom_regions = [bottom_left, bottom_center, bottom_right, bottom_band]
 
-    if any("section 26 24 16" in r or "section 262416" in r for r in top_regions):
-        score += 30
+    top_text = _top_region_text(page_dict)
+    full_text = _full_region_text(page_dict)
 
-    if any("distribution panelboards" in r for r in top_regions):
+    if _has_panelboard_title(top_text):
+        score += 40
+    elif _has_panelboard_title(full_text):
         score += 20
-    elif any("lighting and appliance panelboards" in r for r in top_regions):
+
+    if "panelboards breaker type" in top_text:
+        score += 20
+    if "distribution panelboards" in top_text:
+        score += 20
+    if "power and lighting panelboards" in top_text:
+        score += 20
+    if "lighting and appliance panelboards" in top_text:
         score += 18
-    elif any("low voltage panelboards" in r for r in top_regions):
+    if "low voltage panelboards" in top_text:
         score += 18
-    elif any("panelboards" in r for r in top_regions):
+
+    if re.search(r"\bsection\s+26\s+24\s+\d{2}(?:\s+\d+)?\b", top_text):
         score += 10
 
-    if any("26 24 16" in r or "262416" in r for r in top_regions):
-        score += 16
-
-    if any("panelboards" in r for r in top_regions):
-        score += 8
-
-    if "26 24 16" in full_text and "panelboards" in full_text:
-        score += 12
-
-    if re.search(r"\b26\s+24\s+16(?:\s+\d+)?\s*1\b", full_text):
-        score += 28
-
-    opening_terms = [
-        "part 1 general",
-        "1 1 related documents",
-        "1 1 description",
-        "1 1 summary",
-        "1 1 references",
-        "1 1 related work",
-    ]
-    opening_hits = sum(1 for term in opening_terms if term in full_text)
-    score += min(opening_hits * 8, 24)
-
-    if any("section 26 24 16" in r or "section 262416" in r for r in bottom_regions):
-        score -= 12
-
-    if any("low voltage panelboards" in r or "distribution panelboards" in r for r in bottom_regions):
-        score -= 8
-
-    all_section_refs = re.findall(r"\b26\s+\d{2}\s+\d{2}(?:\.\d+)?\b", full_text)
-    unique_section_refs = set(all_section_refs)
-    if len(unique_section_refs) >= 3:
-        score -= 18
-    elif len(unique_section_refs) == 2:
-        score -= 8
-
-    toc_terms = [
-        "table of contents",
-        "contents",
-        "division 26",
-        "building standards",
-        "technical standards",
-    ]
-    if any(term in full_text for term in toc_terms):
-        score -= 18
-
-    deep_body_terms = [
-        "surge protective device",
-        "ground fault circuit interrupter",
-        "fabrication and features",
-    ]
-    deep_body_hits = sum(1 for term in deep_body_terms if term in middle_band)
-    score -= min(deep_body_hits * 2, 10)
+    score += _panelboard_support_score(full_text) * 2
+    score -= _panelboard_reference_penalty(full_text) * 10
+    score -= _panelboard_stop_score(top_text) * 12
+    score += int(_score_section_code_proximity(page_dict))
 
     return score
 
@@ -918,17 +995,18 @@ def get_section_header_line(page_dict: dict) -> Optional[str]:
     ]
 
     header_patterns = [
-        r"section\s+26\s+24\s+16\s+16\s+distribution\s+panelboards",
-        r"section\s+26\s+24\s+16\s+13\s+lighting\s+and\s+appliance\s+panelboards",
-        r"section\s+26\s+24\s+16\s+low\s+voltage\s+panelboards",
-        r"section\s+26\s+24\s+16\s+panelboards",
-        r"26\s+24\s+16\s+16\s+distribution\s+panelboards",
-        r"26\s+24\s+16\s+13\s+lighting\s+and\s+appliance\s+panelboards",
-        r"26\s+24\s+16\s+low\s+voltage\s+panelboards",
-        r"26\s+24\s+16\s+panelboards",
-        r"26\s+24\s+16\s+panelboards",
-        r"26\s+24\s+00\s+switchboards\s+and\s+panelboards",
-        r"panelboards",
+        r"section\s+26\s+24\s+\d{2}(?:\s+\d+)?\s+panelboards?\s+breaker\s+type",
+        r"section\s+26\s+24\s+\d{2}(?:\s+\d+)?\s+distribution\s+panelboards?",
+        r"section\s+26\s+24\s+\d{2}(?:\s+\d+)?\s+power\s+and\s+lighting\s+panelboards?",
+        r"section\s+26\s+24\s+\d{2}(?:\s+\d+)?\s+lighting\s+and\s+appliance\s+panelboards?",
+        r"section\s+26\s+24\s+\d{2}(?:\s+\d+)?\s+low\s+voltage\s+panelboards?",
+        r"section\s+26\s+24\s+\d{2}(?:\s+\d+)?\s+panelboards?",
+        r"panelboards?\s+breaker\s+type",
+        r"distribution\s+panelboards?",
+        r"power\s+and\s+lighting\s+panelboards?",
+        r"lighting\s+and\s+appliance\s+panelboards?",
+        r"low\s+voltage\s+panelboards?",
+        r"panelboards?",
     ]
 
     for region_text in candidate_regions:
@@ -941,37 +1019,18 @@ def get_section_header_line(page_dict: dict) -> Optional[str]:
     return None
 
 
-def get_panelboard_section_identity(page_dict: dict) -> Optional[str]:
-    candidate_regions = [
-        page_dict["regions"]["top_center"],
-        page_dict["regions"]["top_left"],
-        page_dict["regions"]["top_right"],
-        page_dict["regions"]["top_band"],
-        page_dict["text"],
-    ]
-
-    for region_text in candidate_regions:
-        norm = normalize_for_matching(region_text)
-        for pattern, section_id in PANELBOARD_SECTION_HEADER_PATTERNS:
-            if pattern.search(norm):
-                return section_id
-
-    return None
-
-
 def find_panelboard_section_candidates(pages: List[dict]) -> List[dict]:
     candidates = []
 
     for idx, page in enumerate(pages):
-        section_id = get_panelboard_section_identity(page)
-        if not section_id:
+        if not _looks_like_panelboard_section_start(page):
             continue
 
         score = score_section_header_candidate(page)
         candidates.append({
             "idx": idx,
             "page_num": page["page_num"],
-            "section_id": section_id,
+            "section_id": None,
             "score": score,
             "title": get_section_header_line(page),
         })
@@ -983,15 +1042,32 @@ def choose_best_panelboard_candidate(candidates: List[dict]) -> Optional[dict]:
     if not candidates:
         return None
 
-    candidates = sorted(
-        candidates,
-        key=lambda c: (
-            PANELBOARD_SECTION_PRIORITY.get(c["section_id"], 999),
-            -c["score"],
-            c["idx"],
-        )
+    # Sort by page order first
+    candidates = sorted(candidates, key=lambda c: c["idx"])
+
+    # Group nearby candidates into local runs (same section area)
+    runs = []
+    current_run = [candidates[0]]
+
+    for cand in candidates[1:]:
+        prev = current_run[-1]
+
+        # pages within 2 pages of each other are treated as one section run
+        if cand["idx"] - prev["idx"] <= 2:
+            current_run.append(cand)
+        else:
+            runs.append(current_run)
+            current_run = [cand]
+
+    runs.append(current_run)
+
+    # Score each run by its strongest page, but return the earliest page in that run
+    best_run = max(
+        runs,
+        key=lambda run: max(c["score"] for c in run)
     )
-    return candidates[0]
+
+    return best_run[0]
 
 
 def find_best_start_page(pages: List[dict]) -> Tuple[Optional[int], float, str]:
@@ -1002,40 +1078,16 @@ def find_best_start_page(pages: List[dict]) -> Tuple[Optional[int], float, str]:
     for idx, page in enumerate(pages):
         score = score_page_for_panelboard_relevance(page)
 
-        full_text = normalize_for_matching(page["text"])
-        top_band = normalize_for_matching(page["regions"]["top_band"])
-        top_left = normalize_for_matching(page["regions"]["top_left"])
-        top_center = normalize_for_matching(page["regions"]["top_center"])
-        top_right = normalize_for_matching(page["regions"]["top_right"])
-        top_regions = [top_center, top_left, top_right, top_band]
+        top_text = _top_region_text(page)
+        full_text = _full_region_text(page)
 
-        has_true_header = (
-            re.search(r"\bsection\s+26\s+24\s+16\b", full_text) is not None
-            or any(re.search(r"\bsection\s+26\s+24\s+16\b", r) for r in top_regions)
-        )
+        has_header_like_title = _has_panelboard_title(top_text)
+        has_panel_title_anywhere = _has_panelboard_title(full_text)
 
-        has_panel_title = any(
-            term in " ".join(top_regions)
-            for term in [
-                "panelboards",
-                "low voltage panelboards",
-                "distribution panelboards",
-                "lighting and appliance panelboards",
-            ]
-        ) or any(
-            term in full_text
-            for term in [
-                "panelboards",
-                "low voltage panelboards",
-                "distribution panelboards",
-                "lighting and appliance panelboards",
-            ]
-        )
-
-        if has_true_header and has_panel_title:
-            score += 10.0
+        if has_header_like_title:
             mode = "dedicated_panelboard_section"
-        elif has_panel_title:
+            score += 6.0
+        elif has_panel_title_anywhere:
             mode = "panelboard_like_section"
         else:
             mode = "unknown"
@@ -1052,37 +1104,51 @@ def find_best_start_page(pages: List[dict]) -> Tuple[Optional[int], float, str]:
 
 
 def refine_to_section_start(pages: List[dict], best_idx: int) -> int:
-    lookback = max(0, best_idx - 20)
+    lookback = max(0, best_idx - 5)
+    best_start = best_idx
+
+    best_page_code = _extract_section_code(
+        " ".join([
+            pages[best_idx]["regions"]["top_left"],
+            pages[best_idx]["regions"]["top_center"],
+            pages[best_idx]["regions"]["top_right"],
+            pages[best_idx]["regions"]["top_band"],
+            pages[best_idx]["text"],
+        ])
+    )
+
+    if best_page_code and best_page_code[0] == 26 and best_page_code[1] == 24:
+        for idx in range(lookback, best_idx + 1):
+            page_code = _extract_section_code(
+                " ".join([
+                    pages[idx]["regions"]["top_left"],
+                    pages[idx]["regions"]["top_center"],
+                    pages[idx]["regions"]["top_right"],
+                    pages[idx]["regions"]["top_band"],
+                    pages[idx]["text"],
+                ])
+            )
+
+            if page_code and page_code[0] == 26 and page_code[1] == 24:
+                best_start = idx
+                break
+
+        return best_start
+
     candidates = []
-
     for idx in range(lookback, best_idx + 1):
-        full_text = normalize_for_matching(pages[idx]["text"])
-        top_band = normalize_for_matching(pages[idx]["regions"]["top_band"])
-        top_left = normalize_for_matching(pages[idx]["regions"]["top_left"])
-        top_center = normalize_for_matching(pages[idx]["regions"]["top_center"])
-        top_right = normalize_for_matching(pages[idx]["regions"]["top_right"])
-        top_regions = [top_center, top_left, top_right, top_band]
-
-        has_true_section_header = (
-            re.search(r"\bsection\s+26\s+24\s+16\b", full_text) is not None
-            or any(re.search(r"\bsection\s+26\s+24\s+16\b", r) for r in top_regions)
-        )
-
-        has_panelboard_title = any("panelboards" in r for r in top_regions) or "panelboards" in full_text
-
-        if has_true_section_header and has_panelboard_title:
+        if _looks_like_panelboard_section_start(pages[idx]):
             score = score_section_header_candidate(pages[idx])
             candidates.append({
                 "idx": idx,
-                "page_num": pages[idx]["page_num"],
                 "score": score,
             })
 
     if not candidates:
         return best_idx
 
-    candidates.sort(key=lambda x: (x["score"], x["idx"]))
-    return candidates[-1]["idx"]
+    candidates.sort(key=lambda x: (x["idx"], -x["score"]))
+    return candidates[0]["idx"]
 
 
 def collect_multi_page_section(
@@ -1093,54 +1159,24 @@ def collect_multi_page_section(
 ) -> Tuple[str, int]:
     collected = []
     end_idx = start_idx
-    target_norm = normalize_for_matching(target_section_id or "")
 
     for idx in range(start_idx, len(pages)):
         page_text = normalize_preserve_lines(pages[idx]["text"])
-        page_match = normalize_for_matching(page_text)
+        top_text = _top_region_text(pages[idx])
+        full_text = _full_region_text(pages[idx])
 
         if idx > start_idx:
-            if target_section_id in ("26 24 16.13", "26 24 16.16"):
-                sibling_headers = [
-                    "section 26 24 16 13",
-                    "section 26 24 16 16",
-                ]
-
-                page_has_sibling_header = any(h in page_match for h in sibling_headers)
-                page_is_target = f"section {target_norm}" in page_match
-
-                if page_has_sibling_header and not page_is_target:
+            # Stop when a new non-panelboard section clearly begins
+            if "section" in top_text and not _has_panelboard_title(top_text):
+                if _panelboard_stop_score(top_text) > 0:
                     break
 
-            if (
-                "section 26 24 19" in page_match or
-                "section 262419" in page_match or
-                re.search(r"\b26\s+24\s+19\b", page_match)
-            ):
+            # Stop if the page has drifted away strongly
+            support_score = _panelboard_support_score(full_text)
+            stop_score = _panelboard_stop_score(full_text)
+
+            if stop_score >= 2 and stop_score > support_score:
                 break
-
-            top_header_text = normalize_for_matching(
-                " ".join([
-                    pages[idx]["regions"]["top_left"],
-                    pages[idx]["regions"]["top_center"],
-                    pages[idx]["regions"]["top_right"],
-                    pages[idx]["regions"]["top_band"],
-                ])
-            )
-
-            real_new_section_header = re.search(
-                r"\bsection\s+26\s+\d{2}\s+\d{2}(?:\s+\d+)?\b",
-                top_header_text
-            )
-
-            if real_new_section_header:
-                if target_section_id:
-                    exact_target_phrase = f"section {target_norm}"
-                    if exact_target_phrase not in top_header_text:
-                        break
-                else:
-                    if not ("section 26 24 16" in top_header_text or "section 262416" in top_header_text):
-                        break
 
         collected.append(page_text)
         end_idx = idx
@@ -1991,7 +2027,7 @@ def analyze_pdf_panelboard_specs(pdf_path: str) -> SpecAnalysisResult:
     if use_exact_candidate and chosen_candidate:
         start_idx = chosen_candidate["idx"]
         mode_guess = "dedicated_panelboard_section"
-        chosen_section_id = chosen_candidate["section_id"]
+        chosen_section_id = None
         chosen_score = float(chosen_candidate["score"])
         chosen_title = chosen_candidate["title"]
         selection_path = "exact_candidate"
@@ -2022,7 +2058,7 @@ def analyze_pdf_panelboard_specs(pdf_path: str) -> SpecAnalysisResult:
 
         start_idx = refine_to_section_start(pages, broad_best_idx)
         mode_guess = broad_mode_guess
-        chosen_section_id = get_panelboard_section_identity(pages[start_idx])
+        chosen_section_id = None
         chosen_score = float(broad_best_score)
         chosen_title = get_section_header_line(pages[start_idx])
         selection_path = "broad_fallback"

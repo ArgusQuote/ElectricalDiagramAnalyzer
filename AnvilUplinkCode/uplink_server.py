@@ -1396,7 +1396,7 @@ def vm_analyze_specs_pdf(media, owner_email=None, job_name=""):
     )
 
     try:
-        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV4.py"
+        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
         print(f">>> SPECS DEBUG selected module_path={module_path}")
 
         if not module_path.is_file():
@@ -1418,7 +1418,7 @@ def vm_analyze_specs_pdf(media, owner_email=None, job_name=""):
 
         analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
         if analyze_specs_pdf_for_ui is None:
-            raise AttributeError("Specs_AnalyzerV4.py does not define analyze_specs_pdf_for_ui")
+            raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
 
         print(">>> SPECS DEBUG got analyze_specs_pdf_for_ui")
 
