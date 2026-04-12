@@ -24,7 +24,7 @@ if project_root not in sys.path:
 
 
 # ---------- IO PATHS ----------
-INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S4.pdf").expanduser()
+INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S19.pdf").expanduser()
 SPEC_OUTPUT_ROOT = Path("~/Spec_Sheet_Analysis/Results").expanduser()
 SPEC_DATA_ROOT = Path("~/Spec_Sheet_Analysis/data").expanduser()
 
