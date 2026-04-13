@@ -24,7 +24,7 @@ if project_root not in sys.path:
 
 
 # ---------- IO PATHS ----------
-INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S18.pdf").expanduser()
+INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S14.pdf").expanduser()
 SPEC_OUTPUT_ROOT = Path("~/Spec_Sheet_Analysis/Results").expanduser()
 SPEC_DATA_ROOT = Path("~/Spec_Sheet_Analysis/data").expanduser()
 
@@ -187,6 +187,117 @@ COMPETITOR_MANUFACTURER_TOKENS = [
 # ============================================================
 # General Helpers
 # ============================================================
+
+def score_strong_top_panelboard_header(page_dict: dict) -> int:
+    top_raw = " ".join([
+        page_dict["regions"]["top_left"],
+        page_dict["regions"]["top_center"],
+        page_dict["regions"]["top_right"],
+        page_dict["regions"]["top_band"],
+    ])
+
+    top_norm = normalize_for_matching(top_raw)
+    score = 0
+
+    # Strong title signal
+    if re.search(r"\bpanelboards?\b", top_norm, re.IGNORECASE):
+        score += 3
+    if re.search(r"\bdistribution panelboards?\b", top_norm, re.IGNORECASE):
+        score += 2
+    if re.search(r"\bpower and lighting panelboards?\b", top_norm, re.IGNORECASE):
+        score += 2
+    if re.search(r"\blighting and appliance panelboards?\b", top_norm, re.IGNORECASE):
+        score += 2
+    if re.search(r"\bpanelboards? breaker type\b", top_norm, re.IGNORECASE):
+        score += 2
+
+    # Section numbering helps, but should not be mandatory
+    if re.search(r"\b26\s*24\b", top_raw, re.IGNORECASE):
+        score += 2
+    if re.search(r"\b26\s*24\s*\d{2}\b", top_raw, re.IGNORECASE):
+        score += 2
+
+    # Extra trust if it looks like an actual section/title line
+    if re.search(r"\bsection\b", top_norm, re.IGNORECASE):
+        score += 1
+    if re.search(r"[-–—]", top_raw):
+        score += 1
+
+    return score
+
+def has_inline_panelboard_section_signal(page_dict: dict) -> bool:
+    text = normalize_preserve_lines(page_dict["text"])
+    lines = split_nonempty_lines(text)
+
+    for line in lines:
+        line_norm = normalize_for_matching(line)
+
+        looks_like_section_line = bool(
+            re.match(r"^\s*26\s*\d{2}\s*\d{2}(?:\.\d{2})?\s*[-–—]?\s*", line, re.IGNORECASE)
+        )
+
+        if looks_like_section_line and "panelboard" in line_norm:
+            return True
+
+    return False
+
+def classify_panelboard_page_layout(page_dict: dict) -> str:
+    top_score = score_strong_top_panelboard_header(page_dict)
+
+    if top_score >= 5:
+        return "strong_top_header"
+
+    if has_inline_panelboard_section_signal(page_dict):
+        return "inline_compact"
+
+    return "weak_candidate"
+
+def backtrack_to_inline_panelboard_start(pages: List[dict], idx: int) -> int:
+    """
+    Compact-doc rescue:
+    if the chosen page looks like continuation content, check the previous page
+    for the actual inline section start like '26 24 16 - PANELBOARDS'.
+
+    Only looks back one page to stay safe.
+    """
+    prev_idx = idx - 1
+    if prev_idx < 0:
+        return idx
+
+    prev_text = normalize_preserve_lines(pages[prev_idx]["text"])
+    prev_lines = split_nonempty_lines(prev_text)
+
+    for line in prev_lines:
+        line_norm = normalize_for_matching(line)
+
+        looks_like_section_line = bool(
+            re.match(r"^\s*26\s*\d{2}\s*\d{2}(?:\.\d{2})?\s*[-–—]?\s*", line, re.IGNORECASE)
+        )
+
+        if looks_like_section_line and "panelboard" in line_norm:
+            return prev_idx
+
+    return idx
+
+
+def get_inline_panelboard_title_from_page(page_dict: dict) -> Optional[str]:
+    """
+    Pull the actual inline compact section label from anywhere on the page,
+    e.g. '26 24 16 - PANELBOARDS'
+    """
+    lines = split_nonempty_lines(normalize_preserve_lines(page_dict["text"]))
+
+    for line in lines:
+        line_norm = normalize_for_matching(line)
+
+        looks_like_section_line = bool(
+            re.match(r"^\s*26\s*\d{2}\s*\d{2}(?:\.\d{2})?\s*[-–—]?\s*", line, re.IGNORECASE)
+        )
+
+        if looks_like_section_line and "panelboard" in line_norm:
+            return line.strip()
+
+    return None
 
 def ms_to_readable(ms: int | float | None) -> str:
     if ms is None:
@@ -1166,6 +1277,22 @@ def collect_multi_page_section(
         full_text = _full_region_text(pages[idx])
 
         if idx > start_idx:
+            # Compact spec mode:
+            # stop when the next compact 26 xx xx section starts and it is not panelboards.
+            if mode == "inline_compact_panelboard_section":
+                page_lines = split_nonempty_lines(page_text)
+
+                for line in page_lines[:20]:
+                    line_norm = normalize_for_matching(line)
+
+                    looks_like_section_line = bool(
+                        re.match(r"^\s*26\s*\d{2}\s*\d{2}(?:\.\d{2})?\s*[-–—]?\s*", line, re.IGNORECASE)
+                    )
+
+                    if looks_like_section_line:
+                        if "panelboard" not in line_norm and "switchboards and panelboards" not in line_norm:
+                            return "\n".join(collected), end_idx
+
             # Stop when a new non-panelboard section clearly begins
             if "section" in top_text and not _has_panelboard_title(top_text):
                 if _panelboard_stop_score(top_text) > 0:
@@ -2016,57 +2143,85 @@ def analyze_pdf_panelboard_specs(pdf_path: str) -> SpecAnalysisResult:
 
     broad_best_idx, broad_best_score, broad_mode_guess = find_best_start_page(pages)
 
-    use_exact_candidate = False
+    chosen_layout = None
     if chosen_candidate:
-        candidate_score = float(chosen_candidate["score"])
-        if broad_best_idx is None:
-            use_exact_candidate = True
-        elif candidate_score >= 18:
-            use_exact_candidate = True
+        chosen_layout = classify_panelboard_page_layout(pages[chosen_candidate["idx"]])
 
-    if use_exact_candidate and chosen_candidate:
+    if chosen_candidate and chosen_layout == "strong_top_header":
+        # Normal doc path. Keep existing behavior.
         start_idx = chosen_candidate["idx"]
         mode_guess = "dedicated_panelboard_section"
         chosen_section_id = None
         chosen_score = float(chosen_candidate["score"])
         chosen_title = chosen_candidate["title"]
-        selection_path = "exact_candidate"
-    else:
-        if broad_best_idx is None:
-            return SpecAnalysisResult(
-                section_match=None,
-                panelboards={
-                    "bussing_material": DetectedValue(value=None),
-                    "allow_plug_on_breakers": DetectedValue(value=None),
-                    "rating_type": DetectedValue(value=None),
-                },
-                job_flags={
-                    "square_d_allowed": DetectedValue(
-                        value=True,
-                        matched_phrase="no panelboard section found; defaulting to allowed",
-                        evidence=[]
-                    ),
-                },
-                debug={
-                    "reason": "No likely panelboard section found",
-                    "default_behavior": "square_d_allowed=True when no panelboard section is found",
-                    "page_scores": [
-                        {
-                            "page_num": p["page_num"],
-                            "score": score_page_for_panelboard_relevance(p)
-                        }
-                        for p in pages
-                    ],
-                    "header_candidates": header_candidates,
-                }
-            )
+        selection_path = "exact_candidate_strong_top_header"
 
-        start_idx = refine_to_section_start(pages, broad_best_idx)
-        mode_guess = broad_mode_guess
+    elif chosen_candidate and chosen_layout == "inline_compact":
+        # Weird compact doc path. Only now do the safe one-page backtrack.
+        original_idx = chosen_candidate["idx"]
+        start_idx = backtrack_to_inline_panelboard_start(pages, original_idx)
+        mode_guess = "inline_compact_panelboard_section"
         chosen_section_id = None
-        chosen_score = float(broad_best_score)
-        chosen_title = get_section_header_line(pages[start_idx])
-        selection_path = "broad_fallback"
+        chosen_score = float(chosen_candidate["score"])
+        chosen_title = (
+            get_inline_panelboard_title_from_page(pages[start_idx])
+            or chosen_candidate["title"]
+        )
+        selection_path = "inline_compact_backtrack"
+
+    else:
+        # Existing fallback behavior
+        use_exact_candidate = False
+        if chosen_candidate:
+            candidate_score = float(chosen_candidate["score"])
+            if broad_best_idx is None:
+                use_exact_candidate = True
+            elif candidate_score >= 18:
+                use_exact_candidate = True
+
+        if use_exact_candidate and chosen_candidate:
+            start_idx = chosen_candidate["idx"]
+            mode_guess = "dedicated_panelboard_section"
+            chosen_section_id = None
+            chosen_score = float(chosen_candidate["score"])
+            chosen_title = chosen_candidate["title"]
+            selection_path = "exact_candidate"
+        else:
+            if broad_best_idx is None:
+                return SpecAnalysisResult(
+                    section_match=None,
+                    panelboards={
+                        "bussing_material": DetectedValue(value=None),
+                        "allow_plug_on_breakers": DetectedValue(value=None),
+                        "rating_type": DetectedValue(value=None),
+                    },
+                    job_flags={
+                        "square_d_allowed": DetectedValue(
+                            value=True,
+                            matched_phrase="no panelboard section found; defaulting to allowed",
+                            evidence=[]
+                        ),
+                    },
+                    debug={
+                        "reason": "No likely panelboard section found",
+                        "default_behavior": "square_d_allowed=True when no panelboard section is found",
+                        "page_scores": [
+                            {
+                                "page_num": p["page_num"],
+                                "score": score_page_for_panelboard_relevance(p)
+                            }
+                            for p in pages
+                        ],
+                        "header_candidates": header_candidates,
+                    }
+                )
+
+            start_idx = refine_to_section_start(pages, broad_best_idx)
+            mode_guess = broad_mode_guess
+            chosen_section_id = None
+            chosen_score = float(broad_best_score)
+            chosen_title = get_section_header_line(pages[start_idx])
+            selection_path = "broad_fallback"
 
     section_text, end_idx = collect_multi_page_section(
         pages,
@@ -2126,6 +2281,7 @@ def analyze_pdf_panelboard_specs(pdf_path: str) -> SpecAnalysisResult:
             "selection_path": selection_path,
             "selected_section_id": chosen_section_id,
             "all_header_candidates": header_candidates,
+            "chosen_layout": chosen_layout,
             "broad_best_idx": broad_best_idx,
             "broad_best_page_num": pages[broad_best_idx]["page_num"] if broad_best_idx is not None else None,
             "refined_start_page_index": start_idx,
