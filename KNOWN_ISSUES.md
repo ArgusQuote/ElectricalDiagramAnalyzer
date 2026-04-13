@@ -2,9 +2,9 @@
 
 ## ML Table Detection Model Underperforms Heuristic Baseline
 
-**Status:** In Progress (v4 retrain completed, still underperforming)
+**Status:** In Progress (v4 remains best model; v5/v5b with negatives regressed)
 **Date:** 2026-02-14
-**Updated:** 2026-04-05
+**Updated:** 2026-04-12
 **Component:** `MLTableDetection/TableDetectorML.py`, `MLTableDetection/train_table_transformer.py`
 
 ### Problem
@@ -204,9 +204,11 @@ positives) but lacks sufficient data diversity to generalise:
 Prioritised by expected impact-to-effort ratio:
 
 1. **Add hard negatives (HIGH impact, LOW effort)** -- Render non-panel
-   pages from existing PDFs (derek2.pdf has 10 unused pages, derekfirst.pdf
-   has 9 unused pages, A.pdf has 2 unrendered pages). Submit in Label Studio
-   with zero annotations. Target 10-15 negatives.
+   pages from existing PDFs. These pages contain no panel schedules (confirmed)
+   so they serve purely as negative examples -- no annotation needed.
+   Sources: derek2.pdf (10 non-panel pages), derekfirst.pdf (9 non-panel
+   pages), A.pdf (2 non-panel pages). Submit in Label Studio with zero
+   annotations. Target 10-15 negatives.
 
 2. **Audit annotation tightness (MEDIUM impact, LOW effort)** -- Compare
    existing Label Studio boxes against heuristic overlays at
@@ -221,8 +223,137 @@ Prioritised by expected impact-to-effort ratio:
    which is designed for small-dataset fine-tuning. Existing COCO annotations
    can be reused. See `training-panel-detector` skill for details.
 
+### v5 Retrain Results (2026-04-12)
+
+20 hard negatives (non-panel pages from derek2.pdf and derekfirst.pdf) added
+to the dataset via Label Studio, bringing the total to 48 images (28 positives
+with 144 annotations, 20 negatives with 0 annotations). Retrained with same
+hyperparameters as v4: 15 epochs, LR 1e-5, weight decay 0.01, batch size 1,
+15% val split. Training completed in ~4m08s on local GPU.
+
+**Training metrics:** Val mAP@0.5 peaked at 0.1507 (epoch 11), significantly
+lower than v4's 0.376. Eval loss decreased from 5.43 to 2.20.
+
+**v5 Box-Level Results on `generic3.pdf`** (6 known panel schedules):
+
+| Metric | v4 | v5 | Change |
+|---|---|---|---|
+| Heuristic boxes (GT) | 6 | 6 | -- |
+| ML model boxes | 4 | 5 | +1 |
+| mAP@0.5 | 0.6634 | **0.1347** | -0.53 |
+| Precision (IoU>0.5) | 1.0000 | **0.4000** | -0.60 |
+| Recall (IoU>0.5) | 0.6667 | **0.3333** | -0.33 |
+| Mean IoU (matched) | 0.7037 | 0.7046 | ~same |
+
+**COCO evaluation on full dataset (48 images):** mAP@0.5 = 0.1531,
+recall@100 = 0.1319. The model over-predicts on positive images (e.g., 13
+boxes on generic3 at low confidence where only 6 exist), with many predictions
+below the 0.5 confidence threshold used in the box comparison.
+
+**Positive finding:** All 20 negative images correctly received 0 predictions.
+The model has learned to distinguish panel pages from non-panel pages.
+
+**Regression analysis:**
+
+- **Negative:positive ratio too high (42%)** -- The 20:28 ratio exceeds the
+  recommended 20-30%. This diluted the positive training signal: the model
+  saw nearly as many "nothing here" examples as "detect tables" examples,
+  suppressing detection confidence on positive images.
+
+- **Noisy validation set** -- With 48 images and 15% val split, only 7
+  images in validation. Some are negatives (no annotations), making mAP
+  metrics unreliable for best-model selection via `load_best_model_at_end`.
+
+- **Insufficient epochs for larger dataset** -- 15 epochs over 48 images
+  (615 steps) gives the model ~15 passes. v4 used 15 epochs over 27 images,
+  giving proportionally more learning per positive example.
+
+**Model location:** `~/Documents/TableAnnotations/models_v5/best/`
+
+### v5b Retrain Results (2026-04-12)
+
+Negatives reduced from 20 to 7 (20% ratio, within recommended 20-30%),
+bringing the dataset to 35 images (28 positives, 7 negatives, 144
+annotations). Retrained with small-dataset recipe: 25 epochs, LR 5e-6,
+weight decay 0.05, batch size 1, 15% val split (30 train / 5 val).
+Training completed in ~6m on local GPU.
+
+**Training metrics:** Val mAP@0.5 improved steadily through all 25 epochs,
+peaking at 0.244 (epoch 24). Val recall@100 reached 0.305 and was still
+climbing. Eval loss decreased from 5.41 to 2.09.
+
+**v5b Box-Level Results on `generic3.pdf`** (6 known panel schedules):
+
+| Metric | v4 | v5 | v5b | v4->v5b |
+|---|---|---|---|---|
+| ML model boxes | 4 | 5 | 4 | same |
+| mAP@0.5 | 0.6634 | 0.1347 | **0.2525** | -0.41 |
+| Precision (IoU>0.5) | 1.0000 | 0.4000 | **0.5000** | -0.50 |
+| Recall (IoU>0.5) | 0.6667 | 0.3333 | **0.3333** | -0.33 |
+| Mean IoU (matched) | 0.7037 | 0.7046 | **0.7025** | ~same |
+
+Per-box breakdown (page 1):
+- GT[0] (320.6, 181.8, 493.7, 428.0) -- MATCHED, IoU=0.6997
+- GT[1] (141.5, 212.2, 314.6, 458.5) -- **MISSED**
+- GT[2] (499.9, 33.5, 672.8, 279.7) -- MATCHED, IoU=0.7052
+- GT[3] (499.9, 282.4, 672.8, 528.7) -- **MISSED**
+- GT[4] (141.5, 33.5, 314.6, 209.7) -- **MISSED**
+- GT[5] (320.6, 33.5, 493.7, 179.6) -- **MISSED**
+
+**COCO evaluation on full dataset (35 images):** mAP@0.5 = 0.2493 (up from
+v5's 0.1531), mAP@0.75 = 0.0744 (up from 0.0068), recall@100 = 0.2250
+(up from 0.1319). All 7 negatives correctly received 0 predictions.
+
+**Analysis:** Reducing the negative ratio from 42% to 20% improved COCO-wide
+metrics vs v5 but made no practical difference on the benchmark: both v5
+and v5b found only 2/6 panels vs v4's 4/6. The overlay comparison confirms
+v5b's boxes are lower confidence (0.67-0.81 vs v4's 0.95-0.96), more
+scattered, and less accurately positioned than v4's. Adding negatives --
+at any ratio tested -- degraded both recall and spatial precision compared
+to v4's positives-only training.
+
+**v4 remains the best Table Transformer model.** It should be used for any
+production or further evaluation work.
+
+**Best model location:** `~/Documents/TableAnnotations/models_v4/best/`
+**v5b model location:** `~/Documents/TableAnnotations/models_v5b/best/`
+
+### Summary of All Table Transformer Attempts
+
+| Version | Images | Negatives | Epochs | mAP@0.5 (generic3) | Precision | Recall | Best? |
+|---|---|---|---|---|---|---|---|
+| v2 | 25 | 0 | 25 | -- | -- | 3/6 found | No |
+| **v4** | **27** | **0** | **15** | **0.6634** | **1.00** | **0.67 (4/6)** | **Yes** |
+| v5 | 48 | 20 (42%) | 15 | 0.1347 | 0.40 | 0.33 (2/6) | No |
+| v5b | 35 | 7 (20%) | 25 | 0.2525 | 0.50 | 0.33 (2/6) | No |
+
+### Next Steps (Updated 2026-04-12)
+
+Prioritised by expected impact-to-effort ratio:
+
+1. **Switch to RF-DETR (HIGH impact, HIGH effort)** -- Four Table
+   Transformer training attempts have plateaued well below the 0.85 target.
+   Per the training skill's Tier 3 guidance, RF-DETR (Apache 2.0, Roboflow)
+   is the recommended next architecture -- designed for small-dataset
+   fine-tuning with 29M-128M params. Existing COCO annotations can be
+   reused directly.
+
+2. **Audit annotation tightness (MEDIUM impact, LOW effort)** -- Mean
+   matched IoU is ~0.70 across all model versions. Tightening annotations
+   against heuristic overlays at
+   `~/Documents/ML_Test/box_comparison_v4/heuristic/magenta_overlays/`
+   could improve box precision for any architecture.
+
+3. **Add more positive training data (MEDIUM impact, MEDIUM effort)** --
+   28 positives is still below the 50+ recommended minimum. More diverse
+   panel layouts would improve generalisation.
+
 ### Comparison Overlays
 
+- Box comparison (v5b): `~/Documents/ML_Test/box_comparison_v5b/` (heuristic + ML overlays and `box_comparison.json`)
+- COCO eval (v5b): `~/Documents/ML_Test/coco_eval_v5b/metrics.json`
+- Box comparison (v5): `~/Documents/ML_Test/box_comparison_v5/` (heuristic + ML overlays and `box_comparison.json`)
+- COCO eval (v5): `~/Documents/ML_Test/coco_eval_v5/metrics.json`
 - Box comparison (v4): `~/Documents/ML_Test/box_comparison_v4/` (heuristic + ML overlays and `box_comparison.json`)
 - Heuristic (v2 eval): `~/Documents/ML_Test/eval_v2/heuristic/magenta_overlays/`
 - ML model (v2 eval):  `~/Documents/ML_Test/eval_v2/ml/magenta_overlays/`
