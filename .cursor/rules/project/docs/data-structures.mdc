@@ -162,13 +162,40 @@ Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage
 - **Config files**: `.jsonc` extension (JSON with comments) for OCR label configs, loaded with custom comment-stripping parser
 - **No database**: All persistence is file-system based under `~/jobs/`
 
+## PageClassifierML Output
+
+### classify_pdf() Return
+- **Location**: `PageFilter/PageClassifierML.py`
+- **Returns**: `(kept_pages, dropped_pages, page_details)`
+  - `kept_pages` -- list[int], 1-indexed page numbers classified as "has panel"
+  - `dropped_pages` -- list[int], 1-indexed page numbers classified as "no panel"
+  - `page_details` -- list[dict], per-page classification info:
+    - `page` -- int, 1-indexed page number
+    - `prediction` -- str, "has_panel" or "no_panel"
+    - `confidence` -- float, softmax probability (0.0 to 1.0)
+    - `decision` -- str, "KEEP" or "DROP"
+
+### readPdf() Return (Pipeline-compatible)
+- **Returns**: `(kept_pages, dropped_pages, output_pdf_path, log_json_path)` -- same signature as PageFilterV4
+
+### Model Checkpoint (model.pt)
+- **Location**: Saved by `MLTableDetection/train_page_classifier.py`
+- **Format**: PyTorch checkpoint dict with keys:
+  - `model_state_dict` -- MobileNetV2 weights
+  - `config` -- dict: `architecture`, `num_classes`, `input_size`, `class_names`
+  - `metrics` -- dict: `val_accuracy`, `val_tp`, `val_fp`, `val_tn`, `val_fn`, `epoch`
+  - `training_info` -- dict: `data_dir`, `total_images`, `positive_count`, `negative_count`, `epochs`, `learning_rate`, `weight_decay`, `freeze_backbone`
+- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt`
+
 ## Data Flow
 
 ```
 PDF (BlobMedia from Anvil UI)
     │
     ▼
-PageFilter.readPdf() → (kept_pages, dropped_pages, filtered_pdf_path, log_json_path)
+Page Filtering (one of):
+├── PageFilterV3/V4.readPdf() → (kept, dropped, filtered_pdf, log)  [heuristic]
+└── PageClassifierML.readPdf() → (kept, dropped, filtered_pdf, log) [ML]
     │
     ▼
 PanelBoardSearch.readPdf() → list[str]  (PNG crop paths)

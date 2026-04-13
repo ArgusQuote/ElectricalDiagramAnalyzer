@@ -17,7 +17,9 @@ PDF Upload (Anvil UI)
     ▼
 AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
     │
-    ├─► PageFilter (PageFilterV3)
+    ├─► Page Filtering (one of):
+    │   ├── PageFilterV3/V4 (heuristic: EasyOCR + regex + footprints)
+    │   └── PageClassifierML (ML: MobileNetV2 binary classifier, ~250 ms/page)
     │       │  keeps electrical pages, outputs filtered PDF
     │       ▼
     ├─► PanelBoardSearch (PanelSearchToolV25)
@@ -50,10 +52,26 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Consumers**: Anvil web frontend via Uplink RPC
 
 ### PageFilter
-- **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages using OCR and heuristics
-- **Location**: `PageFilter/PageFilterV3.py`
-- **Dependencies**: pypdfium2, pikepdf, EasyOCR, OpenCV
+- **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages
+- **Heuristic approach**: `PageFilter/PageFilterV4.py` -- OCR-based E-sheet detection, regex label scoring, whitespace footprints. Slower (~1-3s/page) due to EasyOCR.
+- **ML approach**: `PageFilter/PageClassifierML.py` -- MobileNetV2 binary classifier (~250 ms/page on GPU). No OCR needed; classifies entire page images. Drop-in replacement with same `readPdf()` API.
+- **Production import**: `uplink_server.py` currently uses `PageFilterV3` (not yet switched to V4 or ML)
+- **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
+- **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision
 - **Consumers**: uplink_server (pre-processing step)
+
+### MLTableDetection
+- **Purpose**: ML models for panel schedule detection (table detection and page classification)
+- **Location**: `MLTableDetection/`
+- **Components**:
+  - `TableDetectorML.py` -- DETR-based table detection with bounding boxes (Table Transformer / Detectron2)
+  - `train_table_transformer.py` -- Fine-tuning script for Table Transformer
+  - `train_page_classifier.py` -- Training script for MobileNetV2 page classifier
+  - `evaluate_model.py` -- mAP evaluation, inference, heuristic comparison
+  - `render_pdfs_for_annotation.py` -- PDF-to-PNG renderer for Label Studio
+- **Dependencies**: PyTorch, torchvision, transformers, torchmetrics
+- **Licenses**: All MIT / BSD-3 / Apache 2.0 (commercial-friendly)
+- **Consumers**: PageClassifierML (page classification), potential future integration for table detection
 
 ### VisualDetectionToolLibrary (Panel Detection)
 - **Purpose**: Detects panel table regions in PDF bitmaps using whitespace/void analysis and border detection
@@ -123,7 +141,13 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
 
 ### Versioned Module Files
-- **Decision**: Modules carry version suffixes (e.g., PageFilterV3, PanelSearchToolV25, BreakerTableAnalyzer12)
-- **Context**: Enables side-by-side comparison during development; highest number is the active version
+- **Decision**: Modules carry version suffixes (e.g., PageFilterV4, PanelSearchToolV25, BreakerTableAnalyzer12)
+- **Context**: Enables side-by-side comparison during development; highest number is the current active version
 - **Alternatives considered**: Git branching only (harder to compare in dev scripts)
 - **Consequences**: Multiple version files in each directory; only the highest version is imported by uplink_server
+
+### Dual Page Filtering Paths (Heuristic vs ML)
+- **Decision**: ML page classifier (`PageClassifierML`) exists alongside heuristic (`PageFilterV4`) as a drop-in replacement
+- **Context**: Heuristic pipeline (EasyOCR + regex + footprints) is slow and fragile. ML classifier (MobileNetV2) is faster and more robust but trained on limited data (35 images).
+- **Alternatives considered**: Replacing heuristic entirely (premature given small training set)
+- **Consequences**: Both paths share the same `readPdf()` API signature. Production can switch by changing the import in `uplink_server.py`. The ML classifier requires a trained model checkpoint at `~/Documents/TableAnnotations/models_classifier/best/model.pt`.

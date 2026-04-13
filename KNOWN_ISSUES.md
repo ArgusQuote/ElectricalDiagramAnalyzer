@@ -1,5 +1,66 @@
 # Known Issues
 
+## ML Page Classifier (Binary) Created as PageFilter Replacement
+
+**Status:** Working (initial training, not yet integrated into production pipeline)
+**Date:** 2026-04-13
+**Component:** `PageFilter/PageClassifierML.py`, `MLTableDetection/train_page_classifier.py`
+
+### Summary
+
+A MobileNetV2 binary page classifier was created to replace the slow heuristic
+`PageFilterV4` (EasyOCR + regex + footprints) for the simpler task of determining
+which PDF pages contain panel schedules.
+
+### Training
+
+- **Architecture**: MobileNetV2 (BSD-3 via torchvision), 2.2M total params, 1.2M trainable
+- **Training data**: 35 images (28 positive, 7 negative) from existing COCO annotations
+- **Epochs**: 20, LR 1e-4, batch size 8, 20% val split (28 train / 7 val)
+- **Results**: 100% validation accuracy (TP=6, FP=0, TN=1, FN=0) from epoch 1 onward
+- **Model location**: `~/Documents/TableAnnotations/models_classifier/best/model.pt`
+
+### Test Results
+
+| PDF | Pages | Kept | Dropped | Time/page |
+|---|---|---|---|---|
+| `generic3.pdf` | 1 | [1] | -- | 240 ms |
+| `derek2.pdf` | 11 | [9, 10, 11] | [1-8] | 300 ms |
+| `derekfirst.pdf` | 10 | [1, 4, 6, 7, 8] | [2, 3, 5, 9, 10] | 250 ms |
+
+### Limitations
+
+- **Low confidence margins**: Softmax probabilities range 0.50-0.72, indicating the
+  model is working but not highly confident. More training data (especially negatives
+  from diverse non-panel pages) would widen margins.
+- **Small dataset**: Only 35 training images. Adding more negatives is trivial (no
+  annotation needed), and more positives from diverse PDFs would improve robustness.
+- **Not yet integrated**: `uplink_server.py` still imports `PageFilterV3`. Switching
+  to `PageClassifierML` requires changing the import and providing the model path.
+
+### Usage
+
+```python
+from PageFilter.PageClassifierML import PageClassifierML
+
+classifier = PageClassifierML(
+    output_dir="/path/to/output",
+    model_path="~/Documents/TableAnnotations/models_classifier/best/model.pt",
+)
+kept, dropped, out_pdf, log_path = classifier.readPdf("electrical.pdf")
+```
+
+### Training
+
+```bash
+python MLTableDetection/train_page_classifier.py \
+    --data ~/Documents/TableAnnotations \
+    --output ~/Documents/TableAnnotations/models_classifier \
+    --epochs 20
+```
+
+---
+
 ## ML Table Detection Model Underperforms Heuristic Baseline
 
 **Status:** In Progress (v4 remains best model; v5/v5b with negatives regressed)
