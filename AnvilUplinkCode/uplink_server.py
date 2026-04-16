@@ -1254,101 +1254,101 @@ def _dequeue_loop(idx: int):
             _leave_inflight(owner_id)
             _JOB_Q.task_done()
 
-    def _run_specs_analysis_job(job_id: str):
-        job_dir = BASE_JOBS_DIR / job_id
-        sp = _status_paths(job_dir)
-        st = _json_read_or_none(sp["status"]) or {}
+def _run_specs_analysis_job(job_id: str):
+    job_dir = BASE_JOBS_DIR / job_id
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
 
-        owner_email = str(st.get("owner_email") or "").strip().lower()
-        saved_pdf = Path(st.get("file_path") or "").resolve()
+    owner_email = str(st.get("owner_email") or "").strip().lower()
+    saved_pdf = Path(st.get("file_path") or "").resolve()
 
-        try:
-            _status_write(
-                job_dir,
-                "running",
-                created_at=st.get("created_at"),
-                file_path=str(saved_pdf),
-                job_dir_path=str(job_dir),
-                owner_email=owner_email,
-                owner_id=owner_email,
-                node_id=NODE_ID,
-                step="specs_analyzing",
-                progress=15.0
-            )
+    try:
+        _status_write(
+            job_dir,
+            "running",
+            created_at=st.get("created_at"),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_analyzing",
+            progress=15.0
+        )
 
-            module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
-            print(f">>> SPECS DEBUG selected module_path={module_path}")
+        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
+        print(f">>> SPECS DEBUG selected module_path={module_path}")
 
-            if not module_path.is_file():
-                raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
+        if not module_path.is_file():
+            raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
 
-            import importlib.util
+        import importlib.util
 
-            spec = importlib.util.spec_from_file_location(
-                "argus_specs_analyzer_v5",
-                str(module_path)
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Could not create import spec for {module_path}")
+        spec = importlib.util.spec_from_file_location(
+            "argus_specs_analyzer_v5",
+            str(module_path)
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create import spec for {module_path}")
 
-            spec_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(spec_module)
+        spec_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(spec_module)
 
-            analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
-            if analyze_specs_pdf_for_ui is None:
-                raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
+        analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
+        if analyze_specs_pdf_for_ui is None:
+            raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
 
-            result = analyze_specs_pdf_for_ui(
-                pdf_path=str(saved_pdf),
-                job_dir=str(job_dir)
-            ) or {}
+        result = analyze_specs_pdf_for_ui(
+            pdf_path=str(saved_pdf),
+            job_dir=str(job_dir)
+        ) or {}
 
-            result = dict(result)
-            result["job_id"] = job_id
-            result["job_dir"] = str(job_dir)
-            result["saved_pdf"] = str(saved_pdf)
-            result["owner_email"] = owner_email
-            result["owner_id"] = owner_email
+        result = dict(result)
+        result["job_id"] = job_id
+        result["job_dir"] = str(job_dir)
+        result["saved_pdf"] = str(saved_pdf)
+        result["owner_email"] = owner_email
+        result["owner_id"] = owner_email
 
-            _result_write(job_dir, result)
+        _result_write(job_dir, result)
 
-            _status_write(
-                job_dir,
-                "done",
-                created_at=st.get("created_at"),
-                file_path=str(saved_pdf),
-                job_dir_path=str(job_dir),
-                owner_email=owner_email,
-                owner_id=owner_email,
-                node_id=NODE_ID,
-                step="specs_complete",
-                progress=100.0
-            )
+        _status_write(
+            job_dir,
+            "done",
+            created_at=st.get("created_at"),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_complete",
+            progress=100.0
+        )
 
-            print(f">>> specs analysis done: {job_id}")
+        print(f">>> specs analysis done: {job_id}")
 
-        except Exception as e:
-            tb = traceback.format_exc()
-            print(f">>> specs analysis error [{job_id}]: {e}\n{tb}")
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f">>> specs analysis error [{job_id}]: {e}\n{tb}")
 
-            _status_write(
-                job_dir,
-                "error",
-                created_at=st.get("created_at"),
-                file_path=str(saved_pdf),
-                job_dir_path=str(job_dir),
-                owner_email=owner_email,
-                owner_id=owner_email,
-                node_id=NODE_ID,
-                step="specs_error",
-                error=f"{type(e).__name__}: {e}",
-                traceback=tb,
-                progress=100.0
-            )
+        _status_write(
+            job_dir,
+            "error",
+            created_at=st.get("created_at"),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_error",
+            error=f"{type(e).__name__}: {e}",
+            traceback=tb,
+            progress=100.0
+        )
 
-        finally:
-            with _SPECS_LOCK:
-                _SPECS_RUNNING.pop(job_id, None)
+    finally:
+        with _SPECS_LOCK:
+            _SPECS_RUNNING.pop(job_id, None)
 
 # ---------- Start worker pool (per-slot) ----------
 if not _IS_WORKER_SUBPROCESS:
