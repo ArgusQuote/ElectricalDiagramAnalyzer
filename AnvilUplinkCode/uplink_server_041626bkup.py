@@ -570,8 +570,6 @@ _INFLIGHT_BY_USER: dict[str, int] = {}
 _Q_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
-_SPECS_RUNNING: dict[str, bool] = {}
-_SPECS_LOCK = threading.RLock()
 
 # Per-slot worker pool state: each dequeue thread gets its own worker subprocess
 _WORKER_READY_TIMEOUT = 120  # seconds to wait for worker model loading
@@ -1254,101 +1252,6 @@ def _dequeue_loop(idx: int):
             _leave_inflight(owner_id)
             _JOB_Q.task_done()
 
-    def _run_specs_analysis_job(job_id: str):
-        job_dir = BASE_JOBS_DIR / job_id
-        sp = _status_paths(job_dir)
-        st = _json_read_or_none(sp["status"]) or {}
-
-        owner_email = str(st.get("owner_email") or "").strip().lower()
-        saved_pdf = Path(st.get("file_path") or "").resolve()
-
-        try:
-            _status_write(
-                job_dir,
-                "running",
-                created_at=st.get("created_at"),
-                file_path=str(saved_pdf),
-                job_dir_path=str(job_dir),
-                owner_email=owner_email,
-                owner_id=owner_email,
-                node_id=NODE_ID,
-                step="specs_analyzing",
-                progress=15.0
-            )
-
-            module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
-            print(f">>> SPECS DEBUG selected module_path={module_path}")
-
-            if not module_path.is_file():
-                raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
-
-            import importlib.util
-
-            spec = importlib.util.spec_from_file_location(
-                "argus_specs_analyzer_v5",
-                str(module_path)
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Could not create import spec for {module_path}")
-
-            spec_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(spec_module)
-
-            analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
-            if analyze_specs_pdf_for_ui is None:
-                raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
-
-            result = analyze_specs_pdf_for_ui(
-                pdf_path=str(saved_pdf),
-                job_dir=str(job_dir)
-            ) or {}
-
-            result = dict(result)
-            result["job_id"] = job_id
-            result["job_dir"] = str(job_dir)
-            result["saved_pdf"] = str(saved_pdf)
-            result["owner_email"] = owner_email
-            result["owner_id"] = owner_email
-
-            _result_write(job_dir, result)
-
-            _status_write(
-                job_dir,
-                "done",
-                created_at=st.get("created_at"),
-                file_path=str(saved_pdf),
-                job_dir_path=str(job_dir),
-                owner_email=owner_email,
-                owner_id=owner_email,
-                node_id=NODE_ID,
-                step="specs_complete",
-                progress=100.0
-            )
-
-            print(f">>> specs analysis done: {job_id}")
-
-        except Exception as e:
-            tb = traceback.format_exc()
-            print(f">>> specs analysis error [{job_id}]: {e}\n{tb}")
-
-            _status_write(
-                job_dir,
-                "error",
-                created_at=st.get("created_at"),
-                file_path=str(saved_pdf),
-                job_dir_path=str(job_dir),
-                owner_email=owner_email,
-                owner_id=owner_email,
-                node_id=NODE_ID,
-                step="specs_error",
-                error=f"{type(e).__name__}: {e}",
-                traceback=tb,
-                progress=100.0
-            )
-
-        finally:
-            with _SPECS_LOCK:
-                _SPECS_RUNNING.pop(job_id, None)
 
 # ---------- Start worker pool (per-slot) ----------
 if not _IS_WORKER_SUBPROCESS:
@@ -1460,9 +1363,9 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
     }
 
 @anvil.server.callable
-def vm_upload_specs_pdf(media, owner_email=None, job_name=""):
+def vm_analyze_specs_pdf(media, owner_email=None, job_name=""):
     """
-    Upload/save only. Do NOT analyze yet.
+    Save uploaded specs PDF, run specs analyzer, and return UI-friendly results.
     """
     if not owner_email or not str(owner_email).strip():
         raise RuntimeError("owner_email required")
@@ -1481,116 +1384,105 @@ def vm_upload_specs_pdf(media, owner_email=None, job_name=""):
 
     _status_write(
         job_dir,
-        "uploaded",
+        "running",
         created_at=_now_utc().isoformat(),
         file_path=str(saved_pdf),
         job_dir_path=str(job_dir),
         owner_email=owner_email,
         owner_id=owner_email,
         node_id=NODE_ID,
-        step="specs_uploaded",
+        step="specs_importing",
         progress=5.0
     )
 
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "job_dir": str(job_dir),
-        "saved_pdf": str(saved_pdf),
-        "owner_email": owner_email,
-        "owner_id": owner_email,
-        "node_id": NODE_ID,
-        "state": "uploaded"
-    }
+    try:
+        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
+        print(f">>> SPECS DEBUG selected module_path={module_path}")
 
+        if not module_path.is_file():
+            raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
 
-@anvil.server.callable
-def vm_start_specs_analysis(job_id: str, owner_email: str):
-    """
-    Start analysis only after the PDF has already been uploaded/saved.
-    """
-    if not job_id or not owner_email:
-        raise RuntimeError("job_id and owner_email required")
+        import importlib.util
 
-    owner_email = str(owner_email).strip().lower()
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
+        spec = importlib.util.spec_from_file_location(
+            "argus_specs_analyzer_v4",
+            str(module_path)
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create import spec for {module_path}")
 
-    if not st:
-        raise RuntimeError(f"Unknown specs job_id: {job_id}")
+        spec_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(spec_module)
 
-    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-    if job_owner != owner_email:
-        raise RuntimeError("Owner mismatch")
+        print(f">>> SPECS DEBUG imported module: {spec_module}")
 
-    with _SPECS_LOCK:
-        if _SPECS_RUNNING.get(job_id):
-            return {"ok": True, "job_id": job_id, "state": "running"}
+        analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
+        if analyze_specs_pdf_for_ui is None:
+            raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
 
-        _SPECS_RUNNING[job_id] = True
+        print(">>> SPECS DEBUG got analyze_specs_pdf_for_ui")
 
-    t = threading.Thread(target=_run_specs_analysis_job, args=(job_id,), daemon=True)
-    t.start()
+        _status_write(
+            job_dir,
+            "running",
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_analyzing",
+            progress=15.0
+        )
 
-    return {"ok": True, "job_id": job_id, "state": "running"}
+        result = analyze_specs_pdf_for_ui(
+            pdf_path=str(saved_pdf),
+            job_dir=str(job_dir)
+        ) or {}
 
+        result = dict(result)
+        result["job_id"] = job_id
+        result["job_dir"] = str(job_dir)
+        result["saved_pdf"] = str(saved_pdf)
+        result["owner_email"] = owner_email
+        result["owner_id"] = owner_email
 
-@anvil.server.callable
-def vm_get_specs_status(job_id: str, owner_email: str) -> dict:
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
+        _result_write(job_dir, result)
 
-    st = _json_read_or_none(sp["status"])
-    if not st:
-        return {
-            "state": "error",
-            "error": f"Unknown job_id {job_id}",
-            "debug_job_dir": str(job_dir),
-            "debug_status_path": str(sp["status"]),
-            "debug_result_path": str(sp["result"]),
-        }
+        _status_write(
+            job_dir,
+            "done",
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_complete",
+            progress=100.0
+        )
 
-    req_email = str(owner_email or "").strip().lower()
-    job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+        return result
 
-    if not req_email or not job_email or req_email != job_email:
-        return {
-            "state": "not_found",
-            "debug_req_email": req_email,
-            "debug_job_email": job_email,
-            "debug_raw_state": st.get("state"),
-            "debug_job_dir": str(job_dir),
-        }
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f">>> SPECS DEBUG ERROR: {tb}")
 
-    state = (st.get("state") or "unknown").lower()
-
-    if state == "done":
-        res = _json_read_or_none(sp["result"]) or {}
-        return {
-            "state": "done",
-            "result": res,
-            "debug_raw_state": st.get("state"),
-            "debug_job_dir": str(job_dir),
-        }
-
-    if state == "error":
-        return {
-            "state": "error",
-            "error": st.get("error") or "Unknown error",
-            "debug_raw_state": st.get("state"),
-            "debug_job_dir": str(job_dir),
-        }
-
-    out = {
-        "state": state,
-        "debug_raw_state": st.get("state"),
-        "debug_job_dir": str(job_dir),
-    }
-    for k in ("step", "progress"):
-        if k in st:
-            out[k] = st[k]
-    return out
+        _status_write(
+            job_dir,
+            "error",
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_error",
+            error=f"{type(e).__name__}: {e}",
+            traceback=tb,
+            progress=100.0
+        )
+        raise
 
 @anvil.server.callable
 def vm_delete_specs_job(job_id: str, owner_email: str) -> bool:
