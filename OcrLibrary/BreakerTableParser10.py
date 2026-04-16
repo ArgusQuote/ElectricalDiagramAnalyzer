@@ -790,6 +790,8 @@ class HeaderBandScanner:
                     hero_trip_rank = max(hero_trip_rank, 5)
                 elif _hero_match(w_raw, ["AMP", "AMPS"]):
                     hero_trip_rank = max(hero_trip_rank, 4)
+                elif _hero_match(w_raw, ["OCP", "OCPI", "OCPD"]):
+                    hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["SIZE"]):
                     hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
