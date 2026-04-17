@@ -948,9 +948,35 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             print(f">>> worker canceled before rules: {job_id}")
             return
 
-        rules_payload = _build_rules_payload(prev.get("ui_overrides") or _DEFAULT_OVERRIDES, components)
+        ui_defaults = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
+
+        panel_defaults = (ui_defaults.get("panelboards") or {})
+        default_trim = str(panel_defaults.get("default_trim_style") or "").strip().upper()
+        default_enclosure = str(panel_defaults.get("enclosure") or "").strip()
+
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            if str(comp.get("type") or "").strip().lower() != "panelboard":
+                continue
+
+            attrs = comp.get("attrs") or {}
+
+            trim_style = str(attrs.get("trimStyle") or "").strip().upper()
+            enclosure = str(attrs.get("enclosure") or "").strip().upper()
+
+            if trim_style in ("", "NONE", "X", "-"):
+                attrs["trimStyle"] = default_trim
+
+            if enclosure in ("", "NONE", "X", "-"):
+                attrs["enclosure"] = default_enclosure
+
+            comp["attrs"] = attrs
+
+        rules_payload = _build_rules_payload(ui_defaults, components)
         try:
             rules_result = RE2.process_job(rules_payload) or {}
+
         except Exception as re_err:
             rules_result = {"error": f"{type(re_err).__name__}: {re_err}"}
             print(f">>> rules engine error: {rules_result['error']}")

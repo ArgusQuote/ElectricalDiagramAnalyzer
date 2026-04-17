@@ -1087,7 +1087,92 @@ class PanelParser:
         # Final mode enforcement (last word)
         if (main_mode or "").upper() == "MLO":
             chosen_map["MAIN"] = None
-        # If both still None and we had any amps tokens, BUS fallback will run below as before.
+
+        # ===== Mode-aware BUS/MAIN reconciliation =====
+        mode_upper = (main_mode or "").upper()
+
+        def _norm_txt(c):
+            return self._normalize_digits(str((c or {}).get("text", "")).upper())
+
+        def _is_mains_rating(c):
+            t = _norm_txt(c)
+            return bool(re.search(r'\bMAINS?\s*RATING\b|\bMAIN\s*RATING\b', t))
+
+        def _is_main_device_rating(c):
+            t = _norm_txt(c)
+            return bool(re.search(r'\bMCB\b|\bM\W*C\W*B\b|\bMAIN\s*BREAKER\b|\bMAIN\s*DEVICE\b', t))
+
+        def _looks_amp_like(c):
+            if not c:
+                return False
+            t = _norm_txt(c)
+            if self._snap_voltage_text(self._normalize_voltage_text(t)) is not None:
+                return False
+            return bool(
+                re.search(r"\b([1-9]\d{1,3})\s*(A|AMP|AMPS|MAP)\b", t)
+                or re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', t)
+            )
+
+        bus_ranked = list(ranked_map.get("BUS") or [])
+        main_ranked = list(ranked_map.get("MAIN") or [])
+
+        if mode_upper == "MLO":
+            # No main breaker on MLO panels
+            _set_role("MAIN", None)
+
+            # Prefer explicit Mains Rating as BUS
+            mlo_bus = None
+            for c in bus_ranked + main_ranked:
+                if _is_mains_rating(c) and _looks_amp_like(c):
+                    mlo_bus = _as_ranked("BUS", c)
+                    break
+
+            if mlo_bus is not None:
+                _set_role("BUS", mlo_bus)
+            else:
+                # fallback: best amp-looking candidate becomes BUS
+                for c in bus_ranked + main_ranked:
+                    if _looks_amp_like(c):
+                        _set_role("BUS", _as_ranked("BUS", c))
+                        break
+
+        elif mode_upper == "MCB":
+            # Prefer MCB/Main Breaker rating for MAIN
+            mcb_main = None
+            for c in main_ranked + bus_ranked:
+                if _is_main_device_rating(c) and _looks_amp_like(c):
+                    mcb_main = _as_ranked("MAIN", c)
+                    break
+
+            if mcb_main is not None:
+                _set_role("MAIN", mcb_main)
+
+            # Prefer Mains Rating for BUS
+            mcb_bus = None
+            for c in bus_ranked + main_ranked:
+                if _is_mains_rating(c) and _looks_amp_like(c):
+                    # don't reuse the MAIN token if a distinct mains rating exists
+                    if not chosen_map.get("MAIN") or _cand_key(c) != _cand_key(chosen_map["MAIN"]):
+                        mcb_bus = _as_ranked("BUS", c)
+                        break
+
+            if mcb_bus is not None:
+                _set_role("BUS", mcb_bus)
+
+            # If BUS still missing, allow fallback from MAIN only when there's just one real amp source
+            if not chosen_map.get("BUS") and chosen_map.get("MAIN"):
+                distinct_amp_keys = []
+                seen_amp = set()
+                for c in bus_ranked + main_ranked:
+                    if not _looks_amp_like(c):
+                        continue
+                    k = _cand_key(c)
+                    if k not in seen_amp:
+                        seen_amp.add(k)
+                        distinct_amp_keys.append(k)
+
+                if len(distinct_amp_keys) == 1:
+                    _set_role("BUS", chosen_map["MAIN"], allow_share_with="MAIN")
 
         # ===== NAME fallback: only if we have a strong designation/name label present =====
         if not chosen_map.get("NAME"):
@@ -1146,8 +1231,27 @@ class PanelParser:
                 main_ranked = list(ranked_map.get("MAIN") or [])
 
                 def _amps_from_text(t: str) -> Optional[int]:
-                    m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMP|AMPS)\b", (t or "").upper())
-                    return int(m.group(1)) if m else None
+                    u = self._normalize_digits(str(t).upper())
+
+                    # reject voltage-looking text
+                    uN = self._normalize_voltage_text(u)
+                    if (
+                        self._snap_voltage_text(uN) is not None
+                        or re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', uN)
+                        or re.search(r'\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b', u)
+                        or re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', uN)
+                    ):
+                        return None
+
+                    m = re.search(r"\b([1-9]\d{1,3})\s*(A|AMP|AMPS|MAP)\b", u)
+                    if m:
+                        return int(m.group(1))
+
+                    m2 = re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', u)
+                    if m2:
+                        return int(m2.group(1))
+
+                    return None
 
                 # Prefer explicit-unit amps first (then fall back to any amps-looking)
                 unit_first = [
@@ -1302,18 +1406,27 @@ class PanelParser:
                     # Existing behavior
                     voltage_val = max(lone_hits)
 
-        # BUS (accept with or without unit)
+        # BUS (accept with or without unit, but never from voltage-looking text)
         bus_amp = None
         if chosen_map["BUS"]:
             tU = self._normalize_digits(chosen_map["BUS"]["text"].upper())
-            # allow 2–4 digit amps (10–9999), we’ll clamp later
-            m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS)\b", tU)
-            if m:
-                bus_amp = _to_int(m.group(1))
-            else:
-                m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', tU)
-                if m2:
-                    bus_amp = _to_int(m2.group(1))
+            tN = self._normalize_voltage_text(tU)
+
+            looks_like_voltage = (
+                self._snap_voltage_text(tN) is not None
+                or bool(re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', tN))
+                or bool(re.search(r'\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b', tU))
+                or bool(re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', tN))
+            )
+
+            if not looks_like_voltage:
+                m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS)\b", tU)
+                if m:
+                    bus_amp = _to_int(m.group(1))
+                else:
+                    m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', tU)
+                    if m2:
+                        bus_amp = _to_int(m2.group(1))
 
         # MAIN
         main_amp = None
@@ -1321,14 +1434,24 @@ class PanelParser:
         if chosen_map["MAIN"]:
             txtU0 = chosen_map["MAIN"]["text"].upper()
             txtU  = self._normalize_digits(txtU0)
-            # allow 2–4 digit amps (10–9999), we’ll clamp later
-            m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS|MAP)\b", txtU)
-            if m:
-                main_amp = _to_int(m.group(1))
-            else:
-                m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', txtU)
-                if m2:
-                    main_amp = _to_int(m2.group(1))
+            txtN  = self._normalize_voltage_text(txtU)
+
+            looks_like_voltage = (
+                self._snap_voltage_text(txtN) is not None
+                or bool(re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', txtN))
+                or bool(re.search(r'\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b', txtU))
+                or bool(re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', txtN))
+            )
+
+            if not looks_like_voltage:
+                m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS|MAP)\b", txtU)
+                if m:
+                    main_amp = _to_int(m.group(1))
+                else:
+                    m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', txtU)
+                    if m2:
+                        main_amp = _to_int(m2.group(1))
+
             if re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txtU):
                 self.last_main_type = "MLO"
             elif re.search(r"\b(MCB|M\W*C\W*B|MAIN\s*BREAKER)\b", txtU):
@@ -2060,11 +2183,12 @@ class PanelParser:
                 return self._snap_voltage_text(upN) is not None
 
             if role == "BUS":
-                # bus wants amperage, but should not steal obvious main-type text
-                if re.search(r"\b(MLO|MCB|MAIN\s*LUGS?|MAIN\s*BREAKER)\b", up):
+                if re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE)\b", up):
                     return False
+
                 if re.search(r"\b([1-9]\d{1,3})\s*(A|AMPS?)\b", up):
                     return True
+
                 return bool(re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', up))
 
             if role == "MAIN":
@@ -2342,42 +2466,53 @@ class PanelParser:
                 })
 
             # -----------------------------------------------------------
-            # BUS/MAIN (accept "###A", "### A", and bare "###" in ranges)
-            # But:
-            #   - allow smaller mains (e.g., 50A) when explicitly tied to MCB/MAIN
-            #   - DO NOT treat voltage-looking tokens (120/208 Wye, 480Y/277V) as amps
+            # BUS/MAIN
+            # Only allow amperage-looking values.
+            # NEVER allow voltage-looking strings like:
+            #   208/120V
+            #   480Y/277V
+            #   Volts: 208/120V
+            #   480V
             # -----------------------------------------------------------
 
             m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMP\.?|AMPS?\.?)\b", txtD)
-            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)           # bare 2–4 digits
+            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)
 
-            strong_voltage_token = (
-                snapped_voltage is not None
-                or bool(pair)
-                or (bool(single) and has_volty_ctx)
-            )
-            if not strong_voltage_token:
-                # Extra guards: slash or Wye/Delta/PH context implies voltage
-                if "/" in txtN or re.search(r"\b(WYE|DELTA|PH|PHASE|Ø)\b", txtN):
-                    strong_voltage_token = True
+            # strong voltage guards
+            has_slash_voltage = "/" in txtN
+            has_voltage_word = bool(re.search(r"\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b", txt))
+            has_phase_voltage_ctx = bool(re.search(r"\b(WYE|DELTA|PH|PHASE|Ø)\b", txtN))
+            has_v_suffix = bool(re.search(r"(?<!\d)[1-6]\d{2,3}\s*V\b", txtN))
+            has_voltage_pair = bool(re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', txtN))
+            snapped_voltage = self._snap_voltage_text(txtN) is not None
 
-            # Explicit main-breaker context (relax lower bound here)
-            main_ctxt = bool(re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE)\b", txt))
+            strong_voltage_token = any([
+                has_slash_voltage,
+                has_voltage_word,
+                has_phase_voltage_ctx,
+                has_v_suffix,
+                has_voltage_pair,
+                snapped_voltage,
+            ])
 
-            # OCR weirdness: MAP is treated like AMP, but MAIN-only
+            # Explicit main-breaker context
+            main_ctxt = bool(re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE|MAIN\s*RATING|MAINS?\s*RATING)\b", txt))
             m_main_map = re.search(r"\b([1-9]\d{1,3})\s*MAP\b", txtD)
 
             cand = None
             cand_main_only = False
 
-            if m_with_unit or m_main_map:
+            # If it looks like voltage, never allow it into BUS/MAIN candidate pools
+            if strong_voltage_token:
+                cand = None
+
+            elif m_with_unit or m_main_map:
                 if m_with_unit:
                     n = int(m_with_unit.group(1))
                 else:
                     n = int(m_main_map.group(1))
 
                 if n is not None:
-                    # MAP is MAIN-only and should use the relaxed lower bound like explicit mains
                     lo = 30 if (main_ctxt or m_main_map) else 60
                     if lo <= n <= 4000:
                         cand = {
@@ -2392,12 +2527,9 @@ class PanelParser:
                         if m_main_map and not m_with_unit:
                             cand_main_only = True
 
-            elif m_bare_num and not strong_voltage_token:
+            elif m_bare_num:
                 n = int(m_bare_num.group(1))
-                # allow bare 60..1200; rely on label affinity to disambiguate from AIC/others
-                # (bare 50, 40, etc. are *not* accepted here to avoid table circuits)
                 if 60 <= n <= 1200:
-                    # small score because it's unlabeled; still promotable by BUS fallback
                     cand = {
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                         "xc": xc, "yc": yc,
@@ -2409,23 +2541,37 @@ class PanelParser:
                     }
 
             if cand is not None:
-                up_full = txt  # already uppercased version of raw text
+                up_full = txt
 
-                # If the token mentions BUS but not MAIN/MCB, treat it as BUS-only.
-                has_bus_word  = bool(re.search(r'\bBUS\b', up_full))
-                # If the token explicitly mentions MAIN or M.C.B/MCB, treat it as MAIN-only.
-                has_main_word = bool(re.search(r'\bMAIN\b|\bM\W*C\W*B\b', up_full))
+                has_bus_word = bool(re.search(r'\bBUS\b', up_full))
+
+                # Explicit main-device wording should stay MAIN-only
+                has_main_device_word = bool(
+                    re.search(r'\bMCB\b|\bM\W*C\W*B\b|\bMAIN\s*BREAKER\b|\bMAIN\s*DEVICE\b', up_full)
+                )
+
+                # "Mains Rating" is the one ambiguous case we want to preserve for later logic
+                has_mains_rating_word = bool(
+                    re.search(r'\bMAINS?\s*RATING\b|\bMAIN\s*RATING\b', up_full)
+                )
 
                 if cand_main_only:
                     out["MAIN"].append(dict(cand))
-                elif has_bus_word and not has_main_word:
-                    # Pure bus rating → only BUS
+
+                elif has_bus_word and not has_main_device_word:
                     out["BUS"].append(dict(cand))
-                elif has_main_word and not has_bus_word:
-                    # Pure main rating → only MAIN
+
+                elif has_main_device_word and not has_bus_word:
+                    # MCB Rating / Main Breaker / Main Device stay MAIN-only
                     out["MAIN"].append(dict(cand))
+
+                elif has_mains_rating_word and not has_main_device_word:
+                    # Keep this available to both roles for later reconciliation.
+                    # We do NOT want to lose it on MLO jobs where it may need to become BUS.
+                    out["BUS"].append(dict(cand))
+                    out["MAIN"].append(dict(cand))
+
                 else:
-                    # Ambiguous or unlabeled → still let scoring decide between BUS/MAIN
                     out["BUS"].append(dict(cand))
                     out["MAIN"].append(dict(cand))
 
