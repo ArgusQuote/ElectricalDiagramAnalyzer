@@ -252,7 +252,7 @@ Amperage bounds for breaker skip logic ([15..1200]) are in `_count_would_skip_br
   - `config` -- dict: `architecture`, `num_classes`, `input_size`, `class_names`
   - `metrics` -- dict: `val_accuracy`, `val_tp`, `val_fp`, `val_tn`, `val_fn`, `epoch`
   - `training_info` -- dict: `data_dir`, `total_images`, `positive_count`, `negative_count`, `epochs`, `learning_rate`, `weight_decay`, `freeze_backbone`
-- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt`
+- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt` (48 images: 28 pos, 20 neg; 25 epochs; val_acc=1.0)
 
 ## Data Flow
 

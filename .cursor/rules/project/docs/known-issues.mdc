@@ -25,12 +25,15 @@ alwaysApply: true
   caused regressions. v4 remains the best Table Transformer model. The training skill
   recommends escalating to RF-DETR (Apache 2.0) if further improvement is needed.
 
-- **ML Page Classifier created** -- `PageFilter/PageClassifierML.py` provides a
-  MobileNetV2 binary classifier for page-level "has panel / no panel" decisions.
-  Trained on 35 images (28 pos, 7 neg), achieves 100% val accuracy. Designed as
-  a faster drop-in replacement for PageFilterV4 (~250 ms/page vs ~1-3s). Not yet
-  integrated into `uplink_server.py` (still imports `PageFilterV3`).
+- **ML Page Classifier integrated into V4** -- `PageFilter/PageClassifierML.py`
+  provides a MobileNetV2 binary classifier for page-level "has panel / no panel"
+  decisions. Retrained on 48 images (28 pos, 20 neg), achieves 100% val accuracy
+  (TP=6, FP=0, TN=4, FN=0). `PageFilterV4.py` is now a thin wrapper that
+  delegates all filtering to `PageClassifierML` -- all heuristic logic (OCR,
+  regex scoring, footprint detection) has been removed. Requires a trained model
+  checkpoint (default: `~/Documents/TableAnnotations/models_classifier/best/model.pt`).
 
-- **uplink_server.py imports PageFilterV3** -- The latest heuristic is V4, and
-  the ML classifier is available, but `uplink_server.py` still imports
-  `PageFilter.PageFilterV3`. See `KNOWN_ISSUES.md` for details.
+- **uplink_server.py imports PageFilterV3** -- The latest filter is V4 (ML-based),
+  but `uplink_server.py` still imports `PageFilter.PageFilterV3` (heuristic).
+  Switching to V4 requires adding `model_path` to the `PageFilter()` constructor
+  call in `render_pdf_to_images()`.

@@ -54,11 +54,12 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 
 ### PageFilter
 - **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages
-- **Heuristic approach**: `PageFilter/PageFilterV4.py` -- OCR-based E-sheet detection, regex label scoring, whitespace footprints. Slower (~1-3s/page) due to EasyOCR.
-- **ML approach**: `PageFilter/PageClassifierML.py` -- MobileNetV2 binary classifier (~250 ms/page on GPU). No OCR needed; classifies entire page images. Drop-in replacement with same `readPdf()` API.
-- **Production import**: `uplink_server.py` currently uses `PageFilterV3` (not yet switched to V4 or ML)
-- **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
-- **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision
+- **V4 (ML-based)**: `PageFilter/PageFilterV4.py` -- thin wrapper around `PageClassifierML`. MobileNetV2 binary classifier (~250 ms/page on GPU). No OCR needed; classifies entire page images. Requires `model_path` kwarg pointing to a trained checkpoint.
+- **ML classifier**: `PageFilter/PageClassifierML.py` -- the underlying MobileNetV2 classifier with `readPdf()` API. Trained on 48 images (28 pos, 20 neg).
+- **Legacy heuristic**: `PageFilter/PageFilterV3.py` -- OCR-based E-sheet detection, regex label scoring, whitespace footprints (~1-3s/page).
+- **Production import**: `uplink_server.py` currently uses `PageFilterV3` (not yet switched to V4 ML)
+- **Dependencies (V4/ML)**: pypdfium2, pikepdf, PyTorch, torchvision
+- **Dependencies (V3 heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
 - **Consumers**: uplink_server (pre-processing step)
 
 ### MLTableDetection
@@ -238,7 +239,6 @@ Key aspects:
 - **Consequences**: Multiple version files in each directory; only the highest version is imported by uplink_server
 
 ### Dual Page Filtering Paths (Heuristic vs ML)
-- **Decision**: ML page classifier (`PageClassifierML`) exists alongside heuristic (`PageFilterV4`) as a drop-in replacement
-- **Context**: Heuristic pipeline (EasyOCR + regex + footprints) is slow and fragile. ML classifier (MobileNetV2) is faster and more robust but trained on limited data (35 images).
-- **Alternatives considered**: Replacing heuristic entirely (premature given small training set)
-- **Consequences**: Both paths share the same `readPdf()` API signature. Production can switch by changing the import in `uplink_server.py`. The ML classifier requires a trained model checkpoint at `~/Documents/TableAnnotations/models_classifier/best/model.pt`.
+- **Decision**: `PageFilterV4` now delegates entirely to the ML classifier (`PageClassifierML`); heuristic logic removed. `PageFilterV3` (heuristic) remains available for fallback.
+- **Context**: Heuristic pipeline (EasyOCR + regex + footprints) was slow and fragile. ML classifier (MobileNetV2) is faster and more robust. Retrained on 48 images (28 pos, 20 neg) with 100% val accuracy.
+- **Consequences**: V4 requires a trained model checkpoint (`model_path` kwarg, default `~/Documents/TableAnnotations/models_classifier/best/model.pt`). Production can switch from V3 to V4 by changing the import and adding `model_path` to the constructor call in `uplink_server.py`.

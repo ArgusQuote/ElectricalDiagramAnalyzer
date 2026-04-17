@@ -38,7 +38,7 @@ Notes:
 | File | Purpose |
 |---|---|
 | `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, worker pool, all RPC callables |
-| `PageFilter/PageFilterV4.py` | Page filtering (latest heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints |
+| `PageFilter/PageFilterV4.py` | Page filtering (ML-based) -- thin wrapper delegating to `PageClassifierML` (MobileNetV2 binary classifier); requires `model_path` |
 | `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel), drop-in replacement for PageFilterV4 |
 | `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping |
 | `MLTableDetection/TableDetectorML.py` | ML table detection -- Table Transformer (DETR) for bounding-box-level panel detection |
@@ -62,6 +62,7 @@ Notes:
 | `MISC/requirements.txt` | Main project Python dependencies |
 | `WorkerSetup/worker_init.py` | Thread-pool env vars (`OMP_NUM_THREADS`, etc.) and runtime determinism (`torch`/`cv2` thread caps, cuDNN flags) |
 | `DevEnv/capacity_test.py` | Concurrent multi-PDF stress test with configurable concurrency levels |
+| `DevEnv/PageFilterMLDevEnv.py` | Dev harness for ML-based PageFilterV4 -- single PDF or batch, configurable model/threshold |
 | `DevEnv/DevTestEnv.py` | End-to-end single-PDF pipeline test |
 | `.gitignore` | Ignores venvs, PDFs, images, annotation data |
 
@@ -77,11 +78,10 @@ Notes:
 ### PageFilter
 - **Path**: `PageFilter/`
 - **Purpose**: Filters PDF pages to keep only electrical/panel content
-- **Heuristic**: `PageFilterV4.PageFilter` class, `.readPdf()` method (OCR + regex + footprints)
-- **ML classifier**: `PageClassifierML.PageClassifierML` class, `.readPdf()` method (MobileNetV2 binary classifier, ~250 ms/page)
-- **Production import**: `uplink_server.py` currently imports `PageFilterV3` (not yet updated to V4 or ML)
-- **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
-- **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision (no EasyOCR needed)
+- **V4 (ML-based)**: `PageFilterV4.PageFilter` class, `.readPdf()` method -- thin wrapper around `PageClassifierML` (MobileNetV2 binary classifier, ~250 ms/page). Requires `model_path` kwarg.
+- **ML classifier**: `PageClassifierML.PageClassifierML` class, `.readPdf()` method -- the underlying classifier used by V4
+- **Production import**: `uplink_server.py` currently imports `PageFilterV3` (heuristic, not yet updated to V4 ML)
+- **Dependencies**: pypdfium2, pikepdf, PyTorch, torchvision (no EasyOCR needed)
 
 ### MLTableDetection
 - **Path**: `MLTableDetection/`
@@ -145,7 +145,7 @@ Notes:
 ### DevEnv
 - **Path**: `DevEnv/`
 - **Purpose**: Development scripts for testing individual pipeline stages and batch runs
-- **Contents**: `capacity_test.py`, `DevTestEnv.py`, `PageFilterDevEnv.py`, `DevEnvPanelSearchToolBatch.py`, `DevEnvPanaelSearchToolSimple.py`, `DevEnvBreakerTableAnalyzerV12andHigher.py`, `DevEnvBreaktableAnalyzer2.py`, `DevEnvFindHeader7.py`, `DevTestBreakerTableAnalyzer.py`
+- **Contents**: `capacity_test.py`, `DevTestEnv.py`, `PageFilterDevEnv.py` (heuristic), `PageFilterMLDevEnv.py` (ML-based V4), `DevEnvPanelSearchToolBatch.py`, `DevEnvPanelSearchToolSimple.py`, `DevEnvBreakerTableAnalyzerV12andHigher.py`, `DevMLTableDetection.py`
 - **Note**: `SourcePdf/` (test PDFs) is gitignored and not committed
 
 ## Conventions
