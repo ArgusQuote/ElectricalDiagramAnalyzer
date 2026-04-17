@@ -6,7 +6,10 @@ import os
 import cv2
 import numpy as np
 from difflib import SequenceMatcher
+from contextlib import contextmanager
 import re
+import time
+import fcntl
 
 # Same values you use in HeaderBandScanner
 _HDR_OCR_SCALE = 2.0
@@ -69,6 +72,12 @@ class BreakerFooterFinder:
         # optional: where to dump vertical mask + column crops / debug images
         self.debug_dir: Optional[str] = None
 
+        # Inter-process OCR lock for footer OCR only.
+        # This prevents concurrent EasyOCR footer calls from different worker
+        # processes from crashing under load.
+        self.ocr_lock_path = "/tmp/argus_footer_ocr.lock"
+        self.ocr_lock_timeout_sec = 180
+
     def _ensure_debug_dir(self, analyzer_result: Dict) -> str:
         """
         Resolve a debug directory path based on analyzer_result, similar
@@ -82,6 +91,96 @@ class BreakerFooterFinder:
             os.makedirs(debug_dir, exist_ok=True)
         return debug_dir
 
+    @contextmanager
+    def _ocr_lock(self):
+        """
+        Inter-process lock used only for footer OCR calls.
+        This serializes EasyOCR footer calls across worker processes so
+        GPU/native EasyOCR code is not hit concurrently.
+        """
+        lock_path = self.ocr_lock_path
+        timeout_sec = max(1, int(self.ocr_lock_timeout_sec))
+
+        lock_dir = os.path.dirname(lock_path) or "/tmp"
+        os.makedirs(lock_dir, exist_ok=True)
+
+        f = open(lock_path, "w")
+        acquired = False
+        start = time.time()
+
+        try:
+            while (time.time() - start) < timeout_sec:
+                try:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except BlockingIOError:
+                    time.sleep(0.05)
+
+            if not acquired:
+                raise TimeoutError(
+                    f"Timed out waiting for footer OCR lock after {timeout_sec}s"
+                )
+
+            yield
+
+        finally:
+            try:
+                if acquired:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                f.close()
+            except Exception:
+                pass
+
+
+    def _safe_footer_readtext(
+        self,
+        img: np.ndarray,
+        *,
+        detail: int = 1,
+        paragraph: bool = False,
+        allowlist=None,
+        mag_ratio: float = 1.0,
+        contrast_ths: float = 0.05,
+        adjust_contrast: float = 0.7,
+        text_threshold: float = 0.4,
+        low_text: float = 0.25,
+        dbg_label: str = "",
+    ):
+        """
+        Wrapper for footer OCR only.
+        Serializes OCR across processes to avoid EasyOCR/PyTorch segfaults.
+        """
+        if self.reader is None:
+            return []
+
+        with self._ocr_lock():
+            if self.debug:
+                print(f"[BreakerFooterFinder] OCR LOCK ACQUIRED for {dbg_label}")
+
+            out = self.reader.readtext(
+                img,
+                detail=detail,
+                paragraph=paragraph,
+                allowlist=allowlist,
+                mag_ratio=mag_ratio,
+                contrast_ths=contrast_ths,
+                adjust_contrast=adjust_contrast,
+                text_threshold=text_threshold,
+                low_text=low_text,
+            )
+
+            if self.debug:
+                print(
+                    f"[BreakerFooterFinder] OCR LOCK RELEASE for {dbg_label} "
+                    f"(detections={len(out)})"
+                )
+
+            return out
+    
     def _find_header_verticals(self, band: np.ndarray) -> List[int]:
         """
         Detect vertical grid lines inside the *header band only*.
@@ -1050,7 +1149,7 @@ class BreakerFooterFinder:
                 )
 
                 try:
-                    dets = self.reader.readtext(
+                    dets = self._safe_footer_readtext(
                         col_band_up,
                         detail=1,
                         paragraph=False,
@@ -1060,6 +1159,7 @@ class BreakerFooterFinder:
                         adjust_contrast=0.7,
                         text_threshold=0.4,
                         low_text=0.25,
+                        dbg_label=f"footer_header_col_{i}",
                     )
                 except Exception as e:
                     if self.debug:
@@ -1184,7 +1284,7 @@ class BreakerFooterFinder:
                 dets = []
                 if self.reader is not None:
                     try:
-                        dets = self.reader.readtext(
+                        dets = self._safe_footer_readtext(
                             col_body_mid,
                             detail=1,
                             paragraph=False,
@@ -1194,6 +1294,7 @@ class BreakerFooterFinder:
                             adjust_contrast=0.7,
                             text_threshold=0.4,
                             low_text=0.25,
+                            dbg_label=f"footer_body_col_{idx}_{side_for_col}",
                         )
                     except Exception as e:
                         if self.debug:

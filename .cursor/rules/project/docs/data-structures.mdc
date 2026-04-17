@@ -52,15 +52,43 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 
 ### Analyzer Output (results.analyzer)
 - **Location**: Returned by `OcrLibrary/BreakerTableAnalyzer12.BreakerTableAnalyzer.analyze()`
+- **Dataclass**: `SimpleHFResult` (fields: `src_path`, `header_y`, `header_bottom_y`, `footer_y`, `footer_token_val`, `panel_size`)
 - **Fields**:
   - `src_path` -- str, path to source image
-  - `header_y` -- int, pixel y-position of header top
-  - `header_bottom_y` -- int, pixel y-position of header bottom
-  - `footer_y` -- int, pixel y-position of footer
+  - `header_y` -- int or None, pixel y-position of header top
+  - `header_bottom_y` -- int or None, pixel y-position of header bottom
+  - `footer_y` -- int or None, pixel y-position of footer
   - `footer_token_val` -- int or None, detected footer token (panel space count)
   - `panel_size` -- int or None, detected panel size (e.g., 42, 84)
   - `gray` -- numpy array, preprocessed grayscale image
   - `debug_dir` -- str or None, debug output path
+
+### HeaderResult Dataclass
+- **Location**: `AnchoringClasses/BreakerHeaderFinder.py`
+- **Used by**: `BreakerTableAnalyzer12` for header/footer positioning
+- **Fields**:
+  - `centers` -- list[int], detected row center y-coordinates
+  - `dbg` -- `HeaderDbg`, debug info
+  - `header_y` -- int or None, pixel y of header top
+  - `header_bottom_y` -- int or None, pixel y of header bottom
+  - `footer_struct_y` -- int or None, structural footer y
+  - `last_footer_y` -- int or None, last detected footer y
+  - `footer_snapped` -- bool, whether footer was snapped to a grid line
+  - `snap_note` -- str or None, explanation of snap
+  - `bottom_border_y` -- int or None, y of bottom border
+  - `bottom_row_center_y` -- int or None, y of bottom row center
+
+### FooterResult Dataclass
+- **Location**: `AnchoringClasses/BreakerFooterFinder.py`
+- **Used by**: `BreakerTableAnalyzer12` for footer positioning and column layout
+- **Fields**:
+  - `footer_y` -- int or None, pixel y of footer
+  - `token_y` -- int or None, pixel y of footer token
+  - `token_val` -- int or None, detected footer token value (panel space count)
+  - `panel_size` -- int or None, detected panel size
+  - `dbg_marks` -- list[tuple[int, str]], debug marks as (y, label) pairs
+  - `vlines_x` -- list[int], vertical line x-coordinates (column separators)
+  - `cct_cols` -- list[tuple[int, int]], CKT/CCT column ranges as (x_start, x_end)
 
 ## Component Dict (OCR to RulesEngine)
 
@@ -78,14 +106,27 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `attrs.detected_breakers` -- list of breaker dicts (merged from header + table parser)
   - `attrs.breaker_data_suppressed` -- bool, True if breakers were suppressed by 2-strikes rule
   - `notes` -- list of str, optional warnings (e.g., breaker suppression reason)
+- **Error case**: When image parsing fails, a skeleton dict is created with `_skipped: True` and `reason` field
 
 ## RulesEngine Payload
 
-- **Location**: Built in `_process_job()`, consumed by `RulesEngine4.process_job()`
+- **Location**: Built by `_build_rules_payload()`, consumed by `RulesEngine4.process_job()`
 - **Structure**: `{"defaults": {...}, "items": [component_dict, ...]}`
   - `defaults` -- dict from `_DEFAULT_OVERRIDES` or `ui_overrides`
   - `items` -- list of component dicts (one per detected panel)
 - **Returns**: dict keyed by component name, each value containing part number selections, BOM items, and optional error/skip info
+
+## Worker Pool State
+
+### _WorkerSlot
+- **Location**: `uplink_server.py` (class at line ~559)
+- **Purpose**: State for one worker subprocess slot in the multi-slot pool
+- **Fields**:
+  - `lock` -- `threading.Lock`, protects spawn/kill operations for this slot
+  - `proc` -- `multiprocessing.Process` or None, the worker subprocess
+  - `job_q` -- `mp.Queue` or None, main → worker (sends job_id str, or None for shutdown)
+  - `done_q` -- `mp.Queue` or None, worker → main (sends (status, job_id, error_msg) tuples)
+- **Instances**: `_WORKER_SLOTS` is a list of 4 `_WorkerSlot` objects (one per `MAX_WORKERS`)
 
 ## Job Disk Structure
 
@@ -95,26 +136,41 @@ Each job lives at `~/jobs/{job_id}/`:
 {job_id}/
 ├── status.json          # Job state and metadata
 ├── result.json          # Full processing result (written on completion)
-├── *.pdf                # Uploaded PDF
+├── uploaded_pdfs/       # Uploaded PDF(s)
+│   └── *.pdf
 ├── pdf_images/          # Rendered page images and panel crops
 │   ├── *.png            # Cropped panel PNGs
-│   └── review_overlays/ # OCR debug overlay PNGs
-├── magenta_overlays/    # Full-page detection visualization PNGs
+│   ├── review_overlays/ # OCR debug overlay PNGs
+│   └── magenta_overlays/# Full-page detection visualization PNGs
+│       (also checks: magenta_overlay/, page_overlays/, full_overlays/, overlays/)
+├── debug/               # Debug output from pipeline
 └── .cancel              # Sentinel file (created when job is canceled)
 ```
 
+After completion, `_cleanup_job_dir()` removes everything except:
+- `status.json`, `result.json`
+- Review overlays (`pdf_images/review_overlays/`)
+- Magenta overlays (checked in multiple candidate dirs + fallback for files containing "magenta")
+- Original PDFs (if `keep_pdf=True`)
+
 ### status.json
 - **Fields**:
-  - `state` -- str: "queued", "running", "done", "error", "cancelled"
+  - `state` -- str: "queued", "running", "done", "error", "canceled"
   - `ts` -- str, ISO 8601 UTC timestamp of last update
-  - `progress` -- int, 0-100 percentage
-  - `step` -- str, current pipeline step description
+  - `progress` -- float, 0.0-100.0 percentage
+  - `step` -- str, current pipeline step ("received", "rendering", "rendered", "parsing", "parsed", "rules")
   - `owner_id` -- str, lowercased owner email
   - `owner_email` -- str, owner email
   - `noticed_ts_ms` -- int, epoch ms when job was first received
-  - `job_note` -- str or None, user-provided note
-  - `ui_overrides` -- dict, override settings from the UI
+  - `job_note` -- str or None, user-provided note (pipe-delimited key=value pairs)
+  - `ui_overrides` -- dict, normalized override settings from the UI
+  - `node_id` -- str, `{hostname}:{pid}` of the server process
+  - `image_count` -- int, number of panel PNGs
   - `error` -- str, error message (only when state="error")
+  - `canceled` -- bool, True if cancel was requested
+  - `queue_timeout` -- bool, True if expired by queue timeout
+  - `queue_timeout_min` -- int, timeout threshold that was in effect
+  - `queue_age_ms` / `queue_age_str` -- queue wait time at expiry
 
 ### result.json
 - **Fields**:
@@ -122,6 +178,8 @@ Each job lives at `~/jobs/{job_id}/`:
   - `job_id` -- str
   - `job_dir` -- str, absolute path
   - `saved_pdf` -- str, path to saved PDF
+  - `output_dir` -- str (empty)
+  - `images` -- list (empty)
   - `image_count` -- int, number of panel PNGs processed
   - `components` -- list of component dicts
   - `rules_result` -- dict from RulesEngine4
@@ -136,31 +194,40 @@ Each job lives at `~/jobs/{job_id}/`:
 ### PANEL_FINDER_DEFAULTS
 - **Location**: `uplink_server.py` lines 25-39
 - **Purpose**: Knobs for heuristic panel detection (PanelBoardSearch)
-- **Key fields**: `render_dpi` (1400), `aa_level`, `render_colorspace`, `min_void_area_fr`, `min_void_w_px`, `min_void_h_px`, `max_void_area_fr`, `void_w_fr_range`, `void_h_fr_range`, `min_whitespace_area_fr`, `margin_shave_px`, `pad`, `verbose`
+- **Key fields**: `render_dpi` (1400), `aa_level` (8), `render_colorspace` ("gray"), `min_void_area_fr` (0.004), `min_void_w_px` (90), `min_void_h_px` (90), `max_void_area_fr` (0.30), `void_w_fr_range`, `void_h_fr_range`, `min_whitespace_area_fr` (0.01), `margin_shave_px` (6), `pad` (6), `verbose` (True)
 
 ### _DEFAULT_OVERRIDES
-- **Location**: `uplink_server.py` lines 329-353
+- **Location**: `uplink_server.py` lines 317-340
 - **Purpose**: Default UI override settings for part number selection
-- **Sub-dicts**: panelboards (bussing, breakers, rating, trim, enclosure, SPD), transformers (winding, temp, type, mounting), disconnects (switch type, enclosure, fusible, grounding)
+- **Sub-dicts**: panelboards (bussing, plug-on breakers, rating, feed-thru lugs, trim, enclosure, SPD), transformers (winding, temp, type, weathershield, mounting, resin_enclosure), disconnects (littlefuse, switch type, enclosure, fusible, grounding, solid neutral)
 
 ## Constants
 
 | Constant | Location | Value |
 |---|---|---|
-| `MAX_WORKERS` | uplink_server.py | 1 |
+| `MAX_WORKERS` | uplink_server.py | 4 |
 | `MAX_INFLIGHT_PER_USER` | uplink_server.py | 1 |
+| `WORKER_RECYCLE_AFTER_JOBS` | uplink_server.py (env `WORKER_RECYCLE_JOBS`) | 25 |
 | `WATCHDOG_TIMEOUT_MIN` | uplink_server.py (env) | 10 |
 | `WATCHDOG_KILL_GRACE_SEC` | uplink_server.py (env) | 3 |
 | `QUEUE_TIMEOUT_MIN` | uplink_server.py (env) | 25 |
+| `_WORKER_READY_TIMEOUT` | uplink_server.py | 120 |
+| `API_VERSION` | BreakerTableParserAPIv9.py | "API_9" |
+| `ANALYZER_VERSION` | BreakerTableAnalyzer12.py | "Analyzer12" |
+| `PARSER_VERSION` | BreakerTableParser10.py | "BreakerParser10" |
+| `VALID_VOLTAGES` | BreakerTableParserAPIv9.py | {120, 208, 240, 480, 600} |
+| `AMP_MIN` / `AMP_MAX` | BreakerTableParserAPIv9.py | 100 / 1200 |
+| `OCR_TIMEOUT_SEC` | ocr_timeout.py | 30 |
+| `DEFAULT_INTERRUPTING_RATING` | RulesEngine4.py | 22 |
 
-Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine4 and PartNumberBuilder.
+Amperage bounds for breaker skip logic ([15..1200]) are in `_count_would_skip_breakers` in uplink_server.py. Voltage sets and snap maps are defined in BreakerTableParserAPIv9 and RulesEngine4/PartNumberBuilder.
 
 ## Serialization
 
 - **On-disk format**: JSON files (`status.json`, `result.json`) with `ensure_ascii=False`, `indent=2`, and `default=str` for non-serializable types
 - **Image transport**: `anvil.BlobMedia` wrapping raw PNG bytes (via `vm_fetch_image`)
 - **Config files**: `.jsonc` extension (JSON with comments) for OCR label configs, loaded with custom comment-stripping parser
-- **No database**: All persistence is file-system based under `~/jobs/`
+- **No database**: All persistence is file-system based under `~/jobs/`; `_jobs_upsert` is a no-op stub
 
 ## PageClassifierML Output
 
@@ -200,7 +267,7 @@ Page Filtering (one of):
     ▼
 PanelBoardSearch.readPdf() → list[str]  (PNG crop paths)
     │
-    ▼  (for each PNG, sequential)
+    ▼  (for each PNG, sequential within a worker, parallel across workers)
 BreakerTablePipeline.run() → dict  (results with analyzer/header/parser)
     │
     ▼
@@ -211,4 +278,10 @@ RulesEngine4.process_job({"defaults": ..., "items": [...]}) → dict  (part numb
     │
     ▼
 result.json + status.json written to ~/jobs/{job_id}/
+    │
+    ▼
+_cleanup_job_dir()  (removes temp files, keeps overlays + PDFs)
+    │
+    ▼
+gc.collect() + torch.cuda.empty_cache()  (between-job cleanup in worker)
 ```

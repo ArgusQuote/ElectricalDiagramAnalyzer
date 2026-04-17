@@ -15,6 +15,9 @@ PARSER_VERSION = "BreakerParser10"
 _HDR_OCR_SCALE        = 2.0
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
 _HDR_MIN_CONF         = 0.40
+_OCR_TIMEOUT_SEC      = 30
+
+from OcrLibrary.ocr_timeout import readtext_with_timeout as _readtext_with_timeout
  
 def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
     """
@@ -278,7 +281,8 @@ class HeaderBandScanner:
                     )
 
                     try:
-                        dets = self.reader.readtext(
+                        dets = _readtext_with_timeout(
+                            self.reader,
                             col_band_up,
                             detail=1,
                             paragraph=False,
@@ -787,6 +791,8 @@ class HeaderBandScanner:
                     hero_trip_rank = max(hero_trip_rank, 5)
                 elif _hero_match(w_raw, ["AMP", "AMPS"]):
                     hero_trip_rank = max(hero_trip_rank, 4)
+                elif _hero_match(w_raw, ["OCP", "OCPI", "OCPD"]):
+                    hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["SIZE"]):
                     hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
@@ -1431,7 +1437,8 @@ class SeparatedLayoutParser:
             )
 
             try:
-                dets = self.reader.readtext(
+                dets = _readtext_with_timeout(
+                    self.reader,
                     row_up,
                     detail=1,
                     paragraph=False,
@@ -2164,7 +2171,8 @@ class CombinedLayoutParser:
             )
 
             try:
-                dets = self.reader.readtext(
+                dets = _readtext_with_timeout(
+                    self.reader,
                     row_up,
                     detail=1,
                     paragraph=False,

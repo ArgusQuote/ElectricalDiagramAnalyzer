@@ -437,11 +437,11 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | 
 
         desired_at_240 = panel_k if (voltage == 208 or voltage == 240) else panel_k
         if desired_at_240 >= 65:
-            base = "QH"
+            base = "QH" if allow_plug else "QHB"
         elif desired_at_240 >= 42:
             base = "QOH"
         elif (voltage in (208, 240)) and desired_at_240 >= 25:
-            base = "QH"
+            base = "QH" if allow_plug else "QHB"
         elif desired_at_240 >= 22:
             base = "QO-VH" if allow_plug else "QOB-VH"
         else:
@@ -1815,11 +1815,11 @@ class PanelboardEngine(BaseEngine):
             # FULLY_RATED: treat 208V as 240V for IR capability
             desired_at_240 = panel_k if rating_voltage in (208, 240) else panel_k
             if desired_at_240 >= 65:
-                base = "QH"
+                base = "QH" if allow_plug else "QHB"
             elif desired_at_240 >= 42:
                 base = "QOH"
             elif (rating_voltage in (208, 240)) and desired_at_240 >= 25:
-                base = "QH"  # 25-41k requires H-family at 240V
+                base = "QH" if allow_plug else "QHB"
             elif desired_at_240 >= 22:
                 base = "QO-VH" if allow_plug else "QOB-VH"
             else:

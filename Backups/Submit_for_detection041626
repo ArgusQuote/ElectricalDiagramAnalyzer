@@ -1,0 +1,127 @@
+import anvil.secrets
+import anvil.stripe
+import anvil.email
+import anvil.users
+import anvil.server
+import json, time
+
+def _jsonify(x):
+  return json.loads(json.dumps(x, default=str))
+
+def _is_pdf(media):
+  if not media:
+    return False
+  ct = (getattr(media, "content_type", "") or "").lower()
+  name = (getattr(media, "name", "") or "").lower()
+  return ("pdf" in ct) or name.endswith(".pdf")
+
+def _owner_email() -> str:
+  u = anvil.users.get_user()
+  if not u:
+    raise anvil.server.ExecutionError("User not logged in")
+  try:
+    em = (u['email'] or "").strip().lower()
+  except Exception:
+    em = ""
+  if not em:
+    raise anvil.server.ExecutionError("Your account has no email address.")
+  return em
+
+def _require_entitled_owner_email() -> str:
+  owner_email = _owner_email()
+  ent = anvil.server.call("is_current_user_entitled") or {}
+  if not ent.get("ok"):
+    raise anvil.server.ExecutionError("Your access is not active. Please contact your admin.")
+  return owner_email
+
+
+@anvil.server.callable(require_user=True)
+def submit_for_detection(file, ui_overrides=None, **kwargs):
+  owner_email = _require_entitled_owner_email()
+
+  if not _is_pdf(file):
+    raise anvil.server.ExecutionError("PDFs only")
+
+  job_note = kwargs.get("job_note")
+
+  out = anvil.server.call(
+    "vm_submit_for_detection",
+    media=file,
+    ui_overrides=(ui_overrides or {}),
+    job_note=job_note,
+    owner_email=owner_email
+  )
+
+  out = dict(out or {})
+  out["owner_email"] = owner_email
+  out["owner_id"] = owner_email
+  return _jsonify(out)
+
+
+@anvil.server.callable(require_user=True)
+def get_job_status(job_id):
+  """Resilient poll: auto-retry on Uplink disconnects; report a soft-unknown."""
+  owner_email = _owner_email()  # <-- NO entitlement check here
+
+  for attempt in range(3):
+    try:
+      out = anvil.server.call("vm_get_job_status", job_id, owner_email)
+      return _jsonify(out)
+
+    except anvil.server.UplinkDisconnectedError:
+      if attempt < 2:
+        time.sleep(0.75 * (attempt + 1))
+        continue
+      return {"state": "unknown", "error": "uplink_disconnected"}
+
+    except Exception as e:
+      return {"state": "error", "error": f"Status unavailable: {type(e).__name__}: {e}"}
+
+
+@anvil.server.callable(require_user=True)
+def cancel_job(job_id: str) -> bool:
+  owner_email = _require_entitled_owner_email()  # optional to keep; fine either way
+  try:
+    return bool(anvil.server.call("vm_cancel_job", job_id, owner_email))
+  except Exception:
+    return False
+
+
+@anvil.server.callable(require_user=True)
+def list_jobs(limit: int = 50):
+  owner_email = _require_entitled_owner_email()  # optional to keep; fine either way
+  out = anvil.server.call("vm_list_jobs", owner_email, int(limit))
+  return _jsonify(out)
+
+# Specs analysis
+@anvil.server.callable(require_user=True)
+def analyze_specs_pdf(file, job_name=None):
+  owner_email = _require_entitled_owner_email()
+
+  if not _is_pdf(file):
+    raise anvil.server.ExecutionError("PDFs only")
+
+  out = anvil.server.call(
+    "vm_analyze_specs_pdf",
+    media=file,
+    owner_email=owner_email,
+    job_name=(job_name or "")
+  )
+
+  out = dict(out or {})
+  out["owner_email"] = owner_email
+  out["owner_id"] = owner_email
+  return _jsonify(out)
+
+@anvil.server.callable(require_user=True)
+def fetch_specs_image(job_id, source_path):
+  _owner_email()  # confirms logged in
+  return anvil.server.call("vm_fetch_image", job_id, source_path)
+
+@anvil.server.callable(require_user=True)
+def delete_specs_job(job_id):
+  owner_email = _owner_email()
+  ok = bool(anvil.server.call("vm_delete_specs_job", job_id, owner_email))
+  if not ok:
+    raise anvil.server.ExecutionError(f"Could not delete specs temp job: {job_id}")
+  return True

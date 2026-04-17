@@ -12,7 +12,6 @@ import os as _os
 from anvil import BlobMedia
 
 # ---------- CONFIG ----------
-# Ensure your repo is on sys.path (for imports below)
 REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -23,7 +22,6 @@ BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
 PANEL_FINDER_DEFAULTS = {
-    # Same knobs you use in your dev env script
     "render_dpi": 1400,
     "aa_level": 8,
     "render_colorspace": "gray",
@@ -43,16 +41,16 @@ PANEL_FINDER_DEFAULTS = {
 (Path.home() / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
 
 # Worker pool limits
-MAX_WORKERS = 1
+MAX_WORKERS = 4
 MAX_INFLIGHT_PER_USER = 1
 
+# Recycle the persistent worker after this many jobs to prevent resource
+# degradation (RSS creep, GPU memory fragmentation, leaked OCR threads).
+WORKER_RECYCLE_AFTER_JOBS = int(os.environ.get("WORKER_RECYCLE_JOBS", "25"))
+
 # ===== Determinism & Thread Caps (must run before heavy libs init) =====
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
-os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("PYTHONHASHSEED", "0")
+from WorkerSetup import cap_thread_pools, set_runtime_determinism
+cap_thread_pools()
 
 # ---------- WATCHDOG CONFIG ----------
 WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "10"))  # dial in prod
@@ -70,27 +68,8 @@ QUEUE_TIMEOUT_ERROR_MSG = (
 )
 
 def _set_runtime_determinism():
-    """Cap OpenCV/PyTorch thread counts and enable cuDNN determinism for reproducible OCR."""
-    # OpenCV: cap threads if available
-    try:
-        import cv2
-        try:
-            cv2.setNumThreads(1)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    # PyTorch/EasyOCR determinism if present
-    try:
-        import torch
-        torch.set_num_threads(1)
-        torch.set_num_interop_threads(1)
-        if hasattr(torch.backends, "cudnn"):
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-    except Exception:
-        pass
+    """Delegate to shared WorkerSetup module."""
+    set_runtime_determinism()
 
 def _log_run_fingerprint(tag: str = ""):
     """Log CUDA device names and cuDNN determinism settings for diagnostics."""
@@ -112,7 +91,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv9 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+from OcrLibrary.BreakerTableParserAPIv10 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
@@ -159,7 +138,10 @@ def _warmup_ocr_once():
         print(f">>> OCR warmup skipped: {e}")
 
 if not _IS_WORKER_SUBPROCESS:
-    _warmup_ocr_once()
+    # Warmup skipped: main process does not do OCR.  Each worker subprocess
+    # loads its own GPU EasyOCR reader, so warming up here just wastes ~10 GiB
+    # VRAM that the worker pool needs.
+    print(">>> Main process: skipping OCR warmup (workers load their own models)")
 
 # ---------- UTILITIES ----------
 def _now_utc():
@@ -505,15 +487,28 @@ def vm_get_default_overrides() -> dict:
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
 # ---------- PDF → images ----------
-def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list[str]:
+def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_cb=None) -> list[str]:
     """
     Run PageFilter first to keep only probable electrical/panel pages,
     then pass the (possibly filtered) PDF to PanelBoardSearch to produce crops.
     """
     img_dir.mkdir(parents=True, exist_ok=True)
     print(f">>> rendering PDF → images: {saved_pdf} -> {img_dir} (dpi={dpi})")
+    def _emit(step: str, progress: float | None = None, **extra):
+        if callable(status_cb):
+            try:
+                payload = {}
+                if step is not None:
+                    payload["step"] = step
+                if progress is not None:
+                    payload["progress"] = progress
+                payload.update(extra or {})
+                status_cb(**payload)
+            except Exception:
+                pass
 
     # --- 1) Filter pages (OCR first, footprints only if undecided) ---
+    _emit("finding_relevant_pages", 2.0)    
     try:
         pf = PageFilter(
             output_dir=str(img_dir.parent),   # keep filtered PDF alongside job folders
@@ -537,52 +532,46 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
         )
         kept_pages, dropped_pages, filtered_pdf, log_json = pf.readPdf(str(saved_pdf))
         print(f">>> PageFilter: kept={len(kept_pages)} dropped={len(dropped_pages)} filtered_pdf={filtered_pdf}")
+        _emit(
+            "finding_components",
+            8.0,
+            kept_pages=len(kept_pages),
+            dropped_pages=len(dropped_pages),
+        )
     except Exception as e:
         print(f">>> PageFilter error: {e}")
         kept_pages, filtered_pdf = [], None
 
     # Choose which PDF to feed into the finder:
     # - if filter kept at least one page, use filtered_pdf
-    # - else fall back to the original PDF (or return empty if you prefer)
+    # - else fall back to the original PDF
     pdf_for_finder = filtered_pdf if (filtered_pdf and len(kept_pages) > 0) else str(saved_pdf)
     if pdf_for_finder == str(saved_pdf) and (filtered_pdf is not None) and len(kept_pages) == 0:
         print(">>> PageFilter kept 0 pages — falling back to original PDF")
 
-    # --- 2) Run the panel finder on the chosen PDF ---
-    # Build kwargs for PanelBoardSearch (works for both ML and heuristic detectors)
-    finder_kwargs = {
-        "output_dir": str(img_dir),
-        "dpi": dpi,
-        "render_dpi": PANEL_FINDER_DEFAULTS["render_dpi"],
-        "render_colorspace": PANEL_FINDER_DEFAULTS["render_colorspace"],
-        "pad": PANEL_FINDER_DEFAULTS["pad"],
-        "verbose": PANEL_FINDER_DEFAULTS["verbose"],
-    }
-    
-    # Add ML-specific or heuristic-specific parameters
-    if USE_ML_DETECTOR:
-        # ML detector parameters
-        if ML_MODEL_PATH:
-            finder_kwargs["model_path"] = ML_MODEL_PATH
-        finder_kwargs["conf_threshold"] = 0.25
-        finder_kwargs["min_area_fraction"] = PANEL_FINDER_DEFAULTS["min_void_area_fr"]
-        finder_kwargs["max_area_fraction"] = PANEL_FINDER_DEFAULTS["max_void_area_fr"]
-    else:
-        # Heuristic detector parameters
-        finder_kwargs["aa_level"] = PANEL_FINDER_DEFAULTS["aa_level"]
-        finder_kwargs["min_void_area_fr"] = PANEL_FINDER_DEFAULTS["min_void_area_fr"]
-        finder_kwargs["min_void_w_px"] = PANEL_FINDER_DEFAULTS["min_void_w_px"]
-        finder_kwargs["min_void_h_px"] = PANEL_FINDER_DEFAULTS["min_void_h_px"]
-        finder_kwargs["max_void_area_fr"] = PANEL_FINDER_DEFAULTS["max_void_area_fr"]
-        finder_kwargs["void_w_fr_range"] = PANEL_FINDER_DEFAULTS["void_w_fr_range"]
-        finder_kwargs["void_h_fr_range"] = PANEL_FINDER_DEFAULTS["void_h_fr_range"]
-        finder_kwargs["min_whitespace_area_fr"] = PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"]
-        finder_kwargs["margin_shave_px"] = PANEL_FINDER_DEFAULTS["margin_shave_px"]
-    
-    local_finder = PanelBoardSearch(**finder_kwargs)
+    # --- 2) Run the panel finder (PanelSearchToolV18) on the chosen PDF ---
+    local_finder = PanelBoardSearch(
+        output_dir=str(img_dir),
+        dpi=dpi,
+        # All other knobs pulled from PANEL_FINDER_DEFAULTS so they match dev env
+        render_dpi=PANEL_FINDER_DEFAULTS["render_dpi"],
+        aa_level=PANEL_FINDER_DEFAULTS["aa_level"],
+        render_colorspace=PANEL_FINDER_DEFAULTS["render_colorspace"],
+        min_void_area_fr=PANEL_FINDER_DEFAULTS["min_void_area_fr"],
+        min_void_w_px=PANEL_FINDER_DEFAULTS["min_void_w_px"],
+        min_void_h_px=PANEL_FINDER_DEFAULTS["min_void_h_px"],
+        max_void_area_fr=PANEL_FINDER_DEFAULTS["max_void_area_fr"],
+        void_w_fr_range=PANEL_FINDER_DEFAULTS["void_w_fr_range"],
+        void_h_fr_range=PANEL_FINDER_DEFAULTS["void_h_fr_range"],
+        min_whitespace_area_fr=PANEL_FINDER_DEFAULTS["min_whitespace_area_fr"],
+        margin_shave_px=PANEL_FINDER_DEFAULTS["margin_shave_px"],
+        pad=PANEL_FINDER_DEFAULTS["pad"],
+        verbose=PANEL_FINDER_DEFAULTS["verbose"],
+    )
 
     try:
         crops = local_finder.readPdf(pdf_for_finder)
+        _emit("removing_false_positives", 18.0, image_count=len(crops))
     except Exception as e:
         print(f">>> render error: {e}")
         raise
@@ -601,13 +590,22 @@ _INFLIGHT_BY_USER: dict[str, int] = {}
 _Q_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
+_SPECS_RUNNING: dict[str, bool] = {}
+_SPECS_LOCK = threading.RLock()
 
-# Persistent worker process state
-_WORKER_LOCK = threading.Lock()
-_WORKER_PROC = None          # multiprocessing.Process
-_WORKER_JOB_Q = None         # mp Queue: main → worker (job_id str or None for shutdown)
-_WORKER_DONE_Q = None        # mp Queue: worker → main (status, job_id, error_msg)
+# Per-slot worker pool state: each dequeue thread gets its own worker subprocess
 _WORKER_READY_TIMEOUT = 120  # seconds to wait for worker model loading
+
+class _WorkerSlot:
+    """State for one worker subprocess slot."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.proc = None       # multiprocessing.Process
+        self.job_q = None      # mp Queue: main → worker (job_id str or None for shutdown)
+        self.done_q = None     # mp Queue: worker → main (status, job_id, error_msg)
+
+_WORKER_SLOTS: list[_WorkerSlot] = [_WorkerSlot() for _ in range(MAX_WORKERS)]
+_SPAWN_LOCK = threading.Lock()  # serializes env-var set/start/unset across slots
 
 def _enqueue_job(job_id: str, owner_id: str):
     """Put a (job_id, owner_id) tuple onto the shared job queue for worker threads to dequeue."""
@@ -706,7 +704,7 @@ def _count_would_skip_breakers(breakers: list[dict], panel_limit: int | None) ->
 def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     """
     Map BreakerTablePipeline result → component schema expected by RulesEngine.
-    Applies your 4-strikes suppression rule.
+    Applies 4-strikes suppression rule.
     """
     stages = (result_dict or {}).get("results") or {}
     hdr    = stages.get("header")  or {}
@@ -725,11 +723,27 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
                     return iv
         return None
 
+    def _get_text_from_header(*keys):
+        for k in keys:
+            v = h_attrs.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return None
+
     amperage   = _get_int_from_header("amperage", "main_amp", "mainAmperage")
     spaces_h   = _get_int_from_header("spaces")
     voltage    = _get_int_from_header("voltage")
     intRating  = _get_int_from_header("intRating", "interrupt_rating", "interruptRating", "kaic", "kaic_rating")
     main_amp   = _get_int_from_header("mainBreakerAmperage", "main_breaker_amperage", "main_breaker", "mainBreaker")
+    trim_style = _get_text_from_header("trimStyle", "trim_style")
+    enclosure  = _get_text_from_header("enclosure")
+    if trim_style and not enclosure:
+        enclosure = "Nema1"
+    if str(enclosure or "").strip().upper() == "NEMA3R":
+        trim_style = None
     hdr_brkrs  = list(h_attrs.get("detected_breakers") or [])
 
     # Table fields
@@ -762,6 +776,8 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
             "voltage": voltage,
             "intRating": intRating,
             "mainBreakerAmperage": main_amp,
+            "trimStyle": trim_style,
+            "enclosure": enclosure,
             "detected_breakers": det_brkrs,
         },
     }
@@ -815,6 +831,10 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         _jobs_upsert(job_id, state="running", updated_at=_now_utc())
 
         ui_overrides = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
+        def _render_status_cb(**kwargs):
+            payload = {"noticed_ts_ms": noticed_ts_ms}
+            payload.update(kwargs or {})
+            _status_write(job_dir, "running", **payload)
 
         # Ensure images are present
         pdf_dir = job_dir / "uploaded_pdfs"
@@ -826,15 +846,34 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             if not pdfs:
                 raise RuntimeError("No PDF found to render.")
 
-            # Early heartbeat: rendering start
-            _status_write(job_dir, "running", step="rendering", noticed_ts_ms=noticed_ts_ms, progress=2.0)
+            # Early heartbeat: start relevant-page search
+            _status_write(
+                job_dir,
+                "running",
+                step="finding_relevant_pages",
+                noticed_ts_ms=noticed_ts_ms,
+                progress=2.0
+            )
 
-            # Render (PageFilter may be slow)
+            # Render / page-filter / component-find with live phase updates
+            imgs = []
+
             try:
-                imgs = render_pdf_to_images(pdfs[0], img_dir)
+                imgs = render_pdf_to_images(
+                    pdfs[0],
+                    img_dir,
+                    status_cb=_render_status_cb
+                )
             finally:
-                # Heartbeat right after render returns (even on exception path)
-                _status_write(job_dir, "running", step="rendered", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=9.0)
+                # Final heartbeat after image generation finishes
+                _status_write(
+                    job_dir,
+                    "running",
+                    step="rendered",
+                    image_count=len(imgs),
+                    noticed_ts_ms=noticed_ts_ms,
+                    progress=9.0
+                )
 
         if not imgs:
             raise RuntimeError("PDF rendered but produced no crops/images.")
@@ -850,7 +889,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             print(f">>> BreakerTable API Version: {API_VERSION}")
         except Exception:
             pass
-        _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=10.0)
+        _status_write(job_dir, "running", step="parsing", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=20.0)
 
         debug_dir = job_dir / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -863,7 +902,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         components = [None] * total  # preserve order
         for idx, img_path in enumerate(imgs):
             if _is_canceled(job_dir):
-                pct = 10.0 + (done / max(1, total)) * 80.0
+                pct = 20.0 + (done / max(1, total)) * 80.0
                 _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
                 _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
                 print(f">>> worker canceled mid-parse: {job_id}")
@@ -888,6 +927,8 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
                 print(f"    Voltage: {attrs.get('voltage')}")
                 print(f"    IntRating: {attrs.get('intRating')}")
                 print(f"    MainBreakerAmperage: {attrs.get('mainBreakerAmperage')}")
+                print(f"    TrimStyle: {attrs.get('trimStyle')}")
+                print(f"    Enclosure: {attrs.get('enclosure')}")
                 print(f"    Spaces (merged): {attrs.get('spaces')}")
                 print(f"    Detected breakers: {len(attrs.get('detected_breakers') or [])}")
                 components[idx] = comp
@@ -905,7 +946,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
             # progress after each image completes fully (A→P→H)
             done += 1
-            pct = 10.0 + (done / max(1, total)) * 80.0
+            pct = 20.0 + (done / max(1, total)) * 80.0
             _status_write(
                 job_dir,
                 "running",
@@ -933,9 +974,35 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             print(f">>> worker canceled before rules: {job_id}")
             return
 
-        rules_payload = _build_rules_payload(prev.get("ui_overrides") or _DEFAULT_OVERRIDES, components)
+        ui_defaults = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
+
+        panel_defaults = (ui_defaults.get("panelboards") or {})
+        default_trim = str(panel_defaults.get("default_trim_style") or "").strip().upper()
+        default_enclosure = str(panel_defaults.get("enclosure") or "").strip()
+
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            if str(comp.get("type") or "").strip().lower() != "panelboard":
+                continue
+
+            attrs = comp.get("attrs") or {}
+
+            trim_style = str(attrs.get("trimStyle") or "").strip().upper()
+            enclosure = str(attrs.get("enclosure") or "").strip().upper()
+
+            if trim_style in ("", "NONE", "X", "-"):
+                attrs["trimStyle"] = default_trim
+
+            if enclosure in ("", "NONE", "X", "-"):
+                attrs["enclosure"] = default_enclosure
+
+            comp["attrs"] = attrs
+
+        rules_payload = _build_rules_payload(ui_defaults, components)
         try:
             rules_result = RE2.process_job(rules_payload) or {}
+
         except Exception as re_err:
             rules_result = {"error": f"{type(re_err).__name__}: {re_err}"}
             print(f">>> rules engine error: {rules_result['error']}")
@@ -970,7 +1037,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
         # ---- AUTO CLEANUP (keep only what UI uses) ----
         try:
-            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)  # set True if you want to keep the original PDF
+            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)
             _cleanup_job_dir(job_dir, keep)
             print(f">>> cleanup complete: kept {len(keep)} files")
         except Exception as ce:
@@ -984,22 +1051,45 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
 # ---------- Persistent worker subprocess ----------
 
-def _persistent_worker_main(job_q, done_q):
-    """Long-lived subprocess that loads GPU models once and processes jobs."""
-    _set_runtime_determinism()
-    _log_run_fingerprint("persistent_worker_init")
+def _persistent_worker_main(slot_idx, job_q, done_q):
+    """Long-lived subprocess that loads GPU models once and processes jobs.
+
+    Runs between-job hygiene (gc.collect + torch.cuda.empty_cache) after
+    every job. Recycles after WORKER_RECYCLE_AFTER_JOBS jobs to reclaim
+    RSS and eliminate any leaked daemon threads from OCR timeouts.
+
+    NOTE: _set_runtime_determinism() is NOT called here because the
+    ``spawn`` context re-imports the module from scratch, so the
+    module-level call already runs in this subprocess. Calling it a second
+    time would raise ``RuntimeError: cannot set number of interop threads``
+    from PyTorch.
+    """
+    tag = f"slot-{slot_idx}"
+    import gc
+    import torch
+    _log_run_fingerprint(f"persistent_worker_init:{tag}")
 
     import easyocr
-    print(">>> Persistent worker: loading GPU EasyOCR reader ...")
+    print(f">>> Worker [{tag}]: loading GPU EasyOCR reader ...")
     gpu_reader = easyocr.Reader(["en"], gpu=True)
     pipeline = BreakerTablePipeline(debug=True, reader=gpu_reader)
-    # Force lazy init so analyzer + header parser are ready before first job
     pipeline._ensure_analyzer()
     pipeline._ensure_header_parser()
-    print(f">>> Persistent worker: models loaded | API_VERSION={API_VERSION}")
+    print(f">>> Worker [{tag}]: models loaded | API_VERSION={API_VERSION}")
+
+    try:
+        free_vram, total_vram = torch.cuda.mem_get_info()
+        print(
+            f">>> Worker [{tag}]: VRAM after model load — "
+            f"free={free_vram / 1024**3:.1f} GiB, "
+            f"total={total_vram / 1024**3:.1f} GiB"
+        )
+    except Exception:
+        pass
 
     done_q.put(("ready", None, None))
 
+    jobs_processed = 0
     while True:
         try:
             msg = job_q.get()
@@ -1014,82 +1104,108 @@ def _persistent_worker_main(job_q, done_q):
             done_q.put(("done", job_id, None))
         except Exception as e:
             tb = traceback.format_exc()
-            print(f">>> persistent worker job error [{job_id}]: {e}\n{tb}")
+            print(f">>> Worker [{tag}] job error [{job_id}]: {e}\n{tb}")
             try:
                 job_dir = BASE_JOBS_DIR / job_id
                 _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
             except Exception:
                 pass
             done_q.put(("error", job_id, f"{type(e).__name__}: {e}"))
+        finally:
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
 
-    print(">>> Persistent worker: shutdown")
+        jobs_processed += 1
+        if jobs_processed >= WORKER_RECYCLE_AFTER_JOBS:
+            print(f">>> Worker [{tag}]: recycling after {jobs_processed} jobs")
+            break
+
+    print(f">>> Worker [{tag}]: shutdown")
 
 
 # ---------- Worker lifecycle ----------
 
-def _spawn_persistent_worker():
-    """Spawn (or respawn) the persistent worker process. Returns when ready."""
-    global _WORKER_PROC, _WORKER_JOB_Q, _WORKER_DONE_Q
+def _spawn_persistent_worker(idx: int):
+    """Spawn (or respawn) worker subprocess for slot ``idx``. Blocks until ready."""
+    slot = _WORKER_SLOTS[idx]
+    tag = f"slot-{idx}"
 
     mp_ctx = get_context("spawn")
-    _WORKER_JOB_Q = mp_ctx.Queue()
-    _WORKER_DONE_Q = mp_ctx.Queue()
+    slot.job_q = mp_ctx.Queue()
+    slot.done_q = mp_ctx.Queue()
 
-    os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
-    _WORKER_PROC = mp_ctx.Process(
-        target=_persistent_worker_main,
-        args=(_WORKER_JOB_Q, _WORKER_DONE_Q),
-        daemon=True,
-    )
-    _WORKER_PROC.start()
-    os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
+    with _SPAWN_LOCK:
+        os.environ["_EDA_WORKER_SUBPROCESS"] = "1"
+        slot.proc = mp_ctx.Process(
+            target=_persistent_worker_main,
+            args=(idx, slot.job_q, slot.done_q),
+            daemon=True,
+        )
+        slot.proc.start()
+        os.environ.pop("_EDA_WORKER_SUBPROCESS", None)
 
-    print(f">>> Persistent worker spawned (pid={_WORKER_PROC.pid}), waiting for ready ...")
+    print(f">>> Worker [{tag}] spawned (pid={slot.proc.pid}), waiting for ready ...")
     try:
-        status, _, _ = _WORKER_DONE_Q.get(timeout=_WORKER_READY_TIMEOUT)
+        status, _, _ = slot.done_q.get(timeout=_WORKER_READY_TIMEOUT)
         if status != "ready":
             raise RuntimeError(f"unexpected worker init status: {status}")
     except Empty:
         raise RuntimeError(
-            f"persistent worker did not become ready within {_WORKER_READY_TIMEOUT}s"
+            f"Worker [{tag}] did not become ready within {_WORKER_READY_TIMEOUT}s"
         )
-    print(">>> Persistent worker ready")
+    print(f">>> Worker [{tag}] ready")
 
 
-def _kill_persistent_worker():
-    """Terminate and join the persistent worker process."""
-    global _WORKER_PROC
-    if _WORKER_PROC is None:
+def _kill_persistent_worker(idx: int):
+    """Terminate and join the worker subprocess in slot ``idx``."""
+    slot = _WORKER_SLOTS[idx]
+    if slot.proc is None:
         return
     try:
-        _WORKER_PROC.terminate()
+        slot.proc.terminate()
     except Exception:
         pass
-    _WORKER_PROC.join(timeout=WATCHDOG_KILL_GRACE_SEC)
-    if _WORKER_PROC.is_alive():
+    slot.proc.join(timeout=WATCHDOG_KILL_GRACE_SEC)
+    if slot.proc.is_alive():
         try:
-            _WORKER_PROC.kill()
+            slot.proc.kill()
         except Exception:
             pass
-        _WORKER_PROC.join(timeout=1)
-    _WORKER_PROC = None
+        slot.proc.join(timeout=1)
+    slot.proc = None
 
 
-def _ensure_worker_alive():
-    """If the persistent worker died, respawn it."""
-    global _WORKER_PROC
-    if _WORKER_PROC is not None and _WORKER_PROC.is_alive():
+def _ensure_worker_alive(idx: int):
+    """If the worker in slot ``idx`` exited (recycle or crash), respawn it."""
+    slot = _WORKER_SLOTS[idx]
+    tag = f"slot-{idx}"
+    if slot.proc is not None and slot.proc.is_alive():
         return
-    if _WORKER_PROC is not None:
-        print(">>> Persistent worker died — respawning")
-    _kill_persistent_worker()
-    _spawn_persistent_worker()
+    if slot.proc is not None:
+        exitcode = getattr(slot.proc, "exitcode", None)
+        if exitcode is not None and exitcode == 0:
+            print(f">>> Worker [{tag}] exited (planned recycle) — respawning")
+        else:
+            print(f">>> Worker [{tag}] died (exitcode={exitcode}) — respawning")
+    _kill_persistent_worker(idx)
+    _spawn_persistent_worker(idx)
 
 
-# ---------- Dequeue loop (persistent worker) ----------
+# ---------- Dequeue loop (per-slot worker pool) ----------
 
 def _dequeue_loop(idx: int):
+    """Each dequeue thread ``idx`` owns worker slot ``idx``.
+
+    Pulls jobs from the shared ``_JOB_Q``, dispatches to its own slot's
+    ``job_q``, and waits on its own slot's ``done_q``.  No cross-slot
+    queue access, no race conditions.
+    """
     threading.current_thread().name = f"pool-worker-{idx}"
+    slot = _WORKER_SLOTS[idx]
+    tag = f"slot-{idx}"
 
     while not _STOP.is_set():
         try:
@@ -1148,22 +1264,20 @@ def _dequeue_loop(idx: int):
                 print(f">>> queue timeout (pre-start): {job_id} | age={age_str}")
                 continue
 
-            with _WORKER_LOCK:
-                _ensure_worker_alive()
+            with slot.lock:
+                _ensure_worker_alive(idx)
 
-            _WORKER_JOB_Q.put(job_id)
+            slot.job_q.put(job_id)
 
             # Wait for completion with watchdog timeout
             timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
             worker_ok = True
             try:
-                status, done_job_id, err_msg = _WORKER_DONE_Q.get(timeout=timeout_sec)
+                status, done_job_id, err_msg = slot.done_q.get(timeout=timeout_sec)
             except Empty:
-                # Watchdog fired — the worker is stuck
                 worker_ok = False
 
-            if not worker_ok or (_WORKER_PROC is not None and not _WORKER_PROC.is_alive()):
-                # Worker timed out or crashed mid-job
+            if not worker_ok or (slot.proc is not None and not slot.proc.is_alive()):
                 try:
                     with open(_cancel_path(job_dir), "w") as f:
                         f.write("1")
@@ -1172,10 +1286,10 @@ def _dequeue_loop(idx: int):
 
                 if not worker_ok:
                     msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
-                    print(f">>> watchdog timeout: {job_id}")
+                    print(f">>> watchdog timeout [{tag}]: {job_id}")
                 else:
                     msg = "Worker process crashed during this job. Please try again."
-                    print(f">>> worker crash detected during: {job_id}")
+                    print(f">>> worker crash [{tag}] during: {job_id}")
 
                 _status_write(job_dir, "error", error=msg)
                 try:
@@ -1184,26 +1298,133 @@ def _dequeue_loop(idx: int):
                     pass
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
 
-                # Kill and respawn the worker for subsequent jobs
-                with _WORKER_LOCK:
-                    _kill_persistent_worker()
-                    _spawn_persistent_worker()
+                with slot.lock:
+                    _kill_persistent_worker(idx)
+                    _spawn_persistent_worker(idx)
 
         finally:
             _leave_inflight(owner_id)
             _JOB_Q.task_done()
 
+def _run_specs_analysis_job(job_id: str):
+    job_dir = BASE_JOBS_DIR / job_id
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
 
-# ---------- Start worker pool ----------
+    owner_email = str(st.get("owner_email") or "").strip().lower()
+    saved_pdf = Path(st.get("file_path") or "").resolve()
+
+    try:
+        _status_write(
+            job_dir,
+            "running",
+            created_at=st.get("created_at"),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_analyzing",
+            progress=15.0
+        )
+
+        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
+        print(f">>> SPECS DEBUG selected module_path={module_path}")
+
+        if not module_path.is_file():
+            raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
+
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "argus_specs_analyzer_v5",
+            str(module_path)
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create import spec for {module_path}")
+
+        spec_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(spec_module)
+
+        analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
+        if analyze_specs_pdf_for_ui is None:
+            raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
+
+        result = analyze_specs_pdf_for_ui(
+            pdf_path=str(saved_pdf),
+            job_dir=str(job_dir)
+        ) or {}
+
+        result = dict(result)
+        result["job_id"] = job_id
+        result["job_dir"] = str(job_dir)
+        result["saved_pdf"] = str(saved_pdf)
+        result["owner_email"] = owner_email
+        result["owner_id"] = owner_email
+
+        _result_write(job_dir, result)
+
+        _status_write(
+            job_dir,
+            "done",
+            created_at=st.get("created_at"),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_complete",
+            progress=100.0
+        )
+
+        print(f">>> specs analysis done: {job_id}")
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f">>> specs analysis error [{job_id}]: {e}\n{tb}")
+
+        _status_write(
+            job_dir,
+            "error",
+            created_at=st.get("created_at"),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            step="specs_error",
+            error=f"{type(e).__name__}: {e}",
+            traceback=tb,
+            progress=100.0
+        )
+
+    finally:
+        with _SPECS_LOCK:
+            _SPECS_RUNNING.pop(job_id, None)
+
+# ---------- Start worker pool (per-slot) ----------
 if not _IS_WORKER_SUBPROCESS:
-    _spawn_persistent_worker()
-    for i in range(MAX_WORKERS):
-        t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
-        t.start()
-        _WORKERS.append(t)
-    print(f">>> Worker pool started: {MAX_WORKERS} threads, per-user cap={MAX_INFLIGHT_PER_USER}")
+    try:
+        for i in range(MAX_WORKERS):
+            _spawn_persistent_worker(i)
+        for i in range(MAX_WORKERS):
+            t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
+            t.start()
+            _WORKERS.append(t)
+        print(
+            f">>> Worker pool started: {MAX_WORKERS} slots, "
+            f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
+        )
+    except Exception as e:
+        print(f">>> Worker pool startup failed: {e}")
+        print(traceback.format_exc())
 
 # ---------- API: submit / status / list / cancel ----------
+@anvil.server.callable
+def vm_ping():
+    print(f">>> vm_ping called | NODE_ID={NODE_ID}")
+    return {"ok": True, "node_id": NODE_ID}
+
 @anvil.server.callable
 def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email=None):
     """
@@ -1290,6 +1511,172 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "deferred_render": True
     }
 
+@anvil.server.callable
+def vm_upload_specs_pdf(media, owner_email=None, job_name=""):
+    """
+    Upload/save only. Do NOT analyze yet.
+    """
+    if not owner_email or not str(owner_email).strip():
+        raise RuntimeError("owner_email required")
+
+    owner_email = str(owner_email).strip().lower()
+
+    safe_job_name = _slugify(job_name or Path(getattr(media, "name", "specs.pdf")).stem)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    job_id = f"specs_{safe_job_name}__{stamp}"
+
+    job_dir = BASE_JOBS_DIR / job_id
+    pdf_dir = job_dir / "uploaded_pdfs"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_pdf = _save_media_to_disk(media, pdf_dir)
+
+    _status_write(
+        job_dir,
+        "uploaded",
+        created_at=_now_utc().isoformat(),
+        file_path=str(saved_pdf),
+        job_dir_path=str(job_dir),
+        owner_email=owner_email,
+        owner_id=owner_email,
+        node_id=NODE_ID,
+        step="specs_uploaded",
+        progress=5.0
+    )
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "job_dir": str(job_dir),
+        "saved_pdf": str(saved_pdf),
+        "owner_email": owner_email,
+        "owner_id": owner_email,
+        "node_id": NODE_ID,
+        "state": "uploaded"
+    }
+
+
+@anvil.server.callable
+def vm_start_specs_analysis(job_id: str, owner_email: str):
+    """
+    Start analysis only after the PDF has already been uploaded/saved.
+    """
+    if not job_id or not owner_email:
+        raise RuntimeError("job_id and owner_email required")
+
+    owner_email = str(owner_email).strip().lower()
+    job_dir = BASE_JOBS_DIR / job_id
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
+
+    if not st:
+        raise RuntimeError(f"Unknown specs job_id: {job_id}")
+
+    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+    if job_owner != owner_email:
+        raise RuntimeError("Owner mismatch")
+
+    with _SPECS_LOCK:
+        if _SPECS_RUNNING.get(job_id):
+            return {"ok": True, "job_id": job_id, "state": "running"}
+
+        _SPECS_RUNNING[job_id] = True
+
+    t = threading.Thread(target=_run_specs_analysis_job, args=(job_id,), daemon=True)
+    t.start()
+
+    return {"ok": True, "job_id": job_id, "state": "running"}
+
+
+@anvil.server.callable
+def vm_get_specs_status(job_id: str, owner_email: str) -> dict:
+    job_dir = BASE_JOBS_DIR / job_id
+    sp = _status_paths(job_dir)
+
+    st = _json_read_or_none(sp["status"])
+    if not st:
+        return {
+            "state": "error",
+            "error": f"Unknown job_id {job_id}",
+            "debug_job_dir": str(job_dir),
+            "debug_status_path": str(sp["status"]),
+            "debug_result_path": str(sp["result"]),
+        }
+
+    req_email = str(owner_email or "").strip().lower()
+    job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+
+    if not req_email or not job_email or req_email != job_email:
+        return {
+            "state": "not_found",
+            "debug_req_email": req_email,
+            "debug_job_email": job_email,
+            "debug_raw_state": st.get("state"),
+            "debug_job_dir": str(job_dir),
+        }
+
+    state = (st.get("state") or "unknown").lower()
+
+    if state == "done":
+        res = _json_read_or_none(sp["result"]) or {}
+        return {
+            "state": "done",
+            "result": res,
+            "debug_raw_state": st.get("state"),
+            "debug_job_dir": str(job_dir),
+        }
+
+    if state == "error":
+        return {
+            "state": "error",
+            "error": st.get("error") or "Unknown error",
+            "debug_raw_state": st.get("state"),
+            "debug_job_dir": str(job_dir),
+        }
+
+    out = {
+        "state": state,
+        "debug_raw_state": st.get("state"),
+        "debug_job_dir": str(job_dir),
+    }
+    for k in ("step", "progress"):
+        if k in st:
+            out[k] = st[k]
+    return out
+
+@anvil.server.callable
+def vm_delete_specs_job(job_id: str, owner_email: str) -> bool:
+    """
+    Delete a specs-only temp job folder after the results modal is finished.
+    Only allows deletion of specs_* jobs owned by the requesting user.
+    """
+    if not job_id or not owner_email:
+        return False
+
+    owner_email = str(owner_email).strip().lower()
+    if not job_id.startswith("specs_"):
+        return False
+
+    job_dir = BASE_JOBS_DIR / job_id
+    if not job_dir.exists() or not job_dir.is_dir():
+        return False
+
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
+    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+
+    if not job_owner or job_owner != owner_email:
+        return False
+
+    import shutil
+    try:
+        shutil.rmtree(job_dir, ignore_errors=False)
+        print(f">>> deleted specs temp job folder: {job_dir}")
+        return True
+    except Exception as e:
+        print(f">>> failed deleting specs temp job folder {job_dir}: {e}")
+        return False
+
 def _natural_key(p: Path):
     """Generate a natural sort key so 'page2' sorts before 'page10'."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
@@ -1309,7 +1696,7 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
     if not pdf_images.is_dir():
         return []
 
-    # 1) Preferred / common directories (adjust if your generator uses a specific one)
+    # 1) Preferred / common directories
     candidate_dirs = [
         pdf_images / "magenta_overlays",
         pdf_images / "magenta_overlay",
@@ -1324,7 +1711,7 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
             found.extend(list(d.glob("*.png")))
 
     # 2) Fallback: search for filenames containing "magenta" anywhere under pdf_images,
-    # but EXCLUDE review_overlays (those are your per-panel items)
+    # but EXCLUDE review_overlays 
     if not found:
         for p in pdf_images.rglob("*.png"):
             if "review_overlays" in p.parts:
@@ -1561,12 +1948,11 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
 
 @anvil.server.callable
 def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
-    """
-    List jobs owned by this user (disk-backed).
-    Includes job_name + submitted_at if present in job_note.
-    """
+    print(f">>> vm_list_jobs called | owner_id={owner_id!r} | NODE_ID={NODE_ID}")
+
     owner_id = str(owner_id or "").strip().lower()
     if not owner_id:
+        print(">>> vm_list_jobs: empty owner_id")
         return []
 
     def _safe_iso(dt_s):
@@ -1575,38 +1961,49 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
         return dt_s.strip()
 
     rows = []
-    for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
-        if not d.is_dir():
-            continue
+    try:
+        for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
+            if not d.is_dir():
+                continue
 
-        st = _json_read_or_none(_status_paths(d)["status"]) or {}
-        st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
-        if st_owner != owner_id:
-            continue
-        state = (st.get("state") or "unknown").lower()
-        if state == "error":
-            continue  # failed jobs never appear for anyone
+            st = _json_read_or_none(_status_paths(d)["status"]) or {}
+            st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+            if st_owner != owner_id:
+                continue
 
-        meta = _parse_job_note(st.get("job_note") or "")
-        job_name = (meta.get("job_name") or "").strip() or d.name
-        submitted_at_utc = (meta.get("submitted_at_utc") or "").strip()
+            state = (st.get("state") or "unknown").lower()
 
-        rows.append({
-            "job_id": d.name,
-            "job_name": job_name,
-            "submitted_at_utc": submitted_at_utc,
-            "created_at": _safe_iso(st.get("created_at")),
-            "state": (st.get("state") or "unknown"),
-            "step": (st.get("step") or ""),
-            "progress": float(st.get("progress", 0.0) or 0.0),
-            "image_count": int(st.get("image_count", 0) or 0),
-            "cycle_time_str": (st.get("cycle_time_str") or ""),
-        })
+            # TEMP: include error jobs while debugging
+            if state == "error":
+                continue
 
-        if len(rows) >= int(limit):
-            break
+            meta = _parse_job_note(st.get("job_note") or "")
+            job_name = (meta.get("job_name") or "").strip() or d.name
+            submitted_at_utc = (meta.get("submitted_at_utc") or "").strip()
 
-    return rows
+            row = {
+                "job_id": d.name,
+                "job_name": job_name,
+                "submitted_at_utc": submitted_at_utc,
+                "created_at": _safe_iso(st.get("created_at")),
+                "state": (st.get("state") or "unknown"),
+                "step": (st.get("step") or ""),
+                "progress": float(st.get("progress", 0.0) or 0.0),
+                "image_count": int(st.get("image_count", 0) or 0),
+                "cycle_time_str": (st.get("cycle_time_str") or ""),
+            }
+            rows.append(row)
+
+            if len(rows) >= int(limit):
+                break
+
+        print(f">>> vm_list_jobs returning {len(rows)} rows for {owner_id!r}")
+        return rows
+
+    except Exception as e:
+        print(f">>> vm_list_jobs ERROR: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        raise
 
 @anvil.server.callable
 def vm_cancel_job(job_id: str, owner_id: str) -> bool:
@@ -1631,6 +2028,6 @@ def vm_cancel_job(job_id: str, owner_id: str) -> bool:
     return True
 
 # ---------- MAIN ----------
-if __name__ == "__main__":
+if not _IS_WORKER_SUBPROCESS:
     print(">>> Uplink ready; waiting for calls")
     anvil.server.wait_forever()

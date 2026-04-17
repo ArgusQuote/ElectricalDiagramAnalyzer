@@ -9,17 +9,18 @@ alwaysApply: false
 
 ```
 ElectricalDiagramAnalyzer/
-├── AnvilUplinkCode/           # Anvil Uplink server (main entry point)
+├── AnvilUplinkCode/           # Anvil Uplink server (main entry point) + alternate implementations + dated backups
 ├── PageFilter/                # PDF page filtering (keep electrical pages)
 ├── VisualDetectionToolLibrary/# Heuristic panel/table detection
 ├── MLTableDetection/          # ML-based table detection and page classification
 ├── OcrLibrary/                # OCR pipeline (analyzer, header parser, table parser)
 ├── AnchoringClasses/          # Header/footer anchor detection
-├── RulesEngine/               # Part number selection rules
+├── RulesEngine/               # Part number selection rules (engine versions)
 ├── PartNumberSelector/        # Equipment part number lookup tables
-├── DevEnv/                    # Development and testing scripts
-├── Backups/                   # Anvil app exports and server backups
-├── MISC/                      # Utilities, configs, requirements
+├── WorkerSetup/               # Thread-pool caps and runtime determinism for workers
+├── DevEnv/                    # Development and testing scripts (SourcePdf/ is gitignored)
+├── Backups/                   # Anvil UI form exports (extensionless) + server backups (.py)
+├── MISC/                      # OcrRules, breaker_labels_config, requirements.txt
 └── .cursor/                   # Cursor rules and skills
     ├── rules/
     │   ├── domain/            # Technology-specific rules
@@ -27,6 +28,10 @@ ElectricalDiagramAnalyzer/
     │   └── project/docs/      # Project documentation rules
     └── skills/                # Agent skills
 ```
+
+Notes:
+- `.vscode/` (launch.json) is gitignored and not tracked in the repo.
+- `SourcePdf/` under DevEnv is gitignored (test PDFs stored locally only).
 
 ## Key Files
 
@@ -45,22 +50,29 @@ ElectricalDiagramAnalyzer/
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
 | `OcrLibrary/PanelHeaderParserV9.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
 | `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
-| `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
-| `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
-| `RulesEngine/RulesEngine4.py` | Rules engine -- `process_job()` selects part numbers from component dicts |
-| `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
+| `OcrLibrary/ocr_timeout.py` | Shared OCR timeout -- `readtext_with_timeout()` wraps EasyOCR calls in daemon threads with wall-clock timeout |
 | `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
-| `OcrLibrary/breaker_labels_config.jsonc` | Breaker label configuration |
+| `OcrLibrary/breaker_labels_config.jsonc` | Breaker label config -- trip/poles/circuit/footer labels, row rules, scoring, fallbacks |
+| `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images (`HeaderResult` dataclass) |
+| `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor, column separators, CKT/CCT mapping (`FooterResult` dataclass) |
+| `RulesEngine/RulesEngine4.py` | Rules engine -- `DefaultResolver`, `BaseEngine`, `PanelboardEngine`, `DisconnectEngine`, `TransformerEngine`; `process_job()` entry point |
+| `PartNumberSelector/PartNumberBuilder.py` | Part number builders: `mccb`, `nqPanelboard`, `nfPanelboard`, `iLinePanelboard`, `loadcenter`, `breakerSelector`, `blanks`, `eFrameBreaker`, `Disconnect`, `transformer`, `externalSpd` |
+| `MISC/OcrRules.py` | `PANEL_PARSE_LEXICON` -- header/table column aliases, regex patterns, normalization hints |
+| `MISC/breaker_labels_config.jsonc` | Older copy of breaker label config (also present in OcrLibrary/) |
 | `MISC/requirements.txt` | Main project Python dependencies |
+| `WorkerSetup/worker_init.py` | Thread-pool env vars (`OMP_NUM_THREADS`, etc.) and runtime determinism (`torch`/`cv2` thread caps, cuDNN flags) |
+| `DevEnv/capacity_test.py` | Concurrent multi-PDF stress test with configurable concurrency levels |
+| `DevEnv/DevTestEnv.py` | End-to-end single-PDF pipeline test |
 | `.gitignore` | Ignores venvs, PDFs, images, annotation data |
 
 ## Module Boundaries
 
 ### AnvilUplinkCode
 - **Path**: `AnvilUplinkCode/`
-- **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
+- **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, multi-slot persistent worker pool (4 workers), watchdog, queue timeout, worker recycling
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
+- **Dependencies**: WorkerSetup, PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
+- **Also contains**: Alternate implementations (`uplink_server_persistent_worker.py`, `uplink_server_ondemonad_worker.py`), dated backups (`*_bkup.py`, `*bkup.py`)
 
 ### PageFilter
 - **Path**: `PageFilter/`
@@ -87,37 +99,61 @@ ElectricalDiagramAnalyzer/
 - **Path**: `VisualDetectionToolLibrary/`
 - **Purpose**: Detects and crops panel regions from PDF page bitmaps using heuristics
 - **Entry point**: `PanelSearchToolV25.PanelBoardSearch` class, `.readPdf()` method
-- **Dependencies**: pypdfium2, OpenCV, NumPy
+- **Dependencies**: pypdfium2, pikepdf, OpenCV, NumPy, PIL
+- **Also contains**: Older versions (V23, V24), `BreakerTableAnalyzer7.py` (legacy)
 
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
-- **Purpose**: Three-stage OCR pipeline for breaker table extraction
+- **Purpose**: Three-stage OCR pipeline for breaker table extraction plus shared timeout utility
 - **Entry point**: `BreakerTableParserAPIv9.BreakerTablePipeline` class, `.run()` method
-- **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
+- **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc, breaker_labels_config.jsonc
+- **Also contains**: Shared `ocr_timeout.py`, older versions (APIv8, Parser9, Analyzer10, HeaderParserV8, BreakerTableParserAPI, BreakerTableParserALTModuleized)
 
 ### AnchoringClasses
 - **Path**: `AnchoringClasses/`
 - **Purpose**: Detects header and footer anchor positions for layout analysis
 - **Entry point**: `BreakerHeaderFinder` and `BreakerFooterFinder` classes
-- **Dependencies**: EasyOCR reader (passed in), OpenCV, NumPy
+- **Dependencies**: EasyOCR reader (passed in), OpenCV, NumPy, `OcrLibrary.ocr_timeout` (for header finder)
 
 ### RulesEngine
 - **Path**: `RulesEngine/`
-- **Purpose**: Maps OCR-extracted component attributes to equipment part numbers
+- **Purpose**: Maps OCR-extracted component attributes to equipment part numbers via engine classes
 - **Entry point**: `RulesEngine4.process_job(payload)` function
+- **Key classes**: `DefaultResolver`, `BaseEngine`, `PanelboardEngine`, `DisconnectEngine`, `TransformerEngine`
 - **Dependencies**: PartNumberSelector
+- **Also contains**: Older versions (RulesEngine2.py, RulesEngine3.py), `__init__.py`
 
 ### PartNumberSelector
 - **Path**: `PartNumberSelector/`
 - **Purpose**: Part number lookup tables and selection logic for electrical equipment
-- **Entry point**: `PartNumberBuilder` module (exports: mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer, loadcenter)
+- **Entry point**: `PartNumberBuilder` module
+- **Exports**: `mccb`, `nqPanelboard`, `nfPanelboard`, `iLinePanelboard`, `loadcenter`, `breakerSelector`, `blanks`, `eFrameBreaker`, `Disconnect`, `transformer`, `externalSpd`
 - **Dependencies**: None (pure logic)
+
+### WorkerSetup
+- **Path**: `WorkerSetup/`
+- **Purpose**: Centralised thread-pool capping and runtime determinism for any process that runs EasyOCR/PyTorch inference
+- **Entry point**: `from WorkerSetup import cap_thread_pools, set_runtime_determinism`
+- **Dependencies**: None (stdlib `os`; optional `cv2`, `torch`)
+- **Also contains**: `__init__.py` (re-exports `cap_thread_pools`, `set_runtime_determinism`)
+
+### MISC
+- **Path**: `MISC/`
+- **Purpose**: Shared config, dependencies, and lexicon rules
+- **Contents**: `requirements.txt`, `OcrRules.py` (PANEL_PARSE_LEXICON), `breaker_labels_config.jsonc`
+
+### DevEnv
+- **Path**: `DevEnv/`
+- **Purpose**: Development scripts for testing individual pipeline stages and batch runs
+- **Contents**: `capacity_test.py`, `DevTestEnv.py`, `PageFilterDevEnv.py`, `DevEnvPanelSearchToolBatch.py`, `DevEnvPanaelSearchToolSimple.py`, `DevEnvBreakerTableAnalyzerV12andHigher.py`, `DevEnvBreaktableAnalyzer2.py`, `DevEnvFindHeader7.py`, `DevTestBreakerTableAnalyzer.py`
+- **Note**: `SourcePdf/` (test PDFs) is gitignored and not committed
 
 ## Conventions
 
 - **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is the current active version. Lower versions are kept for comparison in DevEnv scripts.
 - **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
-- **Backups**: `Backups/` contains Anvil form exports and server snapshots. Not part of the runtime.
+- **Backups**: `Backups/` contains Anvil UI form exports (extensionless files like `Login`, `Output`, `Upload`) and dated server backup `.py` files. Not part of the runtime.
+- **Alternate implementations**: `AnvilUplinkCode/` contains `uplink_server_persistent_worker.py` and `uplink_server_ondemonad_worker.py` alongside the active `uplink_server.py`. These are alternate/experimental implementations, not imported by the active server.
 - **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.
 - **New pipeline module**: Create a new directory at the repo root with a versioned Python file (e.g., `NewModule/NewModuleV1.py`).
 - **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in `RulesEngine4.py`.
