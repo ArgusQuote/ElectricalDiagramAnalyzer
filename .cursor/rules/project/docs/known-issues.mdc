@@ -5,182 +5,33 @@ alwaysApply: true
 
 # Known Issues
 
+The file `KNOWN_ISSUES.md` at the project root tracks known bugs, limitations, and
+deferred work items.
+
 ## How to Use
 
-- **Before working on a component**: Check this file for known problems
+- **Before working on a component**: Check `KNOWN_ISSUES.md` for known problems
   that may affect your work or that your work could address.
 - **When discovering a new issue**: Add an entry with status, date, component,
   problem description, and any known root cause or workaround.
 - **When resolving an issue**: Update the status to "Resolved" with the date and
   a brief note on the fix, but keep the entry for historical context.
-- **Never place agent-oriented documentation files in the repo root** -- keep
-  them inside `.cursor/`.
 
-## Open
+## Current Open Issues
 
-### Persistent worker long-running degradation risks (partially mitigated)
+- **ML Table Detection underperforms heuristic** -- `MLTableDetection/TableDetectorML.py`
+  exists and has been trained through four iterations (v2, v4, v5, v5b). The best model
+  (v4) achieves mAP@0.5 of 0.66 on `generic3.pdf` but still trails the heuristic
+  `PanelSearchToolV25` which finds all 6 panels. Adding negative examples (v5, v5b)
+  caused regressions. v4 remains the best Table Transformer model. The training skill
+  recommends escalating to RF-DETR (Apache 2.0) if further improvement is needed.
 
-- **Status:** Open (partially mitigated)
-- **Date:** 2026-03-20
-- **Component:** `AnvilUplinkCode/uplink_server.py`, `OcrLibrary/BreakerTableParser10.py`,
-  `OcrLibrary/BreakerTableParserAPIv9.py`
-- **Problem:** The persistent worker subprocesses load the GPU EasyOCR reader once and
-  reuse the same `BreakerTablePipeline`, `BreakerTableAnalyzer`, and
-  `PanelHeaderParser` instances across all jobs within a recycling window. While OCR
-  inference accuracy does not drift (model weights are frozen, forward passes are
-  stateless), several resource-level degradation risks accumulate over time.
-- **Mitigations already implemented:**
-  - `gc.collect()` runs after every job (line ~1000 in `_persistent_worker_main`)
-  - `torch.cuda.empty_cache()` runs after every job (line ~1001-1003)
-  - Worker recycling after `WORKER_RECYCLE_AFTER_JOBS` (default 25) jobs -- worker
-    exits cleanly and `_ensure_worker_alive()` respawns, reclaiming all leaked
-    threads, RSS, and fragmented GPU memory
-- **Remaining risks within a recycling window (25 jobs):**
-- **Risk 1 — Leaked daemon threads from OCR timeout:**
-  `ocr_timeout.py` wraps every `readtext()` call in a daemon thread with a
-  30-second timeout. When a timeout fires, the function returns `[]` but the daemon
-  thread keeps running — stuck in EasyOCR's C/CUDA code, unreachable from Python.
-  Each leaked thread holds a reference to the `reader` object, the `image` numpy
-  array, active GPU memory for the in-flight forward pass, and an OS thread (~8 MB
-  stack). Accumulated leaked threads are reclaimed on worker recycle.
-- **Risk 2 — GPU memory fragmentation between cache flushes:**
-  `torch.cuda.empty_cache()` runs after each job, but within a single job's
-  processing of multiple panel crops with varying image sizes, fragmentation can
-  still occur. The per-job flush mitigates cross-job accumulation.
-- **Risk 3 — Process RSS growth within recycling window:**
-  Python's `pymalloc` allocator does not return freed memory to the OS. Each job
-  processes large images (1400 DPI bitmaps can be 50-100+ MB as numpy arrays) through
-  multiple pipeline stages. The process RSS ratchets upward within the 25-job window
-  before recycling reclaims it.
-- **Risk 4 — Stale instance state on mid-run exceptions:**
-  `PanelHeaderParser._last_full_W` and `._last_band_top` are set during
-  `parse_panel()` and read back by internal methods via `getattr()`. If an exception
-  interrupts a run partway through, these hold values from a previous image, which
-  could affect header band geometry scoring on the next image. Similarly,
-  `BreakerHeaderFinder.last_ocr_error`, `.debug_dir`, and `.debug_stem` carry over
-  if the analyzer skips resetting them on an error path.
-- **Further mitigation options:**
-  (a) Track leaked timeout threads and log warnings when the count grows.
-  (b) Clear stale instance state explicitly at the start of each pipeline stage
-  or reset the pipeline object between jobs.
-  (c) Lower `WORKER_RECYCLE_AFTER_JOBS` if degradation is observed before 25 jobs.
+- **ML Page Classifier created** -- `PageFilter/PageClassifierML.py` provides a
+  MobileNetV2 binary classifier for page-level "has panel / no panel" decisions.
+  Trained on 35 images (28 pos, 7 neg), achieves 100% val accuracy. Designed as
+  a faster drop-in replacement for PageFilterV4 (~250 ms/page vs ~1-3s). Not yet
+  integrated into `uplink_server.py` (still imports `PageFilterV3`).
 
-### BreakerFooterFinder OCR has no wall-clock timeout
-
-- **Status:** Open
-- **Date:** 2026-03-20
-- **Component:** `AnchoringClasses/BreakerFooterFinder.py`
-- **Problem:** `BreakerFooterFinder._safe_footer_readtext()` wraps
-  `self.reader.readtext()` with an `fcntl`-based inter-process file lock
-  to serialize footer OCR across workers, but does not apply a wall-clock
-  timeout. If the EasyOCR reader deadlocks at the C/CUDA level during a
-  footer OCR call, the worker will hang until the watchdog timeout fires
-  (default 10 minutes). This is inconsistent with the other OCR call sites
-  (`BreakerHeaderFinder`, `PanelHeaderParserV9`, `BreakerTableParser10`)
-  which all use `readtext_with_timeout()` from `OcrLibrary/ocr_timeout.py`.
-- **Impact:** Low probability but high impact -- a footer OCR hang wastes
-  up to 10 minutes of a worker slot before the watchdog kills and respawns it.
-- **Workaround:** The watchdog timeout catches this eventually, and worker
-  recycling limits long-term effects.
-- **Fix:** Wrap the `readtext()` call in `_safe_footer_readtext()` with
-  `readtext_with_timeout()` from `OcrLibrary/ocr_timeout.py`, maintaining
-  the existing `fcntl` lock for serialization.
-
-### `worker_init.py` lacks a guard on `torch.set_num_interop_threads`
-
-- **Status:** Open
-- **Date:** 2026-03-20
-- **Component:** `WorkerSetup/worker_init.py`
-- **Problem:** `set_runtime_determinism()` in `worker_init.py` calls
-  `torch.set_num_interop_threads(1)` without any guard. PyTorch only allows
-  this call once per process -- a second call raises `RuntimeError`. The
-  current `uplink_server.py` avoids the issue by not calling
-  `_set_runtime_determinism()` inside `_persistent_worker_main` (relying on
-  the module-level call inherited via the `spawn` context). However, if any
-  future code path calls `set_runtime_determinism()` twice in the same
-  process, the worker will crash.
-- **Impact:** Latent fragility -- no current crash, but easy to regress.
-- **Fix:** Add a try/except `RuntimeError` around `torch.set_num_interop_threads(1)`
-  in `worker_init.py`, or use a module-level flag to skip the call if it has
-  already been made.
-
-### ML Table Detection not yet implemented
-
-- **Status:** Open
-- **Date:** 2025-03-01
-- **Component:** `MLTableDetection/`, `TableDetectorML.py`
-- **Problem:** The ML-based panel detection directory and module do not exist
-  in the repo. ML-based panel detection is a planned future feature. The
-  `.cursor/skills/training-panel-detector/` skill contains guidance for building
-  it. Currently only heuristic detection via `PanelSearchToolV25` is available.
-
-## Resolved
-
-### Persistent worker subprocess crashes on startup — double `set_num_interop_threads`
-
-- **Status:** Resolved
-- **Date:** 2026-03-20
-- **Resolved:** 2026-03-20
-- **Component:** `AnvilUplinkCode/uplink_server.py`, `WorkerSetup/worker_init.py`
-- **Symptom:** The `anvil-uplink.service` starts but the persistent worker subprocess
-  crashes immediately. The main process hangs at `_spawn_persistent_worker()` waiting
-  for a "ready" signal that never arrives, then hits the 120s `_WORKER_READY_TIMEOUT`.
-  No jobs can be processed.
-- **Root cause:** With `multiprocessing.get_context("spawn")`, the subprocess re-imports
-  `uplink_server.py` from scratch. Module-level code called `_set_runtime_determinism()`
-  → `set_runtime_determinism()` → `torch.set_num_interop_threads(1)`. Then
-  `_persistent_worker_main()` called `_set_runtime_determinism()` again, triggering a
-  second `torch.set_num_interop_threads(1)` in the same process. PyTorch only allows
-  this call once per process.
-- **Fix:** Removed the `_set_runtime_determinism()` call from `_persistent_worker_main()`.
-  The worker docstring now explicitly notes that the module-level call (which runs
-  when the `spawn` context re-imports the module) is sufficient, and calling it again
-  would raise `RuntimeError`. The underlying `worker_init.py` still lacks a guard
-  (see open issue above), but the immediate crash is resolved.
-
-### Same PDF hangs on second consecutive job — reused EasyOCR reader + unprotected `readtext()`
-
-- **Status:** Resolved
-- **Date:** 2026-03-20
-- **Resolved:** 2026-03-20
-- **Component:** `AnchoringClasses/BreakerHeaderFinder.py`,
-  `OcrLibrary/PanelHeaderParserV9.py`, `OcrLibrary/ocr_timeout.py`
-- **Symptom:** Two jobs submitted with the identical PDF. Job 1 completes
-  successfully. Job 2 hangs until the 10-minute watchdog kills the worker.
-  The user sees "This job took over 10 minutes to process."
-- **Root cause:** `BreakerHeaderFinder._run_ocr()` and
-  `PanelHeaderParserV9.parse_panel()` called `self.reader.readtext()` directly
-  with no timeout. When the reused EasyOCR reader's internal CUDA/PyTorch
-  state degraded between jobs, one of these calls deadlocked at the C/CUDA
-  level with no way to break free. `BreakerTableParser10` already wrapped its
-  OCR calls in a 30-second daemon-thread timeout, but the header stages were
-  unprotected.
-- **Fix:** Extracted `readtext_with_timeout()` into a shared module
-  (`OcrLibrary/ocr_timeout.py`) and wrapped all three unprotected
-  `readtext()` calls in `BreakerHeaderFinder` (1 call) and
-  `PanelHeaderParserV9` (2 calls). `BreakerTableParser10` now imports from
-  the same shared module. On timeout, each call returns `[]` and the pipeline
-  continues with partial header data instead of blocking indefinitely.
-  Verified with two consecutive jobs of the same PDF — both completed
-  successfully.
-
-### derekfirst.pdf hangs under multiprocessing concurrency
-
-- **Status:** Resolved
-- **Date:** 2025-03-19
-- **Resolved:** 2026-03-19
-- **Component:** `OcrLibrary/BreakerTableParser10.py` — EasyOCR `readtext()` via `_readtext_with_timeout()`
-- **Symptom:** `derekfirst.pdf` completes successfully as a single job (~103s, 6 crops,
-  103 breakers). However, when run under `multiprocessing` concurrency >= 2
-  (as in `DevEnv/capacity_test.py`), the pipeline hangs indefinitely.
-- **Root cause:** EasyOCR / PyTorch spawned full OpenMP / MKL / OpenBLAS thread
-  pools in every worker process. With concurrency >= 2, the competing thread
-  pools deadlocked at the C/OpenMP level. The `_readtext_with_timeout()` daemon
-  thread could not interrupt C-level hangs.
-- **Fix:** Extracted thread-pool caps and runtime determinism into a shared
-  `WorkerSetup/worker_init.py` module (`cap_thread_pools()` sets
-  `OMP_NUM_THREADS=1` etc.; `set_runtime_determinism()` sets
-  `torch.set_num_threads(1)`, `cv2.setNumThreads(1)`, cuDNN determinism).
-  `capacity_test.py` now calls `cap_thread_pools()` before heavy imports and
-  `set_runtime_determinism()` at the start of each worker.
-  `uplink_server.py` delegates to the same shared module.
+- **uplink_server.py imports PageFilterV3** -- The latest heuristic is V4, and
+  the ML classifier is available, but `uplink_server.py` still imports
+  `PageFilter.PageFilterV3`. See `KNOWN_ISSUES.md` for details.

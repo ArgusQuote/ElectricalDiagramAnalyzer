@@ -19,7 +19,6 @@ Project-specific rules and living documentation:
 - **project/docs/architecture.mdc** -- System architecture and pipeline flows
 - **project/docs/data-structures.mdc** -- Data models, DTOs, and schema conventions
 - **project/docs/file-locations.mdc** -- Source code map and module boundaries
-- **project/docs/known-issues.mdc** -- Known bugs, limitations, and deferred work (always applied)
 
 Consult the appropriate docs/ rule when you need context about how this project works.
 
