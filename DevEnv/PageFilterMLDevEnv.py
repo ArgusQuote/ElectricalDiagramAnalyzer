@@ -38,10 +38,10 @@ if project_root not in sys.path:
 from PageFilter.PageFilterV4 import PageFilter
 
 # ---------- DEFAULTS ----------
-DEFAULT_PDF = Path("~/Documents/new panels/derekfirst.pdf").expanduser()
+DEFAULT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/derekfirst.pdf").expanduser()
 DEFAULT_OUT_DIR = Path("~/Documents/Diagrams/PdfOutput_ML").expanduser()
 DEFAULT_MODEL = Path(
-    "~/Documents/TableAnnotations/models_classifier/best/model.pt"
+    "~/Classifier_Model/model.pt"
 ).expanduser()
 
 
