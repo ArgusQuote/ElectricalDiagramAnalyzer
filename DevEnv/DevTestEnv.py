@@ -17,10 +17,10 @@ if project_root not in sys.path:
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv10 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/derekfirst.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/I.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -96,10 +96,17 @@ def build_component_summary(img_path: str, result: dict, unnamed_counts: dict[st
 
     attrs = normalize_header_attrs((hdr_res.get("attrs") or {}))
 
+    panel_note = str(hdr_res.get("panelNote") or "").strip()
+    special_header_type = hdr_res.get("specialHeaderType")
+    panel_status = str((result.get("panelStatus") or "")).strip()
+
     return {
         "type": "panelboard",
         "name": final_name,
         "source": str(img_path),
+        "panelStatus": panel_status,
+        "panelNote": panel_note,
+        "specialHeaderType": ensure_json_safe(special_header_type) if isinstance(special_header_type, dict) else None,
         "attrs": attrs,
     }
 
@@ -152,8 +159,15 @@ def build_rules_result_from_components(components: list[dict]) -> dict:
             missing.append("spaces")
 
         if missing:
+            panel_note = str(component.get("panelNote") or "").strip()
+
+            if panel_note:
+                skipped_msg = panel_note
+            else:
+                skipped_msg = f"Missing required attributes: {', '.join(missing)}"
+
             rules_result[name] = {
-                "Skipped": f"Missing required attributes: {', '.join(missing)}"
+                "Skipped": skipped_msg
             }
         else:
             rules_result[name] = {
@@ -253,6 +267,9 @@ def main():
         print("\n=== HEADER PARSER ===")
         print("name    :", hdr_res.get("name"))
         print("attrs   :", hdr_res.get("attrs"))
+        print("panelNote :", hdr_res.get("panelNote"))
+        print("specialHeaderType :", hdr_res.get("specialHeaderType"))
+        print("panelStatus :", result.get("panelStatus"))
         hdr_breakers = ((hdr_res.get("attrs") or {}).get("detected_breakers") or [])
 
         print("\n=== TABLE PARSER (summary) ===")

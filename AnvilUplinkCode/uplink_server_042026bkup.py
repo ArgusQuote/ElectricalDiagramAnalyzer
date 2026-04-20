@@ -90,8 +90,8 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine5 as RE2  # must expose process_job(payload)
+from OcrLibrary.BreakerTableParserAPIv10 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
@@ -683,9 +683,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     stages = (result_dict or {}).get("results") or {}
     hdr    = stages.get("header")  or {}
     prs    = stages.get("parser")  or {}
-    panel_status = str((result_dict or {}).get("panelStatus") or "").strip()
-    panel_note = str(hdr.get("panelNote") or "").strip()
-    special_header_type = hdr.get("specialHeaderType") if isinstance(hdr.get("specialHeaderType"), dict) else None
 
     # Header fields
     name   = hdr.get("name") or ""
@@ -747,9 +744,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
         "type": "panelboard",
         "name": name,
         "source": src_img,
-        "panelStatus": panel_status,
-        "panelNote": panel_note,
-        "specialHeaderType": special_header_type,
         "attrs": {
             "amperage": amperage,
             "spaces": spaces,
