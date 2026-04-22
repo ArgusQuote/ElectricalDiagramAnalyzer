@@ -107,6 +107,15 @@ The driver supports CUDA 12.8, but PyTorch was compiled against CUDA 12.1. This 
 | PyYAML | 6.0.2 | YAML parsing |
 | openpyxl | 3.1.5 | Excel file I/O |
 
+## System-Level Tools
+
+| Tool | Path | Version | Purpose |
+|---|---|---|---|
+| Ghostscript (`gs`) | `/usr/bin/gs` | 9.55.0 | PDF rescaling to US Letter in `PageClassifierML._gs_fit_to_letter()` |
+| pdftoppm | `/usr/bin/pdftoppm` | 22.02.0 | PDF-to-image rendering (Poppler utils, used by `pdf2image`) |
+
+**Not installed**: Tesseract, ImageMagick (not needed -- OCR uses EasyOCR, image processing uses OpenCV/Pillow)
+
 ## GPU Memory Budget
 
 At idle (server running, EasyOCR models loaded), the Python process uses ~10.9 GiB of the 24.6 GiB VRAM. This leaves ~13.7 GiB available for inference workloads during job processing.
@@ -121,4 +130,4 @@ At idle (server running, EasyOCR models loaded), the Python process uses ~10.9 G
 
 ## Last Verified
 
-2026-03-18 (automated profile from `nvidia-smi`, `pip list`, `lscpu`, `/proc/meminfo`)
+2026-04-18 (updated system-level tools section; original profile from `nvidia-smi`, `pip list`, `lscpu`, `/proc/meminfo`)
