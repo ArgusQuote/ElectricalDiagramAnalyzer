@@ -52,7 +52,6 @@ class BreakerFooterFinder:
 
     # search largest size first
     PANEL_SIZE_ORDER: List[int] = [84, 72, 66, 54, 42, 30, 18]
-    MAX_CONTINUED_SECTION_CKT = 168
 
     # flat set of all token values we care about
     FOOTER_TOKEN_VALUES = set().union(*PANEL_FOOTER_MAP.values())
@@ -78,128 +77,6 @@ class BreakerFooterFinder:
         # processes from crashing under load.
         self.ocr_lock_path = "/tmp/argus_footer_ocr.lock"
         self.ocr_lock_timeout_sec = 180
-
-    def _round_up_to_standard_panel_size(self, raw_size: int) -> Optional[int]:
-        """
-        Round a raw circuit count up to the next supported standard panel size.
-        Examples:
-          24 -> 30
-          60 -> 66
-          84 -> 84
-        """
-        if raw_size is None or raw_size <= 0:
-            return None
-
-        for size in sorted(self.PANEL_SIZE_ORDER):
-            if raw_size <= size:
-                return size
-
-        return None
-
-    def _infer_continued_section_start(
-        self,
-        all_numeric_candidates: List[Dict],
-        page_height: int,
-    ) -> Optional[int]:
-        """
-        Use only the first few numeric hits directly under the top of the analyzed
-        crop to decide whether this is a continued section.
-
-        Logic:
-          - If we see at least 2 low-start values (<= 31), treat as normal mode.
-          - Otherwise, if the first few visible values are high, use the smallest
-            of those first visible high values as the continued-section start.
-
-        This intentionally uses only the first few numbers under the top line,
-        not numbers farther down the crop.
-        """
-        if not all_numeric_candidates:
-            return None
-
-        # Only inspect the very top portion of the analyzed body
-        top_cutoff = page_height * 0.30
-        top_candidates = [
-            c for c in all_numeric_candidates
-            if c["y_page"] <= top_cutoff
-        ]
-
-        if not top_candidates:
-            top_candidates = sorted(
-                all_numeric_candidates,
-                key=lambda c: (c["y_page"], c["x_page"], -c["conf"])
-            )[:16]
-
-        if not top_candidates:
-            return None
-
-        # Reading order from the top of the crop
-        top_candidates = sorted(
-            top_candidates,
-            key=lambda c: (c["y_page"], c["x_page"], -c["conf"])
-        )
-
-        # Keep the first few UNIQUE values only
-        seen = set()
-        first_vals = []
-        for c in top_candidates:
-            v = int(c["val"])
-            if v not in seen:
-                seen.add(v)
-                first_vals.append(v)
-            if len(first_vals) >= 8:
-                break
-
-        if not first_vals:
-            return None
-
-        low_vals = [v for v in first_vals if v <= 31]
-        high_vals = [v for v in first_vals if v > 31]
-
-        # Normal panel: we have clear low-start evidence near the top
-        if len(low_vals) >= 2:
-            return None
-
-        # Continued section: use the first few visible high numbers near the top
-        if high_vals:
-            return min(high_vals)
-
-        return None
-
-    def _choose_continued_section_bottom_candidate(
-        self,
-        all_numeric_candidates: List[Dict],
-        start_num: int,
-        page_height: int,
-    ) -> Optional[Dict]:
-        """
-        For continued sections, choose the real bottom anchor candidate using the
-        lower part of the analyzed crop.
-
-        We want the largest plausible number near the bottom, since that should
-        be the footer number for the continued section.
-        """
-        if not all_numeric_candidates or start_num is None:
-            return None
-
-        bottom_cutoff = page_height * 0.55
-        bottom_candidates = [
-            c for c in all_numeric_candidates
-            if c["y_page"] >= bottom_cutoff and c["val"] >= start_num
-        ]
-
-        if not bottom_candidates:
-            bottom_candidates = [
-                c for c in all_numeric_candidates
-                if c["val"] >= start_num
-            ]
-
-        if not bottom_candidates:
-            return None
-
-        return max(
-            bottom_candidates,
-            key=lambda c: (c["val"], c["y_page"], c["conf"])
-        )
 
     def _ensure_debug_dir(self, analyzer_result: Dict) -> str:
         """
@@ -1339,8 +1216,7 @@ class BreakerFooterFinder:
 
         # --- 5b) For each CKT/CCT column, crop body (header_bottom_y -> page bottom),
         #          up-res, trim top/bottom 10%, OCR everything, and save ONLY an overlay.
-        footer_token_candidates: List[Dict] = []
-        all_numeric_candidates: List[Dict] = []
+        footer_token_candidates: List[Dict] = [] 
         if cct_cols:
             y_body_start = int(header_bottom_y)
             # clamp start in range
@@ -1383,19 +1259,18 @@ class BreakerFooterFinder:
                     interpolation=cv2.INTER_CUBIC,
                 )
 
-                # --- keep the top exactly at header_bottom_y; only trim the bottom ---
+                # --- trim top and bottom 10% of the upresed crop ---
                 H_body_up, W_body_up = col_body_up.shape[:2]
-                bottom_trim = int(0.10 * H_body_up)
-
-                y_top = 0
-                y_bot = max(y_top + 1, H_body_up - bottom_trim)
+                trim = int(0.10 * H_body_up)
+                y_top = max(0, trim)
+                y_bot = max(y_top + 1, H_body_up - trim)
 
                 col_body_mid = col_body_up[y_top:y_bot, :]
                 if col_body_mid.size == 0:
                     if self.debug:
                         print(
                             f"[BreakerFooterFinder] Trimmed CKT body crop empty for col {idx}: "
-                            f"H_body_up={H_body_up}, bottom_trim={bottom_trim}"
+                            f"H_body_up={H_body_up}, trim={trim}"
                         )
                     continue
 
@@ -1475,23 +1350,18 @@ class BreakerFooterFinder:
                     side = "left" if x_page_c < (W * 0.5) else "right"
 
                     for val in nums:
-                        cand = {
-                            "val": int(val),
-                            "conf": conf_f,
-                            "y_page": float(y_page_c),
-                            "x_page": float(x_page_c),
-                            "side": side,
-                            "col_idx": idx,
-                            "raw_text": str(txt),
-                        }
-
-                        # keep all plausible circuit numbers so we can detect continued sections
-                        if 1 <= val <= self.MAX_CONTINUED_SECTION_CKT:
-                            all_numeric_candidates.append(cand)
-
-                        # keep the original footer candidates EXACTLY as before for normal mode
                         if val in self.FOOTER_TOKEN_VALUES:
-                            footer_token_candidates.append(cand)
+                            footer_token_candidates.append(
+                                {
+                                    "val": int(val),
+                                    "conf": conf_f,
+                                    "y_page": float(y_page_c),
+                                    "x_page": float(x_page_c),
+                                    "side": side,
+                                    "col_idx": idx,
+                                    "raw_text": str(txt),
+                                }
+                            )
 
                 # --- Build overlay image with OCR boxes + text (with confidence) ---
                 if self.debug and col_body_mid.size > 0 and not side_overlay_written[side_for_col]:
@@ -1521,7 +1391,7 @@ class BreakerFooterFinder:
                         nums_for_overlay = [int(m.group()) for m in re.finditer(r"\d+", str(txt) or "")]
                         is_candidate = (
                             conf_f >= 0.50
-                            and any(1 <= val <= self.MAX_CONTINUED_SECTION_CKT for val in nums_for_overlay)
+                            and any(val in self.FOOTER_TOKEN_VALUES for val in nums_for_overlay)
                         )
 
                         color = (0, 0, 255) if is_candidate else (0, 255, 0)  # red for candidates, green otherwise
@@ -1566,14 +1436,6 @@ class BreakerFooterFinder:
         token_val: Optional[int] = None
         panel_size: Optional[int] = None
 
-        # ------------------------------------------------------------
-        # STEP 1: run the ORIGINAL normal-mode footer logic unchanged
-        # ------------------------------------------------------------
-        normal_footer_y: Optional[int] = None
-        normal_token_y: Optional[int] = None
-        normal_token_val: Optional[int] = None
-        normal_panel_size: Optional[int] = None
-
         if footer_token_candidates:
             values_present = {c["val"] for c in footer_token_candidates}
 
@@ -1590,14 +1452,15 @@ class BreakerFooterFinder:
             chosen_size: Optional[int] = None
             chosen_vals: Optional[set[int]] = None
 
-            # Require at least 2 matching values in a bucket before we trust it.
-            min_bucket_hits = 2
-
-            for size in self.PANEL_SIZE_ORDER:
-                vals_in_bucket = values_present & self.PANEL_FOOTER_MAP[size]
-                if len(vals_in_bucket) >= min_bucket_hits:
-                    chosen_size = size
-                    chosen_vals = vals_in_bucket
+            for val in sorted(values_present, reverse=True):
+                # find which panel size window this value belongs to
+                for size in self.PANEL_SIZE_ORDER:
+                    if val in self.PANEL_FOOTER_MAP[size]:
+                        chosen_size = size
+                        # record all values we saw from that window (for logging)
+                        chosen_vals = values_present & self.PANEL_FOOTER_MAP[size]
+                        break
+                if chosen_size is not None:
                     break
 
             if chosen_size is None and self.debug:
@@ -1617,125 +1480,57 @@ class BreakerFooterFinder:
                     key=lambda c: (c["y_page"], c["conf"])
                 )
 
-                normal_token_y = int(round(best["y_page"]))
-                normal_token_val = int(best["val"])
-                normal_panel_size = chosen_size
+                token_y = int(round(best["y_page"]))
+                token_val = int(best["val"])
+                panel_size = chosen_size
 
+                # try to find a strong horizontal line just below the token
                 footer_line_y = self._find_footer_line_from_anchor(
                     gray_lines,
-                    normal_token_y,
+                    token_y,
                     search_down_px=60,
                 )
 
                 if footer_line_y is not None:
-                    normal_footer_y = footer_line_y
+                    footer_y = footer_line_y
+                    dbg_marks.append((token_y, f"FOOTER_VAL={token_val}"))
+                    dbg_marks.append((footer_y, "FOOTER_LINE"))
                 else:
-                    normal_footer_y = normal_token_y
+                    # fall back: use token baseline as footer
+                    footer_y = token_y
+                    dbg_marks.append((footer_y, f"FOOTER_VAL={token_val}"))
 
                 if self.debug:
                     print(
-                        "[BreakerFooterFinder] Normal-mode footer selected: "
+                        "[BreakerFooterFinder] Selected footer token: "
                         f"panel_size={chosen_size}, "
                         f"vals_seen={sorted(chosen_vals)}, "
-                        f"val={normal_token_val}, conf={best['conf']:.2f}, "
-                        f"token_y={normal_token_y}, footer_y={normal_footer_y}, "
+                        f"val={token_val}, conf={best['conf']:.2f}, "
+                        f"token_y={token_y}, footer_y={footer_y}, "
                         f"side={best['side']}"
                     )
 
+                # 2) snap the actual footer LINE from the token downward
                 snapped_footer_y = None
                 if gray_lines is not None:
                     snapped_footer_y = self._snap_footer_line_from_token(
                         gray_lines=gray_lines,
-                        token_y=normal_token_y,
+                        token_y=token_y,
                     )
 
                 if snapped_footer_y is not None:
-                    normal_footer_y = snapped_footer_y
-
-        # default to the ORIGINAL normal result
-        footer_y = normal_footer_y
-        token_y = normal_token_y
-        token_val = normal_token_val
-        panel_size = normal_panel_size
-
-        # ------------------------------------------------------------
-        # STEP 2: continued-section override ONLY if the top clearly starts high
-        # ------------------------------------------------------------
-        continued_start_num = self._infer_continued_section_start(
-            all_numeric_candidates,
-            H,
-        )
-
-        if self.debug:
-            print(f"[BreakerFooterFinder] continued_start_num = {continued_start_num}")
-
-        if continued_start_num is not None:
-            continued_best = self._choose_continued_section_bottom_candidate(
-                all_numeric_candidates=all_numeric_candidates,
-                start_num=continued_start_num,
-                page_height=H,
-            )
-
-            if continued_best is not None:
-                continued_end_num = int(continued_best["val"])
-                raw_section_size = continued_end_num - continued_start_num + 1
-                continued_panel_size = self._round_up_to_standard_panel_size(raw_section_size)
-
-                # Require at least 2 values in the detected continued span
-                continued_vals_present = {
-                    int(c["val"])
-                    for c in all_numeric_candidates
-                    if continued_start_num <= int(c["val"]) <= continued_end_num
-                }
-                continued_support_hits = len(continued_vals_present)
-
+                    footer_y = snapped_footer_y
+                    dbg_marks.append((footer_y, "FOOTER_LINE"))
+                else:
+                    # fallback: use token baseline if no strong line found
+                    footer_y = token_y
+                    dbg_marks.append((footer_y, "FOOTER_LINE_FALLBACK"))
+            else:
                 if self.debug:
                     print(
-                        "[BreakerFooterFinder] Continued-section candidate: "
-                        f"start_num={continued_start_num}, "
-                        f"end_num={continued_end_num}, "
-                        f"raw_section_size={raw_section_size}, "
-                        f"continued_panel_size={continued_panel_size}, "
-                        f"support_hits={continued_support_hits}, "
-                        f"vals_seen={sorted(continued_vals_present)}, "
-                        f"token_y={int(round(continued_best['y_page']))}"
+                        "[BreakerFooterFinder] No consistent panel size "
+                        "found from footer token candidates."
                     )
-
-                if continued_panel_size is not None and continued_support_hits >= 2:
-                    # OVERRIDE normal mode only when we clearly detected a continued section
-                    token_y = int(round(continued_best["y_page"]))
-                    token_val = continued_end_num
-                    panel_size = continued_panel_size
-
-                    snapped_footer_y = None
-                    if gray_lines is not None:
-                        snapped_footer_y = self._snap_footer_line_from_token(
-                            gray_lines=gray_lines,
-                            token_y=token_y,
-                        )
-
-                    if snapped_footer_y is not None:
-                        footer_y = snapped_footer_y
-                    else:
-                        footer_y = token_y
-
-                    dbg_marks.append((token_y, f"CONT_START={continued_start_num}"))
-                    dbg_marks.append((token_y, f"CONT_END={continued_end_num}"))
-                    dbg_marks.append((token_y, f"CONT_SIZE={continued_panel_size}"))
-                    dbg_marks.append((footer_y, "FOOTER_LINE"))
-
-                    if self.debug:
-                        print(
-                            "[BreakerFooterFinder] Continued-section OVERRIDE selected: "
-                            f"panel_size={panel_size}, token_val={token_val}, "
-                            f"token_y={token_y}, footer_y={footer_y}"
-                        )
-
-        # final marks for normal mode if we stayed there
-        if continued_start_num is None and token_y is not None:
-            dbg_marks.append((token_y, f"FOOTER_VAL={token_val}"))
-            if footer_y is not None:
-                dbg_marks.append((footer_y, "FOOTER_LINE"))
 
         # --- 6) Debug overlay: band + verticals + CKT boxes ---
         if self.debug:

@@ -1944,6 +1944,10 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
             if not d.is_dir():
                 continue
 
+            # Hide specs jobs from My Jobs Page
+            if d.name.startswith("specs_"):
+                continue
+
             st = _json_read_or_none(_status_paths(d)["status"]) or {}
             st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
             if st_owner != owner_id:
