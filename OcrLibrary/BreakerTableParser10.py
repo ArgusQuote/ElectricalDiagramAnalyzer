@@ -1090,18 +1090,22 @@ class HeaderBandScanner:
 
         # ---------- Panel-level layout decision ----------
         combo_side_exists = False
+        separated_side_exists = False
+
         for side in ("left", "right"):
             tcol = best_trip_col[side]
             pcol = best_poles_col[side]
+
             if (
                 tcol is not None
                 and pcol is not None
-                and tcol["index"] == pcol["index"]
                 and best_trip_rank[side] > 0
                 and best_poles_rank[side] > 0
             ):
-                combo_side_exists = True
-                break
+                if tcol["index"] == pcol["index"]:
+                    combo_side_exists = True
+                else:
+                    separated_side_exists = True
 
         any_trip_hero = any(best_trip_rank[side] > 0 for side in ("left", "right"))
         any_poles_hero = any(best_poles_rank[side] > 0 for side in ("left", "right"))
@@ -1114,10 +1118,14 @@ class HeaderBandScanner:
         if self.debug and implied_combo_sides:
             print("[HeaderBandScanner] Implied combo layout on sides:", sorted(implied_combo_sides))
 
-        if combo_side_exists or implied_combo_sides:
+        if combo_side_exists and separated_side_exists:
+            layout = "unknown"
+        elif combo_side_exists:
             layout = "combined"
-        elif any_trip_hero and any_poles_hero:
+        elif separated_side_exists or (any_trip_hero and any_poles_hero):
             layout = "separated"
+        elif implied_combo_sides:
+            layout = "combined"
         else:
             layout = "unknown"
 

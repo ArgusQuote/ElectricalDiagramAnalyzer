@@ -637,6 +637,12 @@ class PanelParser:
             wrong = float(p.get("wrong", 0.0))
             conf  = float(c.get("conf", 0.0))
 
+            # Bare 50 is risky because it can be a random schedule/header number.
+            # Allow it only when strongly tied to BUS/MAIN/RATING label logic.
+            if role in ("BUS", "MAIN") and c.get("requiresStrongAmpLabel"):
+                if lbl < 0.60 and not bool(c.get("fromColonLabel")):
+                    return False
+    
             has_role_labels = bool(labels_map.get(role))
 
             LBL_MIN  = float(self._GATE["LBL_MIN"].get(role, 0.20))
@@ -1819,7 +1825,7 @@ class PanelParser:
         This avoids hardcoding every exact phrase combination.
         """
         w = str(word or "").upper().strip()
-        if not w:
+        if not w: 
             return ""
 
         # switchboard family
@@ -1912,10 +1918,15 @@ class PanelParser:
         NEGATIVE_CONTEXT_PATTERNS = [
             r"\bFED\s+FROM\b",
             r"\bFED\s+BY\b",
+            r"\bSUPPLY\s+FROM\b",
+            r"\bSUPPLY\s+BY\b",
             r"\bSUPPLIED\s+FROM\b",
             r"\bSUPPLIED\s+BY\b",
             r"\bSOURCE\b",
             r"\bCONNECTED\s+TO\b",
+            r"\bMAIN\s+TYPE\b",
+            r"\bMAINS\s+TYPE\b",
+            r"\bMAINS?\s+RATING\b",
         ]
 
         def _token_height(it: dict) -> int:
@@ -1926,6 +1937,43 @@ class PanelParser:
 
         def _line_text(ln) -> str:
             return " ".join((tok or "").strip() for (_, tok, _) in ln.get("tokens", []))
+
+        def _is_name_label_line(cand: dict) -> bool:
+            """
+            True when a joined line appears to be describing the name/title/designation
+            of the schedule/object, not general header metadata.
+
+            Examples that should count:
+            NAME: SWITCHBOARD XYZ
+            PANEL NAME: INVERTER A
+            PANEL DESIGNATION: WW-A
+            SWITCHBOARD: 14A
+            WIREWAY: WW-A
+            INVERTER: INV-1
+            """
+            text = self._normalize_special_header_text(cand.get("text", ""))
+
+            if not text:
+                return False
+
+            # Generic name/title labels
+            if re.search(r"\b(NAME|PANEL\s+NAME|PANEL\s+DESIGNATION|DESIGNATION|TITLE)\b", text):
+                return True
+
+            # Special family used as the label itself, e.g. "SWITCHBOARD: 14A"
+            # Colon is removed by normalize, so this sees "SWITCHBOARD 14A".
+            # That is fine because this function is only used after the family rule matched.
+            if re.search(r"\b(SWITCHBOARD|SWBD|WIREWAY|WWA|WWB|WWC|INVERTER|INV)\b", text):
+                # Reject known metadata/source phrases
+                if re.search(r"\b(SUPPLY\s+FROM|SUPPLIED\s+FROM|FED\s+FROM|FED\s+BY|SOURCE|MAINS?\s+TYPE|MAIN\s+TYPE|CONNECTED\s+TO)\b", text):
+                    return False
+                return True
+
+            # Lighting schedule is naturally a title phrase.
+            if re.search(r"\b(LIGHT|LIGHTING|FIXTURE)\s+SCHEDULE\b", text):
+                return True
+
+            return False
 
         def _has_negative_context(text: str, kind: str, source_type: str = "line", source_line=None, source_item=None) -> bool:
             """
@@ -2059,6 +2107,9 @@ class PanelParser:
             for rule in FAMILY_RULES:
                 for req in rule["required_any"]:
                     if req.issubset(token_set):
+                        if cand["source_type"] != "token" and not _is_name_label_line(cand):
+                            continue
+
                         if _has_negative_context(
                             original_text,
                             rule["kind"],
@@ -2801,7 +2852,7 @@ class PanelParser:
                     n = int(m_main_map.group(1))
 
                 if n is not None:
-                    lo = 30 if (main_ctxt or m_main_map) else 60
+                    lo = 30 if (main_ctxt or m_main_map) else 50
                     if lo <= n <= 4000:
                         cand = {
                             "x1": x1, "y1": y1, "x2": x2, "y2": y2,
@@ -2817,7 +2868,8 @@ class PanelParser:
 
             elif m_bare_num:
                 n = int(m_bare_num.group(1))
-                if 60 <= n <= 1200:
+
+                if 50 <= n <= 1200:
                     cand = {
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                         "xc": xc, "yc": yc,
@@ -2826,6 +2878,7 @@ class PanelParser:
                         "shape": 0.68,
                         "ctx": 0.04,
                         "has_unit": False,
+                        "requiresStrongAmpLabel": bool(n == 50),
                     }
 
             if cand is not None:
