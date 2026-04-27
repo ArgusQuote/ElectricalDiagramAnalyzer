@@ -1844,6 +1844,10 @@ class PanelParser:
         if w in {"SCHEDULE", "SCHEDULES"}:
             return "SCHEDULE"
 
+        # conduit family
+        if w in {"CONDUIT", "CONDUITS"}:
+            return "CONDUIT"
+
         # wireway family
         if w in {"WIREWAY", "WIREWAYS", "WWA", "WWB", "WWC"}:
             return "WIREWAY"
@@ -1896,6 +1900,13 @@ class PanelParser:
                 "required_any": [
                     {"LIGHT", "SCHEDULE"},
                     {"LIGHT", "FIXTURE", "SCHEDULE"},
+                ],
+            },
+            {
+                "kind": "conduit_schedule",
+                "note": "Conduit schedule detected",
+                "required_any": [
+                    {"CONDUIT", "SCHEDULE"},
                 ],
             },
             {
@@ -1969,8 +1980,8 @@ class PanelParser:
                     return False
                 return True
 
-            # Lighting schedule is naturally a title phrase.
-            if re.search(r"\b(LIGHT|LIGHTING|FIXTURE)\s+SCHEDULE\b", text):
+            # Lighting/conduit schedules are naturally title phrases.
+            if re.search(r"\b(LIGHT|LIGHTING|FIXTURE|CONDUIT)\s+SCHEDULE\b", text):
                 return True
 
             return False

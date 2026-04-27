@@ -616,6 +616,10 @@ class HeaderBandScanner:
                     if w_letters.startswith("AMP"):
                         return True
                     
+                if t_letters in ("OCP", "OCPD", "OCPI", "IOCP"):
+                    if w_letters.startswith("OCP"):
+                        return True
+                    
                 if len(t_norm) <= 4:
                     threshold = 0.90
                 else:
@@ -790,7 +794,7 @@ class HeaderBandScanner:
                     hero_trip_rank = max(hero_trip_rank, 5)
                 elif _hero_match(w_raw, ["AMP", "AMPS"]):
                     hero_trip_rank = max(hero_trip_rank, 4)
-                elif _hero_match(w_raw, ["OCP", "OCPI", "OCPD"]):
+                elif _hero_match(w_raw, ["OCP", "OCPI", "OCPD", "IOCP"]):
                     hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["SIZE"]):
                     hero_trip_rank = max(hero_trip_rank, 3)
@@ -1038,6 +1042,10 @@ class HeaderBandScanner:
             and not info.get("has_desc_signal")
             and not info.get("has_special_signal")
             and (info.get("ignoredReason") is None)
+            and (
+                int(info.get("hero_trip_rank", 0)) > 0
+                or int(info.get("hero_poles_rank", 0)) > 0
+            )
         ]
 
         if not hero_candidates:
