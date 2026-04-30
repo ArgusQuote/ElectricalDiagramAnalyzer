@@ -1862,54 +1862,8 @@ def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[in
     return (None, active_count)
 
 @anvil.server.callable
-def vm_get_job_result(job_id: str, owner_email: str) -> dict:
-    """
-    Fetch the completed result for a job.
-    This is separate from vm_get_job_status so polling stays lightweight.
-    """
-    if not job_id or not owner_email:
-        return {
-            "ok": False,
-            "error": "job_id and owner_email are required"
-        }
-
-    owner_email = str(owner_email or "").strip().lower()
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-
-    st = _json_read_or_none(sp["status"])
-    if not st:
-        return {
-            "ok": False,
-            "error": f"Unknown job_id {job_id}"
-        }
-
-    job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-
-    if not owner_email or not job_email or owner_email != job_email:
-        return {
-            "ok": False,
-            "error": "Owner mismatch"
-        }
-
-    state = str(st.get("state") or "").strip().lower()
-    if state != "done":
-        return {
-            "ok": False,
-            "error": f"Job is not done yet. Current state: {state}"
-        }
-
-    result = _json_read_or_none(sp["result"]) or {}
-
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "result": result
-    }
-
-@anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
-    """Status primarily from disk; does not return final result. Enforces ownership by email."""
+    """Status primarily from disk; returns result when done. Enforces ownership by email."""
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
 
@@ -1938,13 +1892,8 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         return {"state": "canceled", **node_hint}
 
     if state == "done":
-        return {
-            "state": "done",
-            "job_id": job_id,
-            "progress": 100.0,
-            "result_ready": True,
-            **node_hint
-        }
+        res = _json_read_or_none(sp["result"]) or {}
+        return {"state": "done", "result": res, **node_hint}
     if state == "error":
         out = {
             "state": "error",
