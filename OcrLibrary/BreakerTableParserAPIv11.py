@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParserAPIv7.py
+# OcrLibrary/BreakerTableParserAPIv10.py
 import sys, os, inspect
 import re
 import cv2
@@ -10,7 +10,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "API_7"
+API_VERSION = "API_11"
 API_ORIGIN  = __file__
 
 SNAP_MAP = {
@@ -43,12 +43,13 @@ def reset_name_deduper():
     _NAME_COUNTS.clear()
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
-from OcrLibrary.PanelHeaderParserV6   import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParser9   import BreakerTableParser, PARSER_VERSION
-
+from OcrLibrary.PanelHeaderParserV11   import PanelParser as PanelHeaderParser
+from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
+ 
 class BreakerTablePipeline:
-    def __init__(self, *, debug: bool = True):
+    def __init__(self, *, debug: bool = True, reader=None):
         self.debug = bool(debug)
+        self._shared_reader = reader
         self._analyzer = None
         self._header_parser = None
 
@@ -63,9 +64,37 @@ class BreakerTablePipeline:
         except Exception:
             return None
 
+    def _special_header_note(self, header_result: dict | None) -> str | None:
+        if not isinstance(header_result, dict):
+            return None
+
+        note = str(header_result.get("panelNote") or "").strip()
+        if note:
+            return note
+
+        sht = header_result.get("specialHeaderType")
+        if isinstance(sht, dict):
+            note = str(sht.get("note") or "").strip()
+            if note:
+                return note
+
+        return None
+
+    def _special_header_kind(self, header_result: dict | None) -> str | None:
+        if not isinstance(header_result, dict):
+            return None
+
+        sht = header_result.get("specialHeaderType")
+        if isinstance(sht, dict):
+            kind = str(sht.get("kind") or "").strip()
+            return kind or None
+
+        return None
+
     def _mask_header_non_name(self, header_result: dict | None, *, detected_name):
         out = dict(header_result) if isinstance(header_result, dict) else {}
         out["name"] = detected_name
+
         attrs = out.get("attrs")
         if isinstance(attrs, dict):
             masked = {}
@@ -77,9 +106,21 @@ class BreakerTablePipeline:
             out["attrs"] = masked
         else:
             out["attrs"] = {}
+
+        preserve_keys = {
+            "name",
+            "attrs",
+            "panelNote",
+            "specialHeaderType",
+            "reviewOverlayPath",
+            "winningBoxes",
+            "boxImageShape",
+        }
+
         for k in list(out.keys()):
-            if k not in ("name", "attrs"):
+            if k not in preserve_keys:
                 out[k] = "x"
+
         return out
 
     def _mask_parser_non_name(self, parser_result: dict | None, *, detected_name):
@@ -119,8 +160,10 @@ class BreakerTablePipeline:
         main_amps = pick(hdr, "main_amps", "main", "main_rating", "main_breaker_amps", "mainBreakerAmperage") \
                     or pick(attrs, "main_amps", "main", "main_rating", "main_breaker_amps", "mainBreakerAmperage") \
                     or ah.get("main_amps")
+        trim_style = pick(hdr, "trimStyle", "trim_style") or pick(attrs, "trimStyle", "trim_style")
+        enclosure = pick(hdr, "enclosure") or pick(attrs, "enclosure")
         spaces = prs.get("spaces")
-        return name, volts, bus_amps, main_amps, spaces
+        return name, volts, bus_amps, main_amps, trim_style, enclosure, spaces
 
     def _parse_voltage(self, v):
         if v is None:
@@ -143,6 +186,21 @@ class BreakerTablePipeline:
             return False
         return (n % 10) in (0, 5)
 
+    def _amp_over_max_message(self, bus_amps, main_amps):
+        bus_i = self._to_int_or_none(bus_amps)
+        main_i = self._to_int_or_none(main_amps)
+
+        over = []
+        if bus_i is not None and bus_i > AMP_MAX:
+            over.append(f"bus amperage {bus_i}A exceeds max allowed system amperage ({AMP_MAX}A)")
+        if main_i is not None and main_i > AMP_MAX:
+            over.append(f"main amperage {main_i}A exceeds max allowed system amperage ({AMP_MAX}A)")
+
+        if not over:
+            return None
+
+        return "; ".join(over)
+    
     def _ensure_dir(self, p: str) -> str:
         os.makedirs(p, exist_ok=True)
         return p
@@ -264,6 +322,7 @@ class BreakerTablePipeline:
 
         GREEN = (0, 255, 0)      # trip OR combined
         BLUE  = (255, 0, 0)      # poles
+        ORANGE = (0, 165, 255)   # specialFeatures (CB Info / Notes / Options / Type)
 
         def draw_col(col, color, label):
             try:
@@ -287,11 +346,15 @@ class BreakerTablePipeline:
             if layout == "combined":
                 if role == "combo":
                     draw_col(col, GREEN, "COMBO")
+                elif role == "specialFeatures":
+                    draw_col(col, ORANGE, "INFO")
             elif layout == "separated":
                 if role == "trip":
                     draw_col(col, GREEN, "TRIP")
                 elif role == "poles":
                     draw_col(col, BLUE, "POLES")
+                elif role == "specialFeatures":
+                    draw_col(col, ORANGE, "INFO")
             else:
                 # unknown layout: still show anything we have
                 if role == "combo":
@@ -300,6 +363,8 @@ class BreakerTablePipeline:
                     draw_col(col, GREEN, "TRIP")
                 elif role == "poles":
                     draw_col(col, BLUE, "POLES")
+                elif role == "specialFeatures":
+                    draw_col(col, ORANGE, "INFO")
 
         # Save one combined file for the UI
         safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
@@ -318,12 +383,12 @@ class BreakerTablePipeline:
 
     def _ensure_analyzer(self):
         if self._analyzer is None:
-            self._analyzer = BreakerTableAnalyzer(debug=self.debug)
+            self._analyzer = BreakerTableAnalyzer(debug=self.debug, reader=self._shared_reader)
         return self._analyzer
 
     def _ensure_header_parser(self):
         if self._header_parser is None:
-            self._header_parser = PanelHeaderParser(debug=self.debug)
+            self._header_parser = PanelHeaderParser(debug=self.debug, reader=self._shared_reader)
         return self._header_parser
 
     def run(
@@ -381,7 +446,7 @@ class BreakerTablePipeline:
 
         # --- 2b) Apply de-duped display name as early as possible ---
         try:
-            base_name, _v, _b, _m, _ = self._extract_panel_keys(analyzer_result, header_result, None)
+            base_name, _v, _b, _m, _trim, _encl, _ = self._extract_panel_keys(analyzer_result, header_result, None)
         except Exception:
             base_name = None
         dedup_name = _dedupe_name(base_name)
@@ -394,22 +459,46 @@ class BreakerTablePipeline:
         except Exception:
             pass
 
-        # --- 3) Header validity check (but DO NOT skip the table parser) ---
-        should_run_parser = run_parser
+        # --- 3) Header validity check (but DO NOT skip the review overlay) ---
         panel_status = None
         header_invalid = False
+        skip_bom_due_to_special_header = False
+
+        special_kind = self._special_header_kind(header_result)
+        if special_kind in {"switchboard", "wireway", "lighting_schedule", "inverter"}:
+            skip_bom_due_to_special_header = True
+            special_note = self._special_header_note(header_result) or f"{special_kind} detected"
+            panel_status = f"detected but skipped ({dedup_name})"
+            if isinstance(header_result, dict):
+                header_result["panelNote"] = special_note
+
+        should_run_parser = (run_parser and not skip_bom_due_to_special_header)
         try:
-            _dn, volts, bus_amps, main_amps, _spaces_unused = self._extract_panel_keys(
+            _dn, volts, bus_amps, main_amps, _trim_style, _enclosure, _spaces_unused = self._extract_panel_keys(
                 analyzer_result, header_result, None
             )
             volts_i = self._parse_voltage(volts)
             volts_invalid = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
             bus_invalid   = not self._is_valid_amp(bus_amps)                          # REQUIRED
             main_invalid  = (main_amps is not None) and (not self._is_valid_amp(main_amps))  # OPTIONAL
+            amp_over_max_note = self._amp_over_max_message(bus_amps, main_amps)
 
             if volts_invalid or bus_invalid or main_invalid:
-                panel_status = f"unable to detect key information on panel ({dedup_name})"
+                special_note = self._special_header_note(header_result)
+
+                if special_note:
+                    panel_status = f"detected but skipped ({dedup_name})"
+                    if isinstance(header_result, dict):
+                        header_result["panelNote"] = special_note
+                elif amp_over_max_note:
+                    panel_status = f"detected but skipped ({dedup_name})"
+                    if isinstance(header_result, dict):
+                        header_result["panelNote"] = amp_over_max_note
+                else:
+                    panel_status = f"unable to detect key information on panel ({dedup_name})"
+
                 header_invalid = True
+
                 if self.debug:
                     miss = []
                     if volts_invalid: miss.append(f"volts={volts!r}")
@@ -451,12 +540,20 @@ class BreakerTablePipeline:
             if self.debug:
                 print(f"[WARN] Review overlay generation failed: {e}")
 
+        # fallback preview path if overlay could not be written
+        if not review_overlay_path:
+            review_overlay_path = img
+
         # expose to UI
         if isinstance(parser_result, dict):
             parser_result["reviewOverlayPath"] = review_overlay_path
         if isinstance(header_result, dict):
             header_result["reviewOverlayPath"] = review_overlay_path
-        if header_invalid:
+
+        if skip_bom_due_to_special_header:
+            header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
+            parser_result = self._mask_parser_non_name(parser_result, detected_name=dedup_name)
+        elif header_invalid:
             header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
 
         # --- optional legacy prints (only if table parser ran) ---
@@ -471,13 +568,15 @@ class BreakerTablePipeline:
         # --- 4) Panel validity & masking logic (spaces + header recheck) ---
         try:
             if panel_status is None:
-                _dn2, volts, bus_amps, main_amps, spaces = self._extract_panel_keys(
+                _dn2, volts, bus_amps, main_amps, trim_style, enclosure, spaces = self._extract_panel_keys(
                     analyzer_result, header_result, parser_result
                 )
                 volts_i = self._parse_voltage(volts)
                 volts_invalid  = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
                 bus_invalid    = not self._is_valid_amp(bus_amps)
                 main_invalid   = (main_amps is not None) and (not self._is_valid_amp(main_amps))
+                amp_over_max_note = self._amp_over_max_message(bus_amps, main_amps)
+
                 if isinstance(spaces, int):
                     spaces_norm = SNAP_MAP.get(spaces, spaces)
                     spaces_invalid = spaces_norm is None or spaces_norm <= 0
@@ -485,9 +584,22 @@ class BreakerTablePipeline:
                     spaces_invalid = True
 
                 if spaces_invalid or volts_invalid or bus_invalid or main_invalid:
-                    panel_status = f"unable to detect key information on panel ({dedup_name})"
+                    special_note = self._special_header_note(header_result)
+
+                    if special_note:
+                        panel_status = f"detected but skipped ({dedup_name})"
+                        if isinstance(header_result, dict):
+                            header_result["panelNote"] = special_note
+                    elif amp_over_max_note:
+                        panel_status = f"detected but skipped ({dedup_name})"
+                        if isinstance(header_result, dict):
+                            header_result["panelNote"] = amp_over_max_note
+                    else:
+                        panel_status = f"unable to detect key information on panel ({dedup_name})"
+
                     header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
-                    parser_result = self._mask_parser_non_name(parser_result,  detected_name=dedup_name)
+                    parser_result = self._mask_parser_non_name(parser_result, detected_name=dedup_name)
+
         except Exception as e:
             if self.debug:
                 print(f"[WARN] Panel validation/masking failed: {e}")

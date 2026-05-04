@@ -1,17 +1,18 @@
-# OcrLibrary/BreakerTableParserAPIv3.py
+# OcrLibrary/BreakerTableParserAPIv10.py
 import sys, os, inspect
+import re
+import cv2
+import copy
 
-# ----- ensure repo root on sys.path -----
 _THIS_FILE  = os.path.abspath(__file__)
 _OCRLIB_DIR = os.path.dirname(_THIS_FILE)
 _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "ALT"
+API_VERSION = "API_10"
 API_ORIGIN  = __file__
 
-# Panel validation snap map for spaces normalization
 SNAP_MAP = {
     16: 18, 20: 18,
     28: 30, 32: 30,
@@ -21,12 +22,11 @@ SNAP_MAP = {
     70: 72, 74: 72,
     82: 84, 86: 84,
 }
-# Header-level validation (pre-table-parse)
+
 VALID_VOLTAGES = {120, 208, 240, 480, 600}
 AMP_MIN = 100
 AMP_MAX = 1200
 
-# --- Panel name de-duper (module-scope; persists for this process/job) ---
 _NAME_COUNTS = {}
 
 def _norm_name(s):
@@ -39,31 +39,20 @@ def _dedupe_name(raw_name: str | None) -> str:
     _NAME_COUNTS[key] = cnt
     return base if cnt == 1 else f"{base} ({cnt})"
 
-# Optional: call from tests to reset between runs in the same process
 def reset_name_deduper():
     _NAME_COUNTS.clear()
 
-# ----- STRICT imports: Analyzer + Header + Parser5 only -----
-from OcrLibrary.BreakerTableAnalyzer5 import BreakerTableAnalyzer, ANALYZER_VERSION
-from OcrLibrary.PanelHeaderParserV4   import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParser5   import BreakerTableParser, PARSER_VERSION
-
+from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
+from OcrLibrary.PanelHeaderParserV10   import PanelParser as PanelHeaderParser
+from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
+ 
 class BreakerTablePipeline:
-    """
-    Class-based, single point of entry that runs:
-      1) BreakerTableAnalyzer4.analyze()
-      2) PanelHeaderParserV4.PanelParser.parse_panel()
-      3) BreakerTableParserALT.parse_from_analyzer()
-
-    No fallbacks. Always ALT.
-    """
-
-    def __init__(self, *, debug: bool = True):
+    def __init__(self, *, debug: bool = True, reader=None):
         self.debug = bool(debug)
+        self._shared_reader = reader
         self._analyzer = None
         self._header_parser = None
 
-    # ---- numeric helpers ----
     def _to_int_or_none(self, v):
         if v is None:
             return None
@@ -75,7 +64,6 @@ class BreakerTablePipeline:
         except Exception:
             return None
 
-    # ---- validation helpers ----
     def _mask_header_non_name(self, header_result: dict | None, *, detected_name):
         out = dict(header_result) if isinstance(header_result, dict) else {}
         out["name"] = detected_name
@@ -132,15 +120,16 @@ class BreakerTablePipeline:
         main_amps = pick(hdr, "main_amps", "main", "main_rating", "main_breaker_amps", "mainBreakerAmperage") \
                     or pick(attrs, "main_amps", "main", "main_rating", "main_breaker_amps", "mainBreakerAmperage") \
                     or ah.get("main_amps")
+        trim_style = pick(hdr, "trimStyle", "trim_style") or pick(attrs, "trimStyle", "trim_style")
+        enclosure = pick(hdr, "enclosure") or pick(attrs, "enclosure")
         spaces = prs.get("spaces")
-        return name, volts, bus_amps, main_amps, spaces
+        return name, volts, bus_amps, main_amps, trim_style, enclosure, spaces
 
     def _parse_voltage(self, v):
         if v is None:
             return None
         if isinstance(v, int):
             return v if v in VALID_VOLTAGES else None
-        import re
         s = str(v)
         m_pair = re.search(r'(?<!\d)(120|208|240|277|480|600)\s*[Y/]\s*(120|208|240|277|480|600)(?!\d)', s, flags=re.I)
         if m_pair:
@@ -157,15 +146,194 @@ class BreakerTablePipeline:
             return False
         return (n % 10) in (0, 5)
 
-    # ---- helpers ----
+    def _ensure_dir(self, p: str) -> str:
+        os.makedirs(p, exist_ok=True)
+        return p
+
+    def _scale_box(self, box, src_w, src_h, dst_w, dst_h):
+        # box = [x1,y1,x2,y2]
+        if not box or src_w <= 0 or src_h <= 0:
+            return None
+        try:
+            x1, y1, x2, y2 = [int(v) for v in box]
+        except Exception:
+            return None
+        sx = float(dst_w) / float(src_w)
+        sy = float(dst_h) / float(src_h)
+        return [int(round(x1*sx)), int(round(y1*sy)), int(round(x2*sx)), int(round(y2*sy))]
+
+    def _draw_box(self, vis, box, color_bgr, label=None, *, fill_alpha: float = 0.0, thickness: int = 2):
+        if not box or len(box) != 4:
+            return
+        H, W = vis.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in box]
+        x1 = max(0, min(W-1, x1)); x2 = max(0, min(W-1, x2))
+        y1 = max(0, min(H-1, y1)); y2 = max(0, min(H-1, y2))
+        if x2 <= x1 or y2 <= y1:
+            return
+
+        # optional faint fill
+        if fill_alpha and fill_alpha > 0.0:
+            a = float(max(0.0, min(1.0, fill_alpha)))
+            overlay = vis.copy()
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color_bgr, -1)
+            cv2.addWeighted(overlay, a, vis, 1.0 - a, 0, dst=vis)
+
+        # outline
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color_bgr, int(thickness))
+
+        if label:
+            cv2.putText(
+                vis, str(label),
+                (x1, max(12, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color_bgr,
+                1,
+                cv2.LINE_AA,
+            )
+
+    def _build_review_overlay(self, *, image_path, analyzer_result, header_result, parser_result, dedup_name):
+        """
+        Writes ONE combined review overlay:
+          - Magenta: winning header attrs
+          - Green: trip columns (or combo columns if combined)
+          - Blue: poles columns (separated)
+        Returns absolute filepath or None.
+        """
+        ar = analyzer_result or {}
+        gray = ar.get("gray")
+        if gray is None or not hasattr(gray, "shape"):
+            return None
+
+        H, W = gray.shape[:2]
+        vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+        # Where to save (job_root/pdf_images/review_overlays/)
+        norm_img = os.path.abspath(image_path).replace("\\", "/")
+
+        rel_path = None
+        out_path = None
+
+        if "/pdf_images/" in norm_img:
+            job_root = norm_img.split("/pdf_images/")[0]
+            review_dir = self._ensure_dir(os.path.join(job_root, "pdf_images", "review_overlays"))
+            safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
+            fname = f"{safe_base}_review_overlay.png"
+            out_path = os.path.join(review_dir, fname)
+            rel_path = f"pdf_images/review_overlays/{fname}"
+        else:
+            # fallback if we can't infer job_root
+            src_dir = os.path.dirname(os.path.abspath(image_path))
+            review_dir = self._ensure_dir(os.path.join(src_dir, "review_overlays"))
+            safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
+            fname = f"{safe_base}_review_overlay.png"
+            out_path = os.path.join(review_dir, fname)
+            rel_path = f"review_overlays/{fname}"
+
+        # --- Magenta header attrs ---
+        # EXPECTATION: header parser returns:
+        # header_result["winningBoxes"] = {"name":[x1,y1,x2,y2], "voltage":[...], ...}
+        # header_result["boxImageShape"] = {"w": <int>, "h": <int>}  (shape used for those coords)
+        hdr = header_result if isinstance(header_result, dict) else {}
+        winning = hdr.get("winningBoxes") if isinstance(hdr.get("winningBoxes"), dict) else {}
+        shape = hdr.get("boxImageShape") if isinstance(hdr.get("boxImageShape"), dict) else {}
+        src_w = int(shape.get("w") or W)
+        src_h = int(shape.get("h") or H)
+
+        MAGENTA = (255, 0, 255)  # BGR
+        for k, box in winning.items():
+            if not isinstance(box, (list, tuple)) or len(box) != 4:
+                continue
+            scaled = self._scale_box(box, src_w, src_h, W, H)
+            self._draw_box(vis, scaled, MAGENTA, label=k, fill_alpha=0.0, thickness=3)
+
+        # --- Column overlays (from Parser9 normalized columns) ---
+        prs = parser_result if isinstance(parser_result, dict) else {}
+        hscan = prs.get("headerScan") if isinstance(prs.get("headerScan"), dict) else {}
+        norm = hscan.get("normalizedColumns") if isinstance(hscan.get("normalizedColumns"), dict) else {}
+        layout = (norm.get("layout") or "unknown").lower()
+        cols = norm.get("columns") or []
+
+        header_bottom_y = ar.get("header_bottom_y")
+        footer_y = ar.get("footer_y")
+
+        y_top = 0
+        y_bot = H - 1
+        if isinstance(header_bottom_y, (int, float)):
+            y_top = max(0, min(H - 1, int(header_bottom_y)))
+        if isinstance(footer_y, (int, float)):
+            y_bot = max(y_top + 1, min(H - 1, int(footer_y)))
+
+        GREEN = (0, 255, 0)      # trip OR combined
+        BLUE  = (255, 0, 0)      # poles
+        ORANGE = (0, 165, 255)   # specialFeatures (CB Info / Notes / Options / Type)
+
+        def draw_col(col, color, label):
+            try:
+                x1 = int(col.get("x_left", 0))
+                x2 = int(col.get("x_right", 0))
+            except Exception:
+                return
+            if x2 <= x1 + 1:
+                return
+            self._draw_box(
+                vis,
+                [x1, y_top, x2, y_bot],
+                color,
+                label=label,
+                fill_alpha=0.12,   # faint fill
+                thickness=3
+            )
+
+        for col in cols:
+            role = col.get("role")
+            if layout == "combined":
+                if role == "combo":
+                    draw_col(col, GREEN, "COMBO")
+                elif role == "specialFeatures":
+                    draw_col(col, ORANGE, "INFO")
+            elif layout == "separated":
+                if role == "trip":
+                    draw_col(col, GREEN, "TRIP")
+                elif role == "poles":
+                    draw_col(col, BLUE, "POLES")
+                elif role == "specialFeatures":
+                    draw_col(col, ORANGE, "INFO")
+            else:
+                # unknown layout: still show anything we have
+                if role == "combo":
+                    draw_col(col, GREEN, "COMBO")
+                elif role == "trip":
+                    draw_col(col, GREEN, "TRIP")
+                elif role == "poles":
+                    draw_col(col, BLUE, "POLES")
+                elif role == "specialFeatures":
+                    draw_col(col, ORANGE, "INFO")
+
+        # Save one combined file for the UI
+        safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"
+        out_path = os.path.join(review_dir, f"{safe_base}_review_overlay.png")
+        try:
+            ok = cv2.imwrite(out_path, vis)
+            if not ok:
+                if self.debug:
+                    print(f"[WARN] cv2.imwrite returned False for: {out_path}")
+                return None
+            return rel_path
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Failed to write review overlay: {e}")
+            return None
+
     def _ensure_analyzer(self):
         if self._analyzer is None:
-            self._analyzer = BreakerTableAnalyzer(debug=self.debug)
+            self._analyzer = BreakerTableAnalyzer(debug=self.debug, reader=self._shared_reader)
         return self._analyzer
 
     def _ensure_header_parser(self):
         if self._header_parser is None:
-            self._header_parser = PanelHeaderParser(debug=self.debug)
+            self._header_parser = PanelHeaderParser(debug=self.debug, reader=self._shared_reader)
         return self._header_parser
 
     def run(
@@ -205,7 +373,7 @@ class BreakerTablePipeline:
                 if hasattr(analyzer, "reader"):
                     header_parser.reader = analyzer.reader
                 if analyzer_result and isinstance(analyzer_result, dict):
-                    hy = analyzer_result.get("header_y")
+                    hy   = analyzer_result.get("header_y")
                     gray = analyzer_result.get("gray")
                     if isinstance(hy, (int, float)) and hasattr(gray, "shape"):
                         H_ana = float(gray.shape[0])
@@ -219,10 +387,11 @@ class BreakerTablePipeline:
                 header_result = None
                 if self.debug:
                     print(f"[WARN] Header parser failed: {e}")
+        header_result_raw = copy.deepcopy(header_result) if isinstance(header_result, dict) else None
 
         # --- 2b) Apply de-duped display name as early as possible ---
         try:
-            base_name, _v, _b, _m, _ = self._extract_panel_keys(analyzer_result, header_result, None)
+            base_name, _v, _b, _m, _trim, _encl, _ = self._extract_panel_keys(analyzer_result, header_result, None)
         except Exception:
             base_name = None
         dedup_name = _dedupe_name(base_name)
@@ -238,8 +407,11 @@ class BreakerTablePipeline:
         # --- 3) Header validity check (but DO NOT skip the table parser) ---
         should_run_parser = run_parser
         panel_status = None
+        header_invalid = False
         try:
-            _dn, volts, bus_amps, main_amps, _spaces_unused = self._extract_panel_keys(analyzer_result, header_result, None)
+            _dn, volts, bus_amps, main_amps, _trim_style, _enclosure, _spaces_unused = self._extract_panel_keys(
+                analyzer_result, header_result, None
+            )
             volts_i = self._parse_voltage(volts)
             volts_invalid = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
             bus_invalid   = not self._is_valid_amp(bus_amps)                          # REQUIRED
@@ -247,8 +419,7 @@ class BreakerTablePipeline:
 
             if volts_invalid or bus_invalid or main_invalid:
                 panel_status = f"unable to detect key information on panel ({dedup_name})"
-                header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
-                # NOTE: we still run the ALT table parser; just change the message:
+                header_invalid = True
                 if self.debug:
                     miss = []
                     if volts_invalid: miss.append(f"volts={volts!r}")
@@ -277,6 +448,27 @@ class BreakerTablePipeline:
         if isinstance(parser_result, dict):
             parser_result["name"] = dedup_name
 
+        review_overlay_path = None
+        try:
+            review_overlay_path = self._build_review_overlay(
+                image_path=img,
+                analyzer_result=analyzer_result,
+                header_result=(header_result_raw or header_result),
+                parser_result=parser_result,
+                dedup_name=dedup_name,
+            )
+        except Exception as e:
+            if self.debug:
+                print(f"[WARN] Review overlay generation failed: {e}")
+
+        # expose to UI
+        if isinstance(parser_result, dict):
+            parser_result["reviewOverlayPath"] = review_overlay_path
+        if isinstance(header_result, dict):
+            header_result["reviewOverlayPath"] = review_overlay_path
+        if header_invalid:
+            header_result = self._mask_header_non_name(header_result, detected_name=dedup_name)
+
         # --- optional legacy prints (only if table parser ran) ---
         if self.debug and parser_result is not None:
             try:
@@ -289,7 +481,9 @@ class BreakerTablePipeline:
         # --- 4) Panel validity & masking logic (spaces + header recheck) ---
         try:
             if panel_status is None:
-                _dn2, volts, bus_amps, main_amps, spaces = self._extract_panel_keys(analyzer_result, header_result, parser_result)
+                _dn2, volts, bus_amps, main_amps, trim_style, enclosure, spaces = self._extract_panel_keys(
+                    analyzer_result, header_result, parser_result
+                )
                 volts_i = self._parse_voltage(volts)
                 volts_invalid  = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
                 bus_invalid    = not self._is_valid_amp(bus_amps)
@@ -325,7 +519,7 @@ class BreakerTablePipeline:
             "panelStatus": panel_status,  # None if OK; message if flagged
         }
 
-# ---- Back-compat: keep the old function name ----
+
 def parse_image(
     image_path: str,
     *,
@@ -343,31 +537,30 @@ def parse_image(
     )
 
 if __name__ == "__main__":
-    # --- Dev banner ---
     modA = sys.modules[BreakerTableAnalyzer.__module__]
     implA = inspect.getsourcefile(BreakerTableAnalyzer) or inspect.getfile(BreakerTableAnalyzer)
     print(">>> DEV Analyzer version:", getattr(modA, "ANALYZER_VERSION", "unknown"))
     print(">>> DEV Analyzer file:", os.path.abspath(implA))
 
-    # ALT sanity
     modP = sys.modules.get(BreakerTableParser.__module__)
     implP = inspect.getsourcefile(BreakerTableParser) or inspect.getfile(BreakerTableParser)
     print(">>> DEV Parser version:", PARSER_VERSION if 'PARSER_VERSION' in globals() else "unknown")
     print(">>> DEV Parser file:", os.path.abspath(implP))
     print(">>> DEV Parser module:", BreakerTableParser.__module__)
 
-    if len(sys.argv) >= 2:
-        img = sys.argv[1]
-    else:
-        img = "/home/paperspace/ElectricalDiagramAnalyzer/detectron2_training/OutputImages/good_tester_combo_page001_table01_rect.png"
+    # Require an image path; no hardcoded fallback
+    if len(sys.argv) < 2:
+        print("Usage: python BreakerTableParserAPIv4.py /path/to/image.png [--no-analyzer] [--no-parser] [--no-header]")
+        sys.exit(1)
 
+    img = sys.argv[1]
     print(">>> DEV Image:", img)
 
     # Simple flags: --no-analyzer --no-parser --no-header
     args = sys.argv[2:]
     run_analyzer = "--no-analyzer" not in args
-    run_parser = "--no-parser" not in args
-    run_header = "--no-header" not in args
+    run_parser   = "--no-parser" not in args
+    run_header   = "--no-header" not in args
 
     pipeline = BreakerTablePipeline(debug=True)
     result = pipeline.run(

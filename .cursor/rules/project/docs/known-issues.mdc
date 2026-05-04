@@ -5,12 +5,11 @@ alwaysApply: true
 
 # Known Issues
 
-The file `KNOWN_ISSUES.md` at the project root tracks known bugs, limitations, and
-deferred work items.
+This file tracks known bugs, limitations, and deferred work items for the project.
 
 ## How to Use
 
-- **Before working on a component**: Check `KNOWN_ISSUES.md` for known problems
+- **Before working on a component**: Check this file for known problems
   that may affect your work or that your work could address.
 - **When discovering a new issue**: Add an entry with status, date, component,
   problem description, and any known root cause or workaround.
@@ -19,8 +18,19 @@ deferred work items.
 
 ## Current Open Issues
 
-- **ML Table Detection not yet implemented** -- The `MLTableDetection/` directory
-  and `TableDetectorML.py` do not exist in the repo. ML-based panel detection is a
-  planned future feature. The `.cursor/skills/training-panel-detector/` skill contains
-  guidance for building it. Currently only heuristic detection via `PanelSearchToolV25`
-  is available. See `KNOWN_ISSUES.md` for details.
+- **ML Table Detection underperforms heuristic** -- `MLTableDetection/TableDetectorML.py`
+  exists and has been trained through four iterations (v2, v4, v5, v5b). The best model
+  (v4) achieves mAP@0.5 of 0.66 on `generic3.pdf` but still trails the heuristic
+  `PanelSearchToolV25` which finds all 6 panels. Adding negative examples (v5, v5b)
+  caused regressions. v4 remains the best Table Transformer model. The training skill
+  recommends escalating to RF-DETR (Apache 2.0) if further improvement is needed.
+
+- **ML Page Classifier created** -- `PageFilter/PageClassifierML.py` provides a
+  MobileNetV2 binary classifier for page-level "has panel / no panel" decisions.
+  Trained on 35 images (28 pos, 7 neg), achieves 100% val accuracy. Designed as
+  a faster drop-in replacement for PageFilterV4 (~250 ms/page vs ~1-3s). Not yet
+  integrated into `uplink_server.py` (still imports `PageFilterV3`).
+
+- **uplink_server.py imports PageFilterV3** -- The latest heuristic is V4, and
+  the ML classifier is available, but `uplink_server.py` still imports
+  `PageFilter.PageFilterV3`.

@@ -72,7 +72,6 @@ def _set_runtime_determinism():
     set_runtime_determinism()
 
 def _log_run_fingerprint(tag: str = ""):
-    """Log CUDA device names and cuDNN determinism settings for diagnostics."""
     try:
         import torch
         devs = []
@@ -91,8 +90,8 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine5 as RE2  # must expose process_job(payload)
+from OcrLibrary.BreakerTableParserAPIv10 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+import RulesEngine.RulesEngine4 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
@@ -111,7 +110,6 @@ if not _IS_WORKER_SUBPROCESS:
 
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
-    """Pre-load EasyOCR models by running BreakerTablePipeline on a dummy 32x32 image."""
     try:
         _log_run_fingerprint("warmup")
         import numpy as np, cv2, tempfile
@@ -145,16 +143,13 @@ if not _IS_WORKER_SUBPROCESS:
 
 # ---------- UTILITIES ----------
 def _now_utc():
-    """Return the current UTC datetime."""
     return datetime.now(timezone.utc)
 
 def _epoch_ms(dt=None) -> int:
-    """Convert a datetime (default: now UTC) to epoch milliseconds."""
     dt = dt or datetime.now(timezone.utc)
     return int(dt.timestamp() * 1000)
 
 def _fmt_cycle_time(ms: int) -> str:
-    """Format milliseconds as HH:MM:SS:mmm for display in status payloads."""
     if ms is None or ms < 0:
         return "00:00:00:000"
     hours = ms // 3_600_000
@@ -166,13 +161,11 @@ def _fmt_cycle_time(ms: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{millis:03d}"
 
 def _slugify(s: str) -> str:
-    """Normalize a string to a filesystem-safe slug (alphanumeric, dots, hyphens, underscores)."""
     s = (s or "").strip().replace(" ", "_")
     s = re.sub(r"[^A-Za-z0-9._-]+", "", s)
     return s or "untitled"
 
 def _json_read_or_none(path: Path):
-    """Load JSON from *path*; return None on any read/parse error."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -209,7 +202,6 @@ def _parse_job_note(job_note: str) -> dict:
     return out
 
 def _iso_to_stamp(s: str) -> str:
-    """Parse an ISO-8601 datetime string into a YYYYMMDD_HHMMSS stamp for job directory names."""
     try:
         s2 = s.rstrip("Z")
         dt = datetime.fromisoformat(s2)
@@ -221,7 +213,6 @@ def _iso_to_stamp(s: str) -> str:
         return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
-    """Create and return a timestamped job directory under BASE_JOBS_DIR with uploaded_pdfs/ and pdf_images/ subdirs."""
     meta = _parse_job_note(job_note)
     job_name = _slugify(meta.get("job_name") or Path(fallback_filename).stem)
     stamp = _iso_to_stamp(meta.get("submitted_at_utc") or "")
@@ -231,7 +222,6 @@ def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
     return job_dir
 
 def _save_media_to_disk(media, dest_dir: Path) -> Path:
-    """Write an Anvil BlobMedia's bytes to *dest_dir* as a PDF file; return the saved path."""
     fname = _slugify(getattr(media, "name", None) or "uploaded.pdf")
     if not fname.lower().endswith(".pdf"):
         fname += ".pdf"
@@ -241,7 +231,6 @@ def _save_media_to_disk(media, dest_dir: Path) -> Path:
     return dst
 
 def _normalize_component_for_none(obj):
-    """Recursively normalize a component dict: convert None to 'NONE', numpy types to Python ints/floats, and numeric strings to numbers."""
     import re
     try:
         import numpy as np
@@ -290,7 +279,6 @@ def _normalize_component_for_none(obj):
 
 # ----- status.json / result.json on disk -----
 def _status_paths(dir_path: Path):
-    """Return a dict with 'status' and 'result' keys pointing to the respective JSON files in *dir_path*."""
     dir_path = Path(dir_path)
     return {"status": dir_path / "status.json", "result": dir_path / "result.json"}
 
@@ -317,14 +305,12 @@ def _status_write(dir_path: Path, state: str, **extras):
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
 
 def _result_write(dir_path: Path, result: dict):
-    """Write *result* dict to result.json in the job directory."""
     paths = _status_paths(dir_path)
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
 
 # ----- Data Tables helpers (disabled here; leave no-ops) -----
 def _jobs_upsert(job_id: str, **fields):
-    """No-op placeholder for a Data Tables upsert (disabled in disk-only mode)."""
     return
 
 # ---------- UI OVERRIDES ----------
@@ -357,7 +343,6 @@ _DEFAULT_OVERRIDES = {
 }
 
 def _deep_merge(dst: dict, src: dict) -> dict:
-    """Recursively merge *src* into *dst*, returning a new dict (nested dicts are merged, scalars overwritten)."""
     out = dict(dst)
     for k, v in (src or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -367,7 +352,6 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     return out
 
 def _coerce_types(overrides: dict) -> dict:
-    """Recursively coerce string values in UI overrides: 'true'/'false' to bool, digit strings to int."""
     def coerce(v):
         if isinstance(v, str):
             s = v.strip().lower()
@@ -388,12 +372,10 @@ def _coerce_types(overrides: dict) -> dict:
     return walk(overrides or {})
 
 def _normalize_ui_overrides(overrides: dict | None) -> dict:
-    """Merge coerced user overrides on top of _DEFAULT_OVERRIDES, returning the combined config."""
     return _deep_merge(_DEFAULT_OVERRIDES, _coerce_types(overrides or {}))
 
 # Delete unused images and folders for storage
 def _rel(p: Path, root: Path) -> str:
-    """Return *p* relative to *root* with forward slashes (for portable JSON paths)."""
     return str(p.relative_to(root)).replace("\\", "/")
 
 def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
@@ -483,7 +465,6 @@ def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
 
 @anvil.server.callable
 def vm_get_default_overrides() -> dict:
-    """RPC callable: return a deep copy of the default UI overrides for panelboards/transformers/disconnects."""
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
 # ---------- PDF → images ----------
@@ -581,7 +562,6 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
 
 # ---------- Rules payload helper ----------
 def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
-    """Assemble the payload dict expected by RulesEngine4.process_job() from UI defaults and component items."""
     return {"defaults": defaults or {}, "items": items or []}
 
 # ---------- Queue / Pool state ----------
@@ -590,8 +570,6 @@ _INFLIGHT_BY_USER: dict[str, int] = {}
 _Q_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
-_SPECS_RUNNING: dict[str, bool] = {}
-_SPECS_LOCK = threading.RLock()
 
 # Per-slot worker pool state: each dequeue thread gets its own worker subprocess
 _WORKER_READY_TIMEOUT = 120  # seconds to wait for worker model loading
@@ -608,11 +586,9 @@ _WORKER_SLOTS: list[_WorkerSlot] = [_WorkerSlot() for _ in range(MAX_WORKERS)]
 _SPAWN_LOCK = threading.Lock()  # serializes env-var set/start/unset across slots
 
 def _enqueue_job(job_id: str, owner_id: str):
-    """Put a (job_id, owner_id) tuple onto the shared job queue for worker threads to dequeue."""
     _JOB_Q.put((job_id, owner_id))
 
 def _enter_inflight(owner_id: str) -> bool:
-    """Try to increment the per-user inflight count; return False if at MAX_INFLIGHT_PER_USER."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         if c >= MAX_INFLIGHT_PER_USER:
@@ -621,18 +597,15 @@ def _enter_inflight(owner_id: str) -> bool:
         return True
 
 def _leave_inflight(owner_id: str):
-    """Decrement the per-user inflight count (floor at 0)."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         _INFLIGHT_BY_USER[owner_id] = max(0, c - 1)
 
 # ---------- Cancel helpers ----------
 def _cancel_path(job_dir: Path) -> Path:
-    """Return the path to the .cancel marker file used to signal job cancellation."""
     return job_dir / ".cancel"
 
 def _is_canceled(job_dir: Path) -> bool:
-    """Check whether a job has been marked as canceled by the presence of its .cancel file."""
     return _cancel_path(job_dir).exists()
 
 def _peek_owner_id(job_dir: Path) -> str:
@@ -659,7 +632,6 @@ def _is_queue_timed_out(job_dir: Path) -> tuple[bool, int | None]:
 
 # ---------- Shared helpers for component mapping ----------
 def _to_int_or_none(x):
-    """Parse *x* as an integer (stripping commas); return None on failure."""
     try:
         return int(str(x).replace(",", "").strip())
     except Exception:
@@ -709,9 +681,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     stages = (result_dict or {}).get("results") or {}
     hdr    = stages.get("header")  or {}
     prs    = stages.get("parser")  or {}
-    panel_status = str((result_dict or {}).get("panelStatus") or "").strip()
-    panel_note = str(hdr.get("panelNote") or "").strip()
-    special_header_type = hdr.get("specialHeaderType") if isinstance(hdr.get("specialHeaderType"), dict) else None
 
     # Header fields
     name   = hdr.get("name") or ""
@@ -773,9 +742,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
         "type": "panelboard",
         "name": name,
         "source": src_img,
-        "panelStatus": panel_status,
-        "panelNote": panel_note,
-        "specialHeaderType": special_header_type,
         "attrs": {
             "amperage": amperage,
             "spaces": spaces,
@@ -980,35 +946,9 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             print(f">>> worker canceled before rules: {job_id}")
             return
 
-        ui_defaults = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
-
-        panel_defaults = (ui_defaults.get("panelboards") or {})
-        default_trim = str(panel_defaults.get("default_trim_style") or "").strip().upper()
-        default_enclosure = str(panel_defaults.get("enclosure") or "").strip()
-
-        for comp in components:
-            if not isinstance(comp, dict):
-                continue
-            if str(comp.get("type") or "").strip().lower() != "panelboard":
-                continue
-
-            attrs = comp.get("attrs") or {}
-
-            trim_style = str(attrs.get("trimStyle") or "").strip().upper()
-            enclosure = str(attrs.get("enclosure") or "").strip().upper()
-
-            if trim_style in ("", "NONE", "X", "-"):
-                attrs["trimStyle"] = default_trim
-
-            if enclosure in ("", "NONE", "X", "-"):
-                attrs["enclosure"] = default_enclosure
-
-            comp["attrs"] = attrs
-
-        rules_payload = _build_rules_payload(ui_defaults, components)
+        rules_payload = _build_rules_payload(prev.get("ui_overrides") or _DEFAULT_OVERRIDES, components)
         try:
             rules_result = RE2.process_job(rules_payload) or {}
-
         except Exception as re_err:
             rules_result = {"error": f"{type(re_err).__name__}: {re_err}"}
             print(f">>> rules engine error: {rules_result['error']}")
@@ -1312,101 +1252,6 @@ def _dequeue_loop(idx: int):
             _leave_inflight(owner_id)
             _JOB_Q.task_done()
 
-def _run_specs_analysis_job(job_id: str):
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-
-    owner_email = str(st.get("owner_email") or "").strip().lower()
-    saved_pdf = Path(st.get("file_path") or "").resolve()
-
-    try:
-        _status_write(
-            job_dir,
-            "running",
-            created_at=st.get("created_at"),
-            file_path=str(saved_pdf),
-            job_dir_path=str(job_dir),
-            owner_email=owner_email,
-            owner_id=owner_email,
-            node_id=NODE_ID,
-            step="specs_analyzing",
-            progress=15.0
-        )
-
-        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
-        print(f">>> SPECS DEBUG selected module_path={module_path}")
-
-        if not module_path.is_file():
-            raise FileNotFoundError(f"Specs analyzer file not found: {module_path}")
-
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "argus_specs_analyzer_v5",
-            str(module_path)
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not create import spec for {module_path}")
-
-        spec_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(spec_module)
-
-        analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
-        if analyze_specs_pdf_for_ui is None:
-            raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
-
-        result = analyze_specs_pdf_for_ui(
-            pdf_path=str(saved_pdf),
-            job_dir=str(job_dir)
-        ) or {}
-
-        result = dict(result)
-        result["job_id"] = job_id
-        result["job_dir"] = str(job_dir)
-        result["saved_pdf"] = str(saved_pdf)
-        result["owner_email"] = owner_email
-        result["owner_id"] = owner_email
-
-        _result_write(job_dir, result)
-
-        _status_write(
-            job_dir,
-            "done",
-            created_at=st.get("created_at"),
-            file_path=str(saved_pdf),
-            job_dir_path=str(job_dir),
-            owner_email=owner_email,
-            owner_id=owner_email,
-            node_id=NODE_ID,
-            step="specs_complete",
-            progress=100.0
-        )
-
-        print(f">>> specs analysis done: {job_id}")
-
-    except Exception as e:
-        tb = traceback.format_exc()
-        print(f">>> specs analysis error [{job_id}]: {e}\n{tb}")
-
-        _status_write(
-            job_dir,
-            "error",
-            created_at=st.get("created_at"),
-            file_path=str(saved_pdf),
-            job_dir_path=str(job_dir),
-            owner_email=owner_email,
-            owner_id=owner_email,
-            node_id=NODE_ID,
-            step="specs_error",
-            error=f"{type(e).__name__}: {e}",
-            traceback=tb,
-            progress=100.0
-        )
-
-    finally:
-        with _SPECS_LOCK:
-            _SPECS_RUNNING.pop(job_id, None)
 
 # ---------- Start worker pool (per-slot) ----------
 if not _IS_WORKER_SUBPROCESS:
@@ -1517,174 +1362,8 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         "deferred_render": True
     }
 
-@anvil.server.callable
-def vm_upload_specs_pdf(media, owner_email=None, job_name=""):
-    """
-    Upload/save only. Do NOT analyze yet.
-    """
-    if not owner_email or not str(owner_email).strip():
-        raise RuntimeError("owner_email required")
-
-    owner_email = str(owner_email).strip().lower()
-
-    safe_job_name = _slugify(job_name or Path(getattr(media, "name", "specs.pdf")).stem)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    job_id = f"specs_{safe_job_name}__{stamp}"
-
-    job_dir = BASE_JOBS_DIR / job_id
-    pdf_dir = job_dir / "uploaded_pdfs"
-    pdf_dir.mkdir(parents=True, exist_ok=True)
-
-    saved_pdf = _save_media_to_disk(media, pdf_dir)
-
-    _status_write(
-        job_dir,
-        "uploaded",
-        created_at=_now_utc().isoformat(),
-        file_path=str(saved_pdf),
-        job_dir_path=str(job_dir),
-        owner_email=owner_email,
-        owner_id=owner_email,
-        node_id=NODE_ID,
-        step="specs_uploaded",
-        progress=5.0
-    )
-
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "job_dir": str(job_dir),
-        "saved_pdf": str(saved_pdf),
-        "owner_email": owner_email,
-        "owner_id": owner_email,
-        "node_id": NODE_ID,
-        "state": "uploaded"
-    }
-
-
-@anvil.server.callable
-def vm_start_specs_analysis(job_id: str, owner_email: str):
-    """
-    Start analysis only after the PDF has already been uploaded/saved.
-    """
-    if not job_id or not owner_email:
-        raise RuntimeError("job_id and owner_email required")
-
-    owner_email = str(owner_email).strip().lower()
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-
-    if not st:
-        raise RuntimeError(f"Unknown specs job_id: {job_id}")
-
-    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-    if job_owner != owner_email:
-        raise RuntimeError("Owner mismatch")
-
-    with _SPECS_LOCK:
-        if _SPECS_RUNNING.get(job_id):
-            return {"ok": True, "job_id": job_id, "state": "running"}
-
-        _SPECS_RUNNING[job_id] = True
-
-    t = threading.Thread(target=_run_specs_analysis_job, args=(job_id,), daemon=True)
-    t.start()
-
-    return {"ok": True, "job_id": job_id, "state": "running"}
-
-
-@anvil.server.callable
-def vm_get_specs_status(job_id: str, owner_email: str) -> dict:
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-
-    st = _json_read_or_none(sp["status"])
-    if not st:
-        return {
-            "state": "error",
-            "error": f"Unknown job_id {job_id}",
-            "debug_job_dir": str(job_dir),
-            "debug_status_path": str(sp["status"]),
-            "debug_result_path": str(sp["result"]),
-        }
-
-    req_email = str(owner_email or "").strip().lower()
-    job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-
-    if not req_email or not job_email or req_email != job_email:
-        return {
-            "state": "not_found",
-            "debug_req_email": req_email,
-            "debug_job_email": job_email,
-            "debug_raw_state": st.get("state"),
-            "debug_job_dir": str(job_dir),
-        }
-
-    state = (st.get("state") or "unknown").lower()
-
-    if state == "done":
-        res = _json_read_or_none(sp["result"]) or {}
-        return {
-            "state": "done",
-            "result": res,
-            "debug_raw_state": st.get("state"),
-            "debug_job_dir": str(job_dir),
-        }
-
-    if state == "error":
-        return {
-            "state": "error",
-            "error": st.get("error") or "Unknown error",
-            "debug_raw_state": st.get("state"),
-            "debug_job_dir": str(job_dir),
-        }
-
-    out = {
-        "state": state,
-        "debug_raw_state": st.get("state"),
-        "debug_job_dir": str(job_dir),
-    }
-    for k in ("step", "progress"):
-        if k in st:
-            out[k] = st[k]
-    return out
-
-@anvil.server.callable
-def vm_delete_specs_job(job_id: str, owner_email: str) -> bool:
-    """
-    Delete a specs-only temp job folder after the results modal is finished.
-    Only allows deletion of specs_* jobs owned by the requesting user.
-    """
-    if not job_id or not owner_email:
-        return False
-
-    owner_email = str(owner_email).strip().lower()
-    if not job_id.startswith("specs_"):
-        return False
-
-    job_dir = BASE_JOBS_DIR / job_id
-    if not job_dir.exists() or not job_dir.is_dir():
-        return False
-
-    sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"]) or {}
-    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-
-    if not job_owner or job_owner != owner_email:
-        return False
-
-    import shutil
-    try:
-        shutil.rmtree(job_dir, ignore_errors=False)
-        print(f">>> deleted specs temp job folder: {job_dir}")
-        return True
-    except Exception as e:
-        print(f">>> failed deleting specs temp job folder {job_dir}: {e}")
-        return False
-
 def _natural_key(p: Path):
-    """Generate a natural sort key so 'page2' sorts before 'page10'."""
+    # Sort like page2 before page10
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 @anvil.server.callable
@@ -1740,7 +1419,6 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
 
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
-    """RPC callable: return job-relative paths of per-panel review overlay PNGs."""
     if not job_id:
         return []
     job_root = (BASE_JOBS_DIR / job_id).resolve()
@@ -1819,7 +1497,6 @@ def vm_set_watchdog_timeout(minutes: int) -> dict:
 
 @anvil.server.callable
 def vm_get_watchdog_timeout() -> int:
-  """RPC callable: return the current watchdog timeout in minutes."""
   return int(WATCHDOG_TIMEOUT_MIN)
 
 def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[int | None, int]:
@@ -1890,54 +1567,8 @@ def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[in
     return (None, active_count)
 
 @anvil.server.callable
-def vm_get_job_result(job_id: str, owner_email: str) -> dict:
-    """
-    Fetch the completed result for a job.
-    This is separate from vm_get_job_status so polling stays lightweight.
-    """
-    if not job_id or not owner_email:
-        return {
-            "ok": False,
-            "error": "job_id and owner_email are required"
-        }
-
-    owner_email = str(owner_email or "").strip().lower()
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-
-    st = _json_read_or_none(sp["status"])
-    if not st:
-        return {
-            "ok": False,
-            "error": f"Unknown job_id {job_id}"
-        }
-
-    job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-
-    if not owner_email or not job_email or owner_email != job_email:
-        return {
-            "ok": False,
-            "error": "Owner mismatch"
-        }
-
-    state = str(st.get("state") or "").strip().lower()
-    if state != "done":
-        return {
-            "ok": False,
-            "error": f"Job is not done yet. Current state: {state}"
-        }
-
-    result = _json_read_or_none(sp["result"]) or {}
-
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "result": result
-    }
-
-@anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
-    """Status primarily from disk; does not return final result. Enforces ownership by email."""
+    """Status primarily from disk; returns result when done. Enforces ownership by email."""
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
 
@@ -1966,13 +1597,8 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         return {"state": "canceled", **node_hint}
 
     if state == "done":
-        return {
-            "state": "done",
-            "job_id": job_id,
-            "progress": 100.0,
-            "result_ready": True,
-            **node_hint
-        }
+        res = _json_read_or_none(sp["result"]) or {}
+        return {"state": "done", "result": res, **node_hint}
     if state == "error":
         out = {
             "state": "error",
@@ -2021,10 +1647,6 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
     try:
         for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
             if not d.is_dir():
-                continue
-
-            # Hide specs jobs from My Jobs Page
-            if d.name.startswith("specs_"):
                 continue
 
             st = _json_read_or_none(_status_paths(d)["status"]) or {}

@@ -1,6 +1,6 @@
-# OcrLibrary/PanelHeaderParserV9.py
+# OcrLibrary/PanelHeaderParserV11.py
 from __future__ import annotations
-import os, re, cv2, json, numpy as np
+import os, re, cv2, json, difflib, numpy as np
 from typing import Dict, List, Tuple, Optional
 
 try:
@@ -14,7 +14,7 @@ from OcrLibrary.ocr_timeout import readtext_with_timeout
 
 class PanelParser:
     """
-    Panel Header Parser V9 
+    Panel Header Parser V11
     - Robust label/value association with wrong-context penalties
     - Handles 65kA / 65000 A / 480Y/277V / 277/480V / 208/120, etc.
     - Clamps header to label cluster to avoid breaker table bleed
@@ -43,48 +43,58 @@ class PanelParser:
 
     # ===== Label-led first, value-led fallback only if shape is very strong =====
     _GATE = {
-        "LBL_MIN": {          # minimum label affinity when labels for that role exist
-            "VOLTAGE": 0.22,
-            "BUS":     0.20,
-            "MAIN":    0.20,
-            "AIC":     0.20,
-            "NAME":    0.15,
+        "LBL_MIN": {
+            "VOLTAGE":   0.22,
+            "BUS":       0.20,
+            "MAIN":      0.20,
+            "AIC":       0.20,
+            "NAME":      0.15,
+            "MOUNTING":  0.00,
+            "ENCLOSURE": 0.00,
         },
-        "SHAPE_STRONG": {     # minimum shape for "value-led override" when labels exist but are weak/misleading
-            "VOLTAGE": 0.88,
-            "BUS":     0.82,
-            "MAIN":    0.82,
-            "AIC":     0.85,
-            "NAME":    0.78,
+        "SHAPE_STRONG": {
+            "VOLTAGE":   0.88,
+            "BUS":       0.82,
+            "MAIN":      0.82,
+            "AIC":       0.85,
+            "NAME":      0.78,
+            "MOUNTING":  0.70,
+            "ENCLOSURE": 0.70,
         },
-        "SHAPE_STRONG_NO_LABEL": {  # stricter when no labels exist on page at all for that role
-            "VOLTAGE": 0.90,
-            "BUS":     0.85,
-            "MAIN":    0.85,
-            "AIC":     0.88,
-            "NAME":    0.82,
+        "SHAPE_STRONG_NO_LABEL": {
+            "VOLTAGE":   0.90,
+            "BUS":       0.85,
+            "MAIN":      0.85,
+            "AIC":       0.88,
+            "NAME":      0.82,
+            "MOUNTING":  0.70,
+            "ENCLOSURE": 0.70,
         },
-        "CONF_MIN_NO_LABEL": {  # minimum OCR confidence when running value-led in unlabeled drawings
-            "VOLTAGE": 0.45,
-            "BUS":     0.45,
-            "MAIN":    0.45,
-            "AIC":     0.40,
-            "NAME":    0.45,
+        "CONF_MIN_NO_LABEL": {
+            "VOLTAGE":   0.45,
+            "BUS":       0.45,
+            "MAIN":      0.45,
+            "AIC":       0.40,
+            "NAME":      0.45,
+            "MOUNTING":  0.45,
+            "ENCLOSURE": 0.45,
         },
-        "MIN_SHAPE_ALWAYS": {   # even label-led picks must at least look like the right kind of value
-            "VOLTAGE": 0.60,    # singles are ~0.62, pairs ~0.92 in the collector
-            "BUS":     0.65,    # bare nums are ~0.68, unit amps ~0.90
-            "MAIN":    0.65,
-            "AIC":     0.75,    # AIC shapes are 0.85-0.90 typically
-            "NAME":    0.55,    # the name injector/logic already filters heavily
+        "MIN_SHAPE_ALWAYS": {
+            "VOLTAGE":   0.60,
+            "BUS":       0.65,
+            "MAIN":      0.65,
+            "AIC":       0.75,
+            "NAME":      0.55,
+            "MOUNTING":  0.60,
+            "ENCLOSURE": 0.60,
         },
-        "WRONG_MAX": 0.55,    # if candidate is too close to WRONG labels, reject unless label affinity is strong
+        "WRONG_MAX": 0.55,
     }
 
     # ====== Label families (regex) ======
     _LABELS = {
         "VOLTAGE": [
-            r"\bVOLT(AGE|S)?\b", r"\bVOLTS?\b", r"\bV\b",
+            r"\bVOLT(AGE|S)?\b", r"\bVOLTS?\b", r"\bVAC\b", r"\bVDC\b", r"\bV\b",
             r"\bPH(ASE)?\b", r"\bWIRE(S)?\b", r"\bØ\b"
         ],
 
@@ -100,7 +110,17 @@ class PanelParser:
                  r"\bMLO\b", r"\bMAIN\s*LUGS?\b", r"\bMAIN\s*TYPE\b", r"\bMAINS?\b", r"\bMAIN\b"
         ],
 
-        # NEW: generic rating labels (used only when BUS/MAIN explicit labels are missing)
+        "MOUNTING": [
+            r"\bMOUNT(?:ING)?\b",
+            r"\bM0UNT(?:ING)?\b",
+        ],
+
+        "ENCLOSURE": [
+            r"\bENCLOSURE\b",
+            r"\bENCL(?:OSURE)?\b",
+        ],
+
+        # Generic rating labels (used only when BUS/MAIN explicit labels are missing)
         "RATING": [
             r"\bPANEL\s*RATING\b",
             r"\bAMPACITY\b",
@@ -112,7 +132,19 @@ class PanelParser:
             r"\bINTERRUPTING\s*RATING\b", r"\bAVAILABLE\s*FAULT\s*CURRENT\b", r"\bFAULT\s*CURRENT\b",
             r"\bSYMMETRICAL\b"
         ],
-        "NAME": [r"\bPANEL\s*DESIGNATION\b", r"\bDESIGNATION\b", r"\bPANEL(BOARD)?\b", r"\bBOARD\b", r"\bPANEL\s*:?\b", r"\bDISTRIBUTION\s*PANEL\b"],
+        "NAME": [
+            r"\bPANEL\s*DESIGNATION\b",
+            r"\bDESIGNATION\b",
+
+            # strong explicit label forms
+            r"\bPANEL\s*:\b",
+            r"\bPANELBOARD\s*:\b",
+            r"\bBOARD\s*:\b",
+
+            # weaker generic forms
+            r"\bDISTRIBUTION\s*PANEL\b",
+            r"\bPANEL\b",
+        ],
         "WRONG": [
             r"\bNOTES?\b", r"\bTABLE\b", r"\bSCHEDULE\b", r"\bSIZE\s*\(??A\)?\b", r"\bCIRCUIT\b",
             r"\bCAT(ALOG)?\b", r"\bDWG\b", r"\bREV\b", r"\bDATE\b"
@@ -125,10 +157,85 @@ class PanelParser:
         "BUS":     dict(W_shape=0.55, W_conf=0.15, W_lbl=0.18, W_side=0.09, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "MAIN":    dict(W_shape=0.55, W_conf=0.15, W_lbl=0.20, W_side=0.11, W_ctx=0.05, W_wrong=0.15, W_y=0.00),
         "AIC":     dict(W_shape=0.60, W_conf=0.12, W_lbl=0.22, W_side=0.12, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
-        "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35)
+        "NAME":    dict(W_shape=0.55, W_conf=0.10, W_lbl=0.15, W_side=0.12, W_ctx=0.00, W_wrong=0.08, W_y=0.35),
+        "MOUNTING": dict(W_shape=0.55, W_conf=0.12, W_lbl=0.24, W_side=0.14, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
+        "ENCLOSURE": dict(W_shape=0.55, W_conf=0.12, W_lbl=0.24, W_side=0.14, W_ctx=0.08, W_wrong=0.12, W_y=0.00),
     }
 
-    _THRESH = {"VOLTAGE":0.55, "BUS":0.54, "MAIN":0.54, "AIC":0.54, "NAME":0.50}
+    VOLTAGE_CANONICAL_MAP = {
+        120: [
+            "120V",
+            "120 VOLTS",
+        ],
+        120240: [
+            "120/240V",
+            "120/240",
+            "240/120V",
+            "240/120",
+        ],
+        208: [
+            "208V",
+            "208 VOLTS",
+            "208/120V",
+            "208/120",
+            "208Y/120V",
+            "208Y/120",
+            "120/208V",
+            "120/208",
+            "120/208Y",
+            "120V/208Y",
+            "120/208 WYE",
+            "208/120 WYE",
+            "208Y120V",
+            "120208",
+            "208120",
+        ],
+        240: [
+            "240V",
+            "240 VOLTS",
+        ],
+        480: [
+            "480V",
+            "480 VOLTS",
+            "480/277V",
+            "480/277",
+            "480Y/277V",
+            "480Y/277",
+            "277/480V",
+            "277/480",
+            "277/480 WYE",
+            "480/277 WYE",
+            "480Y277V",
+            "277480",
+            "480277",
+        ],
+        600: [
+            "600V",
+            "600 VOLTS",
+            "600/347V",
+            "600/347",
+            "600Y/347V",
+            "600Y/347",
+            "347/600V",
+            "347/600",
+            "347/600 WYE",
+            "600/347 WYE",
+            "600Y347V",
+            "347600",
+            "600347",
+        ],
+    }
+
+    VOLTAGE_OUTPUT_MAP = {
+        120: 120,
+        120240: 120,
+        208: 208,
+        240: 240,
+        480: 480,
+        600: 600,
+    }
+
+    _THRESH = {"VOLTAGE":0.55, "BUS":0.54, "MAIN":0.54, "AIC":0.54, "NAME":0.50, "MOUNTING": 0.52, "ENCLOSURE": 0.52,}
 
     _SIGMA_PX = 80.0
 
@@ -159,43 +266,37 @@ class PanelParser:
 
     def _trim_voltage_to_allowed(self, txt: str | None) -> int | None:
         """
-        Return ONLY one of {120, 208, 240, 480, 600} if present.
-
-        Rules:
-        - If the token contains BOTH 120 and 240 (either order) → choose 120
-        (the ONLY case where 120 is allowed to be the winner)
-        - For common wye pairs like 120/208 or 277/480 → choose the higher system voltage (208, 480)
-        - Otherwise:
-            - if voltage_first_number_only=True → choose the first occurring allowed voltage
-            - else → choose the highest occurring allowed voltage
+        Return ONLY one of {120, 208, 240, 480, 600} using:
+        1) strong normalization
+        2) snap to closest canonical voltage family
+        3) fallback direct parsing if needed
         """
         if not txt:
             return None
-        import re
 
         s = self._normalize_digits(str(txt).upper())
         s = self._normalize_voltage_text(s)
 
+        snapped = self._snap_voltage_text(s)
+        if snapped is not None:
+            return self.VOLTAGE_OUTPUT_MAP.get(snapped)
+
         allowed = {120, 208, 240, 480, 600}
 
-        # If this token contains an explicit voltage pair, resolve it.
+        # direct explicit pair fallback
         pair = re.search(r'(?<!\d)(\d{3})\s*[YV]?\s*/\s*(\d{3})(?!\d)', s)
         if pair:
             a = int(pair.group(1))
             b = int(pair.group(2))
-
             if a in allowed and b in allowed:
-                # ONLY special case where 120 wins: 120/240 (either order)
                 if {a, b} == {120, 240}:
                     return 120
-
-                # Everything else: system voltage is the higher one
                 return max(a, b)
 
-        # Otherwise collect allowed voltages in appearance order
+        # direct single-number fallback
         allowed_vals = ("600", "480", "240", "208", "120")
-
         matches: list[tuple[int, int]] = []
+
         for v in allowed_vals:
             m = re.search(rf'(?<!\d){v}(?!\d)', s)
             if m:
@@ -215,7 +316,6 @@ class PanelParser:
             return vals_in_order[0]
 
         return max(vals_in_order)
-
 
     def parse_panel(
         self,
@@ -316,10 +416,19 @@ class PanelParser:
         # ===== Association pipeline =====
         labels_map = self._collect_label_candidates(items)
         value_cands = self._collect_value_candidates(items)
+
+        # --- Strong colon-led extractors for non-NAME header values ---
+        for _role in ("VOLTAGE", "BUS", "MAIN", "AIC", "MOUNTING", "ENCLOSURE"):
+            colon_val = self._extract_value_after_colon_label(lines, _role)
+            if colon_val:
+                value_cands.setdefault(_role, []).append(colon_val)
+
         # --- Simple NAME injector (top 1–2 lines) ---
         simple_name = self._simple_name_from_top(lines)
         if simple_name:
             value_cands.setdefault("NAME", []).append(simple_name)
+
+        special_header_type = self._detect_special_header_type(items, lines)
 
         # Clamp candidate values to above/beside the header label cluster (avoid table bleed)
         header_labels = (labels_map.get("VOLTAGE", []) +
@@ -331,7 +440,7 @@ class PanelParser:
             med_h = float(np.median(lbl_heights)) if lbl_heights else 18.0
             header_bottom = max(L["y2"] for L in header_labels) + int(1.2 * med_h)
             header_bottom = min(header_bottom, by2)
-            for _role in ("BUS", "MAIN", "AIC", "VOLTAGE", "NAME"):
+            for _role in ("BUS", "MAIN", "AIC", "VOLTAGE", "MOUNTING", "ENCLOSURE", "NAME"):
                 value_cands[_role] = [c for c in value_cands.get(_role, []) if c["y2"] <= header_bottom]
 
         main_mode = self._scan_main_mode(items)  # "MLO" / "MCB" / None
@@ -339,7 +448,7 @@ class PanelParser:
 
         ranked_map = {}
         chosen_map = {}
-        ROLE_ORDER = ("VOLTAGE", "AIC", "BUS", "MAIN", "NAME")
+        ROLE_ORDER = ("VOLTAGE", "AIC", "BUS", "MAIN", "MOUNTING", "ENCLOSURE", "NAME")
 
         # ===== Consume-as-we-go =====
         used = set()
@@ -430,6 +539,41 @@ class PanelParser:
 
             return best if best is not None and best_iou >= 0.70 else c
 
+        def _is_colon_labeled(c: dict | None) -> bool:
+            return bool(c and c.get("fromColonLabel"))
+
+        def _overlaps_chosen_name(c: dict | None) -> bool:
+            """
+            True if candidate overlaps the currently chosen NAME box.
+            Used to stop later BUS/MAIN reassignment from stealing amp-like text
+            out of a NAME-owned colon label/value line.
+            """
+            if not c:
+                return False
+
+            nm = chosen_map.get("NAME")
+            if not nm:
+                return False
+
+            ax1, ay1, ax2, ay2 = float(c["x1"]), float(c["y1"]), float(c["x2"]), float(c["y2"])
+            bx1, by1, bx2, by2 = float(nm["x1"]), float(nm["y1"]), float(nm["x2"]), float(nm["y2"])
+
+            ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+            ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+            if ix2 <= ix1 or iy2 <= iy1:
+                return False
+
+            inter = (ix2 - ix1) * (iy2 - iy1)
+            area_a = max(1.0, (ax2 - ax1) * (ay2 - ay1))
+            area_b = max(1.0, (bx2 - bx1) * (by2 - by1))
+            iou = inter / float(area_a + area_b - inter)
+
+            # also treat same-line horizontal overlap as suspicious, even if IoU is modest
+            same_row = abs((ay1 + ay2) * 0.5 - (by1 + by2) * 0.5) <= max(18.0, 0.6 * min(ay2 - ay1, by2 - by1))
+            horiz_overlap = min(ax2, bx2) - max(ax1, bx1)
+
+            return (iou >= 0.18) or (same_row and horiz_overlap > 0)
+        
         def _conflicts_with_role(role: str, text: str) -> bool:
             """
             Hard exclusions to prevent role confusion during value-led fallback.
@@ -440,14 +584,16 @@ class PanelParser:
 
             t = self._normalize_digits(str(text).upper()).strip()
             tN = self._normalize_voltage_text(t)
+            snapped_voltage = self._snap_voltage_text(tN)
 
-            is_amps = bool(re.search(r"\b\d{1,4}\s*(A\.?|AMPS?\.?)\b", t))
+            is_amps = bool(re.search(r"\b\d{1,4}\s*(A\.?|AMP\.?|AMPS?\.?)\b", t))
             is_aic  = (
-                bool(re.search(r"\b\d{2,3}\s*(KAIC|AIC|KA|K)\b", re.sub(r"\s+", "", t)))
+                bool(re.search(r"\b\d{2,3}\s*(KAMP|KAIC|AIC|KA|K)\b", re.sub(r"\s+", "", t)))
                 or bool(re.search(r"\b\d{2,3}[,]?\d{3}\b", t))
             )
             is_vpair = (
-                bool(re.search(r"\b[1-6]\d{2,3}\s*[YV]?\s*/\s*[1-6]?\d{2,3}\b", tN))
+                snapped_voltage is not None
+                or bool(re.search(r"\b[1-6]\d{2,3}\s*[YV]?\s*/\s*[1-6]?\d{2,3}\b", tN))
                 or bool(re.search(r"\b[1-6]\d{2,3}\s*V\b", tN))
             )
             has_volt_words = bool(re.search(r"\b(VOLT|VOLTS|V)\b", tN))
@@ -465,8 +611,13 @@ class PanelParser:
                 return is_vpair or has_volt_words
 
             if role == "NAME":
-                # never allow amps/aic/voltage-shaped tokens to be treated as a panel name
                 return is_amps or is_aic or is_vpair or has_volt_words
+
+            if role == "MOUNTING":
+                return is_amps or is_aic or is_vpair
+
+            if role == "ENCLOSURE":
+                return is_amps or is_aic or is_vpair
 
             return False
 
@@ -486,6 +637,12 @@ class PanelParser:
             wrong = float(p.get("wrong", 0.0))
             conf  = float(c.get("conf", 0.0))
 
+            # Bare 50 is risky because it can be a random schedule/header number.
+            # Allow it only when strongly tied to BUS/MAIN/RATING label logic.
+            if role in ("BUS", "MAIN") and c.get("requiresStrongAmpLabel"):
+                if lbl < 0.60 and not bool(c.get("fromColonLabel")):
+                    return False
+    
             has_role_labels = bool(labels_map.get(role))
 
             LBL_MIN  = float(self._GATE["LBL_MIN"].get(role, 0.20))
@@ -503,20 +660,38 @@ class PanelParser:
             if role == "AIC":
                 t = self._normalize_digits(str(c.get("text", "")).upper()).strip()
 
-                # Reject normal amp ratings like 225A / 400A / 1200A from ever becoming AIC
-                m_small_amps = re.search(r"(?<!\d)(\d{2,4})\s*A\b", t)
-                if m_small_amps:
-                    nA = int(m_small_amps.group(1))
-                    # AIC-as-amps is typically 10,000A+ (10kA)
-                    if nA < 5000:
-                        return False
-        
+                # Strong AIC-only handling for amp-form interrupt ratings like:
+                #   10,000 A
+                #   22,000 A
+                #   65,000 A
+                #
+                # These should ONLY be allowed when clearly tied to the AIC label.
                 has_aic_words = bool(re.search(r"\b(AIC|KAIC|SCCR|INTERRUPTING|FAULT)\b", t))
-                looks_like_aic_amps = bool(re.search(r"\b\d{2,3}[,]?\d{3}\s*A\b", t))  # 10,000 A / 65000 A
+                looks_like_aic_amps = bool(re.search(r"\b(\d{2,3}[,]?\d{3})\s*A\b", t))  # 10,000 A / 65000 A
+                aic_amp_match = re.search(r"\b(\d{2,3}[,]?\d{3})\s*A\b", t)
 
-                # If it's amps-form AND doesn't contain AIC-ish words, only allow when it's near the AIC label
-                if looks_like_aic_amps and not has_aic_words:
-                    if lbl < 0.22:   # tune: this is the "near label" gate
+                if aic_amp_match:
+                    nA = int(aic_amp_match.group(1).replace(",", ""))
+
+                    # Reject weird non-thousand-rounded values
+                    if (nA % 1000) != 0:
+                        return False
+
+                    # Reject anything too small to be interrupting rating amps
+                    if nA < 10000:
+                        return False
+
+                    # If this is the plain amps form (10,000 A) without AIC words,
+                    # require VERY strong AIC label support or colon-led extraction.
+                    if not has_aic_words:
+                        if not (lbl >= 0.85 or bool(c.get("fromColonLabel"))):
+                            return False
+
+                # Reject normal amp ratings like 225A / 400A / 1200A from ever becoming AIC
+                m_small_amps = re.search(r"(?<![\d,])([1-9]\d{1,3})(?![\d,])\s*A\b", t)
+                if m_small_amps:
+                    n_small = int(m_small_amps.group(1))
+                    if n_small < 5000:
                         return False
 
             # Hard conflict check
@@ -606,6 +781,30 @@ class PanelParser:
                 chosen_map[role] = None
         print("AFTER LOOP NAME =", chosen_map.get("NAME", {}).get("text") if chosen_map.get("NAME") else None)
 
+        # --- Mutual exclusivity guard for colon-led BUS/MAIN ---
+        # If one amps role is colon-labeled, the other amps role must also be colon-labeled
+        # to remain distinct. Otherwise, clear the non-colon one and let the later BUS/MAIN
+        # reconciliation logic handle shared fallback cleanly.
+        bus_pick = chosen_map.get("BUS")
+        main_pick = chosen_map.get("MAIN")
+
+        bus_colon = _is_colon_labeled(bus_pick)
+        main_colon = _is_colon_labeled(main_pick)
+
+        if bus_colon and main_pick and not main_colon:
+            _set_role("MAIN", None)
+
+        elif main_colon and bus_pick and not bus_colon:
+            _set_role("BUS", None)
+
+        # If NAME was claimed from a colon label, do not allow MAIN/BUS to reuse
+        # overlapping text from that same name region.
+        if _is_colon_labeled(chosen_map.get("NAME")):
+            if chosen_map.get("MAIN") and _overlaps_chosen_name(chosen_map["MAIN"]):
+                _set_role("MAIN", None)
+            if chosen_map.get("BUS") and _overlaps_chosen_name(chosen_map["BUS"]):
+                _set_role("BUS", None)
+
         def _looks_like_electrical_value_for_name(s: str) -> bool:
             """
             Return True only when the token is *clearly* an electrical rating/value
@@ -639,7 +838,7 @@ class PanelParser:
                 return True
 
             # AIC/kA tokens
-            if re.search(r"(?<!\d)\d{2,3}\s*(KAIC|AIC|KA|K)\b", t):
+            if re.search(r"(?<!\d)\d{2,3}\s*(KAMP|KAIC|AIC|KA|K)\b", t):
                 return True
 
             # Large AIC-like raw amps (65,000 etc)
@@ -673,7 +872,7 @@ class PanelParser:
                 t_nos = re.sub(r"\s+", "", up)
 
                 # Match 2–3 digit kA-style values with K/KA/AIC/KAIC suffix
-                mk = re.search(r'(?<!\d)(\d{2,3})(?:KAIC|AIC|KA|K)\b', t_nos)
+                mk = re.search(r'(?<!\d)(\d{2,3})(?:KAMP|KAIC|AIC|KA|K)\b', t_nos)
                 if not mk:
                     continue
 
@@ -718,6 +917,12 @@ class PanelParser:
         for c in _unit_pool:
             if not bool(c.get("has_unit")):
                 continue
+
+            # If NAME was claimed from a colon-owned label/value, do not allow later
+            # BUS/MAIN reassignment to reuse overlapping amp-looking text from that same source area.
+            if _is_colon_labeled(chosen_map.get("NAME")) and _overlaps_chosen_name(c):
+                continue
+
             k = _cand_key(c)   # <-- use the same identity logic as the "used" set
             if k in _seen:
                 continue
@@ -747,6 +952,10 @@ class PanelParser:
 
             bus_pick = None
             for (c, _, _, _) in bus_sorted:
+                # Never steal from a colon-owned NAME region
+                if _is_colon_labeled(chosen_map.get("NAME")) and _overlaps_chosen_name(c):
+                    continue
+
                 # don't steal a token already used by VOLTAGE/AIC/NAME
                 if _is_used(c):
                     # allow reuse only if it's currently used by BUS/MAIN (we're about to replace anyway),
@@ -767,6 +976,10 @@ class PanelParser:
 
                 main_pick = None
                 for (c, _, _, _) in main_sorted:
+                    # Never steal from a colon-owned NAME region
+                    if _is_colon_labeled(chosen_map.get("NAME")) and _overlaps_chosen_name(c):
+                        continue
+
                     if _is_used(c):
                         if any(chosen_map.get(r) and _cand_key(chosen_map[r]) == _cand_key(c) for r in _protected_roles):
                             continue
@@ -866,10 +1079,108 @@ class PanelParser:
             # No explicit-unit amps → keep ranked picks but still apply mode enforcement
             pass
 
+        # Re-apply colon-led BUS/MAIN exclusivity AFTER the unit-first amps reassignment,
+        # because that later pass can otherwise reintroduce a non-colon amps pick.
+        bus_pick = chosen_map.get("BUS")
+        main_pick = chosen_map.get("MAIN")
+
+        bus_colon = _is_colon_labeled(bus_pick)
+        main_colon = _is_colon_labeled(main_pick)
+
+        if bus_colon and main_pick and not main_colon:
+            _set_role("MAIN", None)
+        elif main_colon and bus_pick and not bus_colon:
+            _set_role("BUS", None)
+
         # Final mode enforcement (last word)
         if (main_mode or "").upper() == "MLO":
             chosen_map["MAIN"] = None
-        # If both still None and we had any amps tokens, BUS fallback will run below as before.
+
+        # ===== Mode-aware BUS/MAIN reconciliation =====
+        mode_upper = (main_mode or "").upper()
+
+        def _norm_txt(c):
+            return self._normalize_digits(str((c or {}).get("text", "")).upper())
+
+        def _is_mains_rating(c):
+            t = _norm_txt(c)
+            return bool(re.search(r'\bMAINS?\s*RATING\b|\bMAIN\s*RATING\b', t))
+
+        def _is_main_device_rating(c):
+            t = _norm_txt(c)
+            return bool(re.search(r'\bMCB\b|\bM\W*C\W*B\b|\bMAIN\s*BREAKER\b|\bMAIN\s*DEVICE\b', t))
+
+        def _looks_amp_like(c):
+            if not c:
+                return False
+            t = _norm_txt(c)
+            if self._snap_voltage_text(self._normalize_voltage_text(t)) is not None:
+                return False
+            return bool(
+                re.search(r"\b([1-9]\d{1,3})\s*(A|AMP|AMPS|MAP)\b", t)
+                or re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', t)
+            )
+
+        bus_ranked = list(ranked_map.get("BUS") or [])
+        main_ranked = list(ranked_map.get("MAIN") or [])
+
+        if mode_upper == "MLO":
+            # No main breaker on MLO panels
+            _set_role("MAIN", None)
+
+            # Prefer explicit Mains Rating as BUS
+            mlo_bus = None
+            for c in bus_ranked + main_ranked:
+                if _is_mains_rating(c) and _looks_amp_like(c):
+                    mlo_bus = _as_ranked("BUS", c)
+                    break
+
+            if mlo_bus is not None:
+                _set_role("BUS", mlo_bus)
+            else:
+                # fallback: best amp-looking candidate becomes BUS
+                for c in bus_ranked + main_ranked:
+                    if _looks_amp_like(c):
+                        _set_role("BUS", _as_ranked("BUS", c))
+                        break
+
+        elif mode_upper == "MCB":
+            # Prefer MCB/Main Breaker rating for MAIN
+            mcb_main = None
+            for c in main_ranked + bus_ranked:
+                if _is_main_device_rating(c) and _looks_amp_like(c):
+                    mcb_main = _as_ranked("MAIN", c)
+                    break
+
+            if mcb_main is not None:
+                _set_role("MAIN", mcb_main)
+
+            # Prefer Mains Rating for BUS
+            mcb_bus = None
+            for c in bus_ranked + main_ranked:
+                if _is_mains_rating(c) and _looks_amp_like(c):
+                    # don't reuse the MAIN token if a distinct mains rating exists
+                    if not chosen_map.get("MAIN") or _cand_key(c) != _cand_key(chosen_map["MAIN"]):
+                        mcb_bus = _as_ranked("BUS", c)
+                        break
+
+            if mcb_bus is not None:
+                _set_role("BUS", mcb_bus)
+
+            # If BUS still missing, allow fallback from MAIN only when there's just one real amp source
+            if not chosen_map.get("BUS") and chosen_map.get("MAIN"):
+                distinct_amp_keys = []
+                seen_amp = set()
+                for c in bus_ranked + main_ranked:
+                    if not _looks_amp_like(c):
+                        continue
+                    k = _cand_key(c)
+                    if k not in seen_amp:
+                        seen_amp.add(k)
+                        distinct_amp_keys.append(k)
+
+                if len(distinct_amp_keys) == 1:
+                    _set_role("BUS", chosen_map["MAIN"], allow_share_with="MAIN")
 
         # ===== NAME fallback: only if we have a strong designation/name label present =====
         if not chosen_map.get("NAME"):
@@ -928,8 +1239,27 @@ class PanelParser:
                 main_ranked = list(ranked_map.get("MAIN") or [])
 
                 def _amps_from_text(t: str) -> Optional[int]:
-                    m = re.search(r"\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b", (t or "").upper())
-                    return int(m.group(1)) if m else None
+                    u = self._normalize_digits(str(t).upper())
+
+                    # reject voltage-looking text
+                    uN = self._normalize_voltage_text(u)
+                    if (
+                        self._snap_voltage_text(uN) is not None
+                        or re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', uN)
+                        or re.search(r'\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b', u)
+                        or re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', uN)
+                    ):
+                        return None
+
+                    m = re.search(r"\b([1-9]\d{1,3})\s*(A|AMP|AMPS|MAP)\b", u)
+                    if m:
+                        return int(m.group(1))
+
+                    m2 = re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', u)
+                    if m2:
+                        return int(m2.group(1))
+
+                    return None
 
                 # Prefer explicit-unit amps first (then fall back to any amps-looking)
                 unit_first = [
@@ -972,7 +1302,7 @@ class PanelParser:
                         txtN,
                     )
                     has_volty_ctx = bool(
-                        re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|V)\b', txtN)
+                        re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|VAC|VDC|V)\b', txtN)
                     )
                     single = (
                         re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
@@ -985,7 +1315,7 @@ class PanelParser:
                         continue
 
                     # accept "###A"/"### A" or a clean bare number 60..1200
-                    m = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)\s*(?:A|AMPS?)\b", up)
+                    m = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)\s*(?:A|AMP|AMPS)\b", up)
                     n = None
                     if m:
                         n = int(m.group(1))
@@ -1084,18 +1414,27 @@ class PanelParser:
                     # Existing behavior
                     voltage_val = max(lone_hits)
 
-        # BUS (accept with or without unit)
+        # BUS (accept with or without unit, but never from voltage-looking text)
         bus_amp = None
         if chosen_map["BUS"]:
             tU = self._normalize_digits(chosen_map["BUS"]["text"].upper())
-            # allow 2–4 digit amps (10–9999), we’ll clamp later
-            m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMPS?)\b", tU)
-            if m:
-                bus_amp = _to_int(m.group(1))
-            else:
-                m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', tU)
-                if m2:
-                    bus_amp = _to_int(m2.group(1))
+            tN = self._normalize_voltage_text(tU)
+
+            looks_like_voltage = (
+                self._snap_voltage_text(tN) is not None
+                or bool(re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', tN))
+                or bool(re.search(r'\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b', tU))
+                or bool(re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', tN))
+            )
+
+            if not looks_like_voltage:
+                m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS)\b", tU)
+                if m:
+                    bus_amp = _to_int(m.group(1))
+                else:
+                    m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', tU)
+                    if m2:
+                        bus_amp = _to_int(m2.group(1))
 
         # MAIN
         main_amp = None
@@ -1103,14 +1442,24 @@ class PanelParser:
         if chosen_map["MAIN"]:
             txtU0 = chosen_map["MAIN"]["text"].upper()
             txtU  = self._normalize_digits(txtU0)
-            # allow 2–4 digit amps (10–9999), we’ll clamp later
-            m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMPS?)\b", txtU)
-            if m:
-                main_amp = _to_int(m.group(1))
-            else:
-                m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', txtU)
-                if m2:
-                    main_amp = _to_int(m2.group(1))
+            txtN  = self._normalize_voltage_text(txtU)
+
+            looks_like_voltage = (
+                self._snap_voltage_text(txtN) is not None
+                or bool(re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', txtN))
+                or bool(re.search(r'\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b', txtU))
+                or bool(re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', txtN))
+            )
+
+            if not looks_like_voltage:
+                m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS|MAP)\b", txtU)
+                if m:
+                    main_amp = _to_int(m.group(1))
+                else:
+                    m2 = re.search(r'(?<!\d)([1-9]\d{1,3})(?!\d)', txtU)
+                    if m2:
+                        main_amp = _to_int(m2.group(1))
+
             if re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txtU):
                 self.last_main_type = "MLO"
             elif re.search(r"\b(MCB|M\W*C\W*B|MAIN\s*BREAKER)\b", txtU):
@@ -1141,6 +1490,18 @@ class PanelParser:
                         if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', t_fix):
                             int_rating_ka = n
 
+        mounting_style = None
+        mounting_enclosure = None
+        if chosen_map.get("MOUNTING"):
+            mounting_style, mounting_enclosure = self._normalize_mounting_output(
+                chosen_map["MOUNTING"]["text"]
+            )
+
+        enclosure_val = None
+        if mounting_enclosure is None and chosen_map.get("ENCLOSURE"):
+            enclosure_val = self._normalize_enclosure_output(
+                chosen_map["ENCLOSURE"]["text"]
+            )
 
         # Prefer the explicit tag on the CHOSEN MAIN value (if present).
         # If that’s absent, fall back to the global scan.
@@ -1183,17 +1544,30 @@ class PanelParser:
         attrs = {
             "amperage": bus_i,
             "voltage": voltage_i,
-            "intRating": aic_i,          # kA as plain int
+            "intRating": aic_i,
             "detected_breakers": [],
         }
+
         if mode != "MLO":
             attrs["mainBreakerAmperage"] = main_i
+
+        if mounting_style is not None:
+            attrs["trimStyle"] = mounting_style
+
+        if mounting_enclosure is not None:
+            attrs["enclosure"] = mounting_enclosure
+        elif enclosure_val is not None:
+            attrs["enclosure"] = enclosure_val
 
         result = {
             "type": "panelboard",
             "name": name,
             "attrs": attrs,
         }
+
+        if special_header_type:
+            result["specialHeaderType"] = special_header_type
+            result["panelNote"] = special_header_type.get("note")
 
         # ---- expose winning boxes for downstream review overlays ----
         def _rect4(it):
@@ -1208,6 +1582,10 @@ class PanelParser:
             winning["bus"] = _rect4(chosen_map["BUS"])
         if chosen_map.get("MAIN"):
             winning["main"] = _rect4(chosen_map["MAIN"])
+        if chosen_map.get("MOUNTING"):
+            winning["mounting"] = _rect4(chosen_map["MOUNTING"])
+        if chosen_map.get("ENCLOSURE"):
+            winning["enclosure"] = _rect4(chosen_map["ENCLOSURE"])
         if chosen_map.get("AIC"):
             winning["aic"] = _rect4(chosen_map["AIC"])
 
@@ -1220,12 +1598,14 @@ class PanelParser:
             # ===== FULL TOKEN TRACE (labels, value-shapes, and candidate ranks) =====
             print("\n==== PANEL HEADER RAW TRACE ====")
 
-            # Map role -> human label
+            # Map role
             _role_human = {
                 "NAME": "name",
                 "VOLTAGE": "volts",
                 "BUS": "bus amps",
                 "MAIN": "main amps",
+                "MOUNTING": "mounting",
+                "ENCLOSURE": "enclosure",
                 "AIC": "AIC",
                 "WRONG": "not of interest",
             }
@@ -1234,7 +1614,7 @@ class PanelParser:
             def _key(c):
                 return (int(round(c["x1"])), int(round(c["y1"])),
                         int(round(c["x2"])), int(round(c["y2"])), (c.get("text","")).strip())
-            role_idx = {r:{} for r in ("NAME","VOLTAGE","BUS","MAIN","AIC")}
+            role_idx = {r:{} for r in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC")}
             for r in role_idx:
                 for c in ranked_map.get(r, []) or []:
                     role_idx[r][_key(c)] = float(c.get("rank", 0.0))
@@ -1253,7 +1633,7 @@ class PanelParser:
 
             # Precompile label regex
             comp_labels = {role:[re.compile(rx, re.I) for rx in self._LABELS.get(role, [])]
-                        for role in ("NAME","VOLTAGE","BUS","MAIN","AIC","WRONG")}
+                        for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC","WRONG")}
 
             for it in items:
                 raw = (it["text"] or "").strip()
@@ -1283,13 +1663,21 @@ class PanelParser:
                 re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)\b", up):
                     value_roles.append("AIC")
 
+                # Mounting
+                if re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up) or re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up):
+                    value_roles.append("MOUNTING")
+
+                # Enclosure
+                if re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up):
+                    value_roles.append("ENCLOSURE")
+
                 # Name-ish: short alphanum
                 if re.fullmatch(r"[A-Z0-9][A-Z0-9._\-\/]{0,12}", up):
                     value_roles.append("NAME")
 
                 # Candidate ranks (if any) for each role
                 ranks_bits = []
-                for role in ("NAME","VOLTAGE","BUS","MAIN","AIC"):
+                for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC"):
                     rr = _rank_for(it, role)
                     if rr is not None:
                         ranks_bits.append(f"{_role_human[role]}:{rr:.2f}")
@@ -1320,7 +1708,7 @@ class PanelParser:
 
             print("\n==== PANEL HEADER CLASSIFY (revised) ====")
             print(f"Band: y=[0,{by2}]  items={len(items)}")
-            for role in ("NAME","VOLTAGE","BUS","MAIN","AIC"):
+            for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC"):
                 lst = ranked_map.get(role, [])
                 print(f"\n[{role}] candidates (top 10):")
                 if not lst:
@@ -1336,7 +1724,7 @@ class PanelParser:
                           f'ybias={p.get("y",0):.2f}  →  rank={c["rank"]:.2f}')
 
             print("\nFinal picks:")
-            for role in ("NAME","VOLTAGE","BUS","MAIN","AIC"):
+            for role in ("NAME","VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","AIC"):
                 it = chosen_map.get(role)
                 if not it:
                     print(f"  {role}: None")
@@ -1373,6 +1761,384 @@ class PanelParser:
         u = re.sub(r'\s{2,}', ' ', u).strip()
         return u
 
+    def _normalize_mounting_output(self, s: str) -> tuple[Optional[str], Optional[str]]:
+        if not s:
+            return None, None
+
+        u = self._normalize_digits(str(s).upper())
+        u = re.sub(r"\s+", " ", u).strip()
+
+        trim_style = None
+        enclosure = None
+
+        if re.search(r"\b(FLUSH|RECESSED)\b", u):
+            trim_style = "FLUSH"
+        elif re.search(r"\bSURFACE\b", u):
+            trim_style = "SURFACE"
+
+        if re.search(r"\bNEMA\s*3R\b|\bN3R\b", u):
+            enclosure = "Nema3R"
+        elif re.search(r"\bNEMA\s*1\b|\bN1\b", u):
+            enclosure = "Nema1"
+
+        # Nema3R makes flush/surface irrelevant for downstream panel use
+        if enclosure == "Nema3R":
+            trim_style = None
+
+        return trim_style, enclosure
+    
+    def _normalize_enclosure_output(self, s: str) -> Optional[str]:
+        if not s:
+            return None
+
+        u = self._normalize_digits(str(s).upper())
+        u = re.sub(r"\s+", " ", u).strip()
+
+        if re.search(r"\bNEMA\s*3R\b|\bN3R\b|\bTYPE\s*3R\b", u):
+            return "Nema3R"
+        if re.search(r"\bNEMA\s*1\b|\bN1\b|\bTYPE\s*1\b", u):
+            return "Nema1"
+
+        return None
+    
+    def _normalize_special_header_text(self, s: str) -> str:
+        import re
+
+        u = str(s or "").upper()
+
+        # basic cleanup
+        u = u.replace("&", " AND ")
+        u = u.replace("/", " ")
+        u = u.replace("-", " ")
+        u = u.replace("_", " ")
+
+        # collapse whitespace
+        u = re.sub(r"[^A-Z0-9\s]", " ", u)
+        u = re.sub(r"\s+", " ", u).strip()
+
+        return u
+
+
+    def _special_header_word_family(self, word: str) -> str:
+        """
+        Normalize obvious word variants/plurals into one family token.
+        This avoids hardcoding every exact phrase combination.
+        """
+        w = str(word or "").upper().strip()
+        if not w: 
+            return ""
+
+        # switchboard family
+        if w in {"SWITCHBOARD", "SWITCHBOARDS", "SWBD", "SWBDS"}:
+            return "SWITCHBOARD"
+
+        # light family
+        if w in {"LIGHT", "LIGHTS", "LIGHTING"}:
+            return "LIGHT"
+
+        # fixture family
+        if w in {"FIXTURE", "FIXTURES"}:
+            return "FIXTURE"
+
+        # schedule family
+        if w in {"SCHEDULE", "SCHEDULES"}:
+            return "SCHEDULE"
+
+        # conduit family
+        if w in {"CONDUIT", "CONDUITS"}:
+            return "CONDUIT"
+
+        # wireway family
+        if w in {"WIREWAY", "WIREWAYS", "WWA", "WWB", "WWC"}:
+            return "WIREWAY"
+
+        # inverter family
+        if w in {"INVERTER", "INVERTERS", "INV"}:
+            return "INVERTER"
+
+        # interior / exterior stay as-is
+        if w in {"INTERIOR", "EXTERIOR"}:
+            return w
+
+        return w
+
+
+    def _special_header_token_set(self, s: str) -> set[str]:
+        txt = self._normalize_special_header_text(s)
+        toks = txt.split()
+        return {self._special_header_word_family(tok) for tok in toks if tok.strip()}
+
+    def _detect_special_header_type(self, items: list[dict], lines) -> Optional[dict]:
+        """
+        Detect obvious non-panel / schedule header families using normalized concept matching.
+
+        Examples matched as the same family:
+        - SWITCHBOARD / SWITCHBOARDS / SWBD
+        - LIGHT / LIGHTS / LIGHTING
+        - FIXTURE / FIXTURES
+        - SCHEDULE / SCHEDULES
+        - INVERTER / INVERTERS / INV
+
+        Guard against relational/source text like:
+        - FED FROM: MAIN SWBD
+        - FED BY: SWBD-A
+        - SOURCE: INVERTER INV-1
+        """
+        import re
+
+        FAMILY_RULES = [
+            {
+                "kind": "switchboard",
+                "note": "Switchboard detected",
+                "required_any": [
+                    {"SWITCHBOARD"},
+                ],
+            },
+            {
+                "kind": "lighting_schedule",
+                "note": "Lighting schedule detected",
+                "required_any": [
+                    {"LIGHT", "SCHEDULE"},
+                    {"LIGHT", "FIXTURE", "SCHEDULE"},
+                ],
+            },
+            {
+                "kind": "conduit_schedule",
+                "note": "Conduit schedule detected",
+                "required_any": [
+                    {"CONDUIT", "SCHEDULE"},
+                ],
+            },
+            {
+                "kind": "wireway",
+                "note": "Wireway detected",
+                "required_any": [
+                    {"WIREWAY"},
+                ],
+            },
+            {
+                "kind": "inverter",
+                "note": "Inverter detected",
+                "required_any": [
+                    {"INVERTER"},
+                    {"LIGHT", "INVERTER"},
+                ],
+            },
+        ]
+
+        NEGATIVE_CONTEXT_PATTERNS = [
+            r"\bFED\s+FROM\b",
+            r"\bFED\s+BY\b",
+            r"\bSUPPLY\s+FROM\b",
+            r"\bSUPPLY\s+BY\b",
+            r"\bSUPPLIED\s+FROM\b",
+            r"\bSUPPLIED\s+BY\b",
+            r"\bSOURCE\b",
+            r"\bCONNECTED\s+TO\b",
+            r"\bMAIN\s+TYPE\b",
+            r"\bMAINS\s+TYPE\b",
+            r"\bMAINS?\s+RATING\b",
+        ]
+
+        def _token_height(it: dict) -> int:
+            try:
+                return max(1, int(it["y2"] - it["y1"]))
+            except Exception:
+                return 1
+
+        def _line_text(ln) -> str:
+            return " ".join((tok or "").strip() for (_, tok, _) in ln.get("tokens", []))
+
+        def _is_name_label_line(cand: dict) -> bool:
+            """
+            True when a joined line appears to be describing the name/title/designation
+            of the schedule/object, not general header metadata.
+
+            Examples that should count:
+            NAME: SWITCHBOARD XYZ
+            PANEL NAME: INVERTER A
+            PANEL DESIGNATION: WW-A
+            SWITCHBOARD: 14A
+            WIREWAY: WW-A
+            INVERTER: INV-1
+            """
+            text = self._normalize_special_header_text(cand.get("text", ""))
+
+            if not text:
+                return False
+
+            # Generic name/title labels
+            if re.search(r"\b(NAME|PANEL\s+NAME|PANEL\s+DESIGNATION|DESIGNATION|TITLE)\b", text):
+                return True
+
+            # Special family used as the label itself, e.g. "SWITCHBOARD: 14A"
+            # Colon is removed by normalize, so this sees "SWITCHBOARD 14A".
+            # That is fine because this function is only used after the family rule matched.
+            if re.search(r"\b(SWITCHBOARD|SWBD|WIREWAY|WWA|WWB|WWC|INVERTER|INV)\b", text):
+                # Reject known metadata/source phrases
+                if re.search(r"\b(SUPPLY\s+FROM|SUPPLIED\s+FROM|FED\s+FROM|FED\s+BY|SOURCE|MAINS?\s+TYPE|MAIN\s+TYPE|CONNECTED\s+TO)\b", text):
+                    return False
+                return True
+
+            # Lighting/conduit schedules are naturally title phrases.
+            if re.search(r"\b(LIGHT|LIGHTING|FIXTURE|CONDUIT)\s+SCHEDULE\b", text):
+                return True
+
+            return False
+
+        def _has_negative_context(text: str, kind: str, source_type: str = "line", source_line=None, source_item=None) -> bool:
+            """
+            Reject special-header hits when the text is relational instead of title-like.
+
+            Important case:
+            FED FROM: .... MAIN SWBD
+            where the matched token may only be "MAIN SWBD" and not contain the
+            relational phrase itself.
+            """
+            up = self._normalize_special_header_text(text)
+
+            # lighting schedules are less likely to be source references
+            if kind == "lighting_schedule":
+                return False
+
+            # 1) direct text match
+            if any(re.search(rx, up, flags=re.I) for rx in NEGATIVE_CONTEXT_PATTERNS):
+                return True
+
+            # 2) if this came from a whole joined line, inspect the whole line text
+            if source_type == "line" and source_line is not None:
+                full_line = self._normalize_special_header_text(_line_text(source_line))
+                if any(re.search(rx, full_line, flags=re.I) for rx in NEGATIVE_CONTEXT_PATTERNS):
+                    return True
+
+            # 3) if this came from a strong single token, inspect nearby same-row line context
+            if source_type == "token" and source_item is not None and source_line is not None:
+                toks = source_line.get("tokens", []) or []
+                if toks:
+                    item_x1 = float(source_item.get("x1", 0.0))
+                    item_yc = float(source_item.get("yc", 0.0))
+                    item_h = max(1.0, float(source_item.get("y2", 0.0)) - float(source_item.get("y1", 0.0)))
+
+                    left_context_tokens = []
+                    for (r, tok, conf) in toks:
+                        rx1, ry1, rx2, ry2 = r
+                        tok_yc = 0.5 * (ry1 + ry2)
+
+                        # same-row-ish tokens to the LEFT of the matched token
+                        if abs(tok_yc - item_yc) <= max(18.0, item_h * 0.8) and rx2 <= item_x1:
+                            left_context_tokens.append((rx1, tok))
+
+                    if left_context_tokens:
+                        left_context_tokens.sort(key=lambda z: z[0])
+                        left_text = self._normalize_special_header_text(" ".join(t for _, t in left_context_tokens))
+
+                        if any(re.search(rx, left_text, flags=re.I) for rx in NEGATIVE_CONTEXT_PATTERNS):
+                            return True
+
+            return False
+
+        heights = [_token_height(it) for it in (items or [])] or [1]
+        med_h = float(np.median(heights)) if hasattr(np, "median") else (sum(heights) / len(heights))
+        top_y = min((float(it.get("yc", 0.0)) for it in (items or [])), default=0.0)
+
+        def _looks_name_like(it: dict) -> bool:
+            txt = self._normalize_special_header_text(it.get("text", ""))
+            if not txt:
+                return False
+
+            h = _token_height(it)
+            yc = float(it.get("yc", 0.0))
+
+            explicit_name_context = bool(
+                re.search(r"\b(NAME|PANEL|PANELBOARD|BOARD|DESIGNATION)\s*:", txt)
+            )
+            size_bias = h >= (med_h * 1.15)
+            top_bias = yc <= (top_y + med_h * 4.0)
+
+            return explicit_name_context or size_bias or top_bias
+
+        def _find_source_line_for_item(it: dict):
+            if not lines:
+                return None
+
+            item_yc = float(it.get("yc", 0.0))
+            best_line = None
+            best_dy = None
+
+            for ln in lines[:8]:
+                rect = ln.get("rect")
+                if not rect:
+                    continue
+                ly1, ly2 = rect[1], rect[3]
+                line_yc = 0.5 * (ly1 + ly2)
+                dy = abs(item_yc - line_yc)
+                if best_dy is None or dy < best_dy:
+                    best_dy = dy
+                    best_line = ln
+
+            return best_line
+
+        candidates = []
+
+        # joined header lines
+        for ln in (lines or [])[:8]:
+            joined = _line_text(ln).strip()
+            if joined:
+                candidates.append({
+                    "text": joined,
+                    "token_set": self._special_header_token_set(joined),
+                    "source_type": "line",
+                    "source_line": ln,
+                    "source_item": None,
+                })
+
+        # strong individual tokens
+        for it in (items or []):
+            txt = str(it.get("text", "") or "").strip()
+            if txt and _looks_name_like(it):
+                src_line = _find_source_line_for_item(it)
+                candidates.append({
+                    "text": txt,
+                    "token_set": self._special_header_token_set(txt),
+                    "source_type": "token",
+                    "source_line": src_line,
+                    "source_item": it,
+                })
+
+        # Prefer fuller candidates first
+        candidates.sort(key=lambda x: (-len(x["token_set"]), -len(x["text"])))
+
+        for cand in candidates:
+            original_text = cand["text"]
+            token_set = cand["token_set"]
+
+            if not token_set:
+                continue
+
+            for rule in FAMILY_RULES:
+                for req in rule["required_any"]:
+                    if req.issubset(token_set):
+                        if cand["source_type"] != "token" and not _is_name_label_line(cand):
+                            continue
+
+                        if _has_negative_context(
+                            original_text,
+                            rule["kind"],
+                            source_type=cand["source_type"],
+                            source_line=cand["source_line"],
+                            source_item=cand["source_item"],
+                        ):
+                            continue
+
+                        return {
+                            "kind": rule["kind"],
+                            "note": rule["note"],
+                            "matched_text": original_text,
+                            "matched_tokens": sorted(token_set),
+                        }
+
+        return None
+
     def _simple_name_from_top(self, lines) -> Optional[dict]:
         """
         Robust name extraction:
@@ -1400,7 +2166,7 @@ class PanelParser:
         VOLT_RE = re.compile(r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b')
         AMPS_RE = re.compile(r'\b([6-9]\d|[1-9]\d{2,3})\s*(A|AMPS?)\b', re.I)
 
-        def _mk_val_by_rects(rects, texts, confs, conf_hint=None, shape=0.98, ctx=0.38):
+        def _mk_val_by_rects(rects, texts, confs, conf_hint=None, shape=0.98, ctx=0.38, from_colon_label=False):
             r1, r2 = rects[0], rects[-1]
             x1, y1 = min(r1[0], r2[0]), min(r1[1], r2[1])
             x2, y2 = max(r1[2], r2[2]), max(r1[3], r2[3])
@@ -1411,11 +2177,40 @@ class PanelParser:
                 "xc": 0.5 * (x1 + x2), "yc": 0.5 * (y1 + y2),
                 "conf": conf, "text": text,
                 "shape": shape, "ctx": ctx,
+                "fromColonLabel": bool(from_colon_label),
             }
 
         def _has_letter(s: str) -> bool:
             return any(ch.isalpha() for ch in (s or ""))
 
+        def _is_id_shaped_name(s: str) -> bool:
+            """
+            Allow panel names like:
+              LP-1
+              EP-2
+              200A/NIP-2
+              2OOA/NIP-2
+            even if they contain something amp-looking, as long as they are clearly
+            mixed name/id text rather than a pure electrical value.
+            """
+            if not s:
+                return False
+            up = str(s).upper().strip()
+
+            # must contain at least one letter somewhere
+            if not _has_letter(up):
+                return False
+
+            # slash/hyphen/dot IDs are common panel names
+            if re.search(r"[\/\-.]", up):
+                return True
+
+            # compact mixed alphanum IDs
+            if re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{1,24}", up):
+                return True
+
+            return False
+        
         def _median(vals):
             if not vals:
                 return 0.0
@@ -1495,57 +2290,6 @@ class PanelParser:
                                         conf_hint=float(conf or 0.8),
                                         shape=0.99, ctx=0.45)
 
-        # Handles OCR where the panel label *and* the name are fused into a single token.
-        # Examples:
-        #   "PANEL: LP-1"
-        #   "NEW PANEL C"
-        #   "EXISTING PNL-2 NORMAL"
-        for ln in top:
-            for (r, t, c) in ln["tokens"]:
-                raw = (t or "").strip()
-                if not raw:
-                    continue
-                up = raw.upper()
-                # Only care about tokens that clearly contain a panel label
-                if "PANEL" not in up and "PNL" not in up:
-                    continue
-
-                # Find PANEL / PANELBOARD / PNL anywhere, then take the text to the right as the name tail.
-                m = re.search(r'(?:PANEL(?:BOARD)?|PNL)\b[:\s\-]*', raw, flags=re.I)
-                if not m:
-                    continue
-
-                # Everything after "PANEL"/"PNL" is the tail
-                tail = raw[m.end():]
-                # Drop parenthetical annotations like "(NEW)", "(EXISTING)"
-                tail = re.sub(r'\([^)]*\)', '', tail)
-                tail = tail.strip()
-                if not tail:
-                    continue
-
-                # Only take the first chunk to avoid "LP-1A NORMAL POWER"
-                first = tail.split()[0].strip(" -:'\"")
-                if not first:
-                    continue
-
-                first_up = first.upper()
-                if first_up in self._NAME_STOPWORDS or _looks_like_header_word(first_up):
-                    continue
-                # Require at least one letter so we don't pick bare "2"
-                if not _has_letter(first):
-                    continue
-                # Short, ID-shaped: LP-1, P6, LP1A, C, etc.
-                if not re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,12}", first_up):
-                    continue
-
-                # Build a synthetic NAME candidate using the original bbox
-                return _mk_val_by_rects(
-                    [r], [first], [c],
-                    conf_hint=float(c or 0.8),
-                    shape=0.98,
-                    ctx=0.42,
-                )
-
         # ===== PASS 0: SINGLE-TOKEN "…Panel: NAME" =====
         for ln in top:
             for (r, t, c) in ln["tokens"]:
@@ -1556,15 +2300,23 @@ class PanelParser:
                     left, right = parts[0], parts[1]
                     if any(lbl in left.split() for lbl in LABEL_WORDS):
                         right_clean = re.sub(r"[^A-Za-z0-9._\-/\s]", "", right).strip()
-                        if (right_clean and _has_letter(right_clean)
-                                and not VOLT_RE.search(right_clean)
-                                and not AMPS_RE.search(right_clean)):
+                        if right_clean and _has_letter(right_clean):
                             if _looks_like_header_word(right_clean.upper()):
                                 continue
+                            if VOLT_RE.search(right_clean):
+                                continue
+
+                            # Allow amp-looking text ONLY when it is clearly an ID-shaped panel name
+                            # like "200A/NIP-2", not a plain electrical value.
+                            if AMPS_RE.search(right_clean) and not _is_id_shaped_name(right_clean):
+                                continue
+
                             return _mk_val_by_rects(
                                 [r], [right_clean], [c],
                                 conf_hint=float(c or 0.75),
-                                shape=0.98, ctx=0.40
+                                shape=1.00,
+                                ctx=0.85,
+                                from_colon_label=True,
                             )
 
         # ===== PASS 1: MULTI-TOKEN "… Panel : NAME …" =====
@@ -1606,7 +2358,22 @@ class PanelParser:
                 if len(picked_rects) >= MAX_TOKENS:
                     break
             if picked_rects:
-                return _mk_val_by_rects(picked_rects, picked_texts, picked_confs)
+                joined_name = " ".join(picked_texts).strip()
+
+                # If the joined colon-name contains amp-like text, still allow it when it is
+                # clearly ID-shaped, e.g. "200A/NIP-2".
+                if VOLT_RE.search(joined_name):
+                    pass
+                else:
+                    if not AMPS_RE.search(joined_name) or _is_id_shaped_name(joined_name):
+                        return _mk_val_by_rects(
+                            picked_rects,
+                            picked_texts,
+                            picked_confs,
+                            shape=1.00,
+                            ctx=0.85,
+                            from_colon_label=True,
+                        )
 
             # Fallback on this line: first short ID after colon that has a letter
             for j in range(colon_idx + 1, len(toks)):
@@ -1619,9 +2386,66 @@ class PanelParser:
                     return _mk_val_by_rects(
                         [r], [t], [c],
                         conf_hint=float(c or 0.7),
-                        shape=0.96, ctx=0.35
+                        shape=0.96,
+                        ctx=0.35,
+                        from_colon_label=True,
                     )
 
+        # Handles OCR where the panel label *and* the name are fused into a single token.
+        # Examples:
+        #   "PANEL: LP-1"
+        #   "NEW PANEL C"
+        #   "EXISTING PNL-2 NORMAL"
+        for ln in top:
+            for (r, t, c) in ln["tokens"]:
+                raw = (t or "").strip()
+                if not raw:
+                    continue
+                up = raw.upper()
+                # Only care about tokens that clearly contain a panel label
+                if "PANEL" not in up and "PNL" not in up:
+                    continue
+
+                # Find PANEL / PANELBOARD / PNL anywhere, then take the text to the right as the name tail.
+                m = re.search(r'(?:PANEL(?:BOARD)?|PNL)\b[:\s\-]*', raw, flags=re.I)
+                if not m:
+                    continue
+
+                # Everything after "PANEL"/"PNL" is the tail
+                tail = raw[m.end():]
+                # Drop parenthetical annotations like "(NEW)", "(EXISTING)"
+                tail = re.sub(r'\([^)]*\)', '', tail)
+                tail = tail.strip()
+                if not tail:
+                    continue
+
+                tail_up = tail.upper()
+                if re.search(r"\b(WIRING|SCHEDULE|NOTES|DESIGNATION|INTERRUPTING|RATING)\b", tail_up):
+                    continue
+
+                # Only take the first chunk to avoid "LP-1A NORMAL POWER"
+                first = tail.split()[0].strip(" -:'\"")
+                if not first:
+                    continue
+
+                first_up = first.upper()
+                if first_up in self._NAME_STOPWORDS or _looks_like_header_word(first_up):
+                    continue
+                # Require at least one letter so we don't pick bare "2"
+                if not _has_letter(first):
+                    continue
+                # Short, ID-shaped: LP-1, P6, LP1A, C, etc.
+                if not re.fullmatch(r"[A-Z0-9][A-Z0-9._\-/]{0,12}", first_up):
+                    continue
+
+                # Build a synthetic NAME candidate using the original bbox
+                return _mk_val_by_rects(
+                    [r], [first], [c],
+                    conf_hint=float(c or 0.8),
+                    shape=1.00,
+                    ctx=0.85
+                )
+            
         # ===== PASS 2: Label present but no colon → first short ID to its right =====
         for ln in top:
             toks = ln["tokens"]
@@ -1657,6 +2481,179 @@ class PanelParser:
 
         return None
 
+    def _extract_value_after_colon_label(self, lines, role: str) -> Optional[dict]:
+        """
+        Strong colon-led extractor for header roles.
+        If we see LABEL: value, or LABEL : value, return the value to the right
+        as a synthetic high-confidence candidate.
+
+        Used for roles like VOLTAGE / BUS / MAIN / AIC / MOUNTING / ENCLOSURE.
+        """
+        import re
+
+        ROLE_LABEL_WORDS = {
+            "VOLTAGE": {"VOLTAGE", "VOLT", "VOLTS", "VAC", "VDC"},
+            "BUS": {"BUS", "BUSS", "AMPERES", "AMPERE", "AMPS", "AMP"},
+            "MAIN": {"MAIN", "MAINS", "MCB", "MLO", "AMPERES", "AMPERE", "AMPS", "AMP"},
+            "AIC": {"AIC", "KAIC", "SCCR", "INTERRUPTING", "RATING"},
+            "MOUNTING": {"MOUNTING", "MOUNT"},
+            "ENCLOSURE": {"ENCLOSURE", "ENCL", "NEMA", "TYPE"},
+        }
+
+        LABEL_WORDS = ROLE_LABEL_WORDS.get(role, set())
+        if not LABEL_WORDS or not lines:
+            return None
+
+        top = lines[: min(6, len(lines))]
+
+        def _mk_val_by_rects(rects, texts, confs, conf_hint=None, shape=1.00, ctx=0.95):
+            r1, r2 = rects[0], rects[-1]
+            x1, y1 = min(r1[0], r2[0]), min(r1[1], r2[1])
+            x2, y2 = max(r1[2], r2[2]), max(r1[3], r2[3])
+            text = re.sub(r"\s+", " ", " ".join((t or "").strip() for t in texts)).strip()
+            conf = float(conf_hint if conf_hint is not None else (sum(confs) / max(1, len(confs))))
+            return {
+                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                "xc": 0.5 * (x1 + x2), "yc": 0.5 * (y1 + y2),
+                "conf": conf,
+                "text": text,
+                "shape": shape,
+                "ctx": ctx,
+                "fromColonLabel": True,
+            }
+
+        def _is_good_for_role(role: str, s: str) -> bool:
+            if not s:
+                return False
+
+            up = self._normalize_digits(str(s).upper()).strip()
+            upN = self._normalize_voltage_text(up)
+
+            if role == "VOLTAGE":
+                return self._snap_voltage_text(upN) is not None
+
+            if role == "BUS":
+                if re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE)\b", up):
+                    return False
+
+                if re.search(r"\b([1-9]\d{1,3})\s*(A|AMPS?)\b", up):
+                    return True
+
+                return bool(re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', up))
+
+            if role == "MAIN":
+                # MAIN value candidates should be amperage-bearing, not bare type words.
+                if re.search(r"\b([1-9]\d{1,3})\s*(A|AMP|AMPS|MAP)\b", up):
+                    return True
+
+                # allow explicit main-device phrases only when they also carry a number
+                if re.search(r"\bMAIN\s*(BREAKER|DEVICE|LUGS?)\b", up) and re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', up):
+                    return True
+
+                return False
+
+            if role == "AIC":
+                t_nos = re.sub(r"\s+", "", up)
+                if re.search(r'(?<!\d)(\d{2,3})(KAMP|KAIC|AIC|KA|K)\b', t_nos):
+                    return True
+                if re.search(r"\b(\d{2,3}[,]?\d{3})\s*(A|KA)?\b", up):
+                    return True
+                return False
+
+            if role == "MOUNTING":
+                return bool(re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up))
+
+            if role == "ENCLOSURE":
+                return bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up))
+
+            return False
+
+        def _looks_like_new_label_start(tok_up: str) -> bool:
+            if not tok_up:
+                return False
+
+            # generic stop if another header-like label starts
+            generic = {
+                "PANEL", "PANELBOARD", "BOARD",
+                "VOLTAGE", "VOLT", "VOLTS",
+                "BUS", "BUSS",
+                "MAIN", "MAINS", "MCB", "MLO",
+                "AIC", "KAIC", "SCCR", "INTERRUPTING", "RATING",
+                "MOUNTING", "MOUNT",
+                "ENCLOSURE", "ENCL", "NEMA", "TYPE",
+                "LOCATION", "SUPPLY", "FROM",
+                "SPD",
+            }
+            return tok_up.strip(":") in generic
+
+        # ----- PASS 0: fused single-token "VOLTAGE: 208Y/120V" -----
+        for ln in top:
+            for (r, t, c) in ln["tokens"]:
+                raw = (t or "").strip()
+                if ":" not in raw:
+                    continue
+
+                left, right = raw.split(":", 1)
+                left_words = set(re.findall(r"[A-Z0-9]+", left.upper()))
+                if not (left_words & LABEL_WORDS):
+                    continue
+
+                right_clean = re.sub(r"\s+", " ", right).strip(" -")
+                if _is_good_for_role(role, right_clean):
+                    return _mk_val_by_rects(
+                        [r], [right_clean], [c],
+                        conf_hint=float(c or 0.80),
+                    )
+
+        # ----- PASS 1: split-token "VOLTAGE : 208Y/120V" -----
+        for ln in top:
+            toks = ln["tokens"]
+            colon_idx = None
+
+            for i, (r, t, c) in enumerate(toks):
+                if ":" not in (t or ""):
+                    continue
+
+                left_words = set()
+                for (_, tt, _) in toks[max(0, i - 4): i + 1]:
+                    left_words.update(re.findall(r"[A-Z0-9]+", (tt or "").upper()))
+
+                if left_words & LABEL_WORDS:
+                    colon_idx = i
+                    break
+
+            if colon_idx is None:
+                continue
+
+            picked_rects, picked_texts, picked_confs = [], [], []
+            for j in range(colon_idx + 1, min(len(toks), colon_idx + 7)):
+                (r2, t2, c2) = toks[j]
+                raw2 = (t2 or "").strip()
+                if not raw2:
+                    continue
+
+                up2 = raw2.upper().strip()
+
+                if ":" in raw2:
+                    break
+                if _looks_like_new_label_start(up2):
+                    break
+
+                picked_rects.append(r2)
+                picked_texts.append(raw2)
+                picked_confs.append(float(c2 or 0.70))
+
+                joined = " ".join(picked_texts).strip()
+                if _is_good_for_role(role, joined):
+                    return _mk_val_by_rects(
+                        picked_rects,
+                        picked_texts,
+                        picked_confs,
+                        conf_hint=max(picked_confs) if picked_confs else 0.80,
+                    )
+
+        return None
+
     def _label_affinity(self, role: str, it: dict, labels_map: dict) -> float:
         import math
 
@@ -1677,7 +2674,7 @@ class PanelParser:
 
     def _collect_label_candidates(self, items: list) -> dict:
         import re
-        role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","RATING","AIC","NAME","WRONG")}
+        role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","RATING","AIC","NAME","WRONG")}
         comp = {role: [re.compile(rx, re.I) for rx in rxs] for role, rxs in self._LABELS.items()}
         for it in items:
             txt = str(it["text"])
@@ -1691,7 +2688,7 @@ class PanelParser:
 
     def _collect_value_candidates(self, items: list) -> dict:
         import re
-        out = {k: [] for k in ("NAME","VOLTAGE","BUS","MAIN","AIC")}
+        out = {k: [] for k in ("NAME","VOLTAGE","BUS","MAIN","AIC","MOUNTING","ENCLOSURE")}
         heights = [abs(it2["y2"] - it2["y1"]) for it2 in items] or [1]
         med_h = float(np.median(heights)) if hasattr(np, "median") else (sum(heights) / len(heights))
 
@@ -1725,30 +2722,90 @@ class PanelParser:
 
             # Voltage-ish context words/letters
             has_volty_ctx = bool(
-                re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|V)\b', txtN)
+                re.search(r'\b(WYE|DELTA|PH|PHASE|Ø|VOLT|VOLTS|VAC|VDC|V)\b', txtN)
             )
 
-            # Recognize "pair" voltages like "480/277", "208/120", "480Y/277V", etc.
+            # Old regex checks still help for clean cases
             pair = re.search(
                 r'\b([1-6]\d{2,3})\s*[YV]?[\/]?\s*([1-6]?\d{2,3})\s*V?\b',
                 txtN,
             )
+
+            single = None
+            if not aic_like and not amps_like and has_volty_ctx:
+                single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
+
+            snapped_voltage = None
+            has_voltage_label_word = bool(re.search(r'\bVOLTAGE\b|\bVOLTS?\b|\bVAC\b|\bVDC\b|\bV\b', txt))
+            has_voltage_numberish = bool(re.search(r'[IL\!\|]?\d{2,3}|\d{2,3}[IL\!\|]?', txtN))
+            has_voltage_separator = ("/" in txtN) or ("Y" in txtN)
+
+            if not aic_like and not amps_like and (has_volty_ctx or has_voltage_label_word or has_voltage_numberish or has_voltage_separator):
+                snapped_voltage = self._snap_voltage_text(txtN)
+
+            # MOUNTING value candidates
+            up_mount = raw.strip().upper()
+            up_mount = self._normalize_digits(up_mount)
+
+            has_mount_word = bool(re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up_mount))
+            has_nema_word = bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up_mount))
+
+            if has_mount_word or has_nema_word:
+                shape = 0.0
+                if has_mount_word:
+                    shape += 0.72
+                if has_nema_word:
+                    shape += 0.16
+
+                # extra context if token itself includes mounting-ish wording
+                ctx = 0.0
+                if re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up_mount):
+                    ctx += 0.10
+                if re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up_mount):
+                    ctx += 0.05
+
+                out["MOUNTING"].append({
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                    "xc": xc, "yc": yc,
+                    "conf": conf,
+                    "text": raw,
+                    "shape": min(1.0, shape),
+                    "ctx": min(1.0, ctx),
+                })
+
+            # ENCLOSURE value candidates
+            has_enclosure_word = bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up_mount))
+
+            if has_enclosure_word:
+                shape = 0.72
+                ctx = 0.10
+
+                out["ENCLOSURE"].append({
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                    "xc": xc, "yc": yc,
+                    "conf": conf,
+                    "text": raw,
+                    "shape": min(1.0, shape),
+                    "ctx": min(1.0, ctx),
+                })
 
             # If it looks AIC-like and has no clear voltage context or separators,
             # kill the pair match so things like "18000" don't become VOLTAGE.
             if pair and aic_like and not has_volty_ctx and "/" not in txtN and "Y" not in txtN and "V" not in txtN:
                 pair = None
 
-            # Single-voltage detection (e.g., "480V", "208", "600V")
-            # Only allowed when this token does NOT look like AIC or amps
-            # and has some voltage-ish context.
-            single = None
-            if not aic_like and not amps_like and has_volty_ctx:
-                single = re.search(r'(?<!\d)([1-6]\d{2,3})(?!\d)', txtN)
+            if pair or single or snapped_voltage is not None:
+                if pair or snapped_voltage in (120240, 208, 480, 600):
+                    shape = 0.92
+                else:
+                    shape = 0.62
 
-            if pair or single:
-                shape = 0.92 if pair else 0.62
                 ctx = 0.15 if has_volty_ctx else 0.0
+                if ":" in raw and re.search(r'\bVOLTAGE\s*:', raw.upper()):
+                    ctx += 0.10
+                elif re.search(r'\bVOLTAGE\b', raw.upper()):
+                    ctx += 0.05
+
                 out["VOLTAGE"].append({
                     "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                     "xc": xc, "yc": yc,
@@ -1759,50 +2816,71 @@ class PanelParser:
                 })
 
             # -----------------------------------------------------------
-            # BUS/MAIN (accept "###A", "### A", and bare "###" in ranges)
-            # But:
-            #   - allow smaller mains (e.g., 50A) when explicitly tied to MCB/MAIN
-            #   - DO NOT treat voltage-looking tokens (120/208 Wye, 480Y/277V) as amps
+            # BUS/MAIN
+            # Only allow amperage-looking values.
+            # NEVER allow voltage-looking strings like:
+            #   208/120V
+            #   480Y/277V
+            #   Volts: 208/120V
+            #   480V
             # -----------------------------------------------------------
 
-            m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMPS?\.?)\b", txtD)  # 10..9999 A w/ unit
-            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)           # bare 2–4 digits
+            m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMP\.?|AMPS?\.?)\b", txtD)
+            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)
 
-            # Strong "this is voltage" signal for amps suppression
-            strong_voltage_token = bool(pair) or (
-                bool(single) and has_volty_ctx
-            )
-            if not strong_voltage_token:
-                # Extra guards: slash or Wye/Delta/PH context implies voltage
-                if "/" in txtN or re.search(r"\b(WYE|DELTA|PH|PHASE|Ø)\b", txtN):
-                    strong_voltage_token = True
+            # strong voltage guards
+            has_slash_voltage = "/" in txtN
+            has_voltage_word = bool(re.search(r"\b(VOLT|VOLTS|VOLTAGE|VAC|VDC)\b", txt))
+            has_phase_voltage_ctx = bool(re.search(r"\b(WYE|DELTA|PH|PHASE|Ø)\b", txtN))
+            has_v_suffix = bool(re.search(r"(?<!\d)[1-6]\d{2,3}\s*V\b", txtN))
+            has_voltage_pair = bool(re.search(r'(?<!\d)([1-6]\d{2,3})\s*[YV]?\s*/\s*([1-6]?\d{2,3})(?!\d)', txtN))
+            snapped_voltage = self._snap_voltage_text(txtN) is not None
 
-            # Explicit main-breaker context (relax lower bound here)
-            main_ctxt = bool(re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE)\b", txt))
+            strong_voltage_token = any([
+                has_slash_voltage,
+                has_voltage_word,
+                has_phase_voltage_ctx,
+                has_v_suffix,
+                has_voltage_pair,
+                snapped_voltage,
+            ])
+
+            # Explicit main-breaker context
+            main_ctxt = bool(re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE|MAIN\s*RATING|MAINS?\s*RATING)\b", txt))
+            m_main_map = re.search(r"\b([1-9]\d{1,3})\s*MAP\b", txtD)
 
             cand = None
-            if m_with_unit:
-                n = int(m_with_unit.group(1))
-                # For explicit main-breaker tokens, allow 30A–4000A.
-                # For everything else, keep the 60A floor to avoid branch circuits.
-                lo = 30 if main_ctxt else 60
-                if lo <= n <= 4000:
-                    cand = {
-                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                        "xc": xc, "yc": yc,
-                        "conf": conf,
-                        "text": raw,
-                        "shape": 0.90,
-                        "ctx": 0.12,
-                        "has_unit": True,
-                    }
+            cand_main_only = False
 
-            elif m_bare_num and not strong_voltage_token:
+            # If it looks like voltage, never allow it into BUS/MAIN candidate pools
+            if strong_voltage_token:
+                cand = None
+
+            elif m_with_unit or m_main_map:
+                if m_with_unit:
+                    n = int(m_with_unit.group(1))
+                else:
+                    n = int(m_main_map.group(1))
+
+                if n is not None:
+                    lo = 30 if (main_ctxt or m_main_map) else 50
+                    if lo <= n <= 4000:
+                        cand = {
+                            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                            "xc": xc, "yc": yc,
+                            "conf": conf,
+                            "text": raw,
+                            "shape": 0.90,
+                            "ctx": 0.12,
+                            "has_unit": True,
+                        }
+                        if m_main_map and not m_with_unit:
+                            cand_main_only = True
+
+            elif m_bare_num:
                 n = int(m_bare_num.group(1))
-                # allow bare 60..1200; rely on label affinity to disambiguate from AIC/others
-                # (bare 50, 40, etc. are *not* accepted here to avoid table circuits)
-                if 60 <= n <= 1200:
-                    # small score because it's unlabeled; still promotable by BUS fallback
+
+                if 50 <= n <= 1200:
                     cand = {
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                         "xc": xc, "yc": yc,
@@ -1811,31 +2889,48 @@ class PanelParser:
                         "shape": 0.68,
                         "ctx": 0.04,
                         "has_unit": False,
+                        "requiresStrongAmpLabel": bool(n == 50),
                     }
 
             if cand is not None:
-                up_full = txt  # already uppercased version of raw text
+                up_full = txt
 
-                # If the token mentions BUS but not MAIN/MCB, treat it as BUS-only.
-                has_bus_word  = bool(re.search(r'\bBUS\b', up_full))
-                # If the token explicitly mentions MAIN or M.C.B/MCB, treat it as MAIN-only.
-                has_main_word = bool(re.search(r'\bMAIN\b|\bM\W*C\W*B\b', up_full))
+                has_bus_word = bool(re.search(r'\bBUS\b', up_full))
 
-                if has_bus_word and not has_main_word:
-                    # Pure bus rating → only BUS
-                    out["BUS"].append(dict(cand))
-                elif has_main_word and not has_bus_word:
-                    # Pure main rating → only MAIN
+                # Explicit main-device wording should stay MAIN-only
+                has_main_device_word = bool(
+                    re.search(r'\bMCB\b|\bM\W*C\W*B\b|\bMAIN\s*BREAKER\b|\bMAIN\s*DEVICE\b', up_full)
+                )
+
+                # "Mains Rating" is the one ambiguous case we want to preserve for later logic
+                has_mains_rating_word = bool(
+                    re.search(r'\bMAINS?\s*RATING\b|\bMAIN\s*RATING\b', up_full)
+                )
+
+                if cand_main_only:
                     out["MAIN"].append(dict(cand))
+
+                elif has_bus_word and not has_main_device_word:
+                    out["BUS"].append(dict(cand))
+
+                elif has_main_device_word and not has_bus_word:
+                    # MCB Rating / Main Breaker / Main Device stay MAIN-only
+                    out["MAIN"].append(dict(cand))
+
+                elif has_mains_rating_word and not has_main_device_word:
+                    # Keep this available to both roles for later reconciliation.
+                    # We do NOT want to lose it on MLO jobs where it may need to become BUS.
+                    out["BUS"].append(dict(cand))
+                    out["MAIN"].append(dict(cand))
+
                 else:
-                    # Ambiguous or unlabeled → still let scoring decide between BUS/MAIN
                     out["BUS"].append(dict(cand))
                     out["MAIN"].append(dict(cand))
 
             # AIC (10k..100k) and KA forms: 65kA, 65 kA
             # Normalize spaces for kA form matching
             t_nos = txtD.replace(" ", "")
-            mk = re.search(r"\b(\d{2,3})(?:KAIC|AIC|KA|K)\b", t_nos)
+            mk = re.search(r"\b(\d{2,3})(?:KAMP|KAIC|AIC|KA|K)\b", t_nos)
             if mk:
                 val_ka = int(mk.group(1))
                 if 10 <= val_ka <= 100:
@@ -1908,7 +3003,7 @@ class PanelParser:
                 continue
 
             # AIC like 42K, 65KAIC, 65K, 65000A
-            if re.search(r"\b\d{2,3}\s*(?:KAIC|AIC|KA|K)\b", up) or re.search(r"\b\d{2,3}[,]?\d{3}\b", up):
+            if re.search(r"\b\d{2,3}\s*(?:KAMP|KAIC|AIC|KA|K)\b", up) or re.search(r"\b\d{2,3}[,]?\d{3}\b", up):
                 continue
 
             # require at least one letter (prevents "3", "42", etc.)
@@ -1967,26 +3062,22 @@ class PanelParser:
 
         def _voltage_key(text: str) -> Optional[str]:
             """
-            Canonicalize voltage tokens so multi-pass OCR variants collapse.
-            Examples:
-              "1207208V" -> "120/208"
-              "120/2O8V" -> "120/208"
-              "480Y/277V" -> "480/277"
-              "480V" -> "480"
+            Canonical voltage key for deduping multi-pass OCR voltage candidates.
             """
             if not text:
                 return None
+
+            snapped_family = self._snap_voltage_text(text)
+            if snapped_family is not None:
+                return str(snapped_family)
+
             t = self._normalize_digits(str(text).upper())
             t = self._normalize_voltage_text(t)
 
-            # Prefer an explicit pair if present
             m = re.search(r'(?<!\d)(\d{3,4})\s*[YV]?\s*/\s*(\d{2,4})(?!\d)', t)
             if m:
-                a = m.group(1)
-                b = m.group(2)
-                return f"{a}/{b}"
+                return f"{m.group(1)}/{m.group(2)}"
 
-            # Else a single allowed-looking voltage
             m2 = re.search(r'(?<!\d)(\d{3,4})(?!\d)', t)
             if m2:
                 return m2.group(1)
@@ -2168,42 +3259,226 @@ class PanelParser:
         thr = self._THRESH.get(role, 0.5)
         return ranked[0] if ranked and ranked[0]["rank"] >= thr else None
 
+    def _voltage_compare_form(self, s: str) -> str:
+        """
+        Collapse a voltage string into a comparison form so ugly OCR variants
+        can be matched against canonical patterns.
+
+        Examples:
+            "120 V / 208 Y WYE /3P" -> "120208Y"
+            "208Y/120V"             -> "208Y120"
+            "208YII2OV"             -> "208Y1120" (after normalization)
+        """
+        if not s:
+            return ""
+
+        u = str(s).upper()
+        u = self._normalize_digits(u)
+        u = self._normalize_voltage_text(u)
+
+        # normalize wording
+        u = re.sub(r'\bVOLTS?\b', 'V', u)
+        u = re.sub(r'\bWYE\b', 'Y', u)
+
+        # drop phase / wire tail noise
+        u = re.sub(r'\b\d+\s*P(H(ASE)?)?\b', ' ', u)      # 3P / 3PH / 3PHASE
+        u = re.sub(r'\b\d+\s*W(IRE)?\b', ' ', u)          # 4W / 4WIRE
+        u = re.sub(r'\bPH(ASE)?\b', ' ', u)
+        u = re.sub(r'\bWIRE(S)?\b', ' ', u)
+
+        # keep only digits, Y, V, slash
+        u = re.sub(r'[^0-9YV/]', '', u)
+
+        # V is not important for matching family shape
+        u = u.replace('V', '')
+
+        # slash is not important for compare form
+        u = u.replace('/', '')
+
+        return u.strip()
+
+
+    def _canonical_voltage_compare_forms(self) -> dict:
+        """
+        Returns:
+            {
+                208: {"208", "208120", "208Y120", "120208", ...},
+                480: {...},
+                ...
+            }
+        """
+        out = {}
+        for family, variants in self.VOLTAGE_CANONICAL_MAP.items():
+            forms = set()
+            for v in variants:
+                cf = self._voltage_compare_form(v)
+                if cf:
+                    forms.add(cf)
+            out[family] = forms
+        return out
+
+
+    def _snap_voltage_text(self, txt: str | None) -> Optional[int]:
+        """
+        Snap OCR voltage text to the closest canonical voltage family key
+        from VOLTAGE_CANONICAL_MAP / VOLTAGE_OUTPUT_MAP.
+
+        Returns one of:
+            120, 120240, 208, 240, 480, 600
+        or None if no confident match.
+        """
+        if not txt:
+            return None
+
+        raw_cf = self._voltage_compare_form(txt)
+        if not raw_cf:
+            return None
+
+        # must contain enough numeric structure to plausibly be a voltage
+        digit_runs = re.findall(r'\d+', raw_cf)
+        joined_digits = ''.join(digit_runs)
+
+        if len(joined_digits) < 3:
+            return None
+
+        # require either:
+        # - at least one 3-digit-ish run
+        # - or a slash/pair style voltage shape after normalization
+        # - or a wye marker with enough digits
+        has_threeish = bool(re.search(r'\d{3}', raw_cf))
+        has_pairish = bool(re.search(r'\d+[Y/]?\d+', raw_cf))
+        has_wyeish = ('Y' in raw_cf and len(joined_digits) >= 6)
+
+        if not (has_threeish or has_pairish or has_wyeish):
+            return None
+
+        canonical_forms = self._canonical_voltage_compare_forms()
+
+        best_family = None
+        best_score = -1.0
+
+        raw_nums = set(re.findall(r'\d{3}', raw_cf))
+        raw_has_y = 'Y' in raw_cf
+
+        for family, forms in canonical_forms.items():
+            family_best = -1.0
+
+            for form in forms:
+                score = difflib.SequenceMatcher(a=raw_cf, b=form).ratio()
+
+                form_nums = set(re.findall(r'\d{3}', form))
+                form_has_y = 'Y' in form
+
+                # bonus for matching the same voltage numbers
+                num_overlap = len(raw_nums & form_nums)
+                score += 0.08 * num_overlap
+
+                # bonus if both are wye-ish
+                if raw_has_y and form_has_y:
+                    score += 0.06
+
+                # small bonus when lengths are close
+                score -= 0.02 * abs(len(raw_cf) - len(form))
+
+                if score > family_best:
+                    family_best = score
+
+            if family_best > best_score:
+                best_score = family_best
+                best_family = family
+
+        # threshold: high enough to avoid random junk, low enough for OCR garbage
+        if best_score >= 0.72:
+            return best_family
+
+        return None
+
     def _normalize_voltage_text(self, s: str) -> str:
         """
-        Make OCR-y voltage strings matchable:
-        - fix I/l between digits -> '/'
-        - fix letter O between digits -> '0'
-        - treat '1' between two 3-digit voltages as a '/'
-        - collapse punctuation around the pair
-        - allow forms like '208Y120V' (missing slash)
+        Strong OCR cleanup for voltage strings before matching / snapping.
+
+        Goals:
+        - repair common OCR mistakes:
+            O/Q/D -> 0
+            Z -> 2
+            I/L/|/! can behave like 1 or slash depending on context
+        - normalize spaces / punctuation
+        - collapse junk tails like /3, /3P, 3PH, 4W, etc.
+        - preserve enough structure for snapping to canonical voltage families
         """
         u = (s or "").upper()
 
-        # Replace I or l BETWEEN digits with '/'
-        u = re.sub(r'(?<=\d)[IL](?=\d)', '/', u)
+        # normalize words first
+        u = re.sub(r'\bVOLTS?\b', 'V', u)
+        u = re.sub(r'\bWYE\b', 'Y', u)
+        u = re.sub(r'\bVAC\b', 'V', u)
+        u = re.sub(r'\bVDC\b', 'V', u)
 
-        # Replace letter O BETWEEN digits with zero
-        u = re.sub(r'(?<=\d)[Oo](?=\d)', '0', u)
+        # common OCR substitutions
+        u = u.replace("Ø", "")
+        u = u.replace("O", "0")
+        u = u.replace("Q", "0")
+        u = u.replace("D", "0")
+        u = u.replace("Z", "2")
 
-        # Generic glue fix: '1201240' → '120/240', '2081120' → '208/120', etc.
-        # Pattern: 3 digits, optional spaces, '1', optional spaces, 3 digits
-        # Only convert when BOTH sides are known voltage values.
+        # normalize separators and whitespace
+        u = u.replace(",", " ")
+        u = u.replace(".", " ")
+        u = u.replace(":", " ")
+        u = re.sub(r'\s+', ' ', u).strip()
+
+        # remove common phase / wire tails that do not matter for system voltage
+        u = re.sub(r'\b\d+\s*/\s*\d+\s*W(IRE)?\b', ' ', u)
+        u = re.sub(r'\b\d+\s*W(IRE)?\b', ' ', u)
+        u = re.sub(r'\b\d+\s*P(H(ASE)?)?\b', ' ', u)     # 3P / 3PH / 3PHASE
+        u = re.sub(r'\bPH(ASE)?\b', ' ', u)
+        u = re.sub(r'\bWIRE(S)?\b', ' ', u)
+
+        # common glued voltage pairs
+        u = re.sub(r'(?<!\d)1201?240(?!\d)', '120/240', u)
+        u = re.sub(r'(?<!\d)2081?120(?!\d)', '208/120', u)
+        u = re.sub(r'(?<!\d)4801?277(?!\d)', '480/277', u)
+        u = re.sub(r'(?<!\d)6001?347(?!\d)', '600/347', u)
+
+        # squeeze spaces again
+        u = re.sub(r'\s+', ' ', u).strip()
+
+        # remove spaces around slash
+        u = re.sub(r'\s*/\s*', '/', u)
+
+        # I/L/!/| between digits often means slash or 1
+        # First: if we have 3 digits + [I/L/!/|] + 3 digits, it's probably a slash
         ALLOWED_VOLTS = {"120", "208", "240", "277", "347", "480", "600"}
 
+        def _mid_sep_repl(m):
+            left = m.group(1)
+            sep = m.group(2)
+            right = m.group(3)
+            if left in ALLOWED_VOLTS and right in ALLOWED_VOLTS:
+                return f"{left}/{right}"
+            return f"{left}{sep}{right}"
+
+        u = re.sub(r'(?<!\d)(\d{3})([IL\!\|])(\d{3})(?!\d)', _mid_sep_repl, u)
+
+        # Also handle 3 digits + literal 1 + 3 digits when both sides are valid voltages
         def _glued_pair_repl(m):
             left = m.group(1)
             right = m.group(2)
             if left in ALLOWED_VOLTS and right in ALLOWED_VOLTS:
                 return f"{left}/{right}"
-            # If it doesn't look like a voltage pair, leave it alone
             return m.group(0)
 
         u = re.sub(r'(?<!\d)(\d{3})\s*1\s*(\d{3})(?!\d)', _glued_pair_repl, u)
 
-        # Normalize common separators/spaces
-        u = u.replace(',', ' ')
-        u = u.replace('.', ' ')
-        u = re.sub(r'\s+', ' ', u)
+        # remaining I/L/!/| inside number runs are more likely 1 than slash
+        u = re.sub(r'[IL\!\|]', '1', u)
+
+        # normalize known compact forms like 208Y120V -> 208Y/120V
+        u = re.sub(r'(?<!\d)(208|480|600)Y(120|277|347)V?(?!\d)', r'\1Y/\2V', u)
+
+        # normalize reversed wye-ish forms like 120/208Y -> 120/208Y
+        # no structural change needed, but keep slash clean
+        u = re.sub(r'\s+', '', u)
 
         return u
 
@@ -2256,11 +3531,13 @@ class PanelParser:
         WHITE  = (255, 255, 255)
         BAND   = (60, 60, 60)
         COLORS = {
-            "NAME":    (255, 128,   0),
-            "VOLTAGE": (255, 200, 100),
-            "BUS":     (  0, 200,   0),
-            "MAIN":    (180,   0, 180),
-            "AIC":     (  0,   0, 255),
+            "NAME":      (255, 128,   0),
+            "VOLTAGE":   (255, 200, 100),
+            "BUS":       (  0, 200,   0),
+            "MAIN":      (180,   0, 180),
+            "MOUNTING":  (  0, 165, 255),
+            "ENCLOSURE": (255, 255,   0),
+            "AIC":       (  0,   0, 255),
         }
 
         def put_text(img, text, org, color, scale=0.55, thick=2):
@@ -2307,6 +3584,8 @@ class PanelParser:
             "VOLTAGE (light orange) candidates",
             "BUS (green) candidates",
             "MAIN (magenta) candidates",
+            "MOUNTING (orange-blue) candidates",
+            "ENCLOSURE (yellow) candidates",
             "AIC (red) candidates",
             "Thick box = chosen",
         ]

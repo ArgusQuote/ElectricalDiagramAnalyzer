@@ -7,6 +7,8 @@ import re
 import cv2
 import numpy as np
 
+from OcrLibrary.ocr_timeout import readtext_with_timeout
+
 
 @dataclass
 class HeaderDbg:
@@ -55,6 +57,8 @@ class BreakerHeaderFinder:
         self.reader = reader
         self.debug = debug
         self.debug_dir: Optional[str] = debug_dir
+        self.debug_stem: Optional[str] = None
+        self.last_ocr_error: Optional[str] = None
 
         self.ocr_dbg_items: List[dict] = []
         self.ocr_dbg_rois: List[Tuple[int, int, int, int]] = []
@@ -111,6 +115,7 @@ class BreakerHeaderFinder:
         self.header_y_abs = None
         self.snap_steps_up = None
         self.last_horizontal_mask_path = None
+        self.last_ocr_error = None
 
         header_y = self._find_header_by_tokens(gray)
 
@@ -275,7 +280,8 @@ class BreakerHeaderFinder:
     def _run_ocr(self, img, mag: float):
         """Run EasyOCR readtext on *img* with the given magnification ratio and a restricted alphanumeric allowlist."""
         try:
-            return self.reader.readtext(
+            out = readtext_with_timeout(
+                self.reader,
                 img,
                 detail=1,
                 paragraph=False,
@@ -286,7 +292,16 @@ class BreakerHeaderFinder:
                 text_threshold=0.4,
                 low_text=0.25,
             )
-        except Exception:
+            if self.debug:
+                print(f"[BreakerHeaderFinder] OCR pass mag={mag} returned {len(out)} detections")
+            return out
+
+        except Exception as e:
+            self.last_ocr_error = f"{type(e).__name__}: {e}"
+            if self.debug:
+                print(f"[BreakerHeaderFinder] OCR FAILED at mag={mag}: {self.last_ocr_error}")
+                import traceback
+                print(traceback.format_exc())
             return []
 
     def _snap_header_to_horizontal_line(
@@ -349,7 +364,8 @@ class BreakerHeaderFinder:
         if self.debug and self.debug_dir:
             try:
                 os.makedirs(self.debug_dir, exist_ok=True)
-                mask_name = f"header_horiz_mask_y{y1_band}_{y2_band}.png"
+                stem = self.debug_stem or "panel"
+                mask_name = f"{stem}_header_horiz_mask_y{y1_band}_{y2_band}.png"
                 mask_path = os.path.join(self.debug_dir, mask_name)
                 cv2.imwrite(mask_path, horiz)
                 self.last_horizontal_mask_path = mask_path
@@ -439,7 +455,8 @@ class BreakerHeaderFinder:
                         1,
                     )
 
-                dbg_name = f"header_horiz_mask_overlay_y{y1_band}_{y2_band}.png"
+                stem = self.debug_stem or "panel"
+                dbg_name = f"{stem}_header_horiz_mask_overlay_y{y1_band}_{y2_band}.png"
                 dbg_path = os.path.join(self.debug_dir, dbg_name)
                 cv2.imwrite(dbg_path, vis)
                 print(f"[BreakerHeaderFinder] Saved horiz mask overlay: {dbg_path}")
@@ -490,8 +507,9 @@ class BreakerHeaderFinder:
         if self.debug and self.debug_dir:
             try:
                 os.makedirs(self.debug_dir, exist_ok=True)
+                stem = self.debug_stem or "panel"
                 dbg_name = (
-                    f"header_band_y{y1_band}_{y2_band}_"
+                    f"{stem}_header_band_y{y1_band}_{y2_band}_"
                     f"h{roi.shape[0]}_w{roi.shape[1]}.png"
                 )
                 dbg_path = os.path.join(self.debug_dir, dbg_name)
@@ -509,7 +527,15 @@ class BreakerHeaderFinder:
         self.header_bottom_y_abs = None
 
         # OCR passes on the band
-        det = self._run_ocr(roi, 1.6) + self._run_ocr(roi, 2.0)
+        det_16 = self._run_ocr(roi, 1.6)
+        det_20 = self._run_ocr(roi, 2.0)
+        det = det_16 + det_20
+
+        if self.debug:
+            print(
+                f"[BreakerHeaderFinder] OCR totals: "
+                f"mag1.6={len(det_16)} mag2.0={len(det_20)} combined={len(det)}"
+            )
 
         items: List[dict] = []
         for box, text, conf in det:
@@ -539,6 +565,11 @@ class BreakerHeaderFinder:
             self.ocr_dbg_items.append(item)
 
         if not items:
+            if self.debug:
+                print(
+                    "[BreakerHeaderFinder] No OCR items found in header band. "
+                    f"last_ocr_error={self.last_ocr_error}"
+                )
             return None
 
         # ---- group by y-bin ----
@@ -606,7 +637,8 @@ class BreakerHeaderFinder:
                 best_ybin = ybin
 
         if best_ybin is None:
-            # no header-like tokens anywhere in band
+            if self.debug:
+                print("[BreakerHeaderFinder] OCR items existed, but no header-like line was selected.")
             return None
 
         # tokens on the winning line, using the same category logic
@@ -636,6 +668,8 @@ class BreakerHeaderFinder:
                 hdr_items.append(it)
 
         if not hdr_items:
+            if self.debug:
+                print("[BreakerHeaderFinder] Winning y-bin selected, but no header items survived filtering.")
             return None
 
         # left-most header token is anchor

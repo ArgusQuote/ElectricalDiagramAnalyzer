@@ -2,10 +2,12 @@ from ._anvil_designer import uploadTemplate
 from anvil import *
 from routing import router
 import stripe.checkout
-import anvil.server, anvil.users, json
+import anvil.server, anvil.users, json, time
 from anvil import js
 from .. import router_state
 from ..AccessCodeDialog import AccessCodeDialog
+from ..SpecsUploadDialog import SpecsUploadDialog
+from ..SpecsResultsDialog import SpecsResultsDialog
 
 USE_UI_OVERRIDES = True
 
@@ -413,3 +415,94 @@ class upload(uploadTemplate):
   @handle("button_1", "click")
   def button_1_click(self, **event_args):
     js.window.location.hash = "coveragemap"
+
+  @handle("specs_btn", "click")
+  def specs_btn_click(self, **event_args):
+    self._run_specs_modal_flow()
+
+  # specs helpers
+  def _apply_specs_defaults_to_page(self, detected_overrides: dict):
+    """
+    Push detected spec defaults back into the page controls.
+    """
+    detected_overrides = detected_overrides or {}
+    pb = detected_overrides.get("panelboards") or {}
+
+    # Bussing material
+    bussing = pb.get("bussing_material")
+    if hasattr(self, "check_box_1") and bussing is not None:
+      self.check_box_1.checked = (str(bussing).upper() == "COPPER")
+
+    # Rating type
+    rating_type = pb.get("rating_type")
+    if hasattr(self, "check_box_4") and rating_type is not None:
+      self.check_box_4.checked = (str(rating_type).upper() == "SERIES_RATED")
+
+    # Plug-on breakers
+    # Your UI override means:
+    # check_box_5.checked == True  -> allow_plug_on_breakers = False
+    allow_plug_on = pb.get("allow_plug_on_breakers")
+    if hasattr(self, "check_box_5") and allow_plug_on is not None:
+      self.check_box_5.checked = (allow_plug_on is False)
+
+    Notification("Specs defaults applied to this page.", style="success").show()
+
+  def _run_specs_modal_flow(self):
+    upload_result = alert(
+      content=SpecsUploadDialog(),
+      title="Specs PDF Analyzer",
+      foreground="white",
+      buttons=[],
+      large=False,
+      dismissible=True
+    )
+  
+    if not upload_result or not upload_result.get("file"):
+      return
+  
+    specs_pdf = upload_result["file"]
+    result = {}
+  
+    try:
+      self.specs_btn.enabled = False
+      self.specs_btn.text = "Uploading..."
+  
+      # Let the UI repaint before the blocking upload/server call starts
+      import anvil.js
+      anvil.js.window.setTimeout(lambda: None, 50)
+  
+      result = anvil.server.call(
+        "analyze_specs_pdf",
+        specs_pdf,
+        self._job_name or ""
+      ) or {}
+  
+      self.specs_btn.text = "Completed"
+  
+    except Exception as e:
+      self.specs_btn.text = "Specs"
+      alert(f"❌ Specs analysis failed:\n{e}")
+      return
+  
+    finally:
+      self.specs_btn.enabled = True
+  
+    modal_result = alert(
+      content=SpecsResultsDialog(result),
+      title="Specs Analysis Results",
+      buttons=[],
+      large=True,
+      dismissible=True
+    )
+  
+    if modal_result and modal_result.get("apply"):
+      self._apply_specs_defaults_to_page(
+        modal_result.get("detected_overrides") or {}
+      )
+  
+    specs_job_id = result.get("job_id")
+    if specs_job_id:
+      try:
+        anvil.server.call("delete_specs_job", specs_job_id)
+      except Exception as e:
+        alert(f"Could not delete temp specs job folder:\n{e}")

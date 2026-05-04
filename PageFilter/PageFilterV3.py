@@ -462,15 +462,21 @@ class PageFilter:
         if self.gs_use_cropbox:
             args.append("-dUseCropBox")
 
-        # write to temp, then replace
-        tmp_out = Path(tempfile.gettempdir()) / (dst.name + ".tmp")
+        # write to a unique temp file, then atomically replace the destination
+        fd, tmp_str = tempfile.mkstemp(suffix=".pdf", prefix=dst.stem + "_gs_")
+        os.close(fd)
+        tmp_out = Path(tmp_str)
         args.extend(["-sOutputFile=" + str(tmp_out), str(src)])
 
-        cp = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if cp.returncode != 0:
-            raise RuntimeError(f"Ghostscript failed ({cp.returncode}). Stderr:\n{cp.stderr.strip()}")
+        try:
+            cp = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if cp.returncode != 0:
+                raise RuntimeError(f"Ghostscript failed ({cp.returncode}). Stderr:\n{cp.stderr.strip()}")
+            tmp_out.replace(dst)
+        except Exception:
+            tmp_out.unlink(missing_ok=True)
+            raise
 
-        tmp_out.replace(dst)
         return str(dst)
 
     @staticmethod

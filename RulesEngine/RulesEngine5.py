@@ -114,7 +114,6 @@ _CANON_PREF = {
 }
 
 def canonicalize_pairs(allowed_pairs: list[str]) -> list[str]:
-    """Pick canonical phase pairs from allowed list (e.g., AB over BA)."""
     s = set(allowed_pairs)
     chosen = []
 
@@ -128,11 +127,9 @@ def canonicalize_pairs(allowed_pairs: list[str]) -> list[str]:
     return chosen
 
 def pair_to_phases(pair: str) -> tuple[str,str]:
-    """Split pair string into two phase letters (e.g., 'AB' -> ('A','B'))."""
     return pair[0], pair[1]
 
 def pick_balanced_pair(phase_load: dict[str, float], pairs: list[str], weight: float) -> str:
-    """Pick the pair that best balances phase load across A/B/C."""
     best_pair, best_score = None, None
     for p in pairs:
         a,b = pair_to_phases(p)
@@ -145,35 +142,29 @@ def pick_balanced_pair(phase_load: dict[str, float], pairs: list[str], weight: f
     return best_pair
 
 def hj_allowed_pairs(frame: str, intr_letter: str, amps: int):
-    """Return allowed 2-pole phase pairs for H/J frame at given amps."""
     table = HJ_2P_ALLOWED.get(frame, {}).get(intr_letter, {})
     allowed = [pair for pair in _2P_BASE_ORDER if amps in table.get(pair, set())]
     return allowed
 
 def _lc_snap_spaces(requested: int) -> int:
-    """Snap requested spaces up to nearest load center size (4–120)."""
     for v in [4, 8, 12, 16, 24, 32, 40, 48, 60, 80, 84, 120]:
         if v >= max(0, int(requested or 0)):
             return v
     return 120
 
 def _lc_cover_style(trim_style: str, enclosure: str) -> str:
-    """Map trim_style and enclosure to cover style (Flush, Surface, Included)."""
     t = str(trim_style or "").upper()
     if t == "FLUSH":   return "Flush"
     if t == "SURFACE": return "Surface"
     return "Included"
 
 def _lc_type_of_main_from_raw(raw: dict) -> str:
-    """Return 'M' (main breaker) or 'L' (main lug) from raw attrs."""
     return "M" if "mainBreakerAmperage" in raw else "L"
 
 def _prefer_qo(material: str | None) -> bool:
-    """Return True if material is COPPER (prefer QO over Homeline)."""
     return str(material or "").upper() == "COPPER"
 
 def ui_defaults():
-    """Return default UI config for panelboards, transformers, disconnects."""
     return {
         "panelboards": {
             "bussing_material":         "ALUMINUM",   # or "COPPER"
@@ -204,7 +195,6 @@ def ui_defaults():
     }
 
 def loadcenter_defaults_from_panel_defaults() -> dict:
-    """Derive load center defaults from panelboard UI defaults."""
     pb = ui_defaults()["panelboards"]
     return {
         "allowPlugOn":     pb["allow_plug_on_breakers"],  # True/False
@@ -215,7 +205,6 @@ def loadcenter_defaults_from_panel_defaults() -> dict:
     }
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep-merge override into base dict; nested dicts merged recursively."""
     if not isinstance(base, dict) or not isinstance(override, dict):
         return base
     out = dict(base)
@@ -235,7 +224,6 @@ _DEFAULT_KEY_ALIASES = {
 }
 
 def _apply_aliases(d: dict) -> dict:
-    """Apply key aliases (e.g., material->bussing_material) to dict recursively."""
     if not isinstance(d, dict):
         return d
     out = {}
@@ -252,12 +240,10 @@ class DefaultResolver:
       3) Item-level overrides (item['defaults']) [optional]
     """
     def __init__(self, job_defaults: dict | None, item_defaults: dict | None):
-        """Store job- and item-level default overrides for resolution."""
         self.job = _apply_aliases(job_defaults or {})
         self.item = _apply_aliases(item_defaults or {})
 
     def resolve(self, domain: str) -> dict:
-        """Resolve defaults for domain (panelboards, transformers, disconnects)."""
         base = ui_defaults().get(domain, {})
         merged = _deep_merge(base, self.job.get("*", {}))
         merged = _deep_merge(merged, self.job.get(domain, {}))
@@ -266,16 +252,12 @@ class DefaultResolver:
         return merged
 
 class BaseEngine:
-    """Base engine for processing panelboard, disconnect, and transformer items."""
-
     def __init__(self, name: str, attrs: dict, resolver: "DefaultResolver | None" = None):
-        """Initialize engine with item name, attrs, and optional default resolver."""
         self.name = name
         self.attrs = attrs.copy()
         self._defaults = resolver or DefaultResolver({}, {})
 
     def process(self) -> dict:
-        """Process item attrs and return result dict; subclass must implement."""
         raise NotImplementedError
 
 ENGINE_REGISTRY = {}
@@ -283,14 +265,12 @@ ENGINE_REGISTRY = {}
 _NONE_STR = "NONE"
 
 def _is_none_token(val) -> bool:
-    """Return True if value is the string 'NONE' (case-insensitive)."""
     try:
         return isinstance(val, str) and val.strip().upper() == _NONE_STR
     except Exception:
         return False
 
 def _scrub_none_tokens(obj):
-    """Recursively replace 'NONE' string tokens with None in dicts/lists/tuples."""
     if isinstance(obj, dict):
         return {k: _scrub_none_tokens(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -302,7 +282,6 @@ def _scrub_none_tokens(obj):
     return obj
 
 def _safe_int(v, default=0):
-    """Parse value as int; return default on failure or NONE/empty."""
     try:
         if v in (None, "", "NONE"):
             return default
@@ -311,7 +290,6 @@ def _safe_int(v, default=0):
         return default
 
 def register_engine(item_type):
-    """Decorator to register engine class for given item type in ENGINE_REGISTRY."""
     def decorator(cls):
         ENGINE_REGISTRY[item_type] = cls
         return cls
@@ -321,7 +299,6 @@ faulthandler.enable()
 faulthandler.dump_traceback_later(30, repeat=True)
 
 def process_job(payload) -> dict:
-    """Main entry: route items to engines by type and merge results."""
     job_defaults = {}
     if isinstance(payload, dict) and "items" in payload:
         items = payload.get("items", [])
@@ -398,7 +375,6 @@ def process_job(payload) -> dict:
     return results
 
 def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | None]:
-    """Screen raw attrs for plug-on compatibility; return (allow_nq, allow_nf, routing)."""
     det = raw.get("detected_breakers", []) or []
     if not det:
         return True, True, None
@@ -532,7 +508,6 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | 
     return allow_nq, allow_nf, routing
 
 def _routing_bump_message(raw: dict) -> str | None:
-    """Build routing-bump message when panel was bumped to I-LINE for breaker limits."""
     routing = raw.get("_routing") or {}
     if routing.get("forcedFamily") != "I-LINE":
         return None
@@ -1061,6 +1036,310 @@ class PanelboardEngine(BaseEngine):
         panel_like = self._build_nq_branch_breakers(panel_like, raw, raw.get("detected_breakers", []))
         return panel_like
 
+    def _next_up(self, values, requested: int):
+        vals = sorted({int(v) for v in (values or []) if v is not None})
+        for v in vals:
+            if v >= int(requested):
+                return v
+        return None
+
+    def _nq_breaker_match_options(self, builder, requested_amps: int, requested_spaces: int, phase: str, lookup_voltage: int):
+        """
+        Return the smallest valid upward amp/space options for NQ main-breaker configs.
+        """
+        amp_candidates = set()
+        space_candidates = set()
+        pair_candidates = []
+
+        table = getattr(builder, "allowedConfigurationsBreaker", {}) or {}
+        for (minA, maxA, spc, phs, voltSpec), _params in table.items():
+            volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
+            if phs != phase or lookup_voltage not in volts:
+                continue
+            if maxA >= requested_amps:
+                amp_candidates.add(maxA)
+            if minA <= requested_amps <= maxA:
+                space_candidates.add(spc)
+            if maxA >= requested_amps and spc >= requested_spaces:
+                pair_candidates.append((maxA, spc))
+
+        return {
+            "amps_only": self._next_up(amp_candidates, requested_amps),
+            "spaces_only": self._next_up(space_candidates, requested_spaces),
+            "pairs": sorted(pair_candidates, key=lambda x: ((x[1] - requested_spaces), (x[0] - requested_amps), x[0], x[1])),
+        }
+
+    def _nf_breaker_match_options(self, builder, requested_amps: int, requested_spaces: int, phase: str, lookup_voltage: int):
+        """
+        Return the smallest valid upward amp/space options for NF main-breaker configs.
+        """
+        amp_candidates = set()
+        space_candidates = set()
+        pair_candidates = []
+
+        table = getattr(builder, "allowedConfigurationsBreaker", {}) or {}
+        for (minA, maxA, spc, phs, voltSpec), _params in table.items():
+            volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
+            if phs != phase or lookup_voltage not in volts:
+                continue
+            if maxA >= requested_amps:
+                amp_candidates.add(maxA)
+            if minA <= requested_amps <= maxA:
+                space_candidates.add(spc)
+            if maxA >= requested_amps and spc >= requested_spaces:
+                pair_candidates.append((maxA, spc))
+
+        return {
+            "amps_only": self._next_up(amp_candidates, requested_amps),
+            "spaces_only": self._next_up(space_candidates, requested_spaces),
+            "pairs": sorted(pair_candidates, key=lambda x: ((x[1] - requested_spaces), (x[0] - requested_amps), x[0], x[1])),
+        }
+
+    def _try_build_main_breaker_family_with_bumps(
+        self,
+        family: str,
+        builder,
+        panel_attrs: dict,
+        requested_amps: int,
+        requested_spaces: int,
+        phase: str,
+        lookup_voltage: int,
+    ):
+        """
+        Try exact, then copper-only exact (if starting on ALUMINUM),
+        then spaces-only, then amps-only, then both, then both+copper.
+        Each attempt resets to the original requested values first.
+        Any builder exception is treated as a failed attempt, not a fatal stop.
+        """
+        if family == "NQ":
+            options = self._nq_breaker_match_options(builder, requested_amps, requested_spaces, phase, lookup_voltage)
+        elif family == "NF":
+            options = self._nf_breaker_match_options(builder, requested_amps, requested_spaces, phase, lookup_voltage)
+        else:
+            return None, None
+
+        requested_material = str(panel_attrs.get("material", "ALUMINUM") or "ALUMINUM").upper()
+        allow_copper_upgrade = (requested_material == "ALUMINUM")
+
+        attempts = [
+            ("exact", requested_amps, requested_spaces, requested_material),
+        ]
+
+        if allow_copper_upgrade:
+            attempts.append(("copper_exact", requested_amps, requested_spaces, "COPPER"))
+
+        if options["spaces_only"] is not None and options["spaces_only"] != requested_spaces:
+            attempts.append(("spaces_only", requested_amps, options["spaces_only"], requested_material))
+
+        if options["amps_only"] is not None and options["amps_only"] != requested_amps:
+            attempts.append(("amps_only", options["amps_only"], requested_spaces, requested_material))
+
+        both_pair = None
+        for a2, s2 in options["pairs"]:
+            if a2 == requested_amps and s2 == requested_spaces:
+                continue
+            if a2 == requested_amps and s2 == options["spaces_only"]:
+                continue
+            if a2 == options["amps_only"] and s2 == requested_spaces:
+                continue
+            both_pair = (a2, s2)
+            attempts.append(("both", a2, s2, requested_material))
+            break
+
+        if allow_copper_upgrade and both_pair is not None:
+            attempts.append(("both_copper", both_pair[0], both_pair[1], "COPPER"))
+
+        last_error = None
+
+        for mode, try_amps, try_spaces, try_material in attempts:
+            attrs = dict(panel_attrs)
+            attrs["amperage"] = try_amps
+            attrs["spaces"] = try_spaces
+            attrs["material"] = try_material
+
+            if family == "NF":
+                attrs.pop("spd", None)
+
+            try:
+                out = (
+                    builder.generateNfPanelboardPartNumber(attrs)
+                    if family == "NF"
+                    else builder.generateNqPanelboardPartNumber(attrs)
+                )
+            except Exception as e:
+                last_error = f"{family} builder exception during {mode}: {e.__class__.__name__}: {e}"
+                continue
+
+            if not isinstance(out, str):
+                return out, {
+                    "mode": mode,
+                    "amperage": try_amps,
+                    "spaces": try_spaces,
+                    "material": try_material,
+                    "requestedMaterial": requested_material,
+                }
+
+            last_error = out
+
+        return None, {
+            "mode": "failed",
+            "error": last_error or f"Invalid {family} BREAKER configuration",
+            "amperage": requested_amps,
+            "spaces": requested_spaces,
+            "material": requested_material,
+            "requestedMaterial": requested_material,
+        }
+
+    def _nf_lug_match_options(self, builder, requested_amps: int, requested_spaces: int, phase: str, lookup_voltage: int):
+        """
+        Return the smallest valid upward amp/space options for NF main-lug configs.
+        """
+        table = getattr(builder, "allowedConfigurationsLug", {}) or {}
+        amp_candidates = set()
+        space_candidates = set()
+        pair_candidates = []
+
+        for (a, spc, phs, voltSpec), _params in table.items():
+            volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
+            if phs != phase or lookup_voltage not in volts:
+                continue
+            if a >= requested_amps:
+                amp_candidates.add(a)
+            if a == requested_amps:
+                space_candidates.add(spc)
+            if a >= requested_amps and spc >= requested_spaces:
+                pair_candidates.append((a, spc))
+
+        return {
+            "amps_only": self._next_up(amp_candidates, requested_amps),
+            "spaces_only": self._next_up(space_candidates, requested_spaces),
+            "pairs": sorted(pair_candidates, key=lambda x: ((x[1] - requested_spaces), (x[0] - requested_amps), x[0], x[1])),
+        }
+
+    def _nq_lug_match_options(self, builder, requested_amps: int, requested_spaces: int, phase: str, lookup_voltage: int):
+        """
+        Return the smallest valid upward amp/space options for NQ main-lug configs.
+        """
+        table = getattr(builder, "allowedConfigurationsLug", {}) or {}
+        amp_candidates = set()
+        space_candidates = set()
+        pair_candidates = []
+
+        for (a, spc, phs, voltSpec), _params in table.items():
+            volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
+            if phs != phase or lookup_voltage not in volts:
+                continue
+            if a >= requested_amps:
+                amp_candidates.add(a)
+            if a == requested_amps:
+                space_candidates.add(spc)
+            if a >= requested_amps and spc >= requested_spaces:
+                pair_candidates.append((a, spc))
+
+        return {
+            "amps_only": self._next_up(amp_candidates, requested_amps),
+            "spaces_only": self._next_up(space_candidates, requested_spaces),
+            "pairs": sorted(
+                pair_candidates,
+                key=lambda x: ((x[1] - requested_spaces), (x[0] - requested_amps), x[0], x[1])
+            ),
+        }
+
+    def _try_build_main_lug_family_with_bumps(
+        self,
+        family: str,
+        builder,
+        panel_attrs: dict,
+        requested_amps: int,
+        requested_spaces: int,
+        phase: str,
+        lookup_voltage: int,
+    ):
+        """
+        Try exact, then copper-only exact (if starting on ALUMINUM),
+        then spaces-only, then amps-only, then both, then both+copper.
+        Each attempt resets to the original requested values first.
+        Any builder exception is treated as a failed attempt, not a fatal stop.
+        """
+        if family == "NF":
+            options = self._nf_lug_match_options(builder, requested_amps, requested_spaces, phase, lookup_voltage)
+        elif family == "NQ":
+            options = self._nq_lug_match_options(builder, requested_amps, requested_spaces, phase, lookup_voltage)
+        else:
+            return None, None
+
+        requested_material = str(panel_attrs.get("material", "ALUMINUM") or "ALUMINUM").upper()
+        allow_copper_upgrade = (requested_material == "ALUMINUM")
+
+        attempts = [
+            ("exact", requested_amps, requested_spaces, requested_material),
+        ]
+
+        if allow_copper_upgrade:
+            attempts.append(("copper_exact", requested_amps, requested_spaces, "COPPER"))
+
+        if options["spaces_only"] is not None and options["spaces_only"] != requested_spaces:
+            attempts.append(("spaces_only", requested_amps, options["spaces_only"], requested_material))
+
+        if options["amps_only"] is not None and options["amps_only"] != requested_amps:
+            attempts.append(("amps_only", options["amps_only"], requested_spaces, requested_material))
+
+        both_pair = None
+        for a2, s2 in options["pairs"]:
+            if a2 == requested_amps and s2 == requested_spaces:
+                continue
+            if a2 == requested_amps and s2 == options["spaces_only"]:
+                continue
+            if a2 == options["amps_only"] and s2 == requested_spaces:
+                continue
+            both_pair = (a2, s2)
+            attempts.append(("both", a2, s2, requested_material))
+            break
+
+        if allow_copper_upgrade and both_pair is not None:
+            attempts.append(("both_copper", both_pair[0], both_pair[1], "COPPER"))
+
+        last_error = None
+
+        for mode, try_amps, try_spaces, try_material in attempts:
+            attrs = dict(panel_attrs)
+            attrs["amperage"] = try_amps
+            attrs["spaces"] = try_spaces
+            attrs["material"] = try_material
+
+            if family == "NF":
+                attrs.pop("spd", None)
+
+            try:
+                out = (
+                    builder.generateNfPanelboardPartNumber(attrs)
+                    if family == "NF"
+                    else builder.generateNqPanelboardPartNumber(attrs)
+                )
+            except Exception as e:
+                last_error = f"{family} builder exception during {mode}: {e.__class__.__name__}: {e}"
+                continue
+
+            if not isinstance(out, str):
+                return out, {
+                    "mode": mode,
+                    "amperage": try_amps,
+                    "spaces": try_spaces,
+                    "material": try_material,
+                    "requestedMaterial": requested_material,
+                }
+
+            last_error = out
+
+        return None, {
+            "mode": "failed",
+            "error": last_error or f"Invalid {family} LUG configuration",
+            "amperage": requested_amps,
+            "spaces": requested_spaces,
+            "material": requested_material,
+            "requestedMaterial": requested_material,
+        }
+
     def _build_main_lug(self, raw):
         panelAttrs = raw.copy()
         panelAttrs["typeOfMain"] = raw["typeOfMain"]
@@ -1207,8 +1486,13 @@ class PanelboardEngine(BaseEngine):
                         break
 
         # pick best in this order: cost_rank, series_priority, diffA, diffS
+        best_by_family = {}
         if candidates:
             candidates.sort(key=lambda c: (c[0], c[1], c[2], c[3]))
+            for cand in candidates:
+                fam = cand[4]
+                if fam not in best_by_family:
+                    best_by_family[fam] = cand
             _, _, _, _, family, chosen_series, best_amps, best_spaces, matched_material = candidates[0]
         else:
             if not candidates:
@@ -1226,6 +1510,7 @@ class PanelboardEngine(BaseEngine):
                 matched_material = "COPPER"
             else:
                 matched_material = panelAttrs["material"]
+
         if family == "I-LINE":
             panelAttrs["ilinePanelType"] = chosen_series
             panelAttrs["panelType"] = "I-LINE"
@@ -1251,29 +1536,155 @@ class PanelboardEngine(BaseEngine):
         if family != "I-LINE":
             panelAttrs["spaces"] = best_spaces
 
-        if family == "NQ":
-            panel = nq.generateNqPanelboardPartNumber(panelAttrs)
-            if isinstance(panel, str):
-                return {"error": panel}
-            allow_sqd_spd = bool(raw.get("_allowSqdSpd", True))
-            spd_present = allow_sqd_spd and (bool(raw.get("spd")) or bool(panel.get("SPD")))
-            panel["spaces"] = (
-                max(0, int(panelAttrs.get("spaces", 0)) - 12) if spd_present
-                else panelAttrs.get("spaces", 0))
-            return self._build_nq_branch_breakers(panel, raw, raw.get("detected_breakers", []))
-        
-        elif family == "NF":
-            attrs_nf = dict(panelAttrs)
-            attrs_nf.pop("spd", None)            
-            panel = nf.generateNfPanelboardPartNumber(attrs_nf)
-            if isinstance(panel, str):
-                return {"error": panel}
-            panel["spaces"] = panelAttrs.get("spaces", 0)
-            return self._build_nf_branch_breakers(
-                panel,
-                raw,
-                raw.get("detected_breakers", [])
+        requested_family_amps = amps
+        requested_family_spaces = spaces
+
+        if family in ("NQ", "NF"):
+            family_try_order = [f for f in (["NQ", "NF"] if family == "NQ" else ["NF"]) if f in best_by_family]
+
+            panel = None
+            bump_meta = None
+            selected_family = None
+            last_family_error = None
+
+            for fam in family_try_order:
+                _cand = best_by_family[fam]
+                _best_amps = _cand[6]
+                _best_spaces = _cand[7]
+
+                trial_attrs = dict(panelAttrs)
+                trial_attrs["amperage"] = _best_amps
+                trial_attrs["spaces"] = _best_spaces
+
+                trial_panel, trial_bump_meta = self._try_build_main_lug_family_with_bumps(
+                    family=fam,
+                    builder=(nq if fam == "NQ" else nf),
+                    panel_attrs=trial_attrs,
+                    requested_amps=requested_family_amps,
+                    requested_spaces=requested_family_spaces,
+                    phase=phase,
+                    lookup_voltage=lookup_voltage,
+                )
+
+                if trial_panel is None:
+                    last_family_error = (trial_bump_meta or {}).get("error") or f"Invalid {fam} LUG configuration"
+                    continue
+
+                panel = trial_panel
+                bump_meta = trial_bump_meta
+                selected_family = fam
+
+                panelAttrs["amperage"] = bump_meta["amperage"]
+                panelAttrs["spaces"] = bump_meta["spaces"]
+                panelAttrs["material"] = bump_meta.get("material", panelAttrs.get("material"))
+
+                requested_material = str(bump_meta.get("requestedMaterial", panelAttrs.get("material", "ALUMINUM"))).upper()
+                final_material = str(bump_meta.get("material", requested_material)).upper()
+
+                if bump_meta["mode"] != "exact" or final_material != requested_material:
+                    note = (
+                        f"{fam} main-lug configuration bumped from "
+                        f"{requested_family_amps}A / {requested_family_spaces} spaces"
+                    )
+
+                    if final_material != requested_material:
+                        note += f" / {requested_material}"
+
+                    note += (
+                        f" to {bump_meta['amperage']}A / {bump_meta['spaces']} spaces"
+                    )
+
+                    if final_material != requested_material:
+                        note += f" / {final_material}"
+
+                    note += "."
+
+                    panel.setdefault("Notes", []).append(note)
+
+                if fam == "NQ":
+                    allow_sqd_spd = bool(raw.get("_allowSqdSpd", True))
+                    spd_present = allow_sqd_spd and (bool(raw.get("spd")) or bool(panel.get("SPD")))
+                    panel["spaces"] = (
+                        max(0, int(panelAttrs.get("spaces", 0)) - 12) if spd_present
+                        else panelAttrs.get("spaces", 0)
+                    )
+
+                    panel["_finalPanelAmperage"] = panelAttrs.get("amperage")
+                    panel["_finalPanelSpaces"] = panelAttrs.get("spaces")
+                    panel["_finalPanelVoltage"] = voltage
+                    panel["_finalPanelIntRating"] = raw.get("intRating")
+                    panel["_finalMainBreakerAmperage"] = None
+
+                    return self._build_nq_branch_breakers(panel, raw, raw.get("detected_breakers", []))
+                else:
+                    panel["spaces"] = panelAttrs.get("spaces", 0)
+
+                    panel["_finalPanelAmperage"] = panelAttrs.get("amperage")
+                    panel["_finalPanelSpaces"] = panelAttrs.get("spaces")
+                    panel["_finalPanelVoltage"] = voltage
+                    panel["_finalPanelIntRating"] = raw.get("intRating")
+                    panel["_finalMainBreakerAmperage"] = None
+
+                    return self._build_nf_branch_breakers(
+                        panel,
+                        raw,
+                        raw.get("detected_breakers", [])
+                    )
+
+            print("[DBG][LUG] NQ/NF attempts failed → falling to I-LINE")
+
+            chosen_series = "HCR-U" if (amps > 800 or spaces > 99) else ("HCP" if amps > 250 else "HCJ")
+            matched_material = "COPPER" if chosen_series == "HCR-U" else panelAttrs["material"]
+
+            panelAttrs["amperage"] = amps
+            panelAttrs["ilinePanelType"] = chosen_series
+            panelAttrs["panelType"] = "I-LINE"
+            panelAttrs["material"] = matched_material
+
+            # Convert classic pole spaces → I-LINE spaces: ×1.5 then cap
+            requested = _safe_int(raw.get("spaces"), 0)
+            target_spaces = min(108, int(math.ceil(requested * 1.5)))
+
+            # Snap to a real interior for this series/config
+            panelAttrs["spaces"] = self._iline_snap_spaces(
+                il,
+                chosen_series,
+                "MAIN LUG",
+                panelAttrs["enclosure"],
+                panelAttrs["material"],
+                panelAttrs.get("trimStyle", ""),
+                target_spaces
             )
+
+            panel = self._safe_generate_iline(panelAttrs)
+            if isinstance(panel, str):
+                return {"error": panel}
+
+            panel["spaces"] = panelAttrs.get("spaces", 0)
+
+            if panelAttrs.get("_resize_note"):
+                panel.setdefault("Notes", []).append(panelAttrs["_resize_note"])
+
+            panel = self._build_iline_branch_breakers(panel, raw, raw.get("detected_breakers", []))
+
+            if int(panelAttrs.get("spaces", 0)) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
+                panel.setdefault("Notes", []).append(
+                    "Requested breaker counts exceed the largest I-LINE interior (108 spaces). User review required."
+                )
+
+            panel.setdefault("Notes", []).append(
+                "NQ/NF main-lug attempts failed; system bumped panel selection to I-LINE."
+            )
+
+            if last_family_error:
+                panel.setdefault("Notes", []).append(f"Last NQ/NF error: {last_family_error}")
+
+            msg = _routing_bump_message(raw)
+            if msg:
+                panel.setdefault("Notes", []).append(msg)
+
+            return panel
+
         else:
             panel = self._safe_generate_iline(panelAttrs)
             if isinstance(panel, str):
@@ -1432,34 +1843,152 @@ class PanelboardEngine(BaseEngine):
 
         _, best_maxA, best_fam, best_params = min(candidates, key=lambda x: (x[0], x[1]))
 
-        panelAttrs["spaces"]          = spaces
-        full_frame_code               = best_params[2][0]
-        panelAttrs["mainBreakerType"] = full_frame_code
-        all_kits        = list(best_params[3:-1])
-        barrier_kit     = best_params[-1]
+        best_by_family = {}
+        for _rank, _maxA, _fam, _params in sorted(candidates, key=lambda x: (x[0], x[1])):
+            if _fam not in best_by_family:
+                best_by_family[_fam] = (_maxA, _params)
 
-        panelAttrs["amperage"] = bus_amps
+        family_try_order = [f for f in (["NQ", "NF"] if best_fam == "NQ" else ["NF"]) if f in best_by_family]
 
-        attrs_for_family = dict(panelAttrs)
-        if best_fam == "NF":
-            attrs_for_family.pop("spd", None)
+        requested_family_amps = bus_amps
+        requested_family_spaces = spaces
 
-        if best_fam == "NQ":
-            panel_output = nq_builder.generateNqPanelboardPartNumber(attrs_for_family)
-            if isinstance(panel_output, str):
-                return {"error": panel_output}
+        panel_output = None
+        bump_meta = None
+        selected_family = None
+        selected_params = None
+        full_frame_code = None
+        all_kits = None
+        barrier_kit = None
+        last_family_error = None
 
-            allow_sqd_spd = bool(raw.get("_allowSqdSpd", True))
-            spd_present = allow_sqd_spd and (bool(raw.get("spd")) or bool(panel_output.get("SPD")))
-            panel_output["spaces"] = (
-                max(0, int(panelAttrs.get("spaces", 0)) - 12) if spd_present
-                else panelAttrs.get("spaces", 0))
+        for fam in family_try_order:
+            _maxA, fam_params = best_by_family[fam]
 
-        if best_fam == "NF":
-            panel_output = nf_builder.generateNfPanelboardPartNumber(attrs_for_family)
-            if isinstance(panel_output, str):
-                return {"error": panel_output}
-            panel_output["spaces"] = panelAttrs.get("spaces", 0)
+            trial_attrs = dict(panelAttrs)
+            trial_attrs["spaces"] = spaces
+            trial_attrs["amperage"] = bus_amps
+            trial_full_frame_code = fam_params[2][0]
+            trial_attrs["mainBreakerType"] = trial_full_frame_code
+
+            trial_output, trial_bump_meta = self._try_build_main_breaker_family_with_bumps(
+                family=fam,
+                builder=(nq_builder if fam == "NQ" else nf_builder),
+                panel_attrs=trial_attrs,
+                requested_amps=requested_family_amps,
+                requested_spaces=requested_family_spaces,
+                phase=phase,
+                lookup_voltage=lookup_voltage,
+            )
+
+            if trial_output is None:
+                last_family_error = (trial_bump_meta or {}).get("error") or f"Invalid {fam} BREAKER configuration"
+                continue
+
+            panel_output = trial_output
+            bump_meta = trial_bump_meta
+            selected_family = fam
+            selected_params = fam_params
+            full_frame_code = trial_full_frame_code
+            all_kits = list(fam_params[3:-1])
+            barrier_kit = fam_params[-1]
+
+            panelAttrs["amperage"] = bump_meta["amperage"]
+            panelAttrs["spaces"] = bump_meta["spaces"]
+            panelAttrs["material"] = bump_meta.get("material", panelAttrs.get("material"))
+            panelAttrs["mainBreakerType"] = full_frame_code
+
+            requested_material = str(bump_meta.get("requestedMaterial", panelAttrs.get("material", "ALUMINUM"))).upper()
+            final_material = str(bump_meta.get("material", requested_material)).upper()
+
+            if bump_meta["mode"] != "exact" or final_material != requested_material:
+                note = (
+                    f"{fam} main-breaker configuration bumped from "
+                    f"{requested_family_amps}A / {requested_family_spaces} spaces"
+                )
+
+                if final_material != requested_material:
+                    note += f" / {requested_material}"
+
+                note += (
+                    f" to {bump_meta['amperage']}A / {bump_meta['spaces']} spaces"
+                )
+
+                if final_material != requested_material:
+                    note += f" / {final_material}"
+
+                note += "."
+
+                panel_output.setdefault("Notes", []).append(note)
+
+            if fam == "NQ":
+                allow_sqd_spd = bool(raw.get("_allowSqdSpd", True))
+                spd_present = allow_sqd_spd and (bool(raw.get("spd")) or bool(panel_output.get("SPD")))
+                panel_output["spaces"] = (
+                    max(0, int(panelAttrs.get("spaces", 0)) - 12) if spd_present
+                    else panelAttrs.get("spaces", 0)
+                )
+            else:
+                panel_output["spaces"] = panelAttrs.get("spaces", 0)
+
+            break
+
+        if panel_output is None:
+            print("[DBG][MB] NQ/NF attempts failed → falling to I-LINE")
+
+            _amps = _safe_int(raw.get("amperage"), 0)
+            _spaces = _safe_int(raw.get("spaces"), 0)
+            chosen_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+
+            raw2 = dict(raw)
+
+            # Convert classic pole spaces → I-LINE spaces: ×1.5 then cap
+            requested = _safe_int(raw.get("spaces"), 0)
+            target_spaces = min(108, int(math.ceil(requested * 1.5)))
+
+            # Snap to a real interior for the chosen series/config
+            il = iLinePanelboard()
+            raw2["spaces"] = self._iline_snap_spaces(
+                il,
+                chosen_series,
+                "MAIN BREAKER",
+                panelAttrs["enclosure"],
+                panelAttrs["material"],
+                panelAttrs.get("trimStyle", ""),
+                target_spaces
+            )
+            raw2["panelType"] = chosen_series
+            raw2["ilinePanelType"] = chosen_series
+
+            panel = self._build_iline_breaker(raw2)
+            panel = self._build_iline_branch_breakers(panel, raw2, raw2.get("detected_breakers", []))
+
+            if int(raw2["spaces"]) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
+                panel.setdefault("Notes", []).append(
+                    "Requested breaker counts exceed the largest I-LINE interior (108 spaces). User review required."
+                )
+
+            panel.setdefault("Notes", []).append(
+                "NQ/NF main-breaker attempts failed; system bumped panel selection to I-LINE."
+            )
+
+            if last_family_error:
+                panel.setdefault("Notes", []).append(f"Last NQ/NF error: {last_family_error}")
+
+            msg = _routing_bump_message(raw)
+            if msg:
+                panel.setdefault("Notes", []).append(msg)
+
+            return panel
+
+        best_fam = selected_family
+        best_params = selected_params
+
+        panel_output["_finalPanelAmperage"] = panelAttrs.get("amperage")
+        panel_output["_finalPanelSpaces"] = panelAttrs.get("spaces")
+        panel_output["_finalPanelVoltage"] = voltage
+        panel_output["_finalPanelIntRating"] = raw.get("intRating")
+        panel_output["_finalMainBreakerAmperage"] = breaker_amps
 
         if set(best_params[2]) == {"LA","LH"} or full_frame_code == "LL":
             rating_key = "LL"
