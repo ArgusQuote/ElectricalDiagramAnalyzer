@@ -22,15 +22,64 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   exists and has been trained through four iterations (v2, v4, v5, v5b). The best model
   (v4) achieves mAP@0.5 of 0.66 on `generic3.pdf` but still trails the heuristic
   `PanelSearchToolV25` which finds all 6 panels. Adding negative examples (v5, v5b)
-  caused regressions. v4 remains the best Table Transformer model. The training skill
-  recommends escalating to RF-DETR (Apache 2.0) if further improvement is needed.
+  caused regressions. v4 remains the best Table Transformer model.
+  **Root cause identified (2026-05-06)**: dataset size is the primary bottleneck.
+  Microsoft Table Transformer maintainers recommend ~1,000 images as the
+  fine-tuning floor (per [microsoft/table-transformer Issue #108](https://github.com/microsoft/table-transformer/issues/108));
+  the original `annotations_coco.json` had only 28 images with annotations.
+  See "Dataset expansion (Phase 1) -- DONE" entry below for the v6 dataset and
+  remaining Phase 2 audit gaps in `train_table_transformer.py`.
+
+- **Dataset expansion (Phase 1) -- DONE 2026-05-06** -- A 298-image / 821-annotation
+  training dataset has been built at `~/Documents/TableAnnotations/v6/` from
+  the original 48 real images plus 250 synthetic images generated via
+  cut-and-paste augmentation ([Dwibedi et al. 2017](https://arxiv.org/abs/1708.01642)).
+  Scripts created:
+  - `MLTableDetection/pseudo_label.py` -- TATR v4 + threshold router
+    (auto-accept / review / hard-negatives) for any future rendered pages.
+    Run on 49 rendered PDF pages: 0 auto-accepted, 3 routed to review,
+    46 already in original COCO so skipped.
+  - `MLTableDetection/synthesize_panels.py` -- generates synthetic pages by
+    white-masking original panel regions and compositing real panel crops
+    onto natural-blank or masked backgrounds with small affine and
+    photometric variations.
+  - `MLTableDetection/merge_annotations.py` -- multi-source COCO merger
+    that re-keys IDs, hardlinks images, and tracks per-image source role.
+  Important caveats:
+    - Synthetic dominates the dataset (84%); held-out validation should
+      be drawn from real images only.
+    - 298 is still below Microsoft's ~1,000-image floor; further gains
+      may require collecting more real PDFs.
+    - 3 review-pile images at `~/Documents/TableAnnotations/pseudo_labeling/review/`
+      (B_page001.png, derek2_page009.png, derekfirst_page007.png) need manual
+      annotation if you want to add them to the v6 dataset.
+
+- **Phase 2 audit gaps in `train_table_transformer.py`** -- The training script
+  has correct augmentation, train/val split, and mAP tracking, but is missing
+  three documented small-dataset levers:
+  1. `--num-queries` is not exposed (uses TATR default 15). Per
+     [DETR Issue #9](https://github.com/facebookresearch/detr/issues/9) and
+     [Issue #620](https://github.com/facebookresearch/detr/issues/620) it
+     should be set modestly above the max objects per image (panels max ~6,
+     suggested value 15-20).
+  2. `--freeze-backbone-epochs` flag missing. With small datasets,
+     [Dynamic Backbone Freezing (arxiv 2407.15143)](https://arxiv.org/html/2407.15143v4)
+     recommends freezing the backbone for the first 30% of training epochs.
+  3. No targeted-negatives mode. v5/v5b regressed because random negatives
+     were added at image level rather than as targeted false-positive crops.
+     Phase 2 should add a separate hard-negatives folder weighted lower in the loss.
+  Plan reference: `~/.cursor/plans/panel-detector-improvement-path_9fdbc9ca.plan.md`.
 
 - **ML Page Classifier created** -- `PageFilter/PageClassifierML.py` provides a
   MobileNetV2 binary classifier for page-level "has panel / no panel" decisions.
   Trained on 35 images (28 pos, 7 neg), achieves 100% val accuracy. Designed as
-  a faster drop-in replacement for PageFilterV4 (~250 ms/page vs ~1-3s). Not yet
-  integrated into `uplink_server.py` (still imports `PageFilterV3`).
+  a faster drop-in replacement for the heuristic page filter (~250 ms/page vs
+  ~1-3 s). Wrapped by `PageFilter/PageFilterV4.py`, which exposes the same
+  `PageFilter` class and `readPdf()` signature as earlier heuristic versions
+  for transparent swap-in. Not yet integrated into `uplink_server.py` (still
+  imports `PageFilterV3`).
 
-- **uplink_server.py imports PageFilterV3** -- The latest heuristic is V4, and
-  the ML classifier is available, but `uplink_server.py` still imports
-  `PageFilter.PageFilterV3`.
+- **uplink_server.py imports PageFilterV3** -- V3 is the last heuristic page
+  filter; V4 is an ML-based wrapper around `PageClassifierML` (MobileNetV2).
+  `uplink_server.py` still imports `PageFilter.PageFilterV3` and has not yet
+  been switched to V4.

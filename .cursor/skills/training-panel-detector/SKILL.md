@@ -86,6 +86,77 @@ Both counts must be non-zero. Annotation count should be >= image count (most pa
 
 ---
 
+### Phase 2.5: Dataset Expansion (small-dataset projects)
+
+**When to run this phase**: if your annotated set has < 500 images. Per the
+[Microsoft Table Transformer maintainers](https://github.com/microsoft/table-transformer/issues/108),
+~1,000 images is the rough floor for fine-tuning. Below that, model-side
+tuning has limited effect compared to data expansion.
+
+This project completed Phase 2.5 on 2026-05-06. The output dataset lives at
+`~/Documents/TableAnnotations/v6/annotations_v6.json` (298 images, 821 annotations).
+
+**Three new scripts implement this phase:**
+
+1. **Pseudo-label rendered pages with the existing detector**:
+
+```bash
+python MLTableDetection/pseudo_label.py \
+  --images-dir ~/Documents/TableAnnotations/pseudo_labeling/images_raw \
+  --output-dir ~/Documents/TableAnnotations/pseudo_labeling \
+  --model-path ~/Documents/TableAnnotations/models_v4/best \
+  --existing-coco ~/Documents/TableAnnotations/annotations/annotations_coco.json \
+  --confidence 0.7
+```
+
+Routes images to `auto_accepted/`, `review/`, or `hard_negatives/` based on
+TATR confidence. Skips images whose filenames already appear in the existing COCO.
+
+2. **Synthesize new training samples via cut-and-paste**
+([Dwibedi et al. 2017](https://arxiv.org/abs/1708.01642)):
+
+```bash
+python MLTableDetection/synthesize_panels.py \
+  --coco ~/Documents/TableAnnotations/annotations/annotations_coco.json \
+  --images-dir ~/Documents/TableAnnotations/images \
+  --output-dir ~/Documents/TableAnnotations/synthetic \
+  --count 250 \
+  --max-dim 2200
+```
+
+White-masks original panel regions on annotated source pages, then composites
+real panel crops onto random non-overlapping locations with small affine
+(rotation +/- 2 deg, scale 0.9-1.1) and brightness (+/- 15%) variations. Also
+uses zero-annotation source pages as natural blank backgrounds (no masking)
+when available.
+
+3. **Merge all annotation sources into a single training-ready COCO**:
+
+```bash
+python MLTableDetection/merge_annotations.py \
+  --output-dir ~/Documents/TableAnnotations/v6 \
+  --source real=~/Documents/TableAnnotations/annotations/annotations_coco.json \
+  --source synth=~/Documents/TableAnnotations/synthetic/annotations.json \
+  --images-dir real=~/Documents/TableAnnotations/images \
+  --images-dir synth=~/Documents/TableAnnotations/synthetic/images \
+  --copy-mode link
+```
+
+Re-keys all image_ids and annotation_ids globally, hardlinks images into
+the output directory (zero extra disk), and prefixes each filename with its
+source role (e.g. `real__A_page001.png`, `synth__A_page001_synth_0042.png`).
+
+**Stop conditions**:
+- If your PDF source pool is already mostly annotated (this project's was 46/49),
+  pseudo-labeling will yield few or zero new auto-accepted images. Synthesis
+  becomes the primary data-expansion lever.
+- If synthetic ends up >75% of the dataset (this project's is 84%), held-out
+  validation MUST be drawn from real images only to detect synthetic-only artifacts.
+- If total images stay below 500, expect Phase 3 fine-tuning to plateau below
+  0.85 mAP. Consider collecting more real PDFs before retraining.
+
+---
+
 ### Phase 3: Model Selection and Training
 
 Use a tiered approach -- start simple, escalate only if needed.
@@ -118,6 +189,23 @@ python MLTableDetection/train_table_transformer.py \
 ```
 
 See [training-recipes.md](references/training-recipes.md) for hyperparameter guidance.
+
+**Known Phase 2 audit gaps in `train_table_transformer.py` as of 2026-05-06**
+(see `known-issues.mdc` for full context):
+- `--num-queries` is not exposed; should be wired through and set to
+  ~15-20 for panel-schedule data per
+  [DETR Issue #9](https://github.com/facebookresearch/detr/issues/9).
+- `--freeze-backbone-epochs` is not implemented; should freeze the backbone
+  for ~30% of total epochs per
+  [Dynamic Backbone Freezing (arxiv 2407.15143)](https://arxiv.org/html/2407.15143v4).
+- No targeted-negatives mode; v5/v5b's regression came from undifferentiated
+  random negatives. A new mode should accept a separate hard-negatives folder
+  weighted lower in the loss.
+- When training on the v6 dataset, point `--data` at
+  `~/Documents/TableAnnotations/v6/` (which has both `images/` and
+  `annotations_v6.json`); the script's COCO loader already handles
+  named annotation files via the `possible_paths` lookup -- you may need to
+  symlink or rename to `annotations.json` until the script learns the v6 name.
 
 **Check**: Validation loss decreases over epochs. Test the fine-tuned model:
 

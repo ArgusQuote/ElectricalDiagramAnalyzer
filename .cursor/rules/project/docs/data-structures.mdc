@@ -176,7 +176,7 @@ Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage
     - `decision` -- str, "KEEP" or "DROP"
 
 ### readPdf() Return (Pipeline-compatible)
-- **Returns**: `(kept_pages, dropped_pages, output_pdf_path, log_json_path)` -- same signature as PageFilterV4
+- **Returns**: `(kept_pages, dropped_pages, output_pdf_path, log_json_path)` -- same signature as the heuristic `PageFilterV3.readPdf()` (and the `PageFilterV4` wrapper, which delegates here)
 
 ### Model Checkpoint (model.pt)
 - **Location**: Saved by `MLTableDetection/train_page_classifier.py`

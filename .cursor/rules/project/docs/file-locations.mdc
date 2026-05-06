@@ -33,14 +33,18 @@ ElectricalDiagramAnalyzer/
 | File | Purpose |
 |---|---|
 | `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, worker pool, all RPC callables |
-| `PageFilter/PageFilterV4.py` | Page filtering (latest heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints |
-| `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel), drop-in replacement for PageFilterV4 |
+| `PageFilter/PageFilterV3.py` | Page filtering (last heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints. Currently the production import. |
+| `PageFilter/PageFilterV4.py` | Page filtering (ML wrapper) -- thin compatibility layer that wraps `PageClassifierML` behind the legacy `PageFilter` class / `readPdf()` API. No heuristic logic. |
+| `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel). Used directly or via the `PageFilterV4` wrapper. |
 | `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping |
 | `MLTableDetection/TableDetectorML.py` | ML table detection -- Table Transformer (DETR) for bounding-box-level panel detection |
-| `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO/YOLO format) |
+| `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO/YOLO format) -- has known Phase 2 gaps; see known-issues |
 | `MLTableDetection/train_page_classifier.py` | Training script for MobileNetV2 binary page classifier |
 | `MLTableDetection/evaluate_model.py` | Evaluation script -- mAP metrics, inference, box-level comparison with heuristic |
 | `MLTableDetection/render_pdfs_for_annotation.py` | Renders PDF pages to PNGs for annotation in Label Studio |
+| `MLTableDetection/pseudo_label.py` | TATR v4 threshold-based pseudo-labeler -- routes rendered PNGs into auto_accepted / review / hard_negatives |
+| `MLTableDetection/synthesize_panels.py` | Cut-and-paste synthetic data generator (Dwibedi et al. 2017) -- composites cropped panels onto blank engineering-drawing backgrounds |
+| `MLTableDetection/merge_annotations.py` | Multi-source COCO merger -- re-keys IDs, hardlinks images, tracks source role per image |
 | `OcrLibrary/BreakerTableParserAPIv9.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
 | `OcrLibrary/PanelHeaderParserV9.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
@@ -65,9 +69,10 @@ ElectricalDiagramAnalyzer/
 ### PageFilter
 - **Path**: `PageFilter/`
 - **Purpose**: Filters PDF pages to keep only electrical/panel content
-- **Heuristic**: `PageFilterV4.PageFilter` class, `.readPdf()` method (OCR + regex + footprints)
+- **Heuristic (last version)**: `PageFilterV3.PageFilter` class, `.readPdf()` method (OCR + regex + footprints). V3 is the final heuristic version; no V4 heuristic exists.
 - **ML classifier**: `PageClassifierML.PageClassifierML` class, `.readPdf()` method (MobileNetV2 binary classifier, ~250 ms/page)
-- **Production import**: `uplink_server.py` currently imports `PageFilterV3` (not yet updated to V4 or ML)
+- **ML wrapper**: `PageFilterV4.PageFilter` class -- wraps `PageClassifierML` behind the legacy `readPdf()` API so callers can swap V3 → V4 transparently
+- **Production import**: `uplink_server.py` currently imports `PageFilterV3` (not yet updated to V4)
 - **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
 - **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision (no EasyOCR needed)
 
@@ -115,7 +120,7 @@ ElectricalDiagramAnalyzer/
 
 ## Conventions
 
-- **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is the current active version. Lower versions are kept for comparison in DevEnv scripts.
+- **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is normally the current active version, with lower versions kept for comparison in DevEnv scripts. Exception: `PageFilter/` -- V3 is the last heuristic and remains in production; V4 is an ML-based wrapper around `PageClassifierML`. Always confirm the active version by checking the import in `AnvilUplinkCode/uplink_server.py`.
 - **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
 - **Backups**: `Backups/` contains Anvil form exports and server snapshots. Not part of the runtime.
 - **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.
