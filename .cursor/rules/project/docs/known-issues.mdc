@@ -20,15 +20,23 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 - **ML Table Detection underperforms heuristic** -- `MLTableDetection/TableDetectorML.py`
   exists and has been trained through four iterations (v2, v4, v5, v5b). The best model
-  (v4) achieves mAP@0.5 of 0.66 on `generic3.pdf` but still trails the heuristic
-  `PanelSearchToolV25` which finds all 6 panels. Adding negative examples (v5, v5b)
-  caused regressions. v4 remains the best Table Transformer model.
+  (v4) averages mAP@0.5 = 0.47 across 5 held-out PDFs (best:
+  `Electrical_Takeoff_page7=1.00`; previously-documented headline:
+  `generic3=0.66`; worst: `K=0.13`). See the
+  "v4 held-out baseline -- DONE 2026-05-07" entry below for the full
+  per-PDF table. v4 still trails the heuristic `PanelSearchToolV25`
+  which finds all 6 panels on generic3. Adding negative examples
+  (v5, v5b) caused regressions. v4 remains the best Table Transformer
+  model.
   **Root cause identified (2026-05-06)**: dataset size is the primary bottleneck.
   Microsoft Table Transformer maintainers recommend ~1,000 images as the
   fine-tuning floor (per [microsoft/table-transformer Issue #108](https://github.com/microsoft/table-transformer/issues/108));
   the original `annotations_coco.json` had only 28 images with annotations.
   See "Dataset expansion (Phase 1) -- DONE" entry below for the v6 dataset and
-  remaining Phase 2 audit gaps in `train_table_transformer.py`.
+  the "Phase 2 audit gaps -- DONE" entry for the training-script changes.
+  Evaluation infrastructure already exists at `MLTableDetection/evaluate_model.py`
+  (modes: `--data` for COCO mAP, `--images` for inference, `--pdf` for
+  box-level ML-vs-heuristic comparison with mAP / precision / recall / mean IoU).
 
 - **Dataset expansion (Phase 1) -- DONE 2026-05-06** -- A 298-image / 821-annotation
   training dataset has been built at `~/Documents/TableAnnotations/v6/` from
@@ -54,21 +62,141 @@ This file tracks known bugs, limitations, and deferred work items for the projec
       (B_page001.png, derek2_page009.png, derekfirst_page007.png) need manual
       annotation if you want to add them to the v6 dataset.
 
-- **Phase 2 audit gaps in `train_table_transformer.py`** -- The training script
-  has correct augmentation, train/val split, and mAP tracking, but is missing
-  three documented small-dataset levers:
-  1. `--num-queries` is not exposed (uses TATR default 15). Per
-     [DETR Issue #9](https://github.com/facebookresearch/detr/issues/9) and
-     [Issue #620](https://github.com/facebookresearch/detr/issues/620) it
-     should be set modestly above the max objects per image (panels max ~6,
-     suggested value 15-20).
-  2. `--freeze-backbone-epochs` flag missing. With small datasets,
-     [Dynamic Backbone Freezing (arxiv 2407.15143)](https://arxiv.org/html/2407.15143v4)
-     recommends freezing the backbone for the first 30% of training epochs.
-  3. No targeted-negatives mode. v5/v5b regressed because random negatives
-     were added at image level rather than as targeted false-positive crops.
-     Phase 2 should add a separate hard-negatives folder weighted lower in the loss.
+- **Phase 2 audit gaps in `train_table_transformer.py` -- DONE 2026-05-07** --
+  All three documented small-dataset levers are now wired through the CLI
+  and `fine_tune_tatr()`:
+  1. `--num-queries N` exposed. Default: keep the pretrained checkpoint's 15.
+     Recommended for panel data: 15-20 per [DETR Issue #9](https://github.com/facebookresearch/detr/issues/9).
+     When N differs from the checkpoint, query embeddings are re-initialised
+     via `ignore_mismatched_sizes=True`.
+  2. `--freeze-backbone-epochs N` added. Default: ~30% of `--epochs`
+     (rounded). Pass 0 to disable. Implemented as a `TrainerCallback` that
+     snapshots the backbone's original (partial-freeze) `requires_grad`
+     state at training start, forces all backbone params off during the
+     freeze window, then restores the snapshot -- preserves DETR's
+     intentional freezing of early ResNet layers (`conv1`, `layer1`).
+     Reference: [Dynamic Backbone Freezing (arxiv 2407.15143)](https://arxiv.org/html/2407.15143v4).
+  3. `--hard-negatives-dir DIR` and `--hard-negatives-weight W` added.
+     Negatives are loaded with empty target boxes (so the loss only fires
+     against the no-object class) and concatenated with the positives via
+     `WeightedRandomSampler` so each negative appears at `W * 1.0` the
+     per-step rate of a positive (default `W=0.1`). Epoch length stays at
+     the positive count so wall-clock time is comparable to a positives-only
+     run. Implemented as a `Trainer` subclass overriding `_get_train_sampler`.
   Plan reference: `~/.cursor/plans/panel-detector-improvement-path_9fdbc9ca.plan.md`.
+
+  **Verification status as of 2026-05-07:**
+  - Unit-level smoke checks PASSED: negatives loader builds an
+    empty-annotation COCO dict; freeze callback round-trips the
+    `requires_grad` snapshot (15 originally trainable + 5 frozen tensors);
+    `num_queries=20` resizes `query_position_embeddings` from 15 to 20.
+  - End-to-end 1-epoch laptop dry-run PASSED on 2026-05-07
+    (RTX 500 Ada, 3.9 GB VRAM): 1 epoch x 298 steps at batch 1 in 51 s,
+    `--num-queries 20 --freeze-backbone-epochs 1`, no OOM.
+    Saved to `/tmp/tatr_dryrun/best/`. Loss values not meaningful
+    (warmup-dominated 1-epoch run).
+  - **Verified end-to-end on 2026-05-07** via 2-epoch laptop dry-run
+    (RTX 500 Ada, 105.9 s wall, exit 0, artifacts at `/tmp/tatr_dryrun2/best/`).
+    Command:
+    ```
+    python MLTableDetection/train_table_transformer.py \
+      --data ~/Documents/TableAnnotations/v6 \
+      --output /tmp/tatr_dryrun2 \
+      --epochs 2 --batch-size 1 --val-split 0.1 \
+      --num-queries 20 --freeze-backbone-epochs 1 \
+      --hard-negatives-dir ~/Documents/TableAnnotations/hard_negatives \
+      --hard-negatives-weight 0.1 \
+      --warmup-steps 5
+    ```
+    All three previously unverified paths fired:
+    1. **Backbone unfreeze**: `[FREEZE] Backbone restored to original
+       partial-freeze state at epoch 1.0 (20 parameter tensors)` printed
+       at the start of epoch 2.
+    2. **Validation + mAP**: torchmetrics
+       `MeanAveragePrecision` produced two epoch-level reports
+       (epoch 1 frozen: `eval_map_50=0.0005`; epoch 2 unfrozen:
+       `eval_map_50=0.0199`). Values are tiny because the 2-epoch run is
+       warmup-dominated; what matters is that `compute_metrics` ran without
+       crashing on the v6 dataset shape.
+    3. **`WeightedSamplerTrainer` with real negatives**: startup log
+       `[INFO] Hard negatives: 13 images from .../hard_negatives
+       (sampler weight 0.100; ~1.3 negatives/epoch on average)` and
+       train step count 536 = 268 (positives) * 2 epochs (the
+       `WeightedRandomSampler` keeps epoch length at the positive count
+       and over-/undersamples to match `num_samples`).
+  - Full retrain on the v6 dataset (Phase 2.b in the plan) is still pending.
+    Recommended target environment: Paperspace A5000 (24 GB VRAM,
+    estimated 15-25 min for 30 epochs). Local laptop is feasible but slow
+    (~30-45 min) and competes for the GPU with the desktop session.
+
+- **`hard_negatives/` folder audit -- DONE 2026-05-07** -- The original
+  warning was based on the pre-v6 image folder (Label-Studio hash-prefixed
+  names like `2cb1b73f-derek2_page006.png`). After cross-checking against
+  v6's `annotations_v6.json`, the verdict is:
+  - **No labeling bug.** All 13 hard-negative PNGs match v6 entries with
+    the `real__` prefix (e.g. `real__derek2_page006.png`) and those v6
+    entries have **0 positive annotations**. The same image is never both
+    positive and negative in v6.
+  - **All 13 are byte-identical (md5 match)** to the corresponding
+    `real__<name>.png` file inside `v6/images/`. They were copied during
+    the v6 build by `merge_annotations.py`'s natural-blank-pages pass.
+  - **Caveat:** the same backgrounds DO appear under `synth__<name>_synth_*`
+    file names in v6 -- those are the cut-and-paste augmentation outputs
+    with real panel crops composited on top, so the file_name (and
+    therefore the COCO image_id) is different. Not a collision.
+  - **Effect on training:** passing `--hard-negatives-dir` is **redundant**
+    rather than harmful -- the COCO already covers these images at
+    zero annotations, so the `WeightedSamplerTrainer` only up-weights how
+    often the model sees those exact backgrounds at "no objects".
+  - **Mismatch with the original Phase 2 plan intent:** the plan envisioned
+    hard negatives as **false-positive crops produced by v4**, not full
+    blank pages. Replacing this folder with v4 false-positive crops is
+    deferred work; it's only worth doing if the v6 retrain underperforms
+    and we need a focused-negatives lever to add.
+  - **Action taken**: none. No files moved, deleted, or flagged. Audit
+    log written to
+    `~/Documents/TableAnnotations/hard_negatives/AUDIT_2026-05-07.md`.
+  - **Recommendation for the real Paperspace retrain**: either drop the
+    `--hard-negatives-dir` flag (since the contribution is near-zero), or
+    keep it as documented -- the dry-run confirmed it does not break
+    training.
+
+- **v4 held-out baseline -- DONE 2026-05-07** -- Per-PDF box-level metrics
+  (heuristic = ground truth, conf 0.5, IoU 0.5) saved at
+  `~/Documents/TableAnnotations/baselines/v4_2026-05-07/<pdf_stem>/box_comparison.json`
+  for the 5 agreed-on held-out PDFs (`generic3`, `K`, `makayla1`, `D`,
+  `Electrical_Takeoff_page7`). Summary at
+  `~/Documents/TableAnnotations/baselines/v4_2026-05-07/SUMMARY.md`.
+  - **Headline number for v6 comparison**: v4 averages
+    **mAP@0.5 = 0.4688** across the 5 PDFs (precision 0.7571,
+    recall 0.5071, mean matched IoU 0.7599), with a wide spread:
+    `Electrical_Takeoff_page7=1.00 | generic3=0.66 | D=0.34 | makayla1=0.21
+    | K=0.13`.
+  - The previously-documented `generic3.pdf = 0.66` figure reproduces
+    exactly (`0.6634`), so the rest of the per-PDF table can be trusted
+    as like-for-like.
+  - Per the Phase 2 plan's pass/fail rule
+    (`mAP@0.5 >= 0.85 AND >= v4 baseline AND >= heuristic on >= 80% of PDFs`),
+    v6 needs to clear v4 by a clear margin on at least 4 of these 5 PDFs.
+  - Side-effect cleanup: `MLTableDetection/evaluate_model.py` was patched
+    with `Image.MAX_IMAGE_PIXELS = None` near its imports because
+    `Electrical_Takeoff_page7.pdf` renders to ~209 megapixels at 400 DPI
+    and tripped PIL's default `DecompressionBombError` guard. The change
+    is local to the eval script and does not affect production paths;
+    it resolves the "PIL DecompressionBombError" caveat documented in
+    `KNOWN_ISSUES.md` line 125-126.
+
+- **`annotations.json` symlink workaround in place at v6 dataset** --
+  `train_table_transformer.py` and `evaluate_model.py` both look for
+  hardcoded `annotations.json` / `annotations_coco.json` filenames in
+  `possible_paths`. The v6 dataset's actual file is `annotations_v6.json`,
+  so a symlink was created on 2026-05-07:
+  ```
+  ~/Documents/TableAnnotations/v6/annotations.json
+    -> ~/Documents/TableAnnotations/v6/annotations_v6.json
+  ```
+  Cleanup option: replace `possible_paths` with a `glob("annotations*.json")`
+  fallback so future v7/v8/etc. datasets don't need a symlink.
 
 - **ML Page Classifier created** -- `PageFilter/PageClassifierML.py` provides a
   MobileNetV2 binary classifier for page-level "has panel / no panel" decisions.

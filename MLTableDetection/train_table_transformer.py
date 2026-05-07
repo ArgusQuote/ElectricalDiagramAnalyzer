@@ -11,6 +11,10 @@ Features:
     - Automatic train/validation split from a single COCO annotation file
     - Validation mAP tracking via torchmetrics (best-model selection)
     - Small-dataset hyperparameter defaults (< 50 images)
+    - Configurable num_queries override (DETR Issue #9)
+    - Backbone freezing for the first N epochs (Dynamic Backbone Freezing,
+      arxiv 2407.15143)
+    - Optional hard-negatives folder, weighted lower in the sampler
 
 Usage:
     # Fine-tune with small-dataset defaults
@@ -22,6 +26,16 @@ Usage:
         --output ~/Documents/TableAnnotations/models_v2 \
         --epochs 25 --learning-rate 5e-6 --weight-decay 0.05 \
         --warmup-steps 100 --val-split 0.15
+
+    # Phase 2 small-dataset recipe (v6 dataset, ~300 images)
+    python train_table_transformer.py \
+        --data ~/Documents/TableAnnotations/v6 \
+        --output ~/Documents/TableAnnotations/models_v6 \
+        --epochs 30 --learning-rate 5e-6 \
+        --num-queries 20 \
+        --freeze-backbone-epochs 10 \
+        --hard-negatives-dir ~/Documents/TableAnnotations/hard_negatives \
+        --hard-negatives-weight 0.1
 
     # Generate Colab notebook for training
     python train_table_transformer.py --colab-notebook
@@ -116,6 +130,55 @@ def convert_yolo_to_coco(yolo_dir: str, output_path: str) -> dict:
 
     print(f"[INFO] Converted {len(coco['images'])} images, "
           f"{len(coco['annotations'])} annotations")
+    return coco
+
+
+# Image suffixes the negatives loader will pick up. Kept aligned with the
+# formats produced by `render_pdfs_for_annotation.py` and `synthesize_panels.py`.
+_NEGATIVE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+
+
+def build_negatives_coco_dict(neg_dir: str) -> dict:
+    """
+    Build a COCO-format dict for a folder of image-level hard negatives.
+
+    Hard negatives are pages that the previous detector got wrong (false
+    positives) or that contain look-alike-but-not-target structures. They
+    are loaded with no bounding-box annotations so the DETR loss only fires
+    its classification term against the no-object class.
+
+    The returned dict mirrors the shape of `convert_yolo_to_coco` output but
+    contains zero entries in `annotations`.
+
+    Args:
+        neg_dir: Directory containing image files. Subdirectories are not
+            traversed -- only direct children are picked up.
+
+    Returns:
+        COCO dict with image entries but no annotations.
+    """
+    from PIL import Image
+
+    neg_dir_path = Path(neg_dir)
+    coco = {
+        "images": [],
+        "annotations": [],
+        "categories": [{"id": 0, "name": "table"}],
+    }
+
+    img_paths = sorted(
+        p for p in neg_dir_path.iterdir()
+        if p.is_file() and p.suffix.lower() in _NEGATIVE_IMAGE_SUFFIXES
+    )
+    for idx, img_path in enumerate(img_paths):
+        with Image.open(img_path) as img:
+            width, height = img.size
+        coco["images"].append({
+            "id": idx,
+            "file_name": img_path.name,
+            "width": width,
+            "height": height,
+        })
     return coco
 
 
@@ -377,6 +440,161 @@ def build_compute_metrics(processor, model_config):
 
 
 # ---------------------------------------------------------------------------
+# Backbone freezing (small-dataset overfitting control)
+# ---------------------------------------------------------------------------
+#
+# Note: TATR ships with *partial* backbone freezing by default -- the early
+# ResNet layers (conv1, layer1) are already frozen, while layer2-4 are
+# trainable. This matches the original DETR transfer-learning recipe.
+#
+# The callback below preserves that original state on "unfreeze": it
+# captures each parameter's initial `requires_grad` at training start,
+# forces them all to False during the freeze window, then restores the
+# captured state. Aggressively unfreezing every layer would break the DETR
+# convention and risk training the conv1/layer1 features that the
+# checkpoint deliberately holds fixed.
+
+
+def _snapshot_backbone_requires_grad(model) -> dict:
+    """Return {param_id: original requires_grad bool} for every backbone tensor."""
+    return {
+        id(p): bool(p.requires_grad)
+        for p in model.model.backbone.parameters()
+    }
+
+
+def _force_backbone_frozen(model) -> int:
+    """Set requires_grad=False on every backbone parameter."""
+    n = 0
+    for p in model.model.backbone.parameters():
+        p.requires_grad_(False)
+        n += 1
+    return n
+
+
+def _restore_backbone_requires_grad(model, snapshot: dict) -> int:
+    """Restore each backbone parameter to its snapshotted requires_grad."""
+    n = 0
+    for p in model.model.backbone.parameters():
+        p.requires_grad_(snapshot.get(id(p), True))
+        n += 1
+    return n
+
+
+def _build_backbone_freeze_callback(freeze_epochs: int, verbose: bool = True):
+    """
+    Build a TrainerCallback that freezes the TATR backbone for the first
+    `freeze_epochs` epochs and restores its original (partial-freeze) state
+    afterwards.
+
+    Rationale: with very small fine-tuning datasets (well under Microsoft's
+    recommended ~1,000-image floor), end-to-end fine-tuning of the
+    pretrained ResNet backbone overfits quickly. Freezing the backbone for
+    the first ~30% of training lets the detection head adapt before the
+    visual features start moving. See
+    https://arxiv.org/html/2407.15143v4 (Dynamic Backbone Freezing).
+    """
+    from transformers import TrainerCallback
+
+    class BackboneFreezeCallback(TrainerCallback):
+        def __init__(self, freeze_epochs: int, verbose: bool):
+            self.freeze_epochs = freeze_epochs
+            self.verbose = verbose
+            self._original_state: Optional[dict] = None
+            self._frozen = False
+
+        def on_train_begin(self, args, state, control, **kwargs):
+            if self.freeze_epochs <= 0:
+                return
+            model = kwargs.get("model")
+            if model is None:
+                return
+            self._original_state = _snapshot_backbone_requires_grad(model)
+            n = _force_backbone_frozen(model)
+            self._frozen = True
+            if self.verbose:
+                trainable_originally = sum(
+                    1 for v in self._original_state.values() if v)
+                print(f"[FREEZE] Backbone frozen for first "
+                      f"{self.freeze_epochs} epoch(s) "
+                      f"({n} parameter tensors; "
+                      f"{trainable_originally} were originally trainable)")
+
+        def on_epoch_begin(self, args, state, control, **kwargs):
+            if not self._frozen:
+                return
+            # state.epoch is float; equals number of completed epochs at
+            # epoch_begin (e.g. 0.0 at start of epoch 1, 1.0 at start of
+            # epoch 2, etc.).
+            if state.epoch is not None and state.epoch >= self.freeze_epochs:
+                model = kwargs.get("model")
+                if model is None or self._original_state is None:
+                    return
+                n = _restore_backbone_requires_grad(
+                    model, self._original_state)
+                self._frozen = False
+                if self.verbose:
+                    print(f"[FREEZE] Backbone restored to original "
+                          f"partial-freeze state at epoch "
+                          f"{state.epoch:.1f} ({n} parameter tensors)")
+
+    return BackboneFreezeCallback(freeze_epochs, verbose)
+
+
+# ---------------------------------------------------------------------------
+# Hard-negatives sampler (weighted Trainer subclass)
+# ---------------------------------------------------------------------------
+
+def _make_weighted_sampler_trainer_class():
+    """
+    Factory that returns a Trainer subclass which samples training examples
+    with per-index weights, used to expose hard-negative images at a lower
+    rate than positives.
+
+    Wrapped in a function so the heavy `transformers` import stays lazy.
+    """
+    from transformers import Trainer
+    import torch
+    from torch.utils.data import WeightedRandomSampler
+
+    class WeightedSamplerTrainer(Trainer):
+        """
+        Trainer that draws from `train_dataset` via a WeightedRandomSampler.
+
+        `sampler_weights` is a 1-D float tensor or list with one entry per
+        training-set index. Hard negatives get a lower weight than
+        positives, so each epoch sees fewer of them and the no-object
+        classification loss does not dominate the box-regression signal.
+
+        `num_samples` controls epoch length; when None we keep the
+        positive-only count so wall-clock per epoch stays comparable to a
+        positives-only run.
+        """
+
+        def __init__(self, *args, sampler_weights=None,
+                     sampler_num_samples=None, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._sampler_weights = sampler_weights
+            self._sampler_num_samples = sampler_num_samples
+
+        def _get_train_sampler(self, train_dataset=None):
+            if self._sampler_weights is None:
+                return super()._get_train_sampler(train_dataset)
+            weights = torch.as_tensor(
+                self._sampler_weights, dtype=torch.double)
+            num_samples = (self._sampler_num_samples
+                           if self._sampler_num_samples is not None
+                           else len(weights))
+            return WeightedRandomSampler(
+                weights=weights,
+                num_samples=num_samples,
+                replacement=True,
+            )
+
+    return WeightedSamplerTrainer
+
+
+# ---------------------------------------------------------------------------
 # Core training function
 # ---------------------------------------------------------------------------
 
@@ -391,6 +609,10 @@ def fine_tune_tatr(
     warmup_steps: int = 100,
     val_split: float = 0.15,
     augment: bool = True,
+    num_queries: Optional[int] = None,
+    freeze_backbone_epochs: Optional[int] = None,
+    hard_negatives_dir: Optional[str] = None,
+    hard_negatives_weight: float = 0.1,
     verbose: bool = True,
 ) -> str:
     """
@@ -407,6 +629,23 @@ def fine_tune_tatr(
         warmup_steps: Linear LR warmup steps.
         val_split: Fraction of images held out for validation (0 to disable).
         augment: Apply Albumentations augmentation to training data.
+        num_queries: If set, override the model's `num_queries` config. The
+            pretrained TATR checkpoint ships with 15 queries; values in the
+            15-30 range are recommended for panel-schedule data (max ~6
+            panels/page) per DETR Issue #9. Setting a value different from
+            the pretrained one re-initialises the query embeddings.
+        freeze_backbone_epochs: If > 0, freeze the ResNet backbone for this
+            many epochs at the start of training, then unfreeze. If None,
+            defaults to ~30% of `epochs`. Pass 0 to disable.
+        hard_negatives_dir: Optional directory of hard-negative images
+            (look-alike pages with no panel schedules). Loaded with empty
+            target boxes so the loss only penalises false-positive
+            classifications. Reuses the existing dataset code path.
+        hard_negatives_weight: Per-sample sampling weight for hard
+            negatives relative to positives (which have weight 1.0). 0.1
+            means each negative is ~10% as likely to be drawn as each
+            positive in a given step. Ignored if `hard_negatives_dir` is
+            None.
         verbose: Print progress.
 
     Returns:
@@ -417,7 +656,6 @@ def fine_tune_tatr(
         TableTransformerForObjectDetection,
         AutoImageProcessor,
         TrainingArguments,
-        Trainer,
     )
 
     output_dir = Path(output_dir)
@@ -485,7 +723,22 @@ def fine_tune_tatr(
         print(f"[INFO] Loading model: {model_name}")
 
     processor = AutoImageProcessor.from_pretrained(model_name)
-    model = TableTransformerForObjectDetection.from_pretrained(model_name)
+
+    model_kwargs = {}
+    if num_queries is not None:
+        # Pass through `from_pretrained` so the config is patched before
+        # the layers are constructed. `ignore_mismatched_sizes=True` lets HF
+        # re-initialise the query embeddings when N differs from the
+        # pretrained checkpoint's value.
+        model_kwargs["num_queries"] = num_queries
+        model_kwargs["ignore_mismatched_sizes"] = True
+
+    model = TableTransformerForObjectDetection.from_pretrained(
+        model_name, **model_kwargs)
+
+    if verbose:
+        print(f"[INFO] num_queries: {model.config.num_queries}"
+              + (" (overridden)" if num_queries is not None else " (default)"))
 
     # ---- datasets ----------------------------------------------------------
     TableDataset = _make_dataset_class()
@@ -504,9 +757,52 @@ def fine_tune_tatr(
             augmentation=None,
         )
 
+    # ---- hard-negatives dataset (optional) ---------------------------------
+    sampler_weights = None
+    sampler_num_samples = None
+    n_positives = len(train_dataset)
+    n_negatives = 0
+
+    if hard_negatives_dir is not None:
+        neg_dir_path = Path(os.path.expanduser(hard_negatives_dir))
+        if not neg_dir_path.exists():
+            raise FileNotFoundError(
+                f"hard_negatives_dir does not exist: {neg_dir_path}")
+
+        neg_coco = build_negatives_coco_dict(str(neg_dir_path))
+        if not neg_coco["images"]:
+            print(f"[WARN] No images found in {neg_dir_path}; "
+                  f"hard-negatives mode disabled")
+        else:
+            neg_dataset = TableDataset(
+                neg_coco, neg_dir_path, processor, cat_id_map,
+                augmentation=None,
+            )
+            n_negatives = len(neg_dataset)
+            train_dataset = torch.utils.data.ConcatDataset(
+                [train_dataset, neg_dataset])
+
+            # Positives weighted 1.0, negatives weighted lower so they
+            # appear less often per epoch. Epoch length stays at the
+            # positive count so wall-clock time is comparable to a
+            # positives-only run.
+            sampler_weights = (
+                [1.0] * n_positives
+                + [float(hard_negatives_weight)] * n_negatives
+            )
+            sampler_num_samples = n_positives
+
+            if verbose:
+                print(f"[INFO] Hard negatives: {n_negatives} images from "
+                      f"{neg_dir_path} (sampler weight "
+                      f"{hard_negatives_weight:.3f}; "
+                      f"~{hard_negatives_weight * n_negatives:.1f} "
+                      f"negatives/epoch on average)")
+
     if verbose:
-        print(f"[INFO] Train set: {len(train_dataset)} images"
-              f" (augmentation={'ON' if augment else 'OFF'})")
+        print(f"[INFO] Train set: {n_positives} positives"
+              + (f" + {n_negatives} hard negatives" if n_negatives else "")
+              + f" (augmentation={'ON' if augment else 'OFF'})")
         if val_dataset:
             print(f"[INFO] Val set:   {len(val_dataset)} images")
 
@@ -551,15 +847,46 @@ def fine_tune_tatr(
     if has_val:
         compute_metrics_fn = build_compute_metrics(processor, model.config)
 
+    # ---- backbone-freeze callback (optional) -------------------------------
+    callbacks = []
+    if freeze_backbone_epochs is None:
+        # Default: freeze the backbone for ~30% of total epochs, rounded up
+        # so very short runs still get at least one frozen epoch. Pass 0
+        # explicitly to disable.
+        freeze_epochs = max(1, int(round(0.3 * epochs)))
+    else:
+        freeze_epochs = int(freeze_backbone_epochs)
+
+    if freeze_epochs > 0:
+        callbacks.append(
+            _build_backbone_freeze_callback(freeze_epochs, verbose=verbose))
+        if verbose:
+            print(f"[INFO] Backbone freeze: first {freeze_epochs} of "
+                  f"{epochs} epochs")
+    elif verbose:
+        print("[INFO] Backbone freeze: disabled")
+
     # ---- trainer -----------------------------------------------------------
-    trainer = Trainer(
+    trainer_kwargs = dict(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         data_collator=collate_fn,
         compute_metrics=compute_metrics_fn,
+        callbacks=callbacks,
     )
+
+    if sampler_weights is not None:
+        WeightedSamplerTrainer = _make_weighted_sampler_trainer_class()
+        trainer = WeightedSamplerTrainer(
+            sampler_weights=sampler_weights,
+            sampler_num_samples=sampler_num_samples,
+            **trainer_kwargs,
+        )
+    else:
+        from transformers import Trainer
+        trainer = Trainer(**trainer_kwargs)
 
     if verbose:
         print(f"[INFO] Starting training for {epochs} epochs "
@@ -800,6 +1127,36 @@ def main():
         help="Disable data augmentation",
     )
     parser.add_argument(
+        "--num-queries",
+        type=int, default=None,
+        help="Override the model's num_queries config. TATR ships with 15; "
+             "for panel schedules (max ~6 panels/page) values in the "
+             "15-30 range are recommended (DETR Issue #9). Default: "
+             "use the pretrained checkpoint's value (15).",
+    )
+    parser.add_argument(
+        "--freeze-backbone-epochs",
+        type=int, default=None,
+        help="Freeze the ResNet backbone for the first N epochs to reduce "
+             "overfitting on small datasets, then unfreeze. Default: "
+             "30%% of --epochs (rounded). Pass 0 to disable.",
+    )
+    parser.add_argument(
+        "--hard-negatives-dir",
+        default=None,
+        help="Optional directory of look-alike-but-not-target images "
+             "(false-positive crops, blank pages, non-panel tables). "
+             "Loaded with empty target boxes; trains the no-object "
+             "classifier without contributing box-regression signal.",
+    )
+    parser.add_argument(
+        "--hard-negatives-weight",
+        type=float, default=0.1,
+        help="Per-sample sampling weight for hard negatives relative to "
+             "positives (1.0). 0.1 means each negative is ~10%% as likely "
+             "as each positive in a given step (default).",
+    )
+    parser.add_argument(
         "--colab-notebook",
         action="store_true",
         help="Generate a Google Colab notebook",
@@ -839,6 +1196,10 @@ def main():
             warmup_steps=args.warmup_steps,
             val_split=args.val_split,
             augment=not args.no_augment,
+            num_queries=args.num_queries,
+            freeze_backbone_epochs=args.freeze_backbone_epochs,
+            hard_negatives_dir=args.hard_negatives_dir,
+            hard_negatives_weight=args.hard_negatives_weight,
             verbose=not args.quiet,
         )
         print(f"\n[SUCCESS] Fine-tuning complete!")

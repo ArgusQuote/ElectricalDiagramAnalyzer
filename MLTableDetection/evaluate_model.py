@@ -32,6 +32,11 @@ import numpy as np
 import cv2
 from PIL import Image
 
+# Some held-out PDFs (e.g. Electrical_Takeoff_page7.pdf) render to >200 MP at
+# 400 DPI and trip PIL's default DecompressionBombError guard. The PDFs are
+# trusted local files, so disable the limit for the duration of this script.
+Image.MAX_IMAGE_PIXELS = None
+
 
 # ---------------------------------------------------------------------------
 # Ensure project root is importable

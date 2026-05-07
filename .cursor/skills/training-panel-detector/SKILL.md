@@ -7,6 +7,25 @@ description: Guides training and fine-tuning a commercial-friendly ML model to d
 
 Trains or fine-tunes a commercial-friendly object detection model to locate panel schedule tables in rendered PDF pages, replacing or augmenting the heuristic detector in `PanelSearchToolV25.py`.
 
+## Current State (2026-05-07)
+
+Phase 1 (data expansion) and Phase 2 (training-script audit gap fixes)
+are complete. The next work item is the Phase 2.b retrain on the v6 dataset.
+Before retraining, the next agent should:
+
+1. **Audit the existing `~/Documents/TableAnnotations/hard_negatives/` folder**
+   for filename overlap with v6 positives (see "hard_negatives folder needs
+   audit before next training" in `known-issues.mdc`).
+2. **Run the recommended 2-epoch dry-run** to exercise the unfreeze + val-mAP +
+   `WeightedSamplerTrainer` paths that the 1-epoch laptop dry-run did not
+   trigger. Command is in `known-issues.mdc` under the "Phase 2 audit gaps -- DONE"
+   entry.
+3. **Establish a v4 baseline** with `MLTableDetection/evaluate_model.py --pdf`
+   on a fixed held-out PDF set so v6 can be compared like-for-like.
+
+The full multi-step plan is at
+`~/.cursor/plans/panel-detector-improvement-path_9fdbc9ca.plan.md`.
+
 ## Prerequisites
 
 Before starting, confirm the following inputs are available:
@@ -190,22 +209,42 @@ python MLTableDetection/train_table_transformer.py \
 
 See [training-recipes.md](references/training-recipes.md) for hyperparameter guidance.
 
-**Known Phase 2 audit gaps in `train_table_transformer.py` as of 2026-05-06**
-(see `known-issues.mdc` for full context):
-- `--num-queries` is not exposed; should be wired through and set to
-  ~15-20 for panel-schedule data per
-  [DETR Issue #9](https://github.com/facebookresearch/detr/issues/9).
-- `--freeze-backbone-epochs` is not implemented; should freeze the backbone
-  for ~30% of total epochs per
+**Phase 2 small-dataset levers (added 2026-05-07)**: `train_table_transformer.py`
+now exposes three CLI flags targeting the documented audit gaps. See
+`known-issues.mdc` ("Phase 2 audit gaps -- DONE") for full context:
+
+- `--num-queries N` -- override the model's `num_queries` config. TATR ships
+  with 15. Recommended values: 15-20 for panel data (max ~6 panels/page) per
+  [DETR Issue #9](https://github.com/facebookresearch/detr/issues/9). When N
+  differs from the checkpoint, query embeddings are re-initialised.
+- `--freeze-backbone-epochs N` -- freeze the ResNet backbone for the first N
+  epochs, then restore its original (partial-freeze) state. Default: 30% of
+  `--epochs`. Pass 0 to disable. Reference:
   [Dynamic Backbone Freezing (arxiv 2407.15143)](https://arxiv.org/html/2407.15143v4).
-- No targeted-negatives mode; v5/v5b's regression came from undifferentiated
-  random negatives. A new mode should accept a separate hard-negatives folder
-  weighted lower in the loss.
-- When training on the v6 dataset, point `--data` at
-  `~/Documents/TableAnnotations/v6/` (which has both `images/` and
-  `annotations_v6.json`); the script's COCO loader already handles
-  named annotation files via the `possible_paths` lookup -- you may need to
-  symlink or rename to `annotations.json` until the script learns the v6 name.
+- `--hard-negatives-dir DIR` (with optional `--hard-negatives-weight W`,
+  default 0.1) -- load look-alike-but-not-target images as image-level
+  negatives (empty target boxes). Sampled via `WeightedRandomSampler` so each
+  negative appears at `W` times the per-step rate of a positive. Replaces
+  v5/v5b's undifferentiated random-negative regression.
+
+Recommended Phase 2 retrain command on the v6 dataset:
+
+```bash
+ln -sf ~/Documents/TableAnnotations/v6/annotations_v6.json \
+       ~/Documents/TableAnnotations/v6/annotations.json   # script looks for annotations.json
+
+python MLTableDetection/train_table_transformer.py \
+  --data ~/Documents/TableAnnotations/v6 \
+  --output ~/Documents/TableAnnotations/models_v6 \
+  --epochs 30 --learning-rate 5e-6 \
+  --num-queries 20 \
+  --freeze-backbone-epochs 10
+```
+
+Add `--hard-negatives-dir DIR` once a curated false-positive folder exists.
+The script's COCO loader already handles named files via its `possible_paths`
+lookup, but symlinking to `annotations.json` is the safest bet until you
+confirm the lookup picks up `annotations_v6.json`.
 
 **Check**: Validation loss decreases over epochs. Test the fine-tuned model:
 
@@ -243,38 +282,45 @@ If Tier 2 plateaus below acceptable accuracy, switch to a stronger backbone. See
 
 ### Phase 4: Evaluation
 
-Compare the trained model against the heuristic baseline.
+Compare the trained model against the heuristic baseline using the existing
+`MLTableDetection/evaluate_model.py` script. It supports four modes:
 
-1. Select 5-10 held-out PDFs not used in training
-2. Run both detectors on each PDF:
+| Mode | Flag | Output |
+|---|---|---|
+| COCO ground-truth mAP | `--data DIR` | `metrics.json` with mAP@0.5, mAP@0.5:0.95, mAP@0.75, recall@100 |
+| Inference on a folder | `--images DIR` | `detections.json` + `visualizations/` overlay images |
+| Box-level vs heuristic | `--pdf PATH` | `box_comparison.json` with mAP, precision, recall, mean IoU, per-page TP/FP/FN |
+| Count-only vs heuristic | `--pdf-count-only PATH` | Legacy mode; counts only |
 
-```python
-from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from MLTableDetection.TableDetectorML import TableDetectorML
+1. Select 5-10 held-out PDFs not used in training (i.e. PDFs whose pages do
+   NOT appear in `~/Documents/TableAnnotations/images/`).
+2. For each PDF, run the box-level comparison (heuristic = ground truth):
 
-# Heuristic
-heuristic = PanelBoardSearch(output_dir="eval/heuristic")
-h_results = heuristic.readPdf("test.pdf")
-
-# ML
-ml_detector = TableDetectorML(
-    output_dir="eval/ml",
-    model_path="path/to/finetuned/model"
-)
-m_results = ml_detector.readPdf("test.pdf")
-
-print(f"Heuristic: {len(h_results)} panels")
-print(f"ML Model:  {len(m_results)} panels")
+```bash
+python MLTableDetection/evaluate_model.py \
+  --model ~/Documents/TableAnnotations/models_v6/best \
+  --pdf ~/Documents/pdfToScan/generic3.pdf \
+  --output ~/Documents/TableAnnotations/eval/v6/generic3 \
+  --conf 0.5 --iou 0.5
 ```
 
-3. Visually inspect the overlay images in `eval/*/magenta_overlays/` to confirm correct detections
-4. Record metrics for each PDF: panels found, false positives, missed panels
+3. Inspect the overlay images in `<output>/heuristic/magenta_overlays/`
+   and `<output>/ml/magenta_overlays/` to confirm correct detections.
+4. Aggregate the per-PDF `box_comparison.json` files into a single
+   summary table (mAP@0.5 column per PDF, plus a row average).
 
-**Check**: ML model should match or exceed heuristic detection count on >= 80% of test PDFs.
+**Check**: ML model should match or exceed heuristic detection count on >= 80%
+of test PDFs AND clear mAP@0.5 >= 0.85 on the average.
+
+**Important**: Establish a v4 baseline using the same held-out set and the
+same script BEFORE evaluating v6, so the comparison is like-for-like.
+Save baselines under `~/Documents/TableAnnotations/baselines/v4_<date>/`
+so future re-evaluations can be diffed.
 
 **Recovery**: If the ML model underperforms:
 - Review false negatives -- are they unusual layouts? Add similar examples to training data
-- Review false positives -- lower the confidence threshold or add hard negatives
+- Review false positives -- lower the confidence threshold or curate
+  them into a hard-negatives folder and re-train with `--hard-negatives-dir`
 - Re-train and re-evaluate (return to Phase 3)
 
 ---
