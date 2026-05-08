@@ -1,5 +1,16 @@
 # ML Table Detection
 
+> **Status (2026-05-08)**: This README documents the original "start from
+> zero, render PDFs, annotate 50-100 images, fine-tune" workflow. Most of
+> that has already been done for this project: the v6 dataset (298 images,
+> 821 annotations) lives at `~/Documents/TableAnnotations/v6/`, a fine-tuned
+> v4 model is at `~/Documents/TableAnnotations/models_v4/best/`, and the
+> next work item is the Phase 2.b 30-epoch retrain on Paperspace.
+> **For current state and the next step, read
+> [.cursor/skills/training-panel-detector/SKILL.md](../.cursor/skills/training-panel-detector/SKILL.md)
+> and [.cursor/rules/project/docs/known-issues.mdc](../.cursor/rules/project/docs/known-issues.mdc)
+> first** -- the workflow below is reference material for an analogous future project, not the current state.
+
 Machine learning-based table detection using **Table Transformer** (MIT License).
 
 ## License Summary

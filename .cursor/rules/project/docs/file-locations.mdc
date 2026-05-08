@@ -38,7 +38,7 @@ ElectricalDiagramAnalyzer/
 | `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel). Used directly or via the `PageFilterV4` wrapper. |
 | `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping |
 | `MLTableDetection/TableDetectorML.py` | ML table detection -- Table Transformer (DETR) for bounding-box-level panel detection |
-| `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO/YOLO format) -- has known Phase 2 gaps; see known-issues |
+| `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO format). Phase 2.a flags wired 2026-05-07: `--num-queries`, `--freeze-backbone-epochs`, `--hard-negatives-dir`. See `known-issues.mdc`. |
 | `MLTableDetection/train_page_classifier.py` | Training script for MobileNetV2 binary page classifier |
 | `MLTableDetection/evaluate_model.py` | Evaluation script -- mAP metrics, inference, box-level comparison with heuristic |
 | `MLTableDetection/render_pdfs_for_annotation.py` | Renders PDF pages to PNGs for annotation in Label Studio |

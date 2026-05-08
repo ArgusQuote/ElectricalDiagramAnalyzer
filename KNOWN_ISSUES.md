@@ -1,5 +1,13 @@
 # Known Issues
 
+> **Status (2026-05-08)**: The living known-issues file is now
+> [.cursor/rules/project/docs/known-issues.mdc](.cursor/rules/project/docs/known-issues.mdc).
+> It is kept up to date as work progresses and currently reflects Phase 1
+> + Phase 2.a + Phase 2.b verification all complete (last update 2026-05-07).
+> **The entries below are historical** -- preserved for context but not
+> updated since 2026-04-12 and pre-date the v4 model, the v6 dataset, and
+> the Phase 2 training-script flags. Read the .mdc first.
+
 ## ML Table Detection Model Underperforms Heuristic Baseline
 
 **Status:** In Progress (v4 remains best model; v5/v5b with negatives regressed)

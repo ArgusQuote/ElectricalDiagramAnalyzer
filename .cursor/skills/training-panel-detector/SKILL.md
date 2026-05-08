@@ -7,24 +7,60 @@ description: Guides training and fine-tuning a commercial-friendly ML model to d
 
 Trains or fine-tunes a commercial-friendly object detection model to locate panel schedule tables in rendered PDF pages, replacing or augmenting the heuristic detector in `PanelSearchToolV25.py`.
 
-## Current State (2026-05-07)
+## Current State (2026-05-08)
 
-Phase 1 (data expansion) and Phase 2 (training-script audit gap fixes)
-are complete. The next work item is the Phase 2.b retrain on the v6 dataset.
-Before retraining, the next agent should:
+Phase 1 (data expansion), Phase 2.a (training-script audit gap fixes),
+and Phase 2.b verification are all complete. The dataset has been
+copied to the Paperspace VM. **The next work item is the 30-epoch
+retrain on Paperspace** -- nothing else is gating it.
 
-1. **Audit the existing `~/Documents/TableAnnotations/hard_negatives/` folder**
-   for filename overlap with v6 positives (see "hard_negatives folder needs
-   audit before next training" in `known-issues.mdc`).
-2. **Run the recommended 2-epoch dry-run** to exercise the unfreeze + val-mAP +
-   `WeightedSamplerTrainer` paths that the 1-epoch laptop dry-run did not
-   trigger. Command is in `known-issues.mdc` under the "Phase 2 audit gaps -- DONE"
-   entry.
-3. **Establish a v4 baseline** with `MLTableDetection/evaluate_model.py --pdf`
-   on a fixed held-out PDF set so v6 can be compared like-for-like.
+What was done on 2026-05-07:
+
+1. **Hard-negatives audit**: all 13 PNGs in `~/Documents/TableAnnotations/hard_negatives/`
+   are byte-identical to `real__<name>.png` entries that already exist in v6 with
+   0 positive annotations -- so there is no labeling collision, just redundancy.
+   Audit log: `~/Documents/TableAnnotations/hard_negatives/AUDIT_2026-05-07.md`.
+   See "hard_negatives/ folder audit -- DONE 2026-05-07" in `known-issues.mdc`.
+   **Recommendation**: drop `--hard-negatives-dir` from the retrain command;
+   contribution would be near-zero.
+2. **2-epoch dry-run on the laptop** (RTX 500 Ada, 105.9 s wall, exit 0)
+   exercised all three previously unverified paths: backbone unfreeze callback
+   at the epoch boundary, `compute_metrics` -> torchmetrics `MeanAveragePrecision`,
+   and `WeightedSamplerTrainer` with real negatives. Artifacts at
+   `/tmp/tatr_dryrun2/best/`. See "Phase 2 audit gaps -- DONE" in `known-issues.mdc`.
+3. **v4 held-out baseline** recorded across 5 PDFs (`generic3`, `K`, `makayla1`,
+   `D`, `Electrical_Takeoff_page7`) at `conf=0.5 iou=0.5 dpi=400`. Headline:
+   v4 averages **mAP@0.5 = 0.4688** with a wide spread (0.13 -> 1.00).
+   Summary: `~/Documents/TableAnnotations/baselines/v4_2026-05-07/SUMMARY.md`.
+   The previously-quoted `generic3 = 0.66` reproduced exactly (`0.6634`),
+   so the comparison is like-for-like.
+
+What was done on 2026-05-08:
+
+4. **Data synced to Paperspace** at `/home/paperspace/Documents/`:
+   - `Documents/TableAnnotations/v6/` (374 MB; 298 images + COCO with the
+     `annotations.json` symlink corrected to a relative path so it works on
+     any machine)
+   - `Documents/pdfToScan/` (29 MB; all 5 held-out PDFs plus the rest of
+     the collection)
+   - `Documents/TableAnnotations/baselines/v4_2026-05-07/` (236 KB; SUMMARY.md
+     + 5 box_comparison.json reference files; the 490 MB of heuristic/ and ml/
+     intermediate viz output was intentionally NOT synced)
+   - Skipped: `hard_negatives/` (audit said redundant), `models_v4/best/`
+     (110 MB; can be re-synced if Paperspace also wants to re-run v4 eval).
+
+What's pending:
+
+- The 30-epoch retrain on Paperspace -- exact command in the
+  "Phase 2 audit gaps -- DONE" entry of `known-issues.mdc`.
+- Post-training evaluation against the v4 baseline on the same 5 PDFs.
+- Phase 2 -> Phase 3 pass/fail decision per the rule documented in
+  `known-issues.mdc` and the plan file.
 
 The full multi-step plan is at
 `~/.cursor/plans/panel-detector-improvement-path_9fdbc9ca.plan.md`.
+Tonight's roadmap is at
+`~/.cursor/plans/finish-phase-2b-retrain_1bb05f66.plan.md`.
 
 ## Prerequisites
 
