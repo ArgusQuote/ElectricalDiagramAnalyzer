@@ -19,15 +19,19 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 ## Current Open Issues
 
 - **ML Table Detection underperforms heuristic** -- `MLTableDetection/TableDetectorML.py`
-  exists and has been trained through four iterations (v2, v4, v5, v5b). The best model
-  (v4) averages mAP@0.5 = 0.47 across 5 held-out PDFs (best:
-  `Electrical_Takeoff_page7=1.00`; previously-documented headline:
-  `generic3=0.66`; worst: `K=0.13`). See the
-  "v4 held-out baseline -- DONE 2026-05-07" entry below for the full
-  per-PDF table. v4 still trails the heuristic `PanelSearchToolV25`
-  which finds all 6 panels on generic3. Adding negative examples
-  (v5, v5b) caused regressions. v4 remains the best Table Transformer
-  model.
+  exists and has been trained through five iterations (v2, v4, v5, v5b, v6).
+  The best model is still **v4**, which averages mAP@0.5 = 0.47 across 5
+  held-out PDFs (best: `Electrical_Takeoff_page7=1.00`; previously-documented
+  headline: `generic3=0.66`; worst: `K=0.13`). See the
+  "v4 held-out baseline -- DONE 2026-05-07" entry below for the full per-PDF
+  table. v4 still trails the heuristic `PanelSearchToolV25` which finds all
+  6 panels on generic3. Adding negative examples (v5, v5b) caused regressions;
+  the v6 retrain on the expanded 298-image dataset (Phase 2.b on Paperspace,
+  2026-05-09) produced an even larger regression -- mAP@0.5 = 0.0337 average,
+  a ~14x backslide vs v4. See the "v6 retrain -- FAIL 2026-05-09" entry below
+  for the failure mode (silent model: only 1 prediction at conf >= 0.5 across
+  the entire eval set, recall 0.03 vs v4's 0.51). v4 remains the best Table
+  Transformer model.
   **Root cause identified (2026-05-06)**: dataset size is the primary bottleneck.
   Microsoft Table Transformer maintainers recommend ~1,000 images as the
   fine-tuning floor (per [microsoft/table-transformer Issue #108](https://github.com/microsoft/table-transformer/issues/108));
@@ -185,6 +189,75 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     is local to the eval script and does not affect production paths;
     it resolves the "PIL DecompressionBombError" caveat documented in
     `KNOWN_ISSUES.md` line 125-126.
+
+- **v6 retrain -- FAIL 2026-05-09** -- The 30-epoch retrain on the v6
+  dataset (Phase 2.b) ran on Paperspace A5000, completed cleanly
+  (`train_runtime=1850s`, `train_loss` 8.50 -> 4.26, `eval_loss` 7.34 ->
+  5.06, exit code 0), and saved artifacts to
+  `~/Documents/TableAnnotations/models_v6/best/`. **Held-out evaluation
+  failed all three pass-criteria.**
+  - **Headline**: v6 averages **mAP@0.5 = 0.0337** across the same 5 PDFs
+    (precision 0.20, recall 0.03, mean matched IoU 0.11). v4's
+    corresponding average was 0.4688 -- v6 is **~14x worse** and is
+    worse than v4 on **5 of 5 PDFs**. Per-PDF: `generic3=0.17 |
+    K/makayla1/D/Electrical_Takeoff_page7 = 0.0`. Summary at
+    `~/Documents/TableAnnotations/baselines/v6_2026-05-09/SUMMARY.md`.
+  - **Failure mode**: the model is *silent*, not noisy. It produces
+    only **1 prediction at confidence >= 0.5 across the entire 5-PDF
+    eval set** (the one match on `generic3.pdf`, IoU 0.56). It produces
+    0 false positives, so the standard "curate v6 false-positive crops
+    into a hard-negatives folder and retrain" path does not apply --
+    there are no false positives to curate.
+  - **In-loop torchmetrics also stayed near zero** across all 30 epochs
+    (range 0.0002-0.0010). Loss decreased monotonically, so the model
+    is learning *something*, but the per-query confidence does not
+    cross the 0.5 threshold on real PDFs except in the one generic3
+    case. The laptop's 2-epoch dry-run had hit `eval_map_50=0.0199`
+    on its 1 unfrozen epoch (batch=1, warmup=5); the Paperspace 30-epoch
+    run with batch=2 and the script's default warmup=100 plus monotonic
+    LR decay saw the unfreeze (epoch 10) under already-decayed lr
+    (~3.25e-6 of peak 5e-6), which may explain the post-unfreeze
+    plateau.
+  - **Environment**: fresh Paperspace VM venv was missing several deps
+    (`transformers`, `torchmetrics`, `albumentations`, `timm`,
+    `accelerate`). Installed `MLTableDetection/requirements.txt` plus
+    `accelerate`. Initial `pip install transformers` grabbed
+    `transformers 5.8.0`, which uses `torch.library.custom_op` schema
+    inference incompatible with this venv's `torch 2.4.1+cu121`; pinned
+    to `transformers<5` (final: 4.55.4). All deps now resolved.
+  - **`compute_metrics` patch required** at `MLTableDetection/train_table_transformer.py`
+    (lines 375-440): under HF transformers 4.55's eval-loop,
+    `accelerate.gather_for_metrics` collapses the per-image
+    `label["orig_size"]` tensor on its way to `compute_metrics`, so the
+    original `h, w = label["orig_size"]` line crashed at the first
+    epoch's validation. The patched version sidesteps the
+    denormalization entirely by computing IoU/mAP in normalized 0-1
+    coordinates -- IoU is scale-invariant, so this is mathematically
+    equivalent to pixel-space computation. Verified by checking that
+    epoch 1 frozen `eval_map_50` (`0.0004`) matches the laptop dry-run's
+    reported `0.0005` to within rounding. The patch is local to the
+    training script's `build_compute_metrics` and does not affect
+    inference / deployment paths.
+  - **Recommended next steps** (NONE auto-started -- pending user
+    sign-off):
+    1. Sanity-check whether the `models_v6/best/` checkpoint
+       (`load_best_model_at_end` with `metric_for_best_model="map_50"`,
+       which selected an essentially-arbitrary epoch out of the
+       0.0002-0.0010 noise band) underperforms the *final* checkpoint
+       (`checkpoint-3810/`). If the final checkpoint is meaningfully
+       better, the training-side fix is just to disable
+       `load_best_model_at_end` until `compute_metrics` produces a
+       useful signal again.
+    2. Re-evaluate at `--conf 0.1` (or 0.05) instead of 0.5 to see
+       whether the model is producing reasonable boxes at lower
+       confidence. If yes, the fix is calibration / temperature
+       scaling, not retraining.
+    3. If both #1 and #2 still underperform v4, escalate to **Phase 3
+       (RF-DETR)** per the plan -- the data-side has been pushed as
+       far as Phase 1 + 2 allow, and the architecture itself may be
+       the limit on this dataset size.
+    4. Curating v6 false-positive crops is **not** a useful next step
+       here -- v6 has 0 false positives on the eval set.
 
 - **`annotations.json` symlink workaround in place at v6 dataset** --
   `train_table_transformer.py` and `evaluate_model.py` both look for

@@ -372,33 +372,48 @@ def build_compute_metrics(processor, model_config):
 
     batch_store: list[dict] = []
 
-    def _denorm_boxes(boxes, width, height):
-        """Scale normalised [cx, cy, w, h] to absolute [x1, y1, x2, y2]."""
+    def _cxcywh_to_xyxy_unit(boxes):
+        """Convert normalised [cx, cy, w, h] (in 0-1 space) to [x1, y1, x2, y2]
+        in the same 0-1 space. mAP@IoU is scale-invariant so we don't need
+        to denormalise to pixel coords -- avoids depending on per-image
+        ``orig_size``, which HF Trainer's evaluation_loop in transformers
+        4.55+ may collapse during accelerate's gather_for_metrics."""
         out = boxes.clone().float()
-        out[:, 0] = (boxes[:, 0] - boxes[:, 2] / 2) * width
-        out[:, 1] = (boxes[:, 1] - boxes[:, 3] / 2) * height
-        out[:, 2] = (boxes[:, 0] + boxes[:, 2] / 2) * width
-        out[:, 3] = (boxes[:, 1] + boxes[:, 3] / 2) * height
+        out[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
+        out[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
+        out[:, 2] = boxes[:, 0] + boxes[:, 2] / 2
+        out[:, 3] = boxes[:, 1] + boxes[:, 3] / 2
         return out
+
+    _debug_state = {"printed": False}
 
     def compute_metrics(eval_pred, compute_result):
         (loss_dict, scores, pred_boxes,
          last_hidden_state, encoder_last_hidden_state), labels = eval_pred
 
+        if not _debug_state["printed"]:
+            _debug_state["printed"] = True
+            try:
+                lbl_type = type(labels).__name__
+                first_lbl = labels[0] if hasattr(labels, "__getitem__") else None
+                first_keys = list(first_lbl.keys()) if isinstance(first_lbl, dict) else None
+                print(f"[DEBUG compute_metrics] labels type={lbl_type}, "
+                      f"len={len(labels) if hasattr(labels, '__len__') else 'n/a'}, "
+                      f"first label keys={first_keys}")
+            except Exception as e:
+                print(f"[DEBUG compute_metrics] inspect failed: {e}")
+
         preds_list = []
         target_list = []
 
         for score, pbox, label in zip(scores, pred_boxes, labels):
-            h, w = label["orig_size"]
-            h, w = float(h), float(w)
-
             # --- predictions ---
             pred_scores = torch.softmax(score[:, :-1], dim=-1)
             pred_labels = pred_scores.argmax(dim=-1)
             pred_conf = pred_scores.gather(
                 1, pred_labels.unsqueeze(-1)).squeeze(-1)
 
-            pred_abs = _denorm_boxes(pbox, w, h)
+            pred_abs = _cxcywh_to_xyxy_unit(pbox)
             preds_list.append({
                 "boxes": pred_abs,
                 "scores": pred_conf,
@@ -406,7 +421,7 @@ def build_compute_metrics(processor, model_config):
             })
 
             # --- ground truth ---
-            gt_boxes = _denorm_boxes(label["boxes"], w, h)
+            gt_boxes = _cxcywh_to_xyxy_unit(label["boxes"])
             target_list.append({
                 "boxes": gt_boxes,
                 "labels": label["class_labels"],
