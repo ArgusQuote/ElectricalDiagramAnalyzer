@@ -9,16 +9,18 @@ Detectron2 (Apache 2.0) is available as a fallback for custom training.
 
 Usage:
     from MLTableDetection.TableDetectorML import TableDetectorML
-    
-    # Zero-shot (no training needed - uses pretrained TATR)
+
+    # Default: uses the local fine-tuned v7 checkpoint if available,
+    # else falls back to the HuggingFace pretrained TATR. See
+    # `_resolve_default_tatr_model_path()` for the search order.
     detector = TableDetectorML(output_dir="/path/to/output")
-    
-    # With custom model
+
+    # Explicit override
     detector = TableDetectorML(
         output_dir="/path/to/output",
         model_path="/path/to/fine-tuned/model"
     )
-    
+
     panel_images = detector.readPdf("/path/to/electrical.pdf")
 """
 
@@ -49,9 +51,41 @@ class TableDetectorML:
     # Available backends
     BACKEND_TATR = "table-transformer"
     BACKEND_DETECTRON2 = "detectron2"
-    
-    # Default Hugging Face model for Table Transformer
-    DEFAULT_TATR_MODEL = "microsoft/table-transformer-detection"
+
+    # Hugging Face fallback (used when no local fine-tuned model is found)
+    PRETRAINED_TATR_MODEL = "microsoft/table-transformer-detection"
+
+    # Local fine-tuned checkpoints, tried in order. v7 is the current
+    # production model (Phase 2 winner -- mAP@0.5 = 0.83 across 5 held-out
+    # PDFs; see .cursor/rules/project/docs/known-issues.mdc entry
+    # "v7 retrain -- DONE 2026-05-15"). Paths cover both deployment hosts
+    # (Paperspace production VM and Marco's laptop).
+    DEFAULT_TATR_LOCAL_PATHS = (
+        "~/Documents/TableAnnotations/models_v7/best",
+        "/home/paperspace/Documents/TableAnnotations/models_v7/best",
+        "/home/marco/Documents/TableAnnotations/models_v7/best",
+    )
+
+    # Back-compat alias. The "default" used to be the HF pretrained model;
+    # we keep the old name so external callers that reference it still work,
+    # but the runtime resolution below prefers the local v7 checkpoint.
+    DEFAULT_TATR_MODEL = PRETRAINED_TATR_MODEL
+
+    @classmethod
+    def _resolve_default_tatr_model_path(cls) -> str:
+        """
+        Pick the default TATR model path, preferring a local fine-tuned
+        checkpoint over the upstream HF pretrained model.
+
+        Tries `DEFAULT_TATR_LOCAL_PATHS` in order and returns the first one
+        whose ``config.json`` exists. Falls back to `PRETRAINED_TATR_MODEL`
+        if no local checkpoint is found.
+        """
+        for candidate in cls.DEFAULT_TATR_LOCAL_PATHS:
+            expanded = Path(os.path.expanduser(candidate))
+            if (expanded / "config.json").is_file():
+                return str(expanded)
+        return cls.PRETRAINED_TATR_MODEL
     
     def __init__(
         self,
@@ -82,8 +116,13 @@ class TableDetectorML:
         
         Args:
             output_dir: Directory to save output files.
-            model_path: Path to model. For TATR, can be HuggingFace model ID
-                        or local path. If None, uses pretrained TATR.
+            model_path: Path to model. For TATR, can be a HuggingFace model
+                        ID or a local path. If None, prefers the local
+                        fine-tuned v7 checkpoint and falls back to the HF
+                        pretrained TATR (`microsoft/table-transformer-detection`)
+                        if no local checkpoint is present. See
+                        `DEFAULT_TATR_LOCAL_PATHS` and
+                        `_resolve_default_tatr_model_path()`.
             backend: Detection backend ("table-transformer" or "detectron2").
             dpi: Detection DPI (for rendering PDF pages).
             render_dpi: Output PNG DPI (higher quality for OCR).
@@ -130,10 +169,20 @@ class TableDetectorML:
         else:
             self.device = device
         
-        # Model path
+        # Model path. For TATR with no explicit override, prefer the local
+        # fine-tuned v7 checkpoint and fall back to the HF pretrained model
+        # if v7 is not present on this host.
         self.model_path = model_path
         if model_path is None and backend == self.BACKEND_TATR:
-            self.model_path = self.DEFAULT_TATR_MODEL
+            self.model_path = self._resolve_default_tatr_model_path()
+            if self.verbose:
+                using_pretrained = (
+                    self.model_path == self.PRETRAINED_TATR_MODEL)
+                source = (
+                    "HuggingFace pretrained (no local v7 checkpoint found)"
+                    if using_pretrained else "local fine-tuned (v7)")
+                print(f"[INFO] Default TATR model: {self.model_path} "
+                      f"({source})")
         
         # Per-page detection boxes in PDF points, populated by readPdf().
         # Maps page index (0-based) -> list of (x0, y0, x1, y1) tuples.

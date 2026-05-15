@@ -179,13 +179,36 @@ Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage
 - **Returns**: `(kept_pages, dropped_pages, output_pdf_path, log_json_path)` -- same signature as the heuristic `PageFilterV3.readPdf()` (and the `PageFilterV4` wrapper, which delegates here)
 
 ### Model Checkpoint (model.pt)
-- **Location**: Saved by `MLTableDetection/train_page_classifier.py`
+- **Location**: PyTorch state-dict checkpoint produced by the one-shot MobileNetV2 training run (training script not in-repo).
 - **Format**: PyTorch checkpoint dict with keys:
   - `model_state_dict` -- MobileNetV2 weights
   - `config` -- dict: `architecture`, `num_classes`, `input_size`, `class_names`
   - `metrics` -- dict: `val_accuracy`, `val_tp`, `val_fp`, `val_tn`, `val_fn`, `epoch`
   - `training_info` -- dict: `data_dir`, `total_images`, `positive_count`, `negative_count`, `epochs`, `learning_rate`, `weight_decay`, `freeze_backbone`
-- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt`
+- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt` on Marco's laptop. **Not present on the Paperspace VM** -- the V4 ML page-filter path is therefore not usable on Paperspace until the checkpoint is synced over.
+
+## TableDetectorML Output and Checkpoint
+
+### readPdf() Return
+- **Location**: `MLTableDetection/TableDetectorML.py`
+- **Returns**: `list[str]` -- absolute paths to the panel PNGs the detector produced (same signature as the heuristic `PanelBoardSearch.readPdf()`).
+- **Side effects**: Populates `self.last_detection_boxes` (per-page list of `(x0, y0, x1, y1)` tuples in PDF points) and `self.last_detection_confidences` (parallel per-page list of floats).
+- **API alias**: `PanelBoardSearch = TableDetectorML` at the bottom of the module so callers that import the heuristic class name can swap to the ML implementation without other code changes.
+
+### TATR Fine-Tuned Checkpoint
+- **Location**: Saved by `MLTableDetection/train_table_transformer.py` via HuggingFace `Trainer`.
+- **Format**: HuggingFace model directory (not a single `.pt` file). The production v7 checkpoint at `~/Documents/TableAnnotations/models_v7/best/` contains:
+  - `model.safetensors` -- ~110 MB, fine-tuned `TableTransformerForObjectDetection` weights.
+  - `config.json` -- model config (includes `num_queries`, `id2label`, etc.).
+  - `preprocessor_config.json` -- image preprocessor (`AutoImageProcessor`) config; required to load via `AutoImageProcessor.from_pretrained()`.
+  - `training_args.bin` -- pickled `TrainingArguments` (recipe forensics).
+  - `trainer_state.json` -- 40 KB, full per-epoch `log_history` including 15 `eval_loss` / `eval_map_50` entries and `best_global_step` / `best_metric` (preserved from `checkpoint-2010/` before the intermediate checkpoints were deleted; see `known-issues.mdc` entry "v7 retrain -- DONE 2026-05-15").
+- **Current best (Paperspace)**: `~/Documents/TableAnnotations/models_v7/best/` -- mAP@0.5 = 0.8297 across 5 held-out PDFs.
+- **Resolution order** (in `TableDetectorML._resolve_default_tatr_model_path()`):
+  1. `~/Documents/TableAnnotations/models_v7/best`
+  2. `/home/paperspace/Documents/TableAnnotations/models_v7/best`
+  3. `/home/marco/Documents/TableAnnotations/models_v7/best`
+  4. Fallback: `microsoft/table-transformer-detection` (HuggingFace pretrained, zero-shot quality).
 
 ## Data Flow
 

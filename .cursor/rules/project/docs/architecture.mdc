@@ -62,17 +62,17 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Consumers**: uplink_server (pre-processing step)
 
 ### MLTableDetection
-- **Purpose**: ML models for panel schedule detection (table detection and page classification)
+- **Purpose**: ML models for panel schedule detection (DETR-based table detection) and supporting data-prep, training, and evaluation infrastructure. The MobileNetV2 page classifier itself lives in `PageFilter/` (see PageFilter section above); only the (laptop-only, not in-repo) classifier training script ever lived here historically.
 - **Location**: `MLTableDetection/`
 - **Components**:
-  - `TableDetectorML.py` -- DETR-based table detection with bounding boxes (Table Transformer / Detectron2)
-  - `train_table_transformer.py` -- Fine-tuning script for Table Transformer
-  - `train_page_classifier.py` -- Training script for MobileNetV2 page classifier
-  - `evaluate_model.py` -- mAP evaluation, inference, heuristic comparison
-  - `render_pdfs_for_annotation.py` -- PDF-to-PNG renderer for Label Studio
-- **Dependencies**: PyTorch, torchvision, transformers, torchmetrics
-- **Licenses**: All MIT / BSD-3 / Apache 2.0 (commercial-friendly)
-- **Consumers**: PageClassifierML (page classification), potential future integration for table detection
+  - `TableDetectorML.py` -- DETR-based table detection (Table Transformer / Detectron2 backends). Default model path resolves to the local fine-tuned **v7** checkpoint at `~/Documents/TableAnnotations/models_v7/best/`; falls back to the upstream pretrained `microsoft/table-transformer-detection` if no local checkpoint exists. See `_resolve_default_tatr_model_path()`.
+  - `train_table_transformer.py` -- Fine-tuning script for Table Transformer (COCO format). Exposes `--num-queries`, `--freeze-backbone-epochs`, `--hard-negatives-dir`. Production v7 recipe is recorded in `~/Documents/TableAnnotations/baselines/v7_2026-05-15/SUMMARY.md`.
+  - `evaluate_model.py` -- mAP evaluation, inference, box-level heuristic comparison.
+  - `render_pdfs_for_annotation.py`, `pseudo_label.py`, `synthesize_panels.py`, `merge_annotations.py` -- data-prep utilities.
+  - `README.md`, `requirements.txt`, `setup_label_studio.sh` -- module documentation and dev-environment helpers.
+- **Dependencies**: PyTorch, torchvision, transformers (`<5`), torchmetrics, albumentations, timm, accelerate.
+- **Licenses**: All MIT / BSD-3 / Apache 2.0 (commercial-friendly).
+- **Consumers**: `PageFilter/PageClassifierML.py` (page classification, via the V4 wrapper). `TableDetectorML` is **not yet wired into the main pipeline** -- the production table-detection step still uses the heuristic `PanelBoardSearch` (`PanelSearchToolV25`). v7 is ready as a drop-in replacement (same `readPdf()` API as `PanelBoardSearch`, exposed via the `PanelBoardSearch` alias at the bottom of `TableDetectorML.py`), but switching `uplink_server.py` to it is deferred until v7 is validated on a wider customer-PDF set.
 
 ### VisualDetectionToolLibrary (Panel Detection)
 - **Purpose**: Detects panel table regions in PDF bitmaps using whitespace/void analysis and border detection
@@ -151,4 +151,10 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Decision**: ML page classifier (`PageClassifierML`, wrapped by `PageFilterV4`) exists alongside the last heuristic (`PageFilterV3`) as a drop-in replacement
 - **Context**: Heuristic pipeline (EasyOCR + regex + footprints) is slow and fragile. ML classifier (MobileNetV2) is faster and more robust but trained on limited data (35 images).
 - **Alternatives considered**: Replacing heuristic entirely (premature given small training set)
-- **Consequences**: Both paths expose the same `PageFilter` class and `readPdf()` signature. Production can switch by changing the import in `uplink_server.py` from `PageFilter.PageFilterV3` to `PageFilter.PageFilterV4`. The ML classifier requires a trained model checkpoint at `~/Documents/TableAnnotations/models_classifier/best/model.pt`.
+- **Consequences**: Both paths expose the same `PageFilter` class and `readPdf()` signature. Production can switch by changing the import in `uplink_server.py` from `PageFilter.PageFilterV3` to `PageFilter.PageFilterV4`. The ML classifier requires a trained model checkpoint at `~/Documents/TableAnnotations/models_classifier/best/model.pt`, which is currently present only on Marco's laptop (the Paperspace VM does not have it).
+
+### Local Fine-Tuned Model Default with HF Fallback
+- **Decision**: `TableDetectorML` resolves its default TATR model path to a local fine-tuned checkpoint if one exists, otherwise to the upstream HuggingFace pretrained weights. The search order is encoded in `DEFAULT_TATR_LOCAL_PATHS` and is host-aware (Paperspace `/home/paperspace/...` and Marco's laptop `/home/marco/...` are both tried).
+- **Context**: The fine-tuned v7 weights live outside the repo at `~/Documents/TableAnnotations/models_v7/best/`. We want production hosts that have the checkpoint to use it as the default, but we also don't want imports to break on hosts that haven't received the weights yet (CI, fresh clones, etc.).
+- **Alternatives considered**: (a) Hardcode the local path -- breaks portability; (b) Require an explicit `model_path` argument -- adds friction at every call site; (c) Bake the weights into the repo -- exceeds reasonable repo-size limits (~110 MB per checkpoint).
+- **Consequences**: Callers who pass `model_path=None` get the best available model for their host. The fallback to the upstream pretrained model means imports never fail on the resolver step, only the final detection quality degrades to "zero-shot TATR" if no local checkpoint is present. The same pattern can be applied to future ML modules with out-of-repo weights.

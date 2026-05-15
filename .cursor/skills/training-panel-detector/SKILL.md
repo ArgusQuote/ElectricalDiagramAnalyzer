@@ -7,60 +7,55 @@ description: Guides training and fine-tuning a commercial-friendly ML model to d
 
 Trains or fine-tunes a commercial-friendly object detection model to locate panel schedule tables in rendered PDF pages, replacing or augmenting the heuristic detector in `PanelSearchToolV25.py`.
 
-## Current State (2026-05-08)
+## Current State (2026-05-15)
 
-Phase 1 (data expansion), Phase 2.a (training-script audit gap fixes),
-and Phase 2.b verification are all complete. The dataset has been
-copied to the Paperspace VM. **The next work item is the 30-epoch
-retrain on Paperspace** -- nothing else is gating it.
+**Phase 2 is complete. v7 is the production TATR model.**
+`MLTableDetection/TableDetectorML.py` now defaults to the local v7
+checkpoint at `~/Documents/TableAnnotations/models_v7/best/` and falls
+back to the HF pretrained model if no local checkpoint is found. v7
+averages mAP@0.5 = **0.8297** across 5 held-out PDFs and matches or
+beats v4 on 5/5 of them. The authoritative status board is the
+`known-issues.mdc` entries "ML Table Detection -- Phase 2 COMPLETE
+2026-05-15" and "v7 retrain -- DONE 2026-05-15"; read those first if
+you're picking up this work.
 
-What was done on 2026-05-07:
-
-1. **Hard-negatives audit**: all 13 PNGs in `~/Documents/TableAnnotations/hard_negatives/`
-   are byte-identical to `real__<name>.png` entries that already exist in v6 with
-   0 positive annotations -- so there is no labeling collision, just redundancy.
-   Audit log: `~/Documents/TableAnnotations/hard_negatives/AUDIT_2026-05-07.md`.
-   See "hard_negatives/ folder audit -- DONE 2026-05-07" in `known-issues.mdc`.
-   **Recommendation**: drop `--hard-negatives-dir` from the retrain command;
-   contribution would be near-zero.
-2. **2-epoch dry-run on the laptop** (RTX 500 Ada, 105.9 s wall, exit 0)
-   exercised all three previously unverified paths: backbone unfreeze callback
-   at the epoch boundary, `compute_metrics` -> torchmetrics `MeanAveragePrecision`,
-   and `WeightedSamplerTrainer` with real negatives. Artifacts at
-   `/tmp/tatr_dryrun2/best/`. See "Phase 2 audit gaps -- DONE" in `known-issues.mdc`.
-3. **v4 held-out baseline** recorded across 5 PDFs (`generic3`, `K`, `makayla1`,
-   `D`, `Electrical_Takeoff_page7`) at `conf=0.5 iou=0.5 dpi=400`. Headline:
-   v4 averages **mAP@0.5 = 0.4688** with a wide spread (0.13 -> 1.00).
-   Summary: `~/Documents/TableAnnotations/baselines/v4_2026-05-07/SUMMARY.md`.
-   The previously-quoted `generic3 = 0.66` reproduced exactly (`0.6634`),
-   so the comparison is like-for-like.
-
-What was done on 2026-05-08:
-
-4. **Data synced to Paperspace** at `/home/paperspace/Documents/`:
-   - `Documents/TableAnnotations/v6/` (374 MB; 298 images + COCO with the
-     `annotations.json` symlink corrected to a relative path so it works on
-     any machine)
-   - `Documents/pdfToScan/` (29 MB; all 5 held-out PDFs plus the rest of
-     the collection)
-   - `Documents/TableAnnotations/baselines/v4_2026-05-07/` (236 KB; SUMMARY.md
-     + 5 box_comparison.json reference files; the 490 MB of heuristic/ and ml/
-     intermediate viz output was intentionally NOT synced)
-   - Skipped: `hard_negatives/` (audit said redundant), `models_v4/best/`
-     (110 MB; can be re-synced if Paperspace also wants to re-run v4 eval).
-
-What's pending:
-
-- The 30-epoch retrain on Paperspace -- exact command in the
-  "Phase 2 audit gaps -- DONE" entry of `known-issues.mdc`.
-- Post-training evaluation against the v4 baseline on the same 5 PDFs.
-- Phase 2 -> Phase 3 pass/fail decision per the rule documented in
-  `known-issues.mdc` and the plan file.
-
-The full multi-step plan is at
+Full historical context (Phase 1 dataset expansion, v6 failure mode,
+v6 root-cause investigation, v7 recipe-fix retrain) lives in the
+chronologically-ordered entries below the headline in
+`known-issues.mdc`. The full multi-step plan is at
 `~/.cursor/plans/panel-detector-improvement-path_9fdbc9ca.plan.md`.
-Tonight's roadmap is at
-`~/.cursor/plans/finish-phase-2b-retrain_1bb05f66.plan.md`.
+
+What's currently available on Paperspace:
+
+- `~/Documents/TableAnnotations/v6/` -- 298-image dataset (with
+  `annotations.json` symlink to `annotations_v6.json`).
+- `~/Documents/TableAnnotations/models_v7/best/` -- 111 MB
+  production checkpoint (HF format: `model.safetensors`,
+  `config.json`, `preprocessor_config.json`, `training_args.bin`,
+  `trainer_state.json`).
+- `~/Documents/TableAnnotations/models_v7/runs/` -- TensorBoard logs.
+- `~/Documents/TableAnnotations/models_v7/train.log` -- canonical
+  training log.
+- `~/Documents/TableAnnotations/baselines/{v4_2026-05-07,
+  v6_2026-05-09, v6_diagnostics_2026-05-14, v7_2026-05-15}/` --
+  per-PDF box-comparison JSONs and `SUMMARY.md` files for each
+  baseline run; comparisons are like-for-like (same 5 PDFs, same
+  flags).
+- `~/Documents/TableAnnotations/models_v6/` -- retained for forensic
+  reference. `models_v4/` and `models_classifier/` are on Marco's
+  laptop only.
+
+Pending follow-up work (none are blockers; tracked in
+`known-issues.mdc`):
+
+- **Tighter box regression**: a v8 with 25-30 epochs on v7's recipe
+  may pull `mAP@0.5:0.95` (currently 0.63) up further; v7's `eval_loss`
+  was still declining at epoch 15.
+- **Switch `uplink_server.py`** from heuristic `PanelBoardSearch` to
+  `TableDetectorML` once v7 is validated on a wider customer-PDF set.
+- **Fix the `annotations.json` hardcoded-path requirement** in
+  `train_table_transformer.py` and `evaluate_model.py` so future
+  v8/v9 datasets don't need a symlink workaround.
 
 ## Prerequisites
 
