@@ -28,10 +28,24 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   6 panels on generic3. Adding negative examples (v5, v5b) caused regressions;
   the v6 retrain on the expanded 298-image dataset (Phase 2.b on Paperspace,
   2026-05-09) produced an even larger regression -- mAP@0.5 = 0.0337 average,
-  a ~14x backslide vs v4. See the "v6 retrain -- FAIL 2026-05-09" entry below
+  a ~14x backslide vs v4.   See the "v6 retrain -- FAIL 2026-05-09" entry below
   for the failure mode (silent model: only 1 prediction at conf >= 0.5 across
-  the entire eval set, recall 0.03 vs v4's 0.51). v4 remains the best Table
-  Transformer model.
+  the entire eval set, recall 0.03 vs v4's 0.51). The two cheap recovery
+  checks (final checkpoint vs `best/`, confidence sweep down to 0.05) both
+  failed on 2026-05-14 -- v6 has effectively collapsed to firing 1 DETR
+  object query per page regardless of how many panels are present. Follow-up
+  training-time forensics on the same day (`trainer_state.json` +
+  `training_args.bin` + a side-by-side hyperparameter diff against v4 +
+  a synthetic-positional-bias check) identified the v6 *training recipe*
+  (not the architecture and not the dataset) as the cause: v6 froze the
+  backbone for the first 9 epochs and then unfroze it under a halved
+  peak LR (5e-6 vs v4's 1e-5) that was already 67% decayed by the
+  unfreeze step, leaving the backbone effectively untrained. See the
+  "v6 root-cause investigation -- DONE 2026-05-14" entry below for the
+  full evidence chain. The recommended next step is now a **recipe-fix
+  retrain (v7)** with v4's hyperparameters on v6's expanded dataset,
+  before any escalation to Phase 3 (RF-DETR). v4 remains the best Table
+  Transformer model in the meantime.
   **Root cause identified (2026-05-06)**: dataset size is the primary bottleneck.
   Microsoft Table Transformer maintainers recommend ~1,000 images as the
   fine-tuning floor (per [microsoft/table-transformer Issue #108](https://github.com/microsoft/table-transformer/issues/108));
@@ -258,6 +272,183 @@ This file tracks known bugs, limitations, and deferred work items for the projec
        the limit on this dataset size.
     4. Curating v6 false-positive crops is **not** a useful next step
        here -- v6 has 0 false positives on the eval set.
+
+- **v6 diagnostic sweep -- DONE 2026-05-14** -- Ran the two cheap
+  recovery checks recommended in the "v6 retrain -- FAIL 2026-05-09"
+  entry. Both failed; the v6 model is not salvageable without
+  another training run, and likely not without a different
+  architecture. Full per-PDF results at
+  `~/Documents/TableAnnotations/baselines/v6_diagnostics_2026-05-14/SUMMARY.md`.
+  - **Setup**: v6 checkpoints (`best/` 111 MB, `checkpoint-3810/`
+    329 MB) were rsynced off the Paperspace VM to the laptop; all
+    evaluation ran locally on the RTX 500 Ada (CUDA 12.8, torch
+    2.8.0). The same 5 held-out PDFs and box-comparison method as
+    the v4 and v6_2026-05-09 baselines were used so the numbers are
+    directly comparable. `preprocessor_config.json` had to be copied
+    from `best/` to `checkpoint-3810/` because HF Trainer only saves
+    it at end-of-training, not per-checkpoint (both come from the
+    same run, file is byte-identical -- not a real divergence).
+  - **Hypothesis A (final checkpoint better than `best/`): rejected.**
+    `checkpoint-3810/` at conf 0.5 averages **mAP@0.5 = 0.0000**
+    across the 5 PDFs (vs `best/`'s 0.0337). It lost the only
+    correct prediction `best/` had on generic3. So the HF
+    best-epoch picker, even though it was choosing from a 0.0002-0.0010
+    noise band, still ended up at a *better* state than the
+    final-epoch state. Disabling `load_best_model_at_end` is
+    therefore not a useful fix.
+  - **Hypothesis B (confidence calibration is off): rejected.**
+    Re-evaluating `best/` at conf 0.1 surfaced one additional correct
+    prediction (makayla1, IoU 0.72) and three confident-but-wrong
+    predictions. Average mAP 0.0337 -> 0.0594. Dropping further to
+    conf 0.05 gave **identical** results -- the model has zero
+    additional proposals in the [0.05, 0.1) confidence band on any
+    PDF. So there is no meaningful calibration uplift to recover.
+  - **Diagnosis: mode collapse to 1 prediction per page.** Across
+    all 15 runs (3 thresholds x 5 PDFs), the model produces *exactly
+    1 prediction per page* at every threshold below 0.1, regardless
+    of how many panels are actually there (GT counts: 6, 7, 8, 3,
+    4). TATR's underlying DETR has 20 object queries (v6 retrain
+    used `--num-queries 20`), but this model effectively fires only
+    one. The most damning datapoint: on
+    `Electrical_Takeoff_page7.pdf` (v4 = 1.00 mAP, the "easiest"
+    of the 5), v6 produces a single wrong box. This is classic DETR
+    mode collapse -- a known failure mode when training data is
+    small or imbalanced, or when classification loss dominates bbox
+    loss during early training.
+  - **All four variants fail all three Phase 2 pass-criteria**
+    (`mAP@0.5 >= 0.85 AND >= v4 baseline AND >= heuristic on >= 80% of PDFs`):
+    v6 best @ 0.5 = 0.034, v6 final @ 0.5 = 0.000, v6 best @ 0.1
+    = 0.059, v6 best @ 0.05 = 0.059. v4 (0.47) remains the best
+    Table Transformer model.
+  - **Recommended next step (UPDATED 2026-05-14 after training-time
+    forensics)**: try a **recipe-fix retrain ("v7")** first; the
+    Phase 3 (RF-DETR) escalation is now downgraded to a fallback if
+    v7 also fails. See the "v6 root-cause investigation -- DONE
+    2026-05-14" entry below: the training logs, hyperparameter
+    diff against v4, and synthetic-positional-bias check together
+    point at the v6 *training recipe* (not the architecture and not
+    the dataset) as the cause of the mode collapse.
+  - **Local artifacts** (all under `~/Documents/TableAnnotations/`):
+    - `models_v6/best/` and `models_v6/checkpoint-3810/` are now
+      available locally (transfer of ~440 MB total from Paperspace).
+    - `baselines/v6_final_2026-05-14/` -- Option 1 outputs.
+    - `baselines/v6_best_conf01_2026-05-14/` -- Option 2 @ 0.1.
+    - `baselines/v6_best_conf005_2026-05-14/` -- Option 2 @ 0.05.
+    - `baselines/v6_diagnostics_2026-05-14/SUMMARY.md` -- the
+      detailed write-up.
+
+- **v6 root-cause investigation -- DONE 2026-05-14** -- After the
+  diagnostic sweep ruled out cheap inference-time fixes, the
+  training-time forensics (`train.log`, `trainer_state.json`,
+  `training_args.bin`) plus a side-by-side hyperparameter diff
+  against v4 plus a synthetic-positional-bias check together
+  identify the v6 **training recipe** as the cause of the mode
+  collapse. The architecture and the expanded dataset are not at
+  fault. The model is salvageable with a recipe-fix retrain.
+  - **Training dynamics (from `trainer_state.json`)**:
+    - `best_global_step = 762` (epoch 6 of 30). The "best"
+      checkpoint that ended up at `models_v6/best/` was selected
+      from epoch 6 -- *before* the backbone unfreeze at epoch 10.
+    - `best_metric = 0.001`. The highest eval `map_50` observed
+      during the entire 30-epoch run on the v6 VAL split (same
+      distribution as training) was 0.001. The model never crossed
+      even a 0.01 mAP threshold on its own validation set.
+    - Training loss declined from 8.6 -> 4.9 (pre-unfreeze) -> 3.9
+      (immediate post-unfreeze) -> 3.3 (plateau through end of
+      training). DETR fine-tuning typically reaches ~1-2; v6
+      plateaued at ~3.3.
+    - Grad norms spiked late: ~20 pre-unfreeze, 50-120 in the
+      middle, 191 at the final step. With `max_grad_norm=0.1`
+      hard-coded in the script (see below), gradients of magnitude
+      191 are clipped by ~1900x -- the model effectively cannot
+      take big optimization steps even when it wants to.
+  - **Hyperparameter diff (v4 worked, mAP 0.47; v6 failed, mAP 0.03)**:
+    | arg | v4 | v6 | direction |
+    |---|---|---|---|
+    | `learning_rate` | 1e-5 | **5e-6** | v6 is half v4 |
+    | `warmup_steps` | 50 | 100 | v6 2x |
+    | `weight_decay` | 0.01 | **0.05** | v6 5x |
+    | `per_device_train_batch_size` | 1 | 2 | v6 2x |
+    | `num_train_epochs` | 15 | 30 | v6 2x |
+    | `lr_scheduler_type` | linear | linear | same |
+    | `max_grad_norm` | 0.1 | 0.1 | same (hard-coded in script) |
+    | `--freeze-backbone-epochs` | none | ~9 epochs frozen | new |
+    | `--num-queries` | 15 (default) | 20 | new (5 random-init queries) |
+    | `--hard-negatives-dir` | none | used | new (per earlier audit: redundant) |
+    | Dataset | 28 real images | 48 real + 250 synthetic = 298 | expanded |
+  - **Why this combination starves the backbone**: v6 freezes the
+    backbone for the first 30% of training (1270 steps). When the
+    callback unfreezes the backbone at step 1270, the LR scheduler
+    is linear-decay from peak 5e-6 and has already reached 3.42e-6
+    (67% of peak, 33% decayed). From there it linearly decays to
+    1.35e-9 over the remaining 2540 steps. So the backbone -- the
+    part of the model that has to adapt PubTables-1M features to
+    engineering drawings -- gets at most ~2540 steps under an LR
+    of 3.4e-6 -> 0, with all gradients clipped to norm 0.1. By
+    contrast, v4's backbone was *never* frozen and trained the full
+    run under LR 1e-5 -> 0. v6's backbone effectively never trained.
+  - **Symptom matches the cause**: when the backbone never adapts,
+    the model can't learn proper localization. It falls back on a
+    degenerate solution -- predict no-object for most queries, and
+    one box near the spatial centroid of training panel positions.
+    The combined v6 dataset has mean centroid `(cx=0.501, cy=0.482)`
+    -- dead-center of the page -- which is exactly where v6's
+    single box landed on `D.pdf` during the conf-0.05 viz run
+    (overlay at
+    `~/Documents/TableAnnotations/baselines/v6_best_conf005_viz_2026-05-14/D/ml/magenta_overlays/`).
+  - **Synthetic positional bias check: REFUTED**. Computed
+    normalized panel-center distributions on the v6 dataset
+    (real n=144, synthetic n=677):
+    - Real `cx`: mean 0.47, stdev 0.21, range 0.16-0.79;
+      `cy`: mean 0.42, stdev 0.21, range 0.11-0.86.
+    - Synthetic `cx`: mean 0.51, stdev 0.22, range 0.09-0.90;
+      `cy`: mean 0.50, stdev 0.21, range 0.07-0.89.
+    Synthetic placements cover 80%+ of page width and 82%+ of page
+    height with stdev essentially identical to real. The
+    cut-and-paste synthesis did *not* introduce a positional
+    cluster. So the v6 dataset is usable as-is; the recipe is
+    what failed it.
+  - **Proposed v7 recipe** (single-variable change vs v4: only the
+    dataset):
+    ```
+    --learning-rate 1e-5            (was 5e-6)
+    --warmup-steps 50               (was 100)
+    --weight-decay 0.01             (was 0.05)
+    --epochs 15                     (was 30; extra epochs didn't help)
+    --freeze-backbone-epochs 0      (was ~9; restore v4's always-trainable backbone)
+    --num-queries 15                (was 20; default TATR queries, no random-init)
+    # drop --hard-negatives-dir     (audit said redundant)
+    # keep --batch-size 2 (or 1)    (minor)
+    # keep dataset at v6/           (the only real change we want to test)
+    ```
+    Expected wall-clock: ~15 min on Paperspace A5000 (half v6's
+    runtime because of 15 vs 30 epochs).
+  - **Pass criteria for v7** (same Phase 2 rules): `mAP@0.5 >= 0.85
+    AND >= v4 baseline AND >= heuristic on >= 80% of PDFs` on the
+    5 held-out PDFs.
+  - **Decision tree after v7**:
+    1. If v7 mAP >= v4 mAP on >= 4 of 5 PDFs -> recipe was the
+       only problem; ship v7, close out Phase 2.
+    2. If v7 only partly recovers (e.g. 0.2-0.4 mAP) -> the recipe
+       was a significant factor but not the only one; further
+       ablations on `--num-queries`, optimizer, or LR schedule
+       are warranted.
+    3. If v7 still fails (mAP < 0.1) -> the dataset isn't usable
+       even under v4's recipe; escalate to **Phase 3 (RF-DETR)**
+       per `~/.cursor/plans/panel-detector-improvement-path_9fdbc9ca.plan.md`.
+       (Note: the original 2026-05-09 escalation to Phase 3 was
+       based on inference-time evidence alone; the 2026-05-14
+       forensics make this an "only if v7 also fails" fallback,
+       not the immediate next step.)
+  - **Local artifacts**:
+    - `~/Documents/TableAnnotations/baselines/v6_diagnostics_2026-05-14/SUMMARY.md`
+      (from prior entry) covers the inference-time evidence.
+    - No new SUMMARY file was written for the training-time
+      forensics; the data lives in the bullets above and in
+      `~/Documents/TableAnnotations/models_v6/{train.log,checkpoint-3810/trainer_state.json,best/training_args.bin}`.
+    - v4 training_args at
+      `~/Documents/TableAnnotations/models_v4/best/training_args.bin`
+      (used for the diff above).
 
 - **`annotations.json` symlink workaround in place at v6 dataset** --
   `train_table_transformer.py` and `evaluate_model.py` both look for
