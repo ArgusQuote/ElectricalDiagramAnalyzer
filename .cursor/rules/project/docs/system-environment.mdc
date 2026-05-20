@@ -120,14 +120,42 @@ The driver supports CUDA 12.8, but PyTorch was compiled against CUDA 12.1. This 
 
 At idle (server running, EasyOCR models loaded), the Python process uses ~10.9 GiB of the 24.6 GiB VRAM. This leaves ~13.7 GiB available for inference workloads during job processing.
 
+## Observed Workload Memory Profile
+
+Measured 2026-05-20 via `DevEnv/capacity_test.py` with 4 concurrent jobs processing
+a 10-page architectural PDF (`derekfirst.pdf`, 2592x1728 pts, AutoCAD output):
+
+| Metric | Peak | Average |
+|---|---|---|
+| **System RAM used (`free -h`)** | **10.18 GiB** / 44 GiB (23%) | -- |
+| **GPU VRAM used (`nvidia-smi`)** | **12.73 GiB** / 24 GiB (52%) | -- |
+| Per-worker RSS | 2.76-2.80 GiB | 1.42 GiB |
+| Parent process RSS | 0.51 GiB | -- |
+| Sum of Python RSS (overcounts shared pages) | 11.10 GiB | -- |
+
+Implications:
+
+- **Production server is heavily over-provisioned on RAM** (peak ~23% of 44 GiB).
+  Anything with >=24 GiB RAM has ample headroom for `MAX_WORKERS=4`.
+- **GPU VRAM is the binding constraint at 52% peak**. Any replacement GPU
+  needs >=24 GiB VRAM to match (e.g. NVIDIA A10G in AWS g5 family is a near match).
+- Per-worker RSS is bimodal: ~1.4 GiB steady-state between jobs (EasyOCR + TATR
+  loaded) and bursts to ~2.8 GiB during page rendering / OCR inference.
+
 ## Constraints and Limits
 
 - **Single GPU**: Only one NVIDIA RTX A5000; no multi-GPU support
 - **No swap**: Swap is disabled (`0B`); OOM kills are possible if RAM is exhausted
-- **Single worker**: `MAX_WORKERS=1` means one job at a time; this is deliberate to avoid GPU memory contention
+- **Four workers**: `MAX_WORKERS=4` in `AnvilUplinkCode/uplink_server.py` (line 44);
+  workers are persistent subprocesses that each load EasyOCR + the v7 TATR model
+  once at warmup and reuse them across jobs
 - **Thread pinning**: `OMP_NUM_THREADS`, `MKL_NUM_THREADS` set to 1 at startup for deterministic OCR
 - **VRAM ceiling**: High-DPI rendering + EasyOCR + large PDFs can approach the 24 GiB limit
 
 ## Last Verified
 
-2026-04-18 (updated system-level tools section; original profile from `nvidia-smi`, `pip list`, `lscpu`, `/proc/meminfo`)
+2026-05-20 (added measured workload memory profile from `DevEnv/capacity_test.py`
+with 4 concurrent jobs on `derekfirst.pdf`; fixed `MAX_WORKERS` doc drift from
+1 to 4 to match `uplink_server.py:44`). Earlier profile updates: 2026-04-18
+(system-level tools section); original profile from `nvidia-smi`, `pip list`,
+`lscpu`, `/proc/meminfo`.

@@ -18,6 +18,142 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **AWS migration from Paperspace -- IN PROGRESS, paused 2026-05-20** --
+  Migration is underway because Paperspace has had recurring "unusually
+  high usage" outages (up to a full day) blocking VM start. Target
+  destination: AWS EC2 `g5.2xlarge` in `us-east-1` with a self-managed
+  `systemd`-supervised Anvil uplink server. **Resumption point: the AWS
+  account exists, the g5 quota is approved, and the next concrete action
+  is Step 4 in the migration plan (launch the EC2 instance).** Paperspace
+  is still the only production backend; do NOT shut it down until Step H
+  (parallel cutover) is complete.
+
+  **What is done (in order it was completed):**
+  1. AWS account created with business contact info; root MFA enabled;
+     IAM admin user `marco-admin` created with `AdministratorAccess` +
+     MFA; root signed out, all work now happens via the IAM sign-in URL
+     `https://766851565012.signin.aws.amazon.com/console`.
+  2. **AWS account ID**: `766851565012`. Region selected and pinned:
+     **`us-east-1`** (N. Virginia). Picked over `us-east-2` (Ohio, ~10 ms
+     closer to Austin) because Anvil's cloud lives in us-east-1, so the
+     EC2 -> Anvil WebSocket -- which fires on every job -- is ~10 ms
+     faster from us-east-1. Also has the largest g5 fleet for restart
+     reliability.
+  3. **Billing access for IAM users**: enabled by root via *Account ->
+     IAM user and role access to Billing information -> Activate IAM
+     access*. Without this, `AdministratorAccess` IAM users get
+     "You need permissions" on the Billing console even though their
+     policy covers it. AWS treats Billing as a separately delegated
+     resource.
+  4. **Billing alerts**: PDF invoices on, CloudWatch billing alerts on,
+     Free-Tier usage alerts on. Two budgets created in
+     `Billing -> Budgets`: `eda-prod-monthly` at $700/mo (alerts at
+     85% actual, 100% forecasted) and `eda-emergency-cap` at $1,500/mo
+     (panic threshold).
+  5. **G/VT quota approved 2026-05-20**: `Running On-Demand G and VT
+     instances` set to **16 vCPUs** in `us-east-1`. Justification
+     submitted on the support case mentioning Austin/TX, migration from
+     Paperspace, PyTorch 2.4 + CUDA 12.1, EasyOCR + fine-tuned TATR.
+     Approval arrived same day. 16 vCPUs covers `g5.2xlarge` (8) or
+     `g5.4xlarge` (16) or two `g5.2xlarge` concurrent.
+  6. **Instance size decided: `g5.2xlarge`** (8 vCPU, 32 GiB RAM, 1x A10G
+     24 GiB). Validated against the real workload via
+     `DevEnv/capacity_test.py` with 4 concurrent jobs on `derekfirst.pdf`
+     on 2026-05-20: peak system RAM was 10.18 GiB / 44 GiB (23%), peak
+     GPU VRAM was 12.73 GiB / 24 GiB (52%). GPU is the binding
+     constraint and is identical on g5.2xlarge (same A10G capacity). RAM
+     savings: g5.2xlarge is ~$340/mo cheaper than g5.4xlarge. See the
+     "Observed Workload Memory Profile" table in
+     `system-environment.mdc` for the full breakdown.
+
+  **What is next (resume here):**
+  1. **Step 4 -- Launch the EC2 instance** in `us-east-1`. Pre-filled
+     wizard answers:
+     - Name: `eda-uplink-prod`
+     - AMI: `Deep Learning OSS Nvidia Driver AMI GPU PyTorch 2.4`
+       (Ubuntu 22.04, x86_64) -- ships with NVIDIA driver + CUDA 12.1 +
+       cuDNN + PyTorch 2.4, matches `system-environment.mdc` exactly.
+     - Instance type: `g5.2xlarge`
+     - Key pair: create new RSA `.pem` named `eda-prod-key`, save to
+       `~/.ssh/eda-prod-key.pem` (chmod 600), back up to password
+       manager.
+     - Security group: new SG `eda-uplink-sg`, SSH inbound from **My IP**
+       only (NOT 0.0.0.0/0). No other inbound rules -- Anvil uplink is
+       outbound-only.
+     - Storage: change root volume from default 8 GiB to **150 GiB gp3**.
+     - Metadata version: V2 only (token required) -- default, leave it.
+  2. **Step A -- Verify**: `ssh -i ~/.ssh/eda-prod-key.pem ubuntu@<dns>`
+     then `nvidia-smi` (A10G 24 GiB), `python3 --version` (3.10), and
+     `nvcc --version` (12.1).
+  3. **Steps B-E -- Provision**: Marco asked at end of 2026-05-20 chat
+     whether the agent should pre-write a paste-once shell script that
+     does: create `paperspace` user (matches `python-environment.mdc`
+     and the existing systemd unit conventions), copy SSH keys to
+     `/home/paperspace/.ssh`, clone the repo, create
+     `/home/paperspace/venv/`, install dependencies, write
+     `/etc/eda-uplink.env` with the `ANVIL_UPLINK_KEY` from Paperspace,
+     write `/etc/systemd/system/eda-uplink.service`, then
+     `systemctl daemon-reload && systemctl enable --now eda-uplink`.
+     The chat ended before that script was written -- it's the cleanest
+     first action to take tomorrow (write it locally, paste it during
+     Step C). The systemd unit template is in the migration-plan chat
+     linked below.
+  4. **Step F (optional) -- EventBridge schedule** for business-hours-
+     only auto-stop/start to save ~$600/mo. Two cron rules in UTC:
+     start `cron(0 11 ? * MON-FRI *)` = 6am CDT / 5am CST, stop
+     `cron(0 3 ? * TUE-SAT *)` = 10pm CDT / 9pm CST. EventBridge does
+     not auto-adjust for DST; the "lose 1 hr in winter" tradeoff was
+     accepted in the chat. Skip this step if the EventBridge complexity
+     is not worth the savings -- always-on costs ~$885/mo on-demand or
+     ~$560/mo with a 1-yr Reserved Instance.
+  5. **Step H -- Parallel cutover**: bring AWS uplink up with Paperspace
+     still running. Anvil supports multiple uplinks per key; jobs
+     round-robin. Run both for ~24 hours, then shut down Paperspace.
+  6. **Doc updates after cutover**:
+     - Update `system-environment.mdc` with the new specs (GPU A10G
+       24 GiB, vCPU 8, RAM 32 GiB, hypervisor Nitro, hostname `eda-uplink-prod`).
+     - Update `python-environment.mdc` if `paperspace` user is NOT
+       created on AWS (Option 1 keeps `/home/paperspace/venv/`; Option 2
+       would require switching the activation snippet to
+       `/home/ubuntu/venv/`).
+     - Update this `known-issues.mdc` entry's status to "DONE".
+
+  **Reference material:**
+  - Full migration plan and Step 4-H walkthrough lives in chat
+    [AWS setup walkthrough and migration](73a8461f-84e9-4dd9-ba4e-194cddc16cef).
+  - Original AWS-vs-alternatives analysis (pricing, region choice,
+    EventBridge tradeoffs) in chat
+    [AWS alternatives for Paperspace](006b43e7-8f52-40a0-ac6a-7275693684ef).
+  - Per-worker memory measurement that justified `g5.2xlarge` is in
+    `.cursor/rules/project/docs/system-environment.mdc` under
+    "Observed Workload Memory Profile" (added 2026-05-20).
+
+  **Operational notes from the 2026-05-20 session:**
+  - The Anvil app name is `"Argus Automated BOM"` (per uplink server
+    log line `Connected to "Argus Automated BOM" as SERVER`). The
+    `ANVIL_UPLINK_KEY` env var on the current Paperspace box is the
+    value to copy to AWS; do NOT regenerate, that would invalidate
+    the existing connection.
+  - Anvil uplink is **outbound-only** (`anvil.server.connect` ->
+    `wss://anvil.works/uplink`); no inbound firewall rules needed and
+    no Elastic IP needed. Public IP can change across stop/start.
+  - Running `DevEnv/capacity_test.py` (or any other big multiprocessing
+    spawner) while the production `anvil-uplink.service` is also running
+    will OOM the GPU -- 8 workers x ~3 GiB EasyOCR VRAM > 24 GiB A10G.
+    Always `sudo systemctl stop anvil-uplink` before benchmarking.
+  - **2026-05-20 incident**: after the capacity-test benchmark + uplink
+    restart, slot-3 worker died at startup with `FileNotFoundError` on
+    `multiprocessing.SemLock._rebuild`. This is a known intermittent
+    Python multiprocessing race where the parent eagerly unlinks
+    per-worker semaphore files from `/dev/shm` before the slowest-
+    spawning worker (slot-3, since it imports last under contention)
+    can attach. Production ran at 3/4 worker capacity for ~10 min
+    until detected. Resolution: `sudo systemctl restart anvil-uplink`
+    (single clean restart got all 4 workers up). Mitigation guidance:
+    if `journalctl -u anvil-uplink` shows `Worker [slot-N] did not
+    become ready within 120s`, just restart the unit -- the race is
+    intermittent and a quiet system usually wins the race on retry.
+
 - **ML Table Detection -- Phase 2 COMPLETE 2026-05-15** -- The best
   TATR model is now **v7**, which averages mAP@0.5 = **0.8297** across
   the 5 held-out PDFs and matches or beats v4 on all 5 of them. v7 is
