@@ -238,6 +238,11 @@ else
   STRIPPED=$(($(wc -l < "$FREEZE_FILE") - $(wc -l < "$TEMP_FREEZE")))
   echo "  (excluded ${STRIPPED} package(s) from freeze: detectron2)"
 
+  # mktemp creates the file owned by root with mode 600. Since pip
+  # runs as ${PAPERSPACE_USER} via sudo -u, hand the file over so
+  # pip can read it (otherwise the install dies with EACCES).
+  chown "${PAPERSPACE_USER}:${PAPERSPACE_USER}" "$TEMP_FREEZE"
+
   # +cu121 PyTorch wheels live at the PyTorch index, not PyPI.
   sudo -u "$PAPERSPACE_USER" "$VENV_DIR/bin/pip" install \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
