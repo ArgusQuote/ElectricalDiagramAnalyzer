@@ -392,8 +392,11 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     `Electrical_Takeoff_page7.pdf` renders to ~209 megapixels at 400 DPI
     and tripped PIL's default `DecompressionBombError` guard. The change
     is local to the eval script and does not affect production paths;
-    it resolves the "PIL DecompressionBombError" caveat documented in
-    `KNOWN_ISSUES.md` line 125-126.
+    it resolves the PIL `DecompressionBombError` caveat that triggered
+    at default `render_dpi=1200` (formerly documented in the
+    pre-2026-05-08 root-level `KNOWN_ISSUES.md`, now removed; the
+    caveat itself is no longer relevant because the fix is in the
+    eval script).
 
 - **v6 retrain -- FAIL 2026-05-09** -- The 30-epoch retrain on the v6
   dataset (Phase 2.b) ran on Paperspace A5000, completed cleanly
