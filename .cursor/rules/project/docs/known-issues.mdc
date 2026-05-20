@@ -18,17 +18,22 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
-- **AWS migration from Paperspace -- IN PROGRESS, paused 2026-05-20** --
-  Migration is underway because Paperspace has had recurring "unusually
-  high usage" outages (up to a full day) blocking VM start. Target
-  destination: AWS EC2 `g5.2xlarge` in `us-east-1` with a self-managed
-  `systemd`-supervised Anvil uplink server. **Resumption point: the AWS
-  account exists, the g5 quota is approved, and the next concrete action
-  is Step 4 in the migration plan (launch the EC2 instance).** Paperspace
-  is still the only production backend; do NOT shut it down until Step H
-  (parallel cutover) is complete.
+- **AWS dev-box provisioning -- IN PROGRESS, paused 2026-05-20 PM** --
+  EC2 g5.2xlarge in us-east-1 was launched and SSH-verified on 2026-05-20.
+  **Scope changed late on 2026-05-20**: AWS is now a manual-run
+  development / capability-testing environment, NOT a production
+  replacement. Paperspace remains the sole customer-facing production
+  uplink and there is no current plan to demote it. AWS
+  `argus-uplink.service` is installed but will deliberately NEVER be
+  `systemctl enable`d. EventBridge scheduling and parallel cutover
+  (originally Steps F and H of the earlier migration plan) are no
+  longer wanted. **For the next agent: read
+  `AWSMigration/HANDOFF.md` first** -- it has the concrete
+  step-by-step. This entry is the upstream context.
 
-  **What is done (in order it was completed):**
+  **What is done (in order it was completed, items 1-6 are pre-launch
+  AWS-account setup, item 7 is the 2026-05-20 launch + provisioning
+  authoring):**
   1. AWS account created with business contact info; root MFA enabled;
      IAM admin user `marco-admin` created with `AdministratorAccess` +
      MFA; root signed out, all work now happens via the IAM sign-in URL
@@ -65,58 +70,103 @@ This file tracks known bugs, limitations, and deferred work items for the projec
      savings: g5.2xlarge is ~$340/mo cheaper than g5.4xlarge. See the
      "Observed Workload Memory Profile" table in
      `system-environment.mdc` for the full breakdown.
+  7. **EC2 launched and provisioning materials authored (2026-05-20)**:
+     Instance `i-0ecb7e8fabdb8548e` with Name tag
+     `argus-production-server` (the name predates the dev-only
+     reclassification; not worth renaming), `g5.2xlarge` in
+     `us-east-1`. SSH key `~/.ssh/argus-prod-key.pem` (RSA), backed
+     up by user to cloud storage + multiple physical copies. Security
+     group `argus-uplink-sg`: SSH inbound from user's IP `/32` only
+     (partner IP deferred). 150 GiB gp3 root volume, EBS encryption
+     left off (matches Paperspace's no-encryption baseline), V2-only
+     IMDS. Hardware verified post-launch: NVIDIA A10G 23,028 MiB VRAM,
+     driver 535.274.02, CUDA-driver 12.2, nvcc 12.0, 30 GiB RAM,
+     145 GiB free on root, no swap. **OS surprise**: the AMI
+     Marketplace listing said "Deep Learning Base GPU AMI (Ubuntu
+     20.04)" but the actual OS is **Ubuntu 24.04.3 LTS (Noble
+     Numbat)** -- AWS-side packaging quirk, not a bug. Provisioning
+     materials authored locally (NOT committed to git yet) under
+     `AWSMigration/`: `provision-aws-uplink.sh` (idempotent bootstrap
+     script), `paperspace-freeze.txt` (149-package canonical install
+     spec captured from production via `pip freeze`), `README.md`
+     (workflow doc), and `HANDOFF.md` (step-by-step for the next
+     agent). The freeze file supersedes `MISC/requirements.txt` for
+     AWS installs because the repo file has drifted (pins `numpy<2`
+     but Paperspace runs 2.1.2; `transformers` isn't listed in the
+     repo file but `4.55.4` is critical per the v6/v7 ML work below).
 
-  **What is next (resume here):**
-  1. **Step 4 -- Launch the EC2 instance** in `us-east-1`. Pre-filled
-     wizard answers:
-     - Name: `eda-uplink-prod`
-     - AMI: `Deep Learning OSS Nvidia Driver AMI GPU PyTorch 2.4`
-       (Ubuntu 22.04, x86_64) -- ships with NVIDIA driver + CUDA 12.1 +
-       cuDNN + PyTorch 2.4, matches `system-environment.mdc` exactly.
-     - Instance type: `g5.2xlarge`
-     - Key pair: create new RSA `.pem` named `eda-prod-key`, save to
-       `~/.ssh/eda-prod-key.pem` (chmod 600), back up to password
-       manager.
-     - Security group: new SG `eda-uplink-sg`, SSH inbound from **My IP**
-       only (NOT 0.0.0.0/0). No other inbound rules -- Anvil uplink is
-       outbound-only.
-     - Storage: change root volume from default 8 GiB to **150 GiB gp3**.
-     - Metadata version: V2 only (token required) -- default, leave it.
-  2. **Step A -- Verify**: `ssh -i ~/.ssh/eda-prod-key.pem ubuntu@<dns>`
-     then `nvidia-smi` (A10G 24 GiB), `python3 --version` (3.10), and
-     `nvcc --version` (12.1).
-  3. **Steps B-E -- Provision**: Marco asked at end of 2026-05-20 chat
-     whether the agent should pre-write a paste-once shell script that
-     does: create `paperspace` user (matches `python-environment.mdc`
-     and the existing systemd unit conventions), copy SSH keys to
-     `/home/paperspace/.ssh`, clone the repo, create
-     `/home/paperspace/venv/`, install dependencies, write
-     `/etc/eda-uplink.env` with the `ANVIL_UPLINK_KEY` from Paperspace,
-     write `/etc/systemd/system/eda-uplink.service`, then
-     `systemctl daemon-reload && systemctl enable --now eda-uplink`.
-     The chat ended before that script was written -- it's the cleanest
-     first action to take tomorrow (write it locally, paste it during
-     Step C). The systemd unit template is in the migration-plan chat
-     linked below.
-  4. **Step F (optional) -- EventBridge schedule** for business-hours-
-     only auto-stop/start to save ~$600/mo. Two cron rules in UTC:
-     start `cron(0 11 ? * MON-FRI *)` = 6am CDT / 5am CST, stop
-     `cron(0 3 ? * TUE-SAT *)` = 10pm CDT / 9pm CST. EventBridge does
-     not auto-adjust for DST; the "lose 1 hr in winter" tradeoff was
-     accepted in the chat. Skip this step if the EventBridge complexity
-     is not worth the savings -- always-on costs ~$885/mo on-demand or
-     ~$560/mo with a 1-yr Reserved Instance.
-  5. **Step H -- Parallel cutover**: bring AWS uplink up with Paperspace
-     still running. Anvil supports multiple uplinks per key; jobs
-     round-robin. Run both for ~24 hours, then shut down Paperspace.
-  6. **Doc updates after cutover**:
-     - Update `system-environment.mdc` with the new specs (GPU A10G
-       24 GiB, vCPU 8, RAM 32 GiB, hypervisor Nitro, hostname `eda-uplink-prod`).
-     - Update `python-environment.mdc` if `paperspace` user is NOT
-       created on AWS (Option 1 keeps `/home/paperspace/venv/`; Option 2
-       would require switching the activation snippet to
-       `/home/ubuntu/venv/`).
-     - Update this `known-issues.mdc` entry's status to "DONE".
+  **Key decisions made on 2026-05-20 (recorded so the next agent
+  doesn't re-litigate):**
+  - **Branch to clone on AWS**: `TOOL_Debug_MaxUserTesting`
+    (commit `5692b8d6d094d70b6018c7725cb2f9c851ac82d4`), confirmed
+    by Marco as the active production branch on Paperspace.
+  - **Python 3.10** via deadsnakes PPA, matching Paperspace exactly.
+    The AMI ships with 3.12 as `/usr/bin/python3`, but the venv at
+    `/home/paperspace/venv` will be 3.10 for compatibility with
+    detectron2/layoutparser/EasyOCR/transformers 4.55.4 as documented
+    in the v6/v7 ML entries below.
+  - **`detectron2` excluded** from the AWS install. Production
+    `uplink_server.py` never calls it; `MLTableDetection/TableDetectorML.py`
+    only lazy-imports it inside `_load_detectron2_model()` when the
+    `"detectron2"` backend is explicitly selected (default is
+    `"table-transformer"`). The Paperspace freeze entry is a
+    git-source build that compiles CUDA extensions against the local
+    `nvcc`, which is 12.0 on the AMI vs 12.1 on Paperspace -- a real
+    compile-risk for unused code.
+  - **Code transfer to AWS**: GitHub deploy key (read-only). The
+    provisioning script generates the key, pauses for Marco to paste
+    it into the repo Deploy Keys settings, then auto-continues on
+    re-run.
+  - **Env file location on AWS**: `/home/paperspace/.anvil_env`
+    (mirrors Paperspace exactly, NOT `/etc/` as the original
+    migration plan assumed).
+  - **Systemd unit naming**: `argus-uplink.service` on AWS,
+    `anvil-uplink.service` on Paperspace -- distinguishable in
+    `journalctl` if both are ever inspected side-by-side. **AWS
+    systemd unit is installed but NEVER `systemctl enable`d.**
+
+  **What is next (resume here on next agent session):**
+  See `AWSMigration/HANDOFF.md` for the full step-by-step. Concise
+  summary in execution order:
+  1. **(DONE 2026-05-20 PM)** Rewrite the provision script footer
+     and README to remove residual parallel-cutover language.
+     Done as part of this entry's update.
+  2. **Commit and push the AWSMigration/ folder** to
+     `TOOL_Debug_MaxUserTesting` so the script is available on AWS
+     after `git clone`. Requires Marco's sign-off per the
+     git-conventions rule.
+  3. **scp + run** `provision-aws-uplink.sh` on the EC2 box; first
+     run exits at the deploy-key step, Marco adds the public key to
+     the repo's Deploy Keys, re-run completes the rest.
+  4. **Ferry the v7 TATR weights** (~111 MB) from Paperspace through
+     the laptop to AWS using the two-step rsync in HANDOFF.md.
+  5. **Ferry the `ANVIL_UPLINK_KEY`** via the pipe-only command in
+     HANDOFF.md (never writes the value to disk on the laptop,
+     never prints to chat).
+  6. **Verify "ready but not running" state**: `torch.cuda.is_available()`
+     True, v7 model loads via `transformers`, `systemctl status
+     argus-uplink` shows `disabled`. Do NOT run
+     `python uplink_server.py` unless Marco explicitly requests it
+     (running it makes Anvil round-robin between AWS and Paperspace).
+  7. **STOP HERE.** Do not enable systemd, do not set EventBridge.
+     The AWS box's intended steady state is "powered on or off at
+     Marco's discretion; uplink runs only when he manually invokes
+     `python AnvilUplinkCode/uplink_server.py`."
+
+  **Operational decisions deferred (not blockers for the handoff):**
+  - Add Marco's business partner's IP to `argus-uplink-sg`.
+  - Elastic IP for stable SSH access (currently using dynamic public
+    IP `3.89.204.0`, which changes on every stop/start cycle).
+  - Separate Anvil app for staging traffic (currently AWS and
+    Paperspace share the same uplink key).
+  - Promotion of AWS to production (NOT currently planned).
+  - Demoting Paperspace's autostart (explicitly NOT wanted now;
+    Paperspace stays as-is and continues auto-starting on boot).
+  - EventBridge schedule for AWS (explicitly NOT wanted now).
+  - Fix `MISC/requirements.txt` drift vs production freeze (tracked
+    informally; the `AWSMigration/paperspace-freeze.txt` file is
+    the source of truth for AWS installs until the repo's
+    requirements files are reconciled).
 
   **Reference material:**
   - Full migration plan and Step 4-H walkthrough lives in chat
