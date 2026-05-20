@@ -1,0 +1,106 @@
+{
+  "simultaneous_jobs": 4,
+  "api_version": "API_9",
+  "input_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/derekfirst.pdf",
+  "batch_elapsed_sec": 191.64,
+  "success_count": 4,
+  "failure_count": 0,
+  "avg_job_elapsed_sec": 189.67,
+  "min_job_elapsed_sec": 187.1,
+  "max_job_elapsed_sec": 191.56,
+  "avg_worker_warmup_sec": 3.22,
+  "max_worker_warmup_sec": 3.26,
+  "slowdown_vs_1x": null,
+  "ready_results": [
+    {
+      "worker_idx": 0,
+      "ok": true,
+      "warmup_sec": 3.18,
+      "vram": {
+        "free_gib": 22.53,
+        "total_gib": 23.79
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 1,
+      "ok": true,
+      "warmup_sec": 3.22,
+      "vram": {
+        "free_gib": 22.34,
+        "total_gib": 23.79
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 2,
+      "ok": true,
+      "warmup_sec": 3.21,
+      "vram": {
+        "free_gib": 22.41,
+        "total_gib": 23.79
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 3,
+      "ok": true,
+      "warmup_sec": 3.26,
+      "vram": {
+        "free_gib": 22.34,
+        "total_gib": 23.79
+      },
+      "error": null
+    }
+  ],
+  "results": [
+    {
+      "job_name": "job_0",
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "component_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "rules_error": null,
+      "elapsed_sec": 187.1,
+      "job_root": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_0"
+    },
+    {
+      "job_name": "job_1",
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "component_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "rules_error": null,
+      "elapsed_sec": 189.49,
+      "job_root": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_1"
+    },
+    {
+      "job_name": "job_2",
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "component_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "rules_error": null,
+      "elapsed_sec": 190.53,
+      "job_root": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_2"
+    },
+    {
+      "job_name": "job_3",
+      "ok": true,
+      "error": null,
+      "crop_count": 6,
+      "component_count": 6,
+      "header_breakers": 0,
+      "table_breakers": 103,
+      "rules_error": null,
+      "elapsed_sec": 191.56,
+      "job_root": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3"
+    }
+  ]
+}

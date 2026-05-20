@@ -1,0 +1,1174 @@
+{
+  "ok": true,
+  "job_name": "job_3",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/uploaded_pdfs/derekfirst.pdf",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page008_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page008_panel02.png"
+  ],
+  "image_count": 6,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "B",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel01.png",
+      "attrs": {
+        "amperage": 225,
+        "spaces": 42,
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 200,
+        "detected_breakers": [
+          {
+            "side": "left",
+            "rowIndex": 1,
+            "rowTop": 675,
+            "rowBottom": 755,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 2,
+            "rowTop": 755,
+            "rowBottom": 835,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 3,
+            "rowTop": 835,
+            "rowBottom": 916,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 4,
+            "rowTop": 916,
+            "rowBottom": 997,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 5,
+            "rowTop": 997,
+            "rowBottom": 1077,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 6,
+            "rowTop": 1077,
+            "rowBottom": 1157,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 7,
+            "rowTop": 1157,
+            "rowBottom": 1238,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 8,
+            "rowTop": 1238,
+            "rowBottom": 1319,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 9,
+            "rowTop": 1319,
+            "rowBottom": 1399,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 10,
+            "rowTop": 1399,
+            "rowBottom": 1480,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 11,
+            "rowTop": 1480,
+            "rowBottom": 1560,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 12,
+            "rowTop": 1560,
+            "rowBottom": 1640,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 13,
+            "rowTop": 1640,
+            "rowBottom": 1721,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 14,
+            "rowTop": 1721,
+            "rowBottom": 1802,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 15,
+            "rowTop": 1802,
+            "rowBottom": 1882,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 16,
+            "rowTop": 1882,
+            "rowBottom": 1962,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 17,
+            "rowTop": 1962,
+            "rowBottom": 2043,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 18,
+            "rowTop": 2043,
+            "rowBottom": 2123,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 19,
+            "rowTop": 2123,
+            "rowBottom": 2204,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 20,
+            "rowTop": 2206,
+            "rowBottom": 2358,
+            "amperage": 30,
+            "poles": 2,
+            "comboText": "30 2"
+          },
+          {
+            "side": "right",
+            "rowIndex": 1,
+            "rowTop": 675,
+            "rowBottom": 755,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 2,
+            "rowTop": 755,
+            "rowBottom": 835,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 3,
+            "rowTop": 835,
+            "rowBottom": 916,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 4,
+            "rowTop": 916,
+            "rowBottom": 997,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 5,
+            "rowTop": 997,
+            "rowBottom": 1077,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 6,
+            "rowTop": 1077,
+            "rowBottom": 1157,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 7,
+            "rowTop": 1157,
+            "rowBottom": 1238,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 8,
+            "rowTop": 1238,
+            "rowBottom": 1319,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 9,
+            "rowTop": 1319,
+            "rowBottom": 1399,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 10,
+            "rowTop": 1399,
+            "rowBottom": 1480,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 11,
+            "rowTop": 1480,
+            "rowBottom": 1560,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 12,
+            "rowTop": 1560,
+            "rowBottom": 1640,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 13,
+            "rowTop": 1640,
+            "rowBottom": 1721,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 14,
+            "rowTop": 1721,
+            "rowBottom": 1802,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 15,
+            "rowTop": 1802,
+            "rowBottom": 1882,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 16,
+            "rowTop": 1882,
+            "rowBottom": 1962,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 17,
+            "rowTop": 1962,
+            "rowBottom": 2043,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 18,
+            "rowTop": 2043,
+            "rowBottom": 2123,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 19,
+            "rowTop": 2123,
+            "rowBottom": 2204,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 20,
+            "rowTop": 2204,
+            "rowBottom": 2284,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 21,
+            "rowTop": 2284,
+            "rowBottom": 2360,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          }
+        ]
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "B (2)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel02.png",
+      "attrs": {
+        "amperage": 225,
+        "spaces": 42,
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": [
+          {
+            "side": "left",
+            "rowIndex": 0,
+            "rowTop": 672,
+            "rowBottom": 753,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 1,
+            "rowTop": 753,
+            "rowBottom": 833,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 2,
+            "rowTop": 833,
+            "rowBottom": 913,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 3,
+            "rowTop": 913,
+            "rowBottom": 993,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 4,
+            "rowTop": 993,
+            "rowBottom": 1073,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 5,
+            "rowTop": 1073,
+            "rowBottom": 1153,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 6,
+            "rowTop": 1153,
+            "rowBottom": 1233,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 7,
+            "rowTop": 1233,
+            "rowBottom": 1313,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 8,
+            "rowTop": 1313,
+            "rowBottom": 1393,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 9,
+            "rowTop": 1393,
+            "rowBottom": 1473,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 10,
+            "rowTop": 1473,
+            "rowBottom": 1553,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 11,
+            "rowTop": 1553,
+            "rowBottom": 1633,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 12,
+            "rowTop": 1633,
+            "rowBottom": 1713,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 13,
+            "rowTop": 1713,
+            "rowBottom": 1793,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 14,
+            "rowTop": 1793,
+            "rowBottom": 1874,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 15,
+            "rowTop": 1874,
+            "rowBottom": 1954,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 16,
+            "rowTop": 1954,
+            "rowBottom": 2034,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 17,
+            "rowTop": 2034,
+            "rowBottom": 2114,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 18,
+            "rowTop": 2114,
+            "rowBottom": 2193,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 19,
+            "rowTop": 2195,
+            "rowBottom": 2348,
+            "amperage": 30,
+            "poles": 2,
+            "comboText": "30 2"
+          },
+          {
+            "side": "right",
+            "rowIndex": 0,
+            "rowTop": 672,
+            "rowBottom": 753,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 1,
+            "rowTop": 753,
+            "rowBottom": 833,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 2,
+            "rowTop": 833,
+            "rowBottom": 913,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 3,
+            "rowTop": 913,
+            "rowBottom": 993,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 4,
+            "rowTop": 993,
+            "rowBottom": 1073,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 5,
+            "rowTop": 1073,
+            "rowBottom": 1153,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 6,
+            "rowTop": 1153,
+            "rowBottom": 1233,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 7,
+            "rowTop": 1233,
+            "rowBottom": 1313,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 8,
+            "rowTop": 1313,
+            "rowBottom": 1393,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 9,
+            "rowTop": 1393,
+            "rowBottom": 1473,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 10,
+            "rowTop": 1473,
+            "rowBottom": 1553,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 11,
+            "rowTop": 1553,
+            "rowBottom": 1633,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 12,
+            "rowTop": 1633,
+            "rowBottom": 1713,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 13,
+            "rowTop": 1713,
+            "rowBottom": 1793,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 14,
+            "rowTop": 1793,
+            "rowBottom": 1874,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 15,
+            "rowTop": 1874,
+            "rowBottom": 1954,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 16,
+            "rowTop": 1954,
+            "rowBottom": 2034,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 17,
+            "rowTop": 2034,
+            "rowBottom": 2114,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 18,
+            "rowTop": 2114,
+            "rowBottom": 2193,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 19,
+            "rowTop": 2193,
+            "rowBottom": 2274,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 20,
+            "rowTop": 2274,
+            "rowBottom": 2350,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          }
+        ]
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "A",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel03.png",
+      "attrs": {
+        "amperage": 400,
+        "spaces": 42,
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": [
+          {
+            "side": "left",
+            "rowIndex": 0,
+            "rowTop": 673,
+            "rowBottom": 907,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "50 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 1,
+            "rowTop": 913,
+            "rowBottom": 1147,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "50 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 2,
+            "rowTop": 1153,
+            "rowBottom": 1387,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "50 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 3,
+            "rowTop": 1393,
+            "rowBottom": 1627,
+            "amperage": 40,
+            "poles": 3,
+            "comboText": "40 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 4,
+            "rowTop": 1633,
+            "rowBottom": 1867,
+            "amperage": 30,
+            "poles": 3,
+            "comboText": "30 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 5,
+            "rowTop": 1870,
+            "rowBottom": 1950,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "left",
+            "rowIndex": 6,
+            "rowTop": 1950,
+            "rowBottom": 2029,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "right",
+            "rowIndex": 0,
+            "rowTop": 673,
+            "rowBottom": 907,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "3 50"
+          },
+          {
+            "side": "right",
+            "rowIndex": 1,
+            "rowTop": 913,
+            "rowBottom": 1147,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "3 50"
+          },
+          {
+            "side": "right",
+            "rowIndex": 2,
+            "rowTop": 1153,
+            "rowBottom": 1387,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "3 50"
+          },
+          {
+            "side": "right",
+            "rowIndex": 3,
+            "rowTop": 1393,
+            "rowBottom": 1627,
+            "amperage": 20,
+            "poles": 3,
+            "comboText": "3 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 4,
+            "rowTop": 1630,
+            "rowBottom": 1709,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 5,
+            "rowTop": 1709,
+            "rowBottom": 1789,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          }
+        ]
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "225A",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page007_panel04.png",
+      "attrs": {
+        "amperage": 225,
+        "spaces": 30,
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 200,
+        "detected_breakers": [
+          {
+            "side": "left",
+            "rowIndex": 0,
+            "rowTop": 671,
+            "rowBottom": 905,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "50 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 1,
+            "rowTop": 911,
+            "rowBottom": 1144,
+            "amperage": 50,
+            "poles": 3,
+            "comboText": "50 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 2,
+            "rowTop": 1150,
+            "rowBottom": 1384,
+            "amperage": 40,
+            "poles": 3,
+            "comboText": "40 3"
+          },
+          {
+            "side": "left",
+            "rowIndex": 3,
+            "rowTop": 1387,
+            "rowBottom": 1466,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20 1"
+          },
+          {
+            "side": "right",
+            "rowIndex": 0,
+            "rowTop": 671,
+            "rowBottom": 905,
+            "amperage": 40,
+            "poles": 3,
+            "comboText": "3 40"
+          },
+          {
+            "side": "right",
+            "rowIndex": 1,
+            "rowTop": 911,
+            "rowBottom": 1144,
+            "amperage": 40,
+            "poles": 3,
+            "comboText": "3 40"
+          },
+          {
+            "side": "right",
+            "rowIndex": 2,
+            "rowTop": 1150,
+            "rowBottom": 1384,
+            "amperage": 20,
+            "poles": 3,
+            "comboText": "3 20"
+          },
+          {
+            "side": "right",
+            "rowIndex": 3,
+            "rowTop": 1387,
+            "rowBottom": 1466,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1 20"
+          }
+        ]
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MOUINTTNG",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page008_panel01.png",
+      "attrs": {
+        "amperage": "NONE",
+        "spaces": 0,
+        "voltage": "NONE",
+        "intRating": "NONE",
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "(unnamed)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_4/job_3/pdf_images/derekfirst_electrical_filtered_page008_panel02.png",
+      "attrs": {
+        "amperage": "NONE",
+        "spaces": 0,
+        "voltage": "NONE",
+        "intRating": "NONE",
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "B": {
+      "Interior": "NQ442L2",
+      "Box": "MH50BE",
+      "Trim": "NC50F",
+      "Ground Bar Kit": "PK27GTA",
+      "Neutral (100%)": "NQN2CU",
+      "Neutral (200%)": "NQNL2",
+      "Service Entrance Note": "Panel not suitable for service entrance.",
+      "Feed-Thru Lugs": "NQFTL2L",
+      "Service Entrance Barrier Kit": "NQHJQLLC",
+      "Main Breaker Kit": "NQMB2HJ",
+      "Main Breaker": "JGL36200",
+      "Branch Breakers (NQ)": [
+        {
+          "Part Number": "QH120",
+          "Interrupting Rating": "65k",
+          "count": 40
+        },
+        {
+          "Part Number": "QOH240",
+          "Interrupting Rating": "42k",
+          "count": 1
+        }
+      ],
+      "Spaces Remaining": 0
+    },
+    "B (2)": {
+      "Interior": "NQ442L2",
+      "Box": "MH50BE",
+      "Trim": "NC50F",
+      "Ground Bar Kit": "PK27GTA",
+      "Neutral (100%)": "NQN2CU",
+      "Neutral (200%)": "NQNL2",
+      "Service Entrance Note": "Panel not suitable for service entrance.",
+      "Feed-Thru Lugs": "NQFTL2L",
+      "Service Entrance Barrier Kit": "NQHJQLLC",
+      "Main Breaker Kit": "NQMB2HJ",
+      "Main Breaker": "HGL36100",
+      "Branch Breakers (NQ)": [
+        {
+          "Part Number": "QH120",
+          "Interrupting Rating": "65k",
+          "count": 40
+        },
+        {
+          "Part Number": "QOH240",
+          "Interrupting Rating": "42k",
+          "count": 1
+        }
+      ],
+      "Spaces Remaining": 0
+    },
+    "A": {
+      "Interior": "NF442L4",
+      "Box": "MH68BE",
+      "Trim": "NC68VF",
+      "Main Breaker Kit": "N400M",
+      "Feed-Thru Lugs": "NF400FTL",
+      "Ground Bar Kit": "PK27GTA",
+      "Neutral (100%)": "NFN6CU",
+      "Neutral (200%)": "NFNL4",
+      "Service Entrance Note": "For service\u2010entrance panels: 100% neutral, service entrance kit, and ground bar required",
+      "Service Entrance Kit": "NFLALLC",
+      "spaces": 42,
+      "Main Breaker": "LAL36400",
+      "Branch Breakers (NF)": [
+        {
+          "Part Number": "EJB34050",
+          "Interrupting Rating": "65kA",
+          "count": 6
+        },
+        {
+          "Part Number": "EJB34040",
+          "Interrupting Rating": "65kA",
+          "count": 1
+        },
+        {
+          "Part Number": "EJB34030",
+          "Interrupting Rating": "65kA",
+          "count": 1
+        },
+        {
+          "Part Number": "EJB14020",
+          "Interrupting Rating": "65kA",
+          "count": 4
+        },
+        {
+          "Part Number": "EJB34020",
+          "Interrupting Rating": "65kA",
+          "count": 1
+        }
+      ],
+      "Spaces Remaining": 11,
+      "Filler Plates": {
+        "Part Number": "NFFP15",
+        "Quantity": 1,
+        "Covers": "15 spaces"
+      }
+    },
+    "225A": {
+      "Interior": "NF430L2",
+      "Box": "MH50BE",
+      "Trim": "NC50F",
+      "Main Breaker Kit": "N250MJ",
+      "Feed-Thru Lugs": "NF250FTL",
+      "Ground Bar Kit": "No ground bar kit available for this configuration.",
+      "Neutral (100%)": "NFN2CU",
+      "Neutral (200%)": "NFNL2",
+      "Service Entrance Note": "For service\u2010entrance panels: 100% neutral, service entrance kit, and ground bar required",
+      "Service Entrance Kit": "NFHJLLC",
+      "spaces": 30,
+      "Main Breaker": "JGL36200",
+      "Branch Breakers (NF)": [
+        {
+          "Part Number": "EJB34050",
+          "Interrupting Rating": "65kA",
+          "count": 2
+        },
+        {
+          "Part Number": "EJB34040",
+          "Interrupting Rating": "65kA",
+          "count": 3
+        },
+        {
+          "Part Number": "EJB14020",
+          "Interrupting Rating": "65kA",
+          "count": 2
+        },
+        {
+          "Part Number": "EJB34020",
+          "Interrupting Rating": "65kA",
+          "count": 1
+        }
+      ],
+      "Spaces Remaining": 10,
+      "Filler Plates": {
+        "Part Number": "NFFP15",
+        "Quantity": 1,
+        "Covers": "15 spaces"
+      }
+    },
+    "MOUINTTNG": {
+      "Skipped": "Missing required attributes: amperage, voltage"
+    },
+    "(unnamed)": {
+      "Skipped": "Missing required attributes: amperage, voltage"
+    }
+  }
+}
