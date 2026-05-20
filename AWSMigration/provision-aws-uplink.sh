@@ -37,7 +37,7 @@ set -euo pipefail
 PAPERSPACE_USER="paperspace"
 PAPERSPACE_HOME="/home/paperspace"
 REPO_URL="git@github.com:ArgusQuote/ElectricalDiagramAnalyzer.git"
-REPO_BRANCH="TOOL_Debug_MaxUserTesting"
+REPO_BRANCH="TOOL_DEVELOPMENT_V3_MS"
 REPO_DIR="${PAPERSPACE_HOME}/ElectricalDiagramAnalyzer"
 VENV_DIR="${PAPERSPACE_HOME}/venv"
 ENV_FILE="${PAPERSPACE_HOME}/.anvil_env"
@@ -176,7 +176,7 @@ EOF
 fi
 
 # -----------------------------------------------------------------------------
-# Step 4: Clone repo (branch TOOL_Debug_MaxUserTesting -- matches production)
+# Step 4: Clone repo (branch TOOL_DEVELOPMENT_V3_MS -- matches production)
 # -----------------------------------------------------------------------------
 log "Step 4/9: git clone (branch ${REPO_BRANCH})"
 

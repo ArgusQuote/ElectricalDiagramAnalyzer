@@ -97,9 +97,20 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
   **Key decisions made on 2026-05-20 (recorded so the next agent
   doesn't re-litigate):**
-  - **Branch to clone on AWS**: `TOOL_Debug_MaxUserTesting`
-    (commit `5692b8d6d094d70b6018c7725cb2f9c851ac82d4`), confirmed
-    by Marco as the active production branch on Paperspace.
+  - **Branch to clone on AWS**: `TOOL_DEVELOPMENT_V3_MS` (revised
+    2026-05-20 PM). Originally `TOOL_Debug_MaxUserTesting` (commit
+    `5692b8d6d094d70b6018c7725cb2f9c851ac82d4`), but Paperspace was
+    migrated to `TOOL_DEVELOPMENT_V3_MS` (merge commit `f7e53bf` on
+    origin) to unify Paperspace and the AWS dev box on a single
+    production branch and avoid maintaining two trees. V3_MS already
+    contained every LW production fix (merge base `8cc31ae` "LW
+    updated server polling to be more reliable") plus Marco's v7
+    TATR integration, the new `MLTableDetection/` module, and the
+    `AWSMigration/` folder itself. The two commits on
+    `TOOL_Debug_MaxUserTesting` that V3_MS did not have (`4009ddf`,
+    `5692b8d`) were `__pycache__/*.pyc` binary-only bumps with zero
+    insertions/deletions of source -- nothing was lost in the swap.
+    `TOOL_Debug_MaxUserTesting` is now effectively retired.
   - **Python 3.10** via deadsnakes PPA, matching Paperspace exactly.
     The AMI ships with 3.12 as `/usr/bin/python3`, but the venv at
     `/home/paperspace/venv` will be 3.10 for compatibility with
@@ -131,10 +142,13 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   1. **(DONE 2026-05-20 PM)** Rewrite the provision script footer
      and README to remove residual parallel-cutover language.
      Done as part of this entry's update.
-  2. **Commit and push the AWSMigration/ folder** to
-     `TOOL_Debug_MaxUserTesting` so the script is available on AWS
-     after `git clone`. Requires Marco's sign-off per the
-     git-conventions rule.
+  2. **(DONE 2026-05-20 PM)** Committed and pushed the
+     `AWSMigration/` folder to `TOOL_DEVELOPMENT_V3_MS` (commits
+     `386954b`, `60cb6f7`, `c321cf5`). Paperspace then migrated from
+     `TOOL_Debug_MaxUserTesting` to `TOOL_DEVELOPMENT_V3_MS` to
+     unify both hosts on one branch. AWS will `git clone --branch
+     TOOL_DEVELOPMENT_V3_MS` per the (updated) constant at the top
+     of `provision-aws-uplink.sh`.
   3. **scp + run** `provision-aws-uplink.sh` on the EC2 box; first
      run exits at the deploy-key step, Marco adds the public key to
      the repo's Deploy Keys, re-run completes the rest.

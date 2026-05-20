@@ -53,7 +53,7 @@ Specifically:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Branch to clone on AWS | `TOOL_Debug_MaxUserTesting` | Marco confirmed this is the production branch on Paperspace |
+| Branch to clone on AWS | `TOOL_DEVELOPMENT_V3_MS` | Was `TOOL_Debug_MaxUserTesting` until 2026-05-20 PM; Paperspace was migrated to V3_MS (which already contained all of LW's production fixes plus the v7 ML work and the `AWSMigration/` folder) to unify Paperspace and AWS on a single branch and avoid maintaining two production trees |
 | Python version | 3.10 (via deadsnakes PPA) | Match Paperspace; avoids detectron2/layoutparser 3.12 risks per the v6/v7 entries in `known-issues.mdc` |
 | Install spec | `AWSMigration/paperspace-freeze.txt`, NOT `MISC/requirements.txt` | Repo `MISC/requirements.txt` is stale (pins `numpy<2` but Paperspace runs 2.1.2; transformers isn't listed) |
 | `detectron2` | **Excluded** from install | Unused by `uplink_server.py` (only lazy-imported in `MLTableDetection/TableDetectorML.py:236`); fragile git-source build with CUDA-version risk |
@@ -74,21 +74,17 @@ do-not-enable warning and a manual-run command block. README
 Section 5 was rewritten as "Verify ready but not running" and Section
 6 as "Manual development run" (with the same warning).
 
-### Step B -- Commit the AWSMigration/ folder
+### Step B -- (DONE 2026-05-20 PM)
 
-The provisioning script must be on disk on AWS to run, and the
-cleanest way is via `git clone`. Currently the files exist only on
-Marco's laptop. Commit them on the same branch Paperspace runs
-(`TOOL_Debug_MaxUserTesting`):
-
-```bash
-git add AWSMigration/
-git commit -m "Add AWS dev-box provisioning script and pinned install spec"
-git push origin TOOL_Debug_MaxUserTesting
-```
-
-**Get Marco's confirmation before pushing** -- the workspace's
-git-conventions rule forbids commits without explicit user consent.
+The `AWSMigration/` folder was committed to `TOOL_DEVELOPMENT_V3_MS`
+(commits `386954b`, `60cb6f7`, `c321cf5`) and pushed to origin.
+Paperspace was then migrated from `TOOL_Debug_MaxUserTesting` to
+`TOOL_DEVELOPMENT_V3_MS` (merge commit `f7e53bf` on origin), which
+unifies Paperspace and the AWS dev box on a single production
+branch. `TOOL_Debug_MaxUserTesting` is now effectively retired
+(its only commits beyond the merge base were two `__pycache__/*.pyc`
+binary-only bumps containing no source change, so nothing was lost
+by switching).
 
 ### Step C -- Run the provisioning script on AWS
 
