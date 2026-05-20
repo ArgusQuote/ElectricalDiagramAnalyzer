@@ -18,18 +18,31 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
-- **AWS dev-box provisioning -- IN PROGRESS, paused 2026-05-20 PM** --
-  EC2 g5.2xlarge in us-east-1 was launched and SSH-verified on 2026-05-20.
-  **Scope changed late on 2026-05-20**: AWS is now a manual-run
-  development / capability-testing environment, NOT a production
-  replacement. Paperspace remains the sole customer-facing production
-  uplink and there is no current plan to demote it. AWS
-  `argus-uplink.service` is installed but will deliberately NEVER be
-  `systemctl enable`d. EventBridge scheduling and parallel cutover
-  (originally Steps F and H of the earlier migration plan) are no
-  longer wanted. **For the next agent: read
-  `AWSMigration/HANDOFF.md` first** -- it has the concrete
-  step-by-step. This entry is the upstream context.
+- **AWS dev-box provisioning -- COMPLETE 2026-05-20 PM (box dormant by design)** --
+  EC2 g5.2xlarge `i-0ecb7e8fabdb8548e` in `us-east-1` is fully
+  provisioned and verified in the **"ready but not running"** state:
+  Python 3.10 venv built, repo cloned to `TOOL_DEVELOPMENT_V3_MS`, v7
+  TATR weights sha256-verified against Paperspace, `ANVIL_UPLINK_KEY`
+  sha256-verified against Paperspace, `argus-uplink.service`
+  installed but `disabled` + `inactive (dead)`. Paperspace's
+  `anvil-uplink.service` was never touched during provisioning and
+  continues to serve 100% of customer traffic. **AWS is a manual-run
+  development / capability-testing environment** -- Marco runs
+  `python AnvilUplinkCode/uplink_server.py` by hand only when actively
+  testing; running it makes Anvil round-robin jobs between AWS and
+  Paperspace until Ctrl-C. `argus-uplink.service` must NEVER be
+  `systemctl enable`d or `systemctl start`ed under the current plan.
+  EventBridge scheduling and parallel cutover (originally Steps F and
+  H of the earlier migration plan) were dropped on 2026-05-20 PM and
+  are not wanted. **For the next agent: this is now an operational
+  reference**, not a step-by-step. The `AWSMigration/HANDOFF.md`
+  file remains as the historical execution plan; the
+  "Provisioning execution log" subsection below is the source of
+  truth for what landed where. If Marco asks to spin up another EC2
+  box, re-run `AWSMigration/provision-aws-uplink.sh` (it is idempotent
+  and now includes the chown temp-freeze fix; see the
+  "Operational notes from the 2026-05-20 PM provisioning session"
+  subsection).
 
   **What is done (in order it was completed, items 1-6 are pre-launch
   AWS-account setup, item 7 is the 2026-05-20 launch + provisioning
@@ -136,35 +149,68 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     `journalctl` if both are ever inspected side-by-side. **AWS
     systemd unit is installed but NEVER `systemctl enable`d.**
 
-  **What is next (resume here on next agent session):**
-  See `AWSMigration/HANDOFF.md` for the full step-by-step. Concise
-  summary in execution order:
-  1. **(DONE 2026-05-20 PM)** Rewrite the provision script footer
-     and README to remove residual parallel-cutover language.
-     Done as part of this entry's update.
+  **Provisioning execution log (all steps DONE 2026-05-20 PM):**
+  Each step below is the operational record of what happened.
+  `AWSMigration/HANDOFF.md` was the planning document.
+  1. **(DONE 2026-05-20 PM)** Rewrote the provision script footer
+     and README to remove residual parallel-cutover language. Done
+     as part of this entry's earlier update.
   2. **(DONE 2026-05-20 PM)** Committed and pushed the
      `AWSMigration/` folder to `TOOL_DEVELOPMENT_V3_MS` (commits
      `386954b`, `60cb6f7`, `c321cf5`). Paperspace then migrated from
      `TOOL_Debug_MaxUserTesting` to `TOOL_DEVELOPMENT_V3_MS` to
-     unify both hosts on one branch. AWS will `git clone --branch
+     unify both hosts on one branch. AWS clones `--branch
      TOOL_DEVELOPMENT_V3_MS` per the (updated) constant at the top
      of `provision-aws-uplink.sh`.
-  3. **scp + run** `provision-aws-uplink.sh` on the EC2 box; first
-     run exits at the deploy-key step, Marco adds the public key to
-     the repo's Deploy Keys, re-run completes the rest.
-  4. **Ferry the v7 TATR weights** (~111 MB) from Paperspace through
-     the laptop to AWS using the two-step rsync in HANDOFF.md.
-  5. **Ferry the `ANVIL_UPLINK_KEY`** via the pipe-only command in
-     HANDOFF.md (never writes the value to disk on the laptop,
-     never prints to chat).
-  6. **Verify "ready but not running" state**: `torch.cuda.is_available()`
-     True, v7 model loads via `transformers`, `systemctl status
-     argus-uplink` shows `disabled`. Do NOT run
-     `python uplink_server.py` unless Marco explicitly requests it
-     (running it makes Anvil round-robin between AWS and Paperspace).
-  7. **STOP HERE.** Do not enable systemd, do not set EventBridge.
-     The AWS box's intended steady state is "powered on or off at
-     Marco's discretion; uplink runs only when he manually invokes
+  3. **(DONE 2026-05-20 PM)** `scp`'d `provision-aws-uplink.sh` to
+     `ubuntu@3.89.204.0:/tmp/` and ran `sudo bash
+     /tmp/provision-aws-uplink.sh`. First run exited at the deploy-
+     key step (exit 10); Marco added the printed ed25519 public key
+     (`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP/uHadXeMKlGyxqdBI8N8Uc2zvNupl/5OD6dwZ3idp9 argus-prod-aws-ip-172-31-45-45@20260520`)
+     to the repo's Deploy Keys with title `argus-prod-aws
+     (2026-05-20)`, write access UNCHECKED. Re-run completed Steps
+     4-9 cleanly in ~3 minutes (pip install was the long part, much
+     faster than the budgeted ~10 min thanks to AWS networking).
+     Hit one bug mid-run that's documented in the "Operational
+     notes" subsection below (pip-install temp-freeze permission).
+  4. **(DONE 2026-05-20 PM)** Ferried the v7 TATR weights (111 MB,
+     5 files) from Paperspace through the laptop to AWS using the
+     two-step rsync in HANDOFF.md. **Integrity verified by sha256
+     match on `model.safetensors`**:
+     `47401faaf34ee8a797801aca5c510e1d845cf2343260b0761d9260d08c4d9ede`
+     on both ends. Final permissions on AWS:
+     `/home/paperspace/Documents/TableAnnotations/models_v7/best/`
+     owned by `paperspace:paperspace`, 644 file mode. Laptop's
+     `/tmp/v7-weights-cache/` was deleted post-transfer.
+  5. **(DONE 2026-05-20 PM)** Ferried the `ANVIL_UPLINK_KEY` via the
+     pipe-only `ssh paperspace-vm 'cat ...' | ssh ... 'sudo tee
+     ... >/dev/null && chown ... && chmod 600 ...'` command in
+     HANDOFF.md Step E. **Integrity verified by sha256 match**:
+     `da78f3f9fdb43a0f1641eb7d4aedd842e7bc3118f1bd661c17d043e24a13a39b`
+     on both ends (66-byte file, mode 600, owner `paperspace`).
+     The key never appeared in chat, never landed on the laptop's
+     disk, and never printed to stdout (tee's stdout was redirected
+     to `/dev/null`). Same Anvil app (`"Argus Automated BOM"`),
+     same uplink key as Paperspace -- not regenerated.
+  6. **(DONE 2026-05-20 PM)** Verified "ready but not running"
+     state via a 5-check smoke test run as the `paperspace` user
+     with `/home/paperspace/venv` activated:
+     - Python: `3.10.20`
+     - `torch.cuda.is_available() == True`, `device == NVIDIA A10G`
+     - `import anvil.server, easyocr, transformers` all clean
+       (`transformers == 4.55.4`, matching Paperspace's pin)
+     - `TableTransformerForObjectDetection.from_pretrained(...)`
+       loads `models_v7/best/` with `num_queries == 15` (correct
+       v7 signature -- v6 had `num_queries == 20`)
+     - Repo HEAD: `d2b545a "MS: I more mdc updates."` on
+       `TOOL_DEVELOPMENT_V3_MS`
+     - `systemctl status argus-uplink`: `Loaded: ... disabled`,
+       `Active: inactive (dead)`. `systemctl is-enabled` says
+       `disabled`. `systemctl is-active` says `inactive`.
+  7. **(DONE 2026-05-20 PM)** Stopped. Did NOT enable systemd, did
+     NOT set EventBridge, did NOT run `uplink_server.py`. The AWS
+     box's intended steady state is "powered on or off at Marco's
+     discretion; uplink runs only when he manually invokes
      `python AnvilUplinkCode/uplink_server.py`."
 
   **Operational decisions deferred (not blockers for the handoff):**
@@ -217,6 +263,73 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     if `journalctl -u anvil-uplink` shows `Worker [slot-N] did not
     become ready within 120s`, just restart the unit -- the race is
     intermittent and a quiet system usually wins the race on retry.
+
+  **Operational notes from the 2026-05-20 PM provisioning session:**
+  - **`provision-aws-uplink.sh` pip-install temp-freeze permission
+    fix**: the original Step 6 created `mktemp`'s output as a
+    root-owned mode-600 file, then ran pip as the `paperspace`
+    user via `sudo -u`, which broke with EACCES at `/tmp/tmp.XXX:
+    Permission denied`. The script now `chown
+    ${PAPERSPACE_USER}:${PAPERSPACE_USER} "$TEMP_FREEZE"` after
+    the `grep -v -E "^detectron2"` step and before invoking
+    `pip install`. Without this, the script fails at Step 6 on a
+    fresh Ubuntu 24.04 box. **Fix committed** in `1e51cab
+    "MS: Fixed provision-aws-uplink.sh"` on
+    `origin/TOOL_DEVELOPMENT_V3_MS` (2026-05-20 PM).
+  - **AWS public IP at end of session**: `3.89.204.0` (dynamic;
+    rotates on EC2 stop/start). The instance was left running
+    after smoke-test. If a future session can't SSH, look up the
+    current public IPv4 in the AWS Console for instance
+    `i-0ecb7e8fabdb8548e`.
+  - **AWS hostname (internal)**: `ip-172-31-45-45`. Useful to know
+    because it appears in the deploy-key comment
+    (`argus-prod-aws-ip-172-31-45-45@20260520`) and in the
+    `Connected to ... as SERVER` line if `uplink_server.py` is
+    ever run manually.
+  - **Pip install actual runtime**: ~3 minutes on the g5.2xlarge in
+    `us-east-1`, vs the script's documented budget of ~10 minutes.
+    AWS networking + the PyTorch CDN are fast enough that the
+    download phase is not the bottleneck. Compile step is also
+    fast since the freeze pins binary-wheel versions for every
+    package except `antlr4-python3-runtime` and `fvcore` (both
+    small, pure-Python).
+  - **`transformers.from_pretrained` "meta parameter" warnings on
+    v7 model load are benign**. PyTorch 2.4's safetensors loader
+    pre-allocates module parameters in "meta" mode then copies
+    weights in; the warnings just note that the in-place copy is
+    a no-op for those meta tensors. Same warnings appear on
+    Paperspace and on the laptop dev RTX 500 Ada. Do not let them
+    distract from genuine load failures, which would be an
+    exception, not a warning.
+  - **Verification methodology for secret transfers**: compare
+    `sha256sum` of `/home/paperspace/.anvil_env` between Paperspace
+    and AWS without ever printing the file contents. If sha256
+    matches, the byte content is identical -- there's no need to
+    print or even read the key value. Same pattern works for any
+    secret transfer where you only need to confirm equality, not
+    correctness. **Do not** use `cmp` -- it requires opening both
+    files on the same host, which is not the situation here.
+  - **`du -sh` and `wc -c < file` from `ubuntu` against
+    paperspace-owned files require sudo**. After the v7 weights
+    `chown -R paperspace:paperspace /home/paperspace/Documents`,
+    the `ubuntu` user can't read into that subtree even though it
+    has NOPASSWD sudo. Use `sudo du`, `sudo ls`, `sudo wc -c file`
+    (no redirect; the `<` redirect is opened by the shell as
+    `ubuntu` before `sudo` is consulted). The cleanest way to run
+    multi-step paperspace-as commands from `ubuntu` is to pipe a
+    heredoc into `ssh ... 'sudo -u paperspace bash -s' <<'EOF'
+    ... EOF` -- this avoids nested-quoting hazards in `bash -c
+    "..."`. The earlier `bash -c "..." <<EOF` attempt today
+    produced corrupted commands like `activatecd /home/...`
+    because the heredoc interacted badly with shell escaping.
+  - **GitHub deploy key naming**: title is `argus-prod-aws
+    (2026-05-20)`, **read-only** (write access UNCHECKED). If the
+    AWS box is ever rebuilt from scratch on a new EC2 instance
+    (e.g. different `i-XXX`), the provision script will generate
+    a *new* ed25519 key with a different hostname suffix; that
+    new key has to be added separately. The current key in the
+    repo's Deploy Keys settings is tied to
+    `ip-172-31-45-45`-named EC2 box only.
 
 - **ML Table Detection -- Phase 2 COMPLETE 2026-05-15** -- The best
   TATR model is now **v7**, which averages mAP@0.5 = **0.8297** across

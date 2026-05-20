@@ -1,0 +1,56 @@
+---
+description: Conventions for what belongs (and what does NOT belong) in this project's living documentation -- handoff docs, known-issues entries, and similar persistent notes.
+alwaysApply: true
+---
+
+# Documentation Conventions
+
+## Do NOT document uncommitted / working-tree state
+
+Marco handles commits himself at the end of the day. The agent must not
+treat uncommitted changes as something to be tracked, summarized, or
+handed off in persistent documentation.
+
+This rule applies to:
+
+- `AWSMigration/HANDOFF.md` and any other `HANDOFF.md` / handoff-style docs
+- `.cursor/rules/project/docs/known-issues.mdc`
+- Any other living-doc file under `.cursor/rules/project/docs/`
+
+Specifically, do NOT:
+
+- Add a "What remains uncommitted" / "Still uncommitted in the working
+  tree" / "Pending commit" section to a handoff or known-issues entry.
+- List files currently `modified` per `git status` as part of the
+  documented project state.
+- Suggest commit messages inside the doc body as a permanent artifact
+  (suggesting one in chat for Marco to use is fine -- writing it into
+  the markdown is not).
+- Describe the working tree as a deliverable. Document only what has
+  been committed, what is operationally true on the relevant host, or
+  what is decided as deferred work.
+
+Why: these docs are read days or weeks later by an agent (or by Marco)
+to understand the *committed, durable* state of the project. Pointing
+at the transient working tree at the moment a doc was written makes
+the doc obsolete the moment Marco commits, and creates churn in
+follow-up sessions trying to reconcile "still uncommitted as of when
+this doc was last updated" against the current `git status`.
+
+## What IS appropriate in these docs
+
+- The committed state of code, infra, and decisions.
+- Operationally-verified facts about hosts (e.g. sha256 of a file on
+  the production VM, systemd unit status, package versions installed).
+- Deferred work items that are deliberately not being done now, with
+  the reason and the conditions under which they would be revisited.
+- Historical decisions and their rationale, so the next agent does
+  not re-litigate them.
+
+## If the agent notices uncommitted changes mid-session
+
+- Mention them in chat to Marco, with a suggested commit message if
+  helpful.
+- Do not write them into a handoff or known-issues entry.
+- Do not stage or commit them without explicit confirmation (per
+  `generic/git-conventions.mdc`).
