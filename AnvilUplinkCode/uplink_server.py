@@ -782,7 +782,7 @@ def _append_panel_edit_log(job_dir: Path, job_id: str, old_component: dict, new_
     return payload
 
 @anvil.server.callable
-def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel_name: str, edited_component: dict) -> dict:
+def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel_name: str, edited_component: dict, original_source_path: str = None) -> dict:
     """
     Fast rules-only rerun after the user edits one panel.
 
@@ -800,15 +800,16 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel
     if not owner_email or not str(owner_email).strip():
         return {"ok": False, "error": "Missing owner_email."}
 
-    if not original_panel_name or not str(original_panel_name).strip():
-        return {"ok": False, "error": "Missing original_panel_name."}
+    if (not original_panel_name or not str(original_panel_name).strip()) and (not original_source_path or not str(original_source_path).strip()):
+        return {"ok": False, "error": "Missing original_panel_name or original_source_path."}
 
     if not isinstance(edited_component, dict):
         return {"ok": False, "error": "edited_component must be a dict."}
 
     job_id = str(job_id).strip()
     owner_email = str(owner_email).strip().lower()
-    original_panel_name = str(original_panel_name).strip()
+    original_panel_name = str(original_panel_name or "").strip()
+    original_source_path = str(original_source_path or "").strip().replace("\\", "/")
 
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
@@ -844,7 +845,16 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel
     def _norm_name(value):
         return str(value or "").strip().upper()
 
+    def _norm_path_for_edit(value):
+        s = str(value or "").strip().replace("\\", "/")
+        while "//" in s:
+            s = s.replace("//", "/")
+        return s
+
     target_norm = _norm_name(original_panel_name)
+    target_source = _norm_path_for_edit(original_source_path)
+    target_source_l = target_source.lower()
+    target_source_base_l = target_source_l.split("/")[-1] if target_source_l else ""
 
     cleaned = dict(edited_component)
     cleaned["type"] = "panelboard"
@@ -861,17 +871,36 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel
     replaced = False
     old_component_for_edit_log = None
 
-    for idx, comp in enumerate(components):
-        if not isinstance(comp, dict):
-            continue
+    def _component_source_matches(comp: dict) -> bool:
+        if not target_source_l:
+            return False
 
-        if str(comp.get("type") or "").strip().lower() != "panelboard":
-            continue
+        candidates = (
+            comp.get("source"),
+            comp.get("overlay_source"),
+            comp.get("overlaySource"),
+            comp.get("preview_source"),
+            comp.get("previewSource"),
+            comp.get("reviewOverlayPath"),
+            comp.get("review_overlay_path"),
+        )
 
-        if _norm_name(comp.get("name")) != target_norm:
-            continue
+        for cand in candidates:
+            cand_n = _norm_path_for_edit(cand).lower()
+            if not cand_n:
+                continue
 
-        # Preserve visual/source metadata unless the edited component explicitly supplied it.
+            cand_base = cand_n.split("/")[-1]
+
+            if cand_n == target_source_l or (target_source_base_l and cand_base == target_source_base_l):
+                return True
+
+        return False
+
+    def _replace_component_at(idx: int, comp: dict):
+        nonlocal replaced, old_component_for_edit_log
+
+        # Preserve visual/source/status metadata unless the edited component explicitly supplied it.
         for key in (
             "source",
             "overlay_source",
@@ -888,13 +917,41 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel
                 cleaned[key] = comp.get(key)
 
         old_component_for_edit_log = _deep_copy_jsonable(comp)
-
         components[idx] = cleaned
         replaced = True
-        break
+
+    # 1) Source match first. This lets bad/problem edits target the exact crop.
+    if target_source_l:
+        for idx, comp in enumerate(components):
+            if not isinstance(comp, dict):
+                continue
+
+            if str(comp.get("type") or "").strip().lower() != "panelboard":
+                continue
+
+            if not _component_source_matches(comp):
+                continue
+
+            _replace_component_at(idx, comp)
+            break
+
+    # 2) Backward-compatible name match for normal BOM-card edits.
+    if not replaced and target_norm:
+        for idx, comp in enumerate(components):
+            if not isinstance(comp, dict):
+                continue
+
+            if str(comp.get("type") or "").strip().lower() != "panelboard":
+                continue
+
+            if _norm_name(comp.get("name")) != target_norm:
+                continue
+
+            _replace_component_at(idx, comp)
+            break
 
     if not replaced:
-        return {"ok": False, "error": f"Panel not found: {original_panel_name}"}
+        return {"ok": False, "error": f"Panel not found: {original_panel_name or original_source_path}"}
 
     edit_log_payload = _append_panel_edit_log(
         job_dir=job_dir,
