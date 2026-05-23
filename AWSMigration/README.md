@@ -11,6 +11,34 @@ Full context (decisions, history, deferred items) lives in
 "AWS dev-box provisioning" entry. Step-by-step execution plan
 for the next agent is in `HANDOFF.md`.
 
+## Connecting to the current AWS box
+
+From Marco's laptop:
+
+```bash
+ssh argus-prod-aws
+```
+
+The alias is configured in `~/.ssh/config` and points at the
+Elastic IP `52.21.216.68` (permanent across stop/start cycles).
+If the SSH attempt times out, the instance is most likely stopped
+to save the ~$1.21/hr compute charge -- start it from the AWS
+Console (instance `i-0ecb7e8fabdb8548e`), wait ~2 min for the
+`2/2 status checks` to pass, and the same `ssh argus-prod-aws`
+will work. No IP lookup is needed -- the EIP follows the instance.
+
+For commands run from a host that doesn't have the laptop's
+`~/.ssh/config`, the explicit form is:
+
+```bash
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68
+```
+
+The `<aws-host>` placeholder used in the recipe blocks below is
+generic on purpose -- it's there to support a future rebuild on a
+different EC2 instance. For day-to-day use, substitute
+`argus-prod-aws` (or `52.21.216.68`).
+
 ## Files in this directory
 
 | File | Purpose |
@@ -100,6 +128,7 @@ migration plan) and you can SSH in as `ubuntu`.
    of new customer jobs to AWS until Ctrl-C. Do not run during
    customer meetings or peak business hours.
    ```bash
+   ssh argus-prod-aws
    sudo -iu paperspace
    source /home/paperspace/venv/bin/activate
    cd /home/paperspace/ElectricalDiagramAnalyzer
@@ -157,7 +186,7 @@ git commit -m "Refresh Paperspace pip freeze for AWS install spec"
 Then on AWS, pull and reinstall:
 
 ```bash
-ssh ubuntu@<aws-host>
+ssh argus-prod-aws
 sudo -iu paperspace
 cd ElectricalDiagramAnalyzer && git pull
 rm /home/paperspace/venv/.argus-install-complete

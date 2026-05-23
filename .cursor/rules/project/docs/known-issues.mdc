@@ -34,7 +34,17 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   `systemctl enable`d or `systemctl start`ed under the current plan.
   EventBridge scheduling and parallel cutover (originally Steps F and
   H of the earlier migration plan) were dropped on 2026-05-20 PM and
-  are not wanted. **For the next agent: this is now an operational
+  are not wanted. **Public IP is now an Elastic IP** (`52.21.216.68`,
+  Name tag `argus-prod-aws-eip`, allocated and associated 2026-05-21
+  AM; ~$3.60/mo flat AWS charge; permanent across stop/start cycles).
+  Marco's laptop has an `argus-prod-aws` alias in `~/.ssh/config`
+  pointing at that EIP, so `ssh argus-prod-aws` is the canonical way
+  to reach the box from this laptop. **As of 2026-05-21 AM the
+  instance is STOPPED** from the AWS Console -- start it from the
+  Console when you actually need it (Marco prefers to keep it off
+  between sessions to save the ~$1.21/hr g5.2xlarge compute charge;
+  only the ~$3.60/mo EIP fee accrues while stopped).
+  **For the next agent: this is now an operational
   reference**, not a step-by-step. The `AWSMigration/HANDOFF.md`
   file remains as the historical execution plan; the
   "Provisioning execution log" subsection below is the source of
@@ -215,8 +225,6 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
   **Operational decisions deferred (not blockers for the handoff):**
   - Add Marco's business partner's IP to `argus-uplink-sg`.
-  - Elastic IP for stable SSH access (currently using dynamic public
-    IP `3.89.204.0`, which changes on every stop/start cycle).
   - Separate Anvil app for staging traffic (currently AWS and
     Paperspace share the same uplink key).
   - Promotion of AWS to production (NOT currently planned).
@@ -246,7 +254,9 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     the existing connection.
   - Anvil uplink is **outbound-only** (`anvil.server.connect` ->
     `wss://anvil.works/uplink`); no inbound firewall rules needed and
-    no Elastic IP needed. Public IP can change across stop/start.
+    no Elastic IP is technically required for the uplink itself. The
+    EIP set up on 2026-05-21 AM (`52.21.216.68`) is purely an SSH
+    convenience for Marco, not a technical requirement.
   - Running `DevEnv/capacity_test.py` (or any other big multiprocessing
     spawner) while the production `anvil-uplink.service` is also running
     will OOM the GPU -- 8 workers x ~3 GiB EasyOCR VRAM > 24 GiB A10G.
@@ -276,11 +286,14 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     fresh Ubuntu 24.04 box. **Fix committed** in `1e51cab
     "MS: Fixed provision-aws-uplink.sh"` on
     `origin/TOOL_DEVELOPMENT_V3_MS` (2026-05-20 PM).
-  - **AWS public IP at end of session**: `3.89.204.0` (dynamic;
-    rotates on EC2 stop/start). The instance was left running
-    after smoke-test. If a future session can't SSH, look up the
-    current public IPv4 in the AWS Console for instance
-    `i-0ecb7e8fabdb8548e`.
+  - **AWS public IP at end of 2026-05-20 PM session**: `3.89.204.0`
+    (dynamic). Superseded 2026-05-21 AM by Elastic IP `52.21.216.68`,
+    which is now permanent across stop/start cycles. The dynamic
+    `3.89.204.0` was released back to AWS's pool at EIP-association
+    time. If a future session can't SSH, the instance is most likely
+    stopped -- start it from the AWS Console and `ssh argus-prod-aws`
+    will work as soon as the `2/2 status checks` pass (no IP lookup
+    required, the EIP follows the instance).
   - **AWS hostname (internal)**: `ip-172-31-45-45`. Useful to know
     because it appears in the deploy-key comment
     (`argus-prod-aws-ip-172-31-45-45@20260520`) and in the
@@ -330,6 +343,57 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     new key has to be added separately. The current key in the
     repo's Deploy Keys settings is tied to
     `ip-172-31-45-45`-named EC2 box only.
+
+  **Operational notes from the 2026-05-21 AM session (EIP + SSH alias + stop):**
+  - **Elastic IP allocated and associated**: `52.21.216.68`, Name
+    tag `Name=argus-prod-aws-eip`, in `us-east-1`, Amazon's IPv4
+    pool. Associated to `i-0ecb7e8fabdb8548e` while the instance
+    was still running; the dynamic IP `3.89.204.0` was released
+    back to the AWS pool at association time. The active SSH
+    session at `3.89.204.0` dropped at the association moment;
+    reconnecting at `52.21.216.68` worked immediately. Cost
+    (per AWS Feb-2024 pricing change): ~$0.005/hr (~$3.60/mo)
+    flat regardless of attachment / instance state. There is no
+    longer a "free while attached and running" tier -- if the EIP
+    is ever released, billing stops but the IP is gone forever.
+    **If the instance is ever terminated** (vs stopped),
+    explicitly release the EIP first via *EC2 -> Elastic IPs ->
+    Actions -> Release Elastic IP addresses*, otherwise the
+    $3.60/mo charge continues for nothing.
+  - **SSH alias added to laptop's `~/.ssh/config`**:
+    ```
+    Host argus-prod-aws
+        HostName 52.21.216.68
+        User ubuntu
+        IdentityFile ~/.ssh/argus-prod-key.pem
+        IdentitiesOnly yes
+    ```
+    `IdentitiesOnly yes` prevents SSH from offering Marco's
+    `id_ed25519` key to AWS before the right `.pem` key, which
+    keeps AWS-side `journalctl -u ssh` clean of false "auth
+    failure" entries. `ssh argus-prod-aws` is now the canonical
+    invocation from Marco's laptop; the bare
+    `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68` form
+    still works for ad-hoc use from other hosts.
+  - **Instance stopped via AWS Console** at session end. The EIP
+    remains associated to the stopped instance (so when Marco
+    starts it again, `ssh argus-prod-aws` Just Works once the
+    `2/2 status checks` pass, no IP lookup required). Stopped
+    state cost: ~$12/mo for the 150 GB gp3 root volume + ~$3.60/mo
+    for the EIP = ~$15.60/mo while dormant, vs ~$880/mo if left
+    running 24/7. Compute (~$1.21/hr) only accrues when running.
+  - **Capability test still not performed**: Marco has never run
+    `python AnvilUplinkCode/uplink_server.py` on AWS in the
+    foreground. The full software stack passed all five smoke
+    checks (Python 3.10.20, CUDA, imports, v7 model load,
+    systemd disabled) plus a 148/148 pip-freeze diff against
+    `paperspace-freeze.txt` (perfect match minus the intentionally-
+    excluded `detectron2`). End-to-end Anvil job processing
+    on AWS is therefore inferred to work but not directly
+    verified. A foreground test would be the next operational
+    proof point, but is optional and must not be run during
+    customer hours (it makes Anvil round-robin between AWS and
+    Paperspace until Ctrl-C).
 
 - **ML Table Detection -- Phase 2 COMPLETE 2026-05-15** -- The best
   TATR model is now **v7**, which averages mAP@0.5 = **0.8297** across

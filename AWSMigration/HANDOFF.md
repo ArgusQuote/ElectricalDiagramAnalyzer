@@ -19,12 +19,21 @@ The upstream context (history, decisions, deferred items, and the
 full operational record) is in `.cursor/rules/project/docs/known-issues.mdc`
 under the "AWS dev-box provisioning" entry.
 
-## Status (2026-05-20 PM)
+## Status (2026-05-21 AM)
 
 - **AWS box `i-0ecb7e8fabdb8548e` (`g5.2xlarge`, `us-east-1`)** is
-  fully provisioned and dormant by design.
-  - SSH: `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@3.89.204.0`
-    (IP `3.89.204.0` is dynamic; rotates on stop/start).
+  fully provisioned and currently **STOPPED** (Marco shut it down
+  via the AWS Console after the 2026-05-20 PM provisioning +
+  smoke-test).
+  - Public IP: **Elastic IP `52.21.216.68`** (allocated and
+    associated 2026-05-21 AM; Name tag `argus-prod-aws-eip`).
+    Permanent across stop/start cycles. The old dynamic IP
+    `3.89.204.0` is released.
+  - SSH (laptop): `ssh argus-prod-aws` -- alias added to
+    `~/.ssh/config` pointing at `52.21.216.68`, user `ubuntu`,
+    key `~/.ssh/argus-prod-key.pem`, `IdentitiesOnly yes`.
+    The bare `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68`
+    form also still works.
   - Internal hostname: `ip-172-31-45-45`.
   - Python venv: `/home/paperspace/venv` (Python 3.10.20).
   - Repo: `/home/paperspace/ElectricalDiagramAnalyzer` on branch
@@ -51,23 +60,20 @@ under the "AWS dev-box provisioning" entry.
 
 All AWS provisioning work is committed on `origin/TOOL_DEVELOPMENT_V3_MS`,
 including the pip-install permission fix (`1e51cab "MS: Fixed
-provision-aws-uplink.sh"`). There is no required follow-up; the items
-below are optional capability tests or quality-of-life improvements.
+provision-aws-uplink.sh"`). The instance has been stopped from the
+AWS Console (started by Marco 2026-05-21 AM after the EIP rollout)
+and there is no required follow-up. The only remaining optional
+item is below.
 
 - **(Optional)** Do a controlled foreground manual run of
   `uplink_server.py` on AWS as a capability test. This makes Anvil
   round-robin jobs between AWS and Paperspace until Ctrl-C, so it
   must NOT be run during a customer meeting or with live jobs in
   flight. Recipe is in "Step F continued -- Manual development
-  run" below and in `AWSMigration/README.md` Section 6.
-- **(Optional)** Stop the EC2 instance from the AWS Console to save
-  money when not actively testing. `g5.2xlarge` is ~$1.21/hr
-  on-demand; leaving it running 24/7 burns ~$880/mo. The provision
-  script is idempotent so a stopped instance can be re-started any
-  time -- only the public IP changes.
-- **(Optional)** Add an `Host argus-prod-aws` block to
-  `~/.ssh/config` (key `~/.ssh/argus-prod-key.pem`) so the `-i ...`
-  flag isn't needed each session.
+  run" below and in `AWSMigration/README.md` Section 6. Procedure:
+  start the instance from the AWS Console, wait ~2 min for the
+  `2/2 status checks`, then `ssh argus-prod-aws` and follow the
+  recipe.
 
 DO NOT under any circumstance:
 
@@ -101,15 +107,17 @@ Specifically:
 1. EC2 launched: instance ID `i-0ecb7e8fabdb8548e`, Name tag
    `argus-production-server` (the name predates the dev-only
    reclassification; do not rename), `g5.2xlarge`, `us-east-1`,
-   public IP `3.89.204.0` (dynamic; will change on stop/start).
+   public IP `3.89.204.0` (dynamic; later replaced by Elastic IP
+   `52.21.216.68` on 2026-05-21 AM).
 2. AMI: "Deep Learning Base GPU AMI" Marketplace listing labeled
    Ubuntu 20.04 but actual OS is **Ubuntu 24.04.3 LTS (Noble Numbat)**
    -- AWS-side packaging quirk, not a bug.
 3. Hardware verified on EC2: NVIDIA A10G, 23,028 MiB VRAM, driver
    535.274.02, CUDA-driver 12.2, `nvcc` 12.0, 30 GiB RAM, 145 GiB free
    on root, no swap.
-4. SSH access: `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@3.89.204.0`.
-   Key backed up by Marco (cloud + multiple copies).
+4. SSH access: `ssh argus-prod-aws` (laptop alias) or
+   `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68`. Key
+   backed up by Marco (cloud + multiple copies).
 5. Security group `argus-uplink-sg`: SSH inbound from Marco's IP only.
    Partner's IP deferred.
 6. Local files created at `AWSMigration/` (now committed on
@@ -420,8 +428,6 @@ These should land as deferred items in `known-issues.mdc`'s
   (Currently keep it on.)
 - Decide if/when EventBridge scheduling is wanted. (Currently not
   wanted.)
-- Decide if Elastic IP is worth setting up. (Currently using dynamic
-  public IP; changes on stop/start.)
 - Decide if a separate Anvil app for staging is worth setting up.
   (Currently AWS and Paperspace share the same uplink key.)
 - Fix the long-standing `MISC/requirements.txt` drift vs production.
@@ -431,7 +437,7 @@ These should land as deferred items in `known-issues.mdc`'s
 
 ```bash
 # To test changes on AWS dev:
-ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<current-public-ip>
+ssh argus-prod-aws
 sudo -iu paperspace
 source /home/paperspace/venv/bin/activate
 cd /home/paperspace/ElectricalDiagramAnalyzer
@@ -440,26 +446,35 @@ python AnvilUplinkCode/uplink_server.py
 # ... test, Ctrl-C when done
 ```
 
-The current public IP must be looked up in the AWS Console each
-session (it's dynamic). If Marco stops the EC2 instance to save
-money, the next session will require:
+If Marco stops the EC2 instance to save money, the next session is:
 
 1. Start the instance from the AWS Console.
 2. Wait ~2 min for `2/2 status checks` to pass.
-3. Copy the new Public IPv4 from the console.
-4. SSH using that new IP.
+3. `ssh argus-prod-aws` -- the Elastic IP `52.21.216.68` is
+   permanent across stop/start cycles, so no IP lookup needed.
 
 ## Useful host aliases on Marco's laptop
 
-The laptop already has these SSH config entries:
+The laptop has these SSH config entries (as of 2026-05-21):
 
 ```
 Host paperspace-vm
     HostName 184.105.3.207
     User paperspace
     # (uses ~/.ssh/id_ed25519)
+
+Host argus-prod-aws
+    HostName 52.21.216.68
+    User ubuntu
+    IdentityFile ~/.ssh/argus-prod-key.pem
+    IdentitiesOnly yes
 ```
 
-(No alias yet for AWS -- always pass `-i ~/.ssh/argus-prod-key.pem
-ubuntu@<ip>` explicitly. Adding an `Host argus-prod-aws` alias is a
-nice future quality-of-life improvement, but optional.)
+Both are configured in `~/.ssh/config`. The earlier note in this
+doc about "no alias yet for AWS" is no longer accurate. The bare
+`ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68` form also
+works if needed (e.g. running ssh commands from a host that
+doesn't have the laptop's `~/.ssh/config`). `IdentitiesOnly yes`
+prevents SSH from offering the laptop's other keys (`id_ed25519`)
+to AWS before trying the right one, which keeps `journalctl -u
+ssh` on AWS clean.
