@@ -12,7 +12,13 @@ import os as _os
 from anvil import BlobMedia
 
 # ---------- CONFIG ----------
-REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
+# Resolve the repo root from this file's location so the server runs
+# unchanged on both production hosts -- Paperspace
+# (/home/paperspace/ElectricalDiagramAnalyzer) and the AWS dev box
+# (/home/ubuntu/ElectricalDiagramAnalyzer) -- as well as on any future
+# host with a different checkout path. uplink_server.py is one level
+# below the repo root at AnvilUplinkCode/uplink_server.py.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

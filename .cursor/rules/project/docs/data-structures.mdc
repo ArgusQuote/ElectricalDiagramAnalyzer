@@ -203,12 +203,13 @@ Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage
   - `preprocessor_config.json` -- image preprocessor (`AutoImageProcessor`) config; required to load via `AutoImageProcessor.from_pretrained()`.
   - `training_args.bin` -- pickled `TrainingArguments` (recipe forensics).
   - `trainer_state.json` -- 40 KB, full per-epoch `log_history` including 15 `eval_loss` / `eval_map_50` entries and `best_global_step` / `best_metric` (preserved from `checkpoint-2010/` before the intermediate checkpoints were deleted; see `known-issues.mdc` entry "v7 retrain -- DONE 2026-05-15").
-- **Current best (Paperspace)**: `~/Documents/TableAnnotations/models_v7/best/` -- mAP@0.5 = 0.8297 across 5 held-out PDFs.
+- **Current best (Paperspace)**: `~/Documents/TableAnnotations/models_v7/best/` -- mAP@0.5 = 0.8297 across 5 held-out PDFs. The same checkpoint (sha256-verified byte-identical) is also present on the AWS dev box at `/home/ubuntu/Documents/TableAnnotations/models_v7/best/` as of 2026-05-20 (path migrated from `/home/paperspace/...` on 2026-05-23).
 - **Resolution order** (in `TableDetectorML._resolve_default_tatr_model_path()`):
-  1. `~/Documents/TableAnnotations/models_v7/best`
-  2. `/home/paperspace/Documents/TableAnnotations/models_v7/best`
-  3. `/home/marco/Documents/TableAnnotations/models_v7/best`
-  4. Fallback: `microsoft/table-transformer-detection` (HuggingFace pretrained, zero-shot quality).
+  1. `~/Documents/TableAnnotations/models_v7/best` (resolves correctly on any host via the current user's home)
+  2. `/home/paperspace/Documents/TableAnnotations/models_v7/best` (Paperspace VM)
+  3. `/home/ubuntu/Documents/TableAnnotations/models_v7/best` (AWS dev box)
+  4. `/home/marco/Documents/TableAnnotations/models_v7/best` (Marco's laptop)
+  5. Fallback: `microsoft/table-transformer-detection` (HuggingFace pretrained, zero-shot quality).
 
 ## Data Flow
 

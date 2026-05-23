@@ -12,14 +12,15 @@ The venv path differs by machine:
 
 | Environment | venv path |
 |---|---|
-| Production (Paperspace) | `/home/paperspace/venv/` |
-| Local dev (Marco) | `/home/marco/venv/` |
+| Production (Paperspace VM) | `/home/paperspace/venv/` |
+| AWS dev box (manual-run only) | `/home/ubuntu/venv/` |
+| Local dev (Marco's laptop) | `/home/marco/venv/` |
 
 Activate whichever exists before running any Python commands:
 
 ```bash
 # Picks the first venv that exists
-for p in /home/paperspace/venv /home/marco/venv; do
+for p in /home/paperspace/venv /home/ubuntu/venv /home/marco/venv; do
   [ -f "$p/bin/activate" ] && source "$p/bin/activate" && break
 done
 ```
@@ -27,6 +28,7 @@ done
 - After activation, use `python` (not `python3`) to run scripts
 - The venv contains all project dependencies: PyTorch, OpenCV, pypdfium2, EasyOCR, etc.
 - If the venv is already activated in the current shell session, do not re-activate it
+- The AWS dev box was migrated from `/home/paperspace/venv/` to `/home/ubuntu/venv/` on 2026-05-23; the `paperspace` user no longer exists on that host. See `.cursor/rules/project/docs/known-issues.mdc` "AWS dev-box provisioning" entry for the full migration record.
 
 ## Running Scripts
 
@@ -40,6 +42,7 @@ python DevEnv/SomeScript.py
 
 ```bash
 which python
-# Expected (production): /home/paperspace/venv/bin/python
-# Expected (local dev):  /home/marco/venv/bin/python
+# Expected (Paperspace production): /home/paperspace/venv/bin/python
+# Expected (AWS dev box):           /home/ubuntu/venv/bin/python
+# Expected (Marco's laptop):        /home/marco/venv/bin/python
 ```

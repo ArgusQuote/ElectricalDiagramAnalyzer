@@ -58,11 +58,16 @@ class TableDetectorML:
     # Local fine-tuned checkpoints, tried in order. v7 is the current
     # production model (Phase 2 winner -- mAP@0.5 = 0.83 across 5 held-out
     # PDFs; see .cursor/rules/project/docs/known-issues.mdc entry
-    # "v7 retrain -- DONE 2026-05-15"). Paths cover both deployment hosts
-    # (Paperspace production VM and Marco's laptop).
+    # "v7 retrain -- DONE 2026-05-15"). Paths cover all three deployment
+    # hosts (Paperspace production VM, AWS dev box, Marco's laptop).
+    # The leading "~/..." entry resolves correctly on any of them via
+    # the current user's home directory; the absolute entries are
+    # belt-and-suspenders for the case where ~ resolution isn't usable
+    # (e.g. running under a different service user).
     DEFAULT_TATR_LOCAL_PATHS = (
         "~/Documents/TableAnnotations/models_v7/best",
         "/home/paperspace/Documents/TableAnnotations/models_v7/best",
+        "/home/ubuntu/Documents/TableAnnotations/models_v7/best",
         "/home/marco/Documents/TableAnnotations/models_v7/best",
     )
 

@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # AWSMigration/provision-aws-uplink.sh
 #
-# Provisions a fresh EC2 instance to mirror the Paperspace production
+# Provisions a fresh EC2 instance as the AWS dev / capability-testing
 # environment for the "Argus Automated BOM" Anvil uplink server.
 #
 # Target host:
 #   - Ubuntu 24.04 (Noble Numbat) on g5.2xlarge with the "Deep Learning Base
 #     GPU AMI (Ubuntu 20.04)" Marketplace image (the OS is actually 24.04
 #     despite the AMI listing's name; verified 2026-05-20).
-#   - Run as the default 'ubuntu' user via sudo.
+#   - Runs as the default 'ubuntu' user via sudo. No additional user is
+#     created. (Until 2026-05-23 this script created a separate 'paperspace'
+#     user to mirror the Paperspace VM exactly; that turned out to be
+#     unnecessary indirection and was retired on 2026-05-23 -- see
+#     known-issues.mdc "AWS dev-box provisioning" entry, subsection
+#     "Operational notes from the 2026-05-23 session".)
 #
 # Usage (on the EC2 box, as the ubuntu user):
 #   sudo bash /tmp/provision-aws-uplink.sh
@@ -21,7 +26,7 @@
 # This script DELIBERATELY does NOT:
 #   - systemctl enable --now argus-uplink   (you do this manually after smoke test)
 #   - rsync the v7 TATR weights from Paperspace (laptop-mediated, separate step)
-#   - set ANVIL_UPLINK_KEY in /home/paperspace/.anvil_env (manual paste after
+#   - set ANVIL_UPLINK_KEY in /home/ubuntu/.anvil_env (manual paste after
 #     retrieval from Paperspace; the key is a long-lived secret and must never
 #     appear in a script or chat log)
 #
@@ -32,15 +37,19 @@
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
-# Constants (mirror Paperspace exactly per 2026-05-20 known-issues audit)
+# Constants
 # -----------------------------------------------------------------------------
-PAPERSPACE_USER="paperspace"
-PAPERSPACE_HOME="/home/paperspace"
+# Service account that owns the venv, repo, env file, and (when run)
+# the uplink process. The AMI's default 'ubuntu' user is used directly --
+# it already exists, has NOPASSWD sudo, and has the SSH key Marco uses
+# to reach the box, so no additional user-creation step is needed.
+UPLINK_USER="ubuntu"
+UPLINK_HOME="/home/${UPLINK_USER}"
 REPO_URL="git@github.com:ArgusQuote/ElectricalDiagramAnalyzer.git"
 REPO_BRANCH="TOOL_DEVELOPMENT_V3_MS"
-REPO_DIR="${PAPERSPACE_HOME}/ElectricalDiagramAnalyzer"
-VENV_DIR="${PAPERSPACE_HOME}/venv"
-ENV_FILE="${PAPERSPACE_HOME}/.anvil_env"
+REPO_DIR="${UPLINK_HOME}/ElectricalDiagramAnalyzer"
+VENV_DIR="${UPLINK_HOME}/venv"
+ENV_FILE="${UPLINK_HOME}/.anvil_env"
 SYSTEMD_UNIT="/etc/systemd/system/argus-uplink.service"
 PYTHON_VERSION="3.10"
 FREEZE_FILE="${REPO_DIR}/AWSMigration/paperspace-freeze.txt"
@@ -62,13 +71,15 @@ die()  { printf '\n\033[1;31mERROR\033[0m %s\n' "$*" >&2; exit 1; }
   || die "This script targets Ubuntu. Detected: $(cat /etc/os-release | head -1)"
 command -v nvidia-smi >/dev/null \
   || die "nvidia-smi not found. Wrong AMI?"
+id "$UPLINK_USER" >/dev/null 2>&1 \
+  || die "Expected user '${UPLINK_USER}' to already exist on this AMI."
 
 log "Pre-checks OK on $(hostname). GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
 
 # -----------------------------------------------------------------------------
 # Step 1: APT packages (build tools, git, deadsnakes for python3.10)
 # -----------------------------------------------------------------------------
-log "Step 1/9: APT packages"
+log "Step 1/8: APT packages"
 
 if ! command -v python3.10 >/dev/null; then
   apt-get update -qq
@@ -91,58 +102,31 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 2: Create paperspace user
+# Step 2: GitHub deploy key (generate, prompt user to add, verify)
 # -----------------------------------------------------------------------------
-log "Step 2/9: paperspace user"
+log "Step 2/8: GitHub deploy key for repo clone"
 
-if ! id "$PAPERSPACE_USER" >/dev/null 2>&1; then
-  useradd -m -s /bin/bash "$PAPERSPACE_USER"
-  usermod -aG sudo "$PAPERSPACE_USER"
-  # Passwordless sudo for systemctl convenience (matches Paperspace pattern)
-  echo "${PAPERSPACE_USER} ALL=(ALL) NOPASSWD:ALL" \
-    > /etc/sudoers.d/90-${PAPERSPACE_USER}
-  chmod 440 /etc/sudoers.d/90-${PAPERSPACE_USER}
-  ok "user '${PAPERSPACE_USER}' created with NOPASSWD sudo"
-else
-  skip "user '${PAPERSPACE_USER}' exists"
-fi
-
-# Copy ubuntu's authorized_keys so you can ssh as paperspace directly
-if [ ! -f "${PAPERSPACE_HOME}/.ssh/authorized_keys" ]; then
-  mkdir -p "${PAPERSPACE_HOME}/.ssh"
-  cp /home/ubuntu/.ssh/authorized_keys "${PAPERSPACE_HOME}/.ssh/authorized_keys"
-  chown -R "${PAPERSPACE_USER}:${PAPERSPACE_USER}" "${PAPERSPACE_HOME}/.ssh"
-  chmod 700 "${PAPERSPACE_HOME}/.ssh"
-  chmod 600 "${PAPERSPACE_HOME}/.ssh/authorized_keys"
-  ok "ssh authorized_keys mirrored from ubuntu user"
-else
-  skip "ssh authorized_keys already present"
-fi
-
-# -----------------------------------------------------------------------------
-# Step 3: GitHub deploy key (generate, prompt user to add, verify)
-# -----------------------------------------------------------------------------
-log "Step 3/9: GitHub deploy key for repo clone"
-
-DEPLOY_KEY="${PAPERSPACE_HOME}/.ssh/id_ed25519"
+DEPLOY_KEY="${UPLINK_HOME}/.ssh/id_ed25519"
 if [ ! -f "$DEPLOY_KEY" ]; then
-  sudo -u "$PAPERSPACE_USER" ssh-keygen -t ed25519 \
-    -C "argus-prod-aws-$(hostname)@$(date +%Y%m%d)" \
+  sudo -u "$UPLINK_USER" mkdir -p "${UPLINK_HOME}/.ssh"
+  sudo -u "$UPLINK_USER" chmod 700 "${UPLINK_HOME}/.ssh"
+  sudo -u "$UPLINK_USER" ssh-keygen -t ed25519 \
+    -C "argus-prod-aws-${UPLINK_USER}-$(hostname)@$(date +%Y%m%d)" \
     -f "$DEPLOY_KEY" -N "" >/dev/null
   ok "deploy key generated"
 fi
 
 # Trust github.com host key (idempotent)
-KNOWN_HOSTS="${PAPERSPACE_HOME}/.ssh/known_hosts"
+KNOWN_HOSTS="${UPLINK_HOME}/.ssh/known_hosts"
 if [ ! -f "$KNOWN_HOSTS" ] || ! grep -q 'github.com' "$KNOWN_HOSTS"; then
-  sudo -u "$PAPERSPACE_USER" ssh-keyscan -H github.com 2>/dev/null \
+  sudo -u "$UPLINK_USER" ssh-keyscan -H github.com 2>/dev/null \
     >> "$KNOWN_HOSTS"
-  chown "${PAPERSPACE_USER}:${PAPERSPACE_USER}" "$KNOWN_HOSTS"
+  chown "${UPLINK_USER}:${UPLINK_USER}" "$KNOWN_HOSTS"
   ok "github.com host key trusted"
 fi
 
 # Verify the deploy key works against GitHub
-GITHUB_TEST=$(sudo -u "$PAPERSPACE_USER" ssh -o BatchMode=yes \
+GITHUB_TEST=$(sudo -u "$UPLINK_USER" ssh -o BatchMode=yes \
   -o StrictHostKeyChecking=no -T git@github.com 2>&1 || true)
 if echo "$GITHUB_TEST" | grep -q "successfully authenticated"; then
   ok "deploy key works against GitHub"
@@ -157,10 +141,12 @@ ACTION REQUIRED: Add this deploy key to the GitHub repo, then re-run script
    https://github.com/ArgusQuote/ElectricalDiagramAnalyzer/settings/keys
 
 2. Click "Add deploy key"
-   - Title: argus-prod-aws ($(date +%Y-%m-%d))
+   - Title: argus-prod-aws-${UPLINK_USER} ($(date +%Y-%m-%d))
    - Key: (paste the value below, INCLUDING the 'ssh-ed25519' prefix
            and the trailing comment)
-   - Allow write access: leave UNCHECKED (read-only is enough)
+   - Allow write access: Marco's call. The 2026-05-23 redeploy enabled
+     write so the AWS box could git push; the original 2026-05-20 key
+     was read-only. Either is fine.
 
 3. Click "Add key"
 
@@ -176,16 +162,16 @@ EOF
 fi
 
 # -----------------------------------------------------------------------------
-# Step 4: Clone repo (branch TOOL_DEVELOPMENT_V3_MS -- matches production)
+# Step 3: Clone repo (branch TOOL_DEVELOPMENT_V3_MS -- matches production)
 # -----------------------------------------------------------------------------
-log "Step 4/9: git clone (branch ${REPO_BRANCH})"
+log "Step 3/8: git clone (branch ${REPO_BRANCH})"
 
 if [ ! -d "$REPO_DIR/.git" ]; then
-  sudo -u "$PAPERSPACE_USER" git clone --branch "$REPO_BRANCH" \
+  sudo -u "$UPLINK_USER" git clone --branch "$REPO_BRANCH" \
     "$REPO_URL" "$REPO_DIR"
-  ok "repo cloned at $(sudo -u "$PAPERSPACE_USER" git -C "$REPO_DIR" rev-parse HEAD)"
+  ok "repo cloned at $(sudo -u "$UPLINK_USER" git -C "$REPO_DIR" rev-parse HEAD)"
 else
-  CURRENT_BRANCH=$(sudo -u "$PAPERSPACE_USER" git -C "$REPO_DIR" \
+  CURRENT_BRANCH=$(sudo -u "$UPLINK_USER" git -C "$REPO_DIR" \
     rev-parse --abbrev-ref HEAD)
   if [ "$CURRENT_BRANCH" != "$REPO_BRANCH" ]; then
     warn "repo on branch '${CURRENT_BRANCH}', expected '${REPO_BRANCH}'"
@@ -196,13 +182,13 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 5: Python venv (3.10, matches Paperspace)
+# Step 4: Python venv (3.10, matches Paperspace)
 # -----------------------------------------------------------------------------
-log "Step 5/9: Python venv at ${VENV_DIR}"
+log "Step 4/8: Python venv at ${VENV_DIR}"
 
 if [ ! -d "$VENV_DIR" ]; then
-  sudo -u "$PAPERSPACE_USER" python3.10 -m venv "$VENV_DIR"
-  sudo -u "$PAPERSPACE_USER" "$VENV_DIR/bin/pip" install --quiet --upgrade \
+  sudo -u "$UPLINK_USER" python3.10 -m venv "$VENV_DIR"
+  sudo -u "$UPLINK_USER" "$VENV_DIR/bin/pip" install --quiet --upgrade \
     pip setuptools wheel
   ok "venv created: $($VENV_DIR/bin/python --version)"
 else
@@ -210,9 +196,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 6: pip install (uses Paperspace's pip freeze as the canonical spec)
+# Step 5: pip install (uses Paperspace's pip freeze as the canonical spec)
 # -----------------------------------------------------------------------------
-log "Step 6/9: pip install (this can take ~10 minutes; PyTorch + CUDA wheels are large)"
+log "Step 5/8: pip install (this can take ~3-10 minutes; PyTorch + CUDA wheels are large)"
 
 if [ ! -f "$FREEZE_FILE" ]; then
   die "Missing canonical install spec: ${FREEZE_FILE}
@@ -239,23 +225,23 @@ else
   echo "  (excluded ${STRIPPED} package(s) from freeze: detectron2)"
 
   # mktemp creates the file owned by root with mode 600. Since pip
-  # runs as ${PAPERSPACE_USER} via sudo -u, hand the file over so
+  # runs as ${UPLINK_USER} via sudo -u, hand the file over so
   # pip can read it (otherwise the install dies with EACCES).
-  chown "${PAPERSPACE_USER}:${PAPERSPACE_USER}" "$TEMP_FREEZE"
+  chown "${UPLINK_USER}:${UPLINK_USER}" "$TEMP_FREEZE"
 
   # +cu121 PyTorch wheels live at the PyTorch index, not PyPI.
-  sudo -u "$PAPERSPACE_USER" "$VENV_DIR/bin/pip" install \
+  sudo -u "$UPLINK_USER" "$VENV_DIR/bin/pip" install \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
     -r "$TEMP_FREEZE"
   rm "$TEMP_FREEZE"
 
-  sudo -u "$PAPERSPACE_USER" touch "$PIP_DONE_MARKER"
+  sudo -u "$UPLINK_USER" touch "$PIP_DONE_MARKER"
   ok "pip install complete"
 fi
 
 # Verify the CUDA stack is wired up
 log "  verifying CUDA via PyTorch"
-CUDA_CHECK=$(sudo -u "$PAPERSPACE_USER" "$VENV_DIR/bin/python" -c \
+CUDA_CHECK=$(sudo -u "$UPLINK_USER" "$VENV_DIR/bin/python" -c \
   "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'NO-GPU')" \
   2>&1 || true)
 echo "  -> $CUDA_CHECK"
@@ -264,45 +250,48 @@ if ! echo "$CUDA_CHECK" | grep -q "True"; then
 fi
 
 # -----------------------------------------------------------------------------
-# Step 7: v7 TATR weights (will be rsynced from your laptop)
+# Step 6: v7 TATR weights (will be rsynced from your laptop)
 # -----------------------------------------------------------------------------
-log "Step 7/9: v7 TATR weights"
+log "Step 6/8: v7 TATR weights"
 
-V7_DIR="${PAPERSPACE_HOME}/Documents/TableAnnotations/models_v7/best"
+V7_DIR="${UPLINK_HOME}/Documents/TableAnnotations/models_v7/best"
 if [ -f "${V7_DIR}/model.safetensors" ]; then
   V7_SIZE=$(du -sh "$V7_DIR" | cut -f1)
   ok "v7 weights present (${V7_SIZE})"
 else
   mkdir -p "$V7_DIR"
-  chown -R "${PAPERSPACE_USER}:${PAPERSPACE_USER}" \
-    "${PAPERSPACE_HOME}/Documents"
+  chown -R "${UPLINK_USER}:${UPLINK_USER}" \
+    "${UPLINK_HOME}/Documents"
   warn "v7 weights NOT YET PRESENT at ${V7_DIR}"
   warn "From your laptop, rsync them via your workstation (uses your existing ssh access to both hosts):"
   cat <<EOF
 
   # Two-step transfer (laptop acts as a bridge):
-  rsync -avhP paperspace-vm:${V7_DIR}/ /tmp/v7-weights-cache/
-  rsync -avhP /tmp/v7-weights-cache/  ubuntu@<aws-host>:/tmp/v7-weights/
+  rsync -avhP paperspace-vm:/home/paperspace/Documents/TableAnnotations/models_v7/best/ \\
+      /tmp/v7-weights-cache/
+  rsync -avhP /tmp/v7-weights-cache/ \\
+      ${UPLINK_USER}@<aws-host>:/tmp/v7-weights/
   # Then on AWS:
+  sudo mkdir -p ${V7_DIR}
   sudo mv /tmp/v7-weights/* ${V7_DIR}/
-  sudo chown -R ${PAPERSPACE_USER}:${PAPERSPACE_USER} ${PAPERSPACE_HOME}/Documents
+  sudo chown -R ${UPLINK_USER}:${UPLINK_USER} ${UPLINK_HOME}/Documents
   rm -rf /tmp/v7-weights /tmp/v7-weights-cache
 
 EOF
 fi
 
 # -----------------------------------------------------------------------------
-# Step 8: env file placeholder (you'll paste the real key separately)
+# Step 7: env file placeholder (you'll paste the real key separately)
 # -----------------------------------------------------------------------------
-log "Step 8/9: env file placeholder at ${ENV_FILE}"
+log "Step 7/8: env file placeholder at ${ENV_FILE}"
 
 if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<'EOF'
 ANVIL_UPLINK_KEY=PASTE_KEY_HERE
 EOF
-  chown "${PAPERSPACE_USER}:${PAPERSPACE_USER}" "$ENV_FILE"
+  chown "${UPLINK_USER}:${UPLINK_USER}" "$ENV_FILE"
   chmod 600 "$ENV_FILE"
-  ok "${ENV_FILE} created with placeholder (chmod 600, owned by ${PAPERSPACE_USER})"
+  ok "${ENV_FILE} created with placeholder (chmod 600, owned by ${UPLINK_USER})"
 elif grep -q "PASTE_KEY_HERE" "$ENV_FILE"; then
   warn "${ENV_FILE} still has placeholder. Edit with: sudo nano ${ENV_FILE}"
 else
@@ -310,9 +299,9 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 9: systemd unit (mirrors Paperspace's anvil-uplink.service)
+# Step 8: systemd unit (mirrors Paperspace's anvil-uplink.service)
 # -----------------------------------------------------------------------------
-log "Step 9/9: systemd unit at ${SYSTEMD_UNIT}"
+log "Step 8/8: systemd unit at ${SYSTEMD_UNIT}"
 
 if [ ! -f "$SYSTEMD_UNIT" ]; then
   cat > "$SYSTEMD_UNIT" <<EOF
@@ -323,8 +312,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=${PAPERSPACE_USER}
-Group=${PAPERSPACE_USER}
+User=${UPLINK_USER}
+Group=${UPLINK_USER}
 WorkingDirectory=${REPO_DIR}
 EnvironmentFile=${ENV_FILE}
 Environment=PYTHONUNBUFFERED=1
@@ -371,15 +360,14 @@ testing in a controlled session).
 Manual finishing steps (in order):
 
 1. If v7 TATR weights aren't there yet, rsync them from Paperspace
-   (see Step 7 message above for the exact commands).
+   (see Step 6 message above for the exact commands).
 
 2. Set the ANVIL_UPLINK_KEY in ${ENV_FILE}:
    sudo nano ${ENV_FILE}
    # Replace 'PASTE_KEY_HERE' with the value from Paperspace's
-   # ${ENV_FILE}. Save (Ctrl-O, Enter, Ctrl-X).
+   # /home/paperspace/.anvil_env. Save (Ctrl-O, Enter, Ctrl-X).
 
 3. Verify the box is ready (does NOT start the uplink; safe at any time):
-   sudo -iu ${PAPERSPACE_USER}
    source ${VENV_DIR}/bin/activate
    cd ${REPO_DIR}
    python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
@@ -389,7 +377,6 @@ Manual finishing steps (in order):
 4. To run the uplink for a manual development session (only when Marco
    explicitly wants to test; this WILL connect to Anvil and cause it to
    route ~half of new jobs to AWS until Ctrl-C):
-       sudo -iu ${PAPERSPACE_USER}
        source ${VENV_DIR}/bin/activate
        cd ${REPO_DIR}
        export \$(cat ${ENV_FILE} | xargs)

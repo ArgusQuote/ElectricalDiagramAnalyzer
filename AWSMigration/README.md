@@ -11,6 +11,15 @@ Full context (decisions, history, deferred items) lives in
 "AWS dev-box provisioning" entry. Step-by-step execution plan
 for the next agent is in `HANDOFF.md`.
 
+> **Path migration 2026-05-23**: This box originally ran under a
+> separate `paperspace` user (mirroring the Paperspace VM exactly)
+> at `/home/paperspace/...`. On 2026-05-23 the layout was migrated
+> to the AMI's default `ubuntu` user at `/home/ubuntu/...` to remove
+> unnecessary indirection. All recipes in this README and in the
+> provisioning script target the current ubuntu layout. References
+> to `paperspace` and `/home/paperspace/...` below are only for the
+> remote Paperspace VM itself (e.g. the rsync source for v7 weights).
+
 ## Connecting to the current AWS box
 
 From Marco's laptop:
@@ -43,8 +52,8 @@ different EC2 instance. For day-to-day use, substitute
 
 | File | Purpose |
 |---|---|
-| `provision-aws-uplink.sh` | Idempotent bootstrap script run on the AWS box as `root`. Installs deps, creates `paperspace` user, generates GitHub deploy key, clones the repo, creates the venv, writes the systemd unit. Does NOT start, enable, or otherwise auto-run the uplink. |
-| `paperspace-freeze.txt` | Canonical `pip freeze` from production Paperspace. Used as the authoritative install spec for the AWS venv to avoid drift between `MISC/requirements.txt` and actual production. |
+| `provision-aws-uplink.sh` | Idempotent bootstrap script run on the AWS box as `root`. Installs deps, generates a GitHub deploy key for the `ubuntu` user, clones the repo, creates the venv at `/home/ubuntu/venv/`, writes the systemd unit. Does NOT start, enable, or otherwise auto-run the uplink. |
+| `paperspace-freeze.txt` | Canonical `pip freeze` from production Paperspace. Used as the authoritative install spec for the AWS venv to avoid drift between `MISC/requirements.txt` and actual production. The filename refers to the source of the freeze (Paperspace), not the install target. |
 | `HANDOFF.md` | Concrete step-by-step execution plan, designed to be the first file a new agent reads when resuming this work. |
 
 ## End-to-end workflow
@@ -65,7 +74,7 @@ migration plan) and you can SSH in as `ubuntu`.
    sudo bash /tmp/provision-aws-uplink.sh
    ```
 
-   On the first run, it stops at Step 3 with a public key it wants you to
+   On the first run, it stops at Step 2 with a public key it wants you to
    paste into the repo's Deploy Keys settings:
    `https://github.com/ArgusQuote/ElectricalDiagramAnalyzer/settings/keys`
 
@@ -73,8 +82,9 @@ migration plan) and you can SSH in as `ubuntu`.
    where it left off, clones the repo, builds the venv, and so on.
 
 3. **Sync the v7 TATR weights.** The provisioning script does NOT pull
-   the v7 weights -- they live at `~/Documents/TableAnnotations/models_v7/`
-   on Paperspace and need to be ferried over. From your laptop (two-step
+   the v7 weights -- they live at
+   `/home/paperspace/Documents/TableAnnotations/models_v7/` on the
+   Paperspace VM and need to be ferried over. From your laptop (two-step
    via the laptop as a bridge):
    ```bash
    rsync -avhP \
@@ -86,17 +96,18 @@ migration plan) and you can SSH in as `ubuntu`.
    ```
    Then on AWS:
    ```bash
+   sudo mkdir -p /home/ubuntu/Documents/TableAnnotations/models_v7/best
    sudo mv /tmp/v7-weights/* \
-       /home/paperspace/Documents/TableAnnotations/models_v7/best/
-   sudo chown -R paperspace:paperspace /home/paperspace/Documents
+       /home/ubuntu/Documents/TableAnnotations/models_v7/best/
+   sudo chown -R ubuntu:ubuntu /home/ubuntu/Documents
    rm -rf /tmp/v7-weights /tmp/v7-weights-cache
    ```
 
-4. **Set the ANVIL_UPLINK_KEY.** Retrieve the key from Paperspace's
+4. **Set the ANVIL_UPLINK_KEY.** Retrieve the key from the Paperspace VM's
    `/home/paperspace/.anvil_env` (the value, not the variable name), then
    on AWS:
    ```bash
-   sudo nano /home/paperspace/.anvil_env
+   sudo nano /home/ubuntu/.anvil_env
    # Replace PASTE_KEY_HERE with the literal key. Save (Ctrl-O, Ctrl-X).
    ```
    Do NOT regenerate the key in Anvil's UI -- that would invalidate the
@@ -107,15 +118,15 @@ migration plan) and you can SSH in as `ubuntu`.
    without starting the uplink. Safe to run at any time, including
    during business hours.
    ```bash
-   sudo -iu paperspace
-   source /home/paperspace/venv/bin/activate
-   cd /home/paperspace/ElectricalDiagramAnalyzer
+   ssh argus-prod-aws
+   source /home/ubuntu/venv/bin/activate
+   cd /home/ubuntu/ElectricalDiagramAnalyzer
    python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
    # expect: True NVIDIA A10G
    python -c "import anvil.server, easyocr, transformers; print('imports ok')"
    python -c "
    from transformers import TableTransformerForObjectDetection
-   m = TableTransformerForObjectDetection.from_pretrained('/home/paperspace/Documents/TableAnnotations/models_v7/best')
+   m = TableTransformerForObjectDetection.from_pretrained('/home/ubuntu/Documents/TableAnnotations/models_v7/best')
    print('v7 model loads OK, num_queries=', m.config.num_queries)"
    # expect: v7 model loads OK, num_queries= 15
 
@@ -129,10 +140,9 @@ migration plan) and you can SSH in as `ubuntu`.
    customer meetings or peak business hours.
    ```bash
    ssh argus-prod-aws
-   sudo -iu paperspace
-   source /home/paperspace/venv/bin/activate
-   cd /home/paperspace/ElectricalDiagramAnalyzer
-   export $(cat /home/paperspace/.anvil_env | xargs)
+   source /home/ubuntu/venv/bin/activate
+   cd /home/ubuntu/ElectricalDiagramAnalyzer
+   export $(cat /home/ubuntu/.anvil_env | xargs)
    python AnvilUplinkCode/uplink_server.py
    # Watch for: 'Connected to "Argus Automated BOM" as SERVER'
    # ... test, then Ctrl-C to stop and disconnect.
@@ -187,8 +197,7 @@ Then on AWS, pull and reinstall:
 
 ```bash
 ssh argus-prod-aws
-sudo -iu paperspace
-cd ElectricalDiagramAnalyzer && git pull
-rm /home/paperspace/venv/.argus-install-complete
+cd /home/ubuntu/ElectricalDiagramAnalyzer && git pull
+rm /home/ubuntu/venv/.argus-install-complete
 sudo bash /tmp/provision-aws-uplink.sh   # script will reinstall
 ```
