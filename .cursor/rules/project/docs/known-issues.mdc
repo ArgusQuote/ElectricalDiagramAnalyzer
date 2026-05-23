@@ -18,7 +18,7 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
-- **AWS dev-box provisioning -- COMPLETE 2026-05-20 PM (box dormant by design)** --
+- **AWS dev-box provisioning -- COMPLETE 2026-05-20 PM (box dormant by design); end-to-end heavyweight verification DONE 2026-05-23; paths migrated `/home/paperspace` → `/home/ubuntu` 2026-05-23** --
   EC2 g5.2xlarge `i-0ecb7e8fabdb8548e` in `us-east-1` is fully
   provisioned and verified in the **"ready but not running"** state:
   Python 3.10 venv built, repo cloned to `TOOL_DEVELOPMENT_V3_MS`, v7
@@ -26,7 +26,14 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   sha256-verified against Paperspace, `argus-uplink.service`
   installed but `disabled` + `inactive (dead)`. Paperspace's
   `anvil-uplink.service` was never touched during provisioning and
-  continues to serve 100% of customer traffic. **AWS is a manual-run
+  continues to serve 100% of customer traffic.
+  **Current canonical layout uses the `ubuntu` user, not `paperspace`**
+  (migrated 2026-05-23; see the "Operational notes from the 2026-05-23
+  session" subsection at the bottom of this entry). All
+  `/home/paperspace/...` paths in the older subsections below are
+  preserved as historical record of the 2026-05-20 / 2026-05-21
+  sessions; the live filesystem maps every one of those to its
+  `/home/ubuntu/...` equivalent now. **AWS is a manual-run
   development / capability-testing environment** -- Marco runs
   `python AnvilUplinkCode/uplink_server.py` by hand only when actively
   testing; running it makes Anvil round-robin jobs between AWS and
@@ -393,7 +400,140 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     verified. A foreground test would be the next operational
     proof point, but is optional and must not be run during
     customer hours (it makes Anvil round-robin between AWS and
-    Paperspace until Ctrl-C).
+    Paperspace until Ctrl-C). **(Status as of 2026-05-23: still
+    true -- no foreground uplink test has run on AWS. The
+    2026-05-23 verification went further than the smoke checks
+    but stopped short of `anvil.server.connect`.)**
+
+  **Operational notes from the 2026-05-23 session (paths migrated to /home/ubuntu, driver fix, end-to-end heavyweight verification):**
+  - **Paths migrated `/home/paperspace/...` → `/home/ubuntu/...`**
+    via the `chore/migrate-paperspace-to-ubuntu-paths` branch,
+    which was authored locally and then merged into
+    `TOOL_DEVELOPMENT_V3_MS`. After the migration the AWS box's
+    live filesystem layout is:
+    - venv: `/home/ubuntu/venv/` (was `/home/paperspace/venv/`)
+    - repo: `/home/ubuntu/ElectricalDiagramAnalyzer/` (was `/home/paperspace/...`)
+    - env file: `/home/ubuntu/.anvil_env` (was `/home/paperspace/.anvil_env`)
+    - v7 weights: `/home/ubuntu/Documents/TableAnnotations/models_v7/best/`
+    - EasyOCR cache: `/home/ubuntu/.EasyOCR/model/`
+    - SSH deploy key: `/home/ubuntu/.ssh/id_ed25519`
+    The `paperspace` user no longer exists on the AWS box (or has
+    been disabled; `find /home -maxdepth 2 -name paperspace`
+    returns nothing). All earlier subsections of this entry that
+    reference `/home/paperspace/...` accurately describe the
+    2026-05-20 / 2026-05-21 state and have not been retroactively
+    rewritten -- they're historical record, not current truth.
+    `TableDetectorML._resolve_default_tatr_model_path()` still works
+    unchanged because its first probe is `~/Documents/TableAnnotations/models_v7/best`
+    (which expands per the current user, so it resolves correctly
+    on either layout).
+  - **New GitHub deploy key for the `ubuntu` user**: the original
+    `argus-prod-aws (2026-05-20)` deploy key was tied to the
+    `paperspace` user's `~/.ssh/id_ed25519` and is no longer used
+    on the AWS box. A new ed25519 key was generated at
+    `/home/ubuntu/.ssh/id_ed25519` (public:
+    `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBjIZDNonruoH0hsidapA1YWBIdIuN2UElwwM2OPxoE0 argus-prod-aws-ubuntu-ip-172-31-45-45@20260523`)
+    and registered in the repo's Deploy Keys settings as
+    `argus-prod-aws-ubuntu (2026-05-23)`, **read-only** (write access
+    UNCHECKED). The older `argus-prod-aws (2026-05-20)` key entry
+    can be removed from GitHub Deploy Keys at Marco's convenience
+    (it's no longer functional since the paperspace-user key is
+    gone), but leaving it doesn't cause harm -- it just can't
+    authenticate anything anymore. **Operational implication**:
+    `git fetch` / `git pull` from the AWS box now uses the ubuntu-
+    user key transparently; no SSH agent or `-i` flag needed.
+  - **NVIDIA driver mismatch resolved by reboot**. `apt`'s
+    unattended-upgrades had upgraded the userspace NVIDIA libraries
+    from 535.274.02 to 535.309.01 (specifically: `nvidia-dkms-535-
+    server`, `libnvidia-compute-535`, `libnvidia-cfg1-535-server`,
+    etc.) without rebooting. Result: kernel module still 535.274.02,
+    userspace 535.309.01 -> `nvidia-smi` failed with `Failed to
+    initialize NVML: Driver/library version mismatch`. PyTorch's
+    `torch.cuda.is_available()` returned True via the CUDA driver
+    API (which is independent of NVML), so the failure was easy to
+    miss -- but any real CUDA op or `nvidia-smi` query would fail.
+    `/var/run/reboot-required` was present with pending packages
+    `libc6 linux-image-6.17.0-1013-aws linux-base`. **Fix**:
+    `sudo shutdown -r now`. Post-reboot, kernel is `6.17.0-1013-aws`
+    (was `6.14.0-1016-aws`) and the matching nvidia-535.309 module
+    auto-loaded via DKMS (pre-built via
+    `linux-objects-nvidia-535-6.14.0-1016-aws` package, so no compile
+    delay). `nvidia-smi` is clean and `torch.cuda.mem_get_info()`
+    works. **Lesson**: future AWS sessions should `cat
+    /var/run/reboot-required 2>/dev/null` as a one-liner health
+    check; an `apt`-pending reboot is the most likely silent CUDA
+    breakage.
+  - **End-to-end heavyweight verification passed (2026-05-23)**.
+    Beyond the import-level smoke tests from 2026-05-20, the
+    2026-05-23 session ran real workloads on each heavyweight
+    subsystem to confirm everything actually computes correctly:
+    - **PyTorch + CUDA + cuDNN**: 4096² fp32 matmul x10 sustained
+      **17,666 GFLOPS** (~57% of A10G's 31 TFLOPS fp32 peak --
+      very good); `Conv2d(3, 64, 3, padding=1)` on GPU OK.
+    - **EasyOCR 1.7.2 on GPU**: real OCR on a synthetic
+      "PANEL MLP-1A 480V" image in 477 ms (read "PANEL MLP-IA
+      480V" -- one OCR-typical `1`→`I` confusion, conf 0.64).
+      First call populated `~/.EasyOCR/model/` with the two
+      cached models (`craft_mlt_25k.pth` 79 MiB +
+      `english_g2.pth` 14 MiB).
+    - **pypdfium2 4.30.0**: opened and rendered a real PDF page
+      (612x792 pts → RGB PIL image), underlying PDFium build 6462.
+    - **v7 TATR model**: backbone weights verified loaded (sha1
+      of first few values of `conv1.weight`, `bn1.weight`, etc.
+      are non-zero distinct values consistent with trained
+      weights, not random init); end-to-end CUDA inference on a
+      synthetic image produced `(1, 15, 3)` logits and
+      `(1, 15, 4)` boxes with per-query logit variability 1.95
+      (>0.1 threshold -- no v6-style mode collapse; queries are
+      genuinely distinguishing between candidates).
+    - **`uplink_server.py` imports**: all 20 top-level imports
+      resolved (via AST parse of the file + per-import import
+      attempts), including `OcrLibrary.BreakerTableParserAPIv11`
+      and `RulesEngine.RulesEngine5` and the `WorkerSetup`
+      module. (Note: `architecture.mdc` and `file-locations.mdc`
+      still document `APIv9` and `RulesEngine4` -- doc drift,
+      not bug. Flagged for a separate small PR.)
+    - **systemd guardrail held across reboot**:
+      `argus-uplink.service` is still `disabled, inactive
+      (dead)`. The reboot did NOT cause systemd to attempt
+      auto-enable, which was the worst-case worry.
+  - **`transformers.from_pretrained` warning chase (2026-05-23)**:
+    on v7 load, transformers 4.55.4 prints dozens of warnings
+    like `UserWarning: for conv1.weight: copying from a non-meta
+    parameter in the checkpoint to a meta parameter in the
+    current model, which is a no-op.` for every ResNet backbone
+    layer. The warning text suggests weights aren't being loaded,
+    which would silently produce a garbage model. Direct
+    verification (read `state_dict()` after load, check `is_meta`
+    and inspect actual tensor values) confirmed the weights ARE
+    loaded -- the warnings are a transformers+accelerate
+    interaction where the model skeleton is built on the `meta`
+    device first and weights are assigned via a different code
+    path that the warning doesn't account for. **Action: none
+    needed**; the warning is cosmetic. The 2026-05-20 session's
+    "Operational notes" subsection already flagged these as
+    benign; the 2026-05-23 verification confirms it rigorously
+    rather than just by analogy to Paperspace.
+  - **Doc drift discovered during verification (not fixed in
+    this session)**: `architecture.mdc` and `file-locations.mdc`
+    reference `OcrLibrary.BreakerTableParserAPIv9` and
+    `RulesEngine.RulesEngine4`, but the actual production imports
+    in `AnvilUplinkCode/uplink_server.py` are now
+    `BreakerTableParserAPIv11` and `RulesEngine5`. Also, the
+    `WorkerSetup` module that `uplink_server.py` imports isn't
+    mentioned in either doc. This is consistent with the
+    file-locations.mdc convention that says "Always confirm the
+    active version by checking the import in
+    `AnvilUplinkCode/uplink_server.py`", so the doc isn't a
+    correctness hazard, but a small future PR to update the
+    `.mdc` files would be helpful.
+  - **Cost / lifecycle status unchanged**: instance is still
+    expected to be stopped between sessions; EIP `52.21.216.68`
+    still associated; SSH alias `argus-prod-aws` still canonical
+    from Marco's laptop. The 2026-05-23 session was on a live
+    instance (Marco started it from the AWS Console before the
+    session); whether he stops it again after this session is
+    his call.
 
 - **ML Table Detection -- Phase 2 COMPLETE 2026-05-15** -- The best
   TATR model is now **v7**, which averages mAP@0.5 = **0.8297** across

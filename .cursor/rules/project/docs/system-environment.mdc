@@ -5,16 +5,20 @@ alwaysApply: false
 
 # System Environment
 
-This project runs on two machines. This document profiles the **production server** (Paperspace VM). The local development machine may differ in hardware and venv path.
+This project runs on three machines. This document profiles the **production server** (Paperspace VM) in detail, and lists deltas for the AWS dev box and the local development machine.
 
 ## Environments
 
-| Property | Production (Paperspace) | Local Dev |
-|---|---|---|
-| **venv path** | `/home/paperspace/venv/` | `/home/marco/venv/` |
-| **User** | `paperspace` | `marco` |
-| **GPU** | NVIDIA RTX A5000 (24 GiB) | Varies |
-| **Purpose** | Runs the Anvil Uplink server for live jobs | Development and testing |
+| Property | Production (Paperspace) | AWS Dev Box | Local Dev |
+|---|---|---|---|
+| **venv path** | `/home/paperspace/venv/` | `/home/ubuntu/venv/` | `/home/marco/venv/` |
+| **User** | `paperspace` | `ubuntu` | `marco` |
+| **GPU** | NVIDIA RTX A5000 (24 GiB) | NVIDIA A10G (24 GiB) | Varies |
+| **Purpose** | Runs the Anvil Uplink server for live jobs | Manual-run dev / capability testing | Development and testing |
+| **Lifecycle** | Always-on, autostarts via systemd | Stopped between sessions (Marco starts from AWS Console) | On-demand |
+| **Uplink** | `anvil-uplink.service` (enabled, active) | `argus-uplink.service` (installed, **never enabled**) | n/a |
+
+See **"AWS Dev Box"** section below for the full AWS-specific profile.
 
 ## Production Server Hardware
 
@@ -152,10 +156,114 @@ Implications:
 - **Thread pinning**: `OMP_NUM_THREADS`, `MKL_NUM_THREADS` set to 1 at startup for deterministic OCR
 - **VRAM ceiling**: High-DPI rendering + EasyOCR + large PDFs can approach the 24 GiB limit
 
+## AWS Dev Box (Manual-Run Only)
+
+EC2 instance `i-0ecb7e8fabdb8548e` in `us-east-1`, EIP `52.21.216.68`,
+Name tag `argus-production-server` (the name predates the dev-only
+reclassification). **Stopped between sessions** by design to save the
+~$1.21/hr g5.2xlarge compute charge; only the ~$15.60/mo (EBS + EIP)
+fee accrues while stopped. SSH alias on Marco's laptop:
+`ssh argus-prod-aws`. See `.cursor/rules/project/docs/known-issues.mdc`
+under "AWS dev-box provisioning" for the operational history and
+guardrails (notably: `argus-uplink.service` must NEVER be
+`systemctl enable`d).
+
+### Hardware
+
+| Resource | Spec |
+|---|---|
+| **Instance** | `g5.2xlarge` (8 vCPU, 32 GiB RAM, 1x A10G 24 GiB) |
+| **GPU** | NVIDIA A10G, 23,028 MiB VRAM (slightly less than A5000's 24,564 MiB due to AWS reservation), Ampere |
+| **CPU** | AMD EPYC 7R32 @ 2.80 GHz, 8 vCPU |
+| **RAM** | 30 GiB usable (32 GiB nominal) |
+| **Disk** | 150 GiB gp3 root volume (no encryption -- matches Paperspace baseline) |
+| **Hypervisor** | AWS Nitro |
+| **Hostname (internal)** | `ip-172-31-45-45` |
+| **Hostname (external)** | EIP `52.21.216.68` |
+
+### OS / Kernel / GPU stack
+
+| Component | Version | Notes |
+|---|---|---|
+| **OS** | Ubuntu 24.04.3 LTS (Noble Numbat) | AMI Marketplace listed "Ubuntu 20.04" but actual OS is 24.04 (AWS packaging quirk) |
+| **Kernel** | `6.17.0-1013-aws` | Upgraded from `6.14.0-1016-aws` on 2026-05-23 reboot |
+| **NVIDIA driver** | 535.309.01 | Upgraded from 535.274.02 on 2026-05-23; required reboot to load new kernel module |
+| **CUDA (driver)** | 12.2 | Forward-compatible with PyTorch's cu121 wheel |
+| **CUDA (PyTorch runtime)** | 12.1 | Same as Paperspace |
+| **nvcc (system toolkit)** | 12.0 | Vs Paperspace's 12.1; this is why `detectron2` is excluded from AWS install (compile risk) |
+| **cuDNN** | 9.1.0 | Bundled with the PyTorch wheel |
+
+### Python Runtime
+
+| Property | Value | Note |
+|---|---|---|
+| **Python** | 3.10.20 | Installed via deadsnakes PPA; system Python is 3.12 |
+| **venv** | `/home/ubuntu/venv/` | Migrated from `/home/paperspace/venv/` on 2026-05-23 |
+| **Install spec** | `AWSMigration/paperspace-freeze.txt` | 149 packages frozen from Paperspace prod; supersedes `MISC/requirements.txt` (which has drifted from prod) |
+
+### Package version deltas vs Paperspace
+
+The vast majority of packages match Paperspace exactly. Notable
+differences:
+
+| Package | AWS | Paperspace | Why |
+|---|---|---|---|
+| `opencv-python` | 4.10.0 | 4.12.0.88 | AWS freeze was taken before Paperspace upgraded; no API-relevant change |
+| `detectron2` | **not installed** | 0.6 | Excluded from AWS install -- unused by `uplink_server.py`, fragile compile against nvcc 12.0 (vs Paperspace's 12.1) |
+| All others | identical | identical | Verified by `pip freeze` diff: 148/149 match (only `detectron2` excluded) |
+
+### Other relevant paths
+
+| Path | Purpose |
+|---|---|
+| `/home/ubuntu/ElectricalDiagramAnalyzer/` | Repo clone (branch `TOOL_DEVELOPMENT_V3_MS`) |
+| `/home/ubuntu/Documents/TableAnnotations/models_v7/best/` | v7 TATR fine-tuned weights (111 MB, sha256-verified against Paperspace) |
+| `/home/ubuntu/.anvil_env` | `ANVIL_UPLINK_KEY` (66 B, mode 600, sha256-verified against Paperspace -- same Anvil app) |
+| `/home/ubuntu/.EasyOCR/model/` | EasyOCR cache (`craft_mlt_25k.pth` 79 MiB + `english_g2.pth` 14 MiB; populated 2026-05-23 on first OCR call) |
+| `/home/ubuntu/.ssh/id_ed25519` | GitHub deploy key (read-only) for `git fetch` / `git pull` |
+| `/etc/systemd/system/argus-uplink.service` | systemd unit (installed, **disabled** -- guardrail) |
+
+### Verified functional state (2026-05-23)
+
+End-to-end smoke tests passed:
+
+| Component | Result |
+|---|---|
+| **PyTorch + CUDA** | 4096² fp32 matmul x10 sustained **17,666 GFLOPS** (~57% of A10G's 31 TFLOPS peak) |
+| **cuDNN** | `Conv2d(3, 64, 3, padding=1)` on GPU produces `(2, 64, 224, 224)` |
+| **pypdfium2 4.30.0** | Renders a real PDF page (612x792 pts → RGB PIL image) |
+| **EasyOCR 1.7.2** | `gpu=cuda`, real OCR on synthetic image in 477 ms |
+| **PyMuPDF 1.26.4** | `fitz.open()` blank doc OK (MuPDF 1.26.7 underneath) |
+| **OpenCV 4.10.0** | `cv2.Canny` produces 96,777 non-zero pixels |
+| **anvil-uplink 0.6.0** | Imports clean (deliberately NOT calling `anvil.server.connect` -- would round-robin live traffic) |
+| **v7 TATR model** | Loads, backbone weights present (sha1 confirmed real trained values, not random init), `num_queries=15`, end-to-end CUDA inference produces non-degenerate outputs |
+| **`uplink_server.py` imports** | All 20 top-level imports resolve via AST extraction |
+| **systemd unit** | `argus-uplink.service`: `disabled, inactive (dead)` (guardrail held through reboot) |
+
+### Known cosmetic quirks (not bugs)
+
+- **`transformers.from_pretrained` "meta parameter no-op" warnings on
+  v7 model load are benign**. PyTorch 2.4's safetensors loader pre-
+  allocates module parameters in "meta" mode then copies real weights
+  in via a different code path; the warnings just note that the
+  *in-place* copy is a no-op for those meta tensors. Weights are
+  actually loaded. Same warnings on Paperspace and laptop.
+- **`/opt/venvs/dl-env/`** is the AMI's stock Deep Learning venv;
+  not ours. Don't accidentally `source` it -- always use
+  `/home/ubuntu/venv`.
+- **EasyOCR's first call after a fresh AMI** triggers a ~94 MiB
+  model download. Cached at `~/.EasyOCR/model/`; persists across
+  reboots.
+
 ## Last Verified
 
-2026-05-20 (added measured workload memory profile from `DevEnv/capacity_test.py`
-with 4 concurrent jobs on `derekfirst.pdf`; fixed `MAX_WORKERS` doc drift from
-1 to 4 to match `uplink_server.py:44`). Earlier profile updates: 2026-04-18
-(system-level tools section); original profile from `nvidia-smi`, `pip list`,
-`lscpu`, `/proc/meminfo`.
+- **AWS Dev Box section**: 2026-05-23 (end-to-end functional verification
+  after path migration paperspace→ubuntu and post-reboot driver fix;
+  see `known-issues.mdc` "AWS dev-box provisioning" entry for the
+  full session log).
+- **Paperspace production**: 2026-05-20 (added measured workload memory
+  profile from `DevEnv/capacity_test.py` with 4 concurrent jobs on
+  `derekfirst.pdf`; fixed `MAX_WORKERS` doc drift from 1 to 4 to match
+  `uplink_server.py:44`). Earlier profile updates: 2026-04-18
+  (system-level tools section); original profile from `nvidia-smi`,
+  `pip list`, `lscpu`, `/proc/meminfo`.
