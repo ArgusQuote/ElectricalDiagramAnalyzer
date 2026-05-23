@@ -434,14 +434,32 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     `/home/ubuntu/.ssh/id_ed25519` (public:
     `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBjIZDNonruoH0hsidapA1YWBIdIuN2UElwwM2OPxoE0 argus-prod-aws-ubuntu-ip-172-31-45-45@20260523`)
     and registered in the repo's Deploy Keys settings as
-    `argus-prod-aws-ubuntu (2026-05-23)`, **read-only** (write access
-    UNCHECKED). The older `argus-prod-aws (2026-05-20)` key entry
-    can be removed from GitHub Deploy Keys at Marco's convenience
-    (it's no longer functional since the paperspace-user key is
-    gone), but leaving it doesn't cause harm -- it just can't
-    authenticate anything anymore. **Operational implication**:
-    `git fetch` / `git pull` from the AWS box now uses the ubuntu-
-    user key transparently; no SSH agent or `-i` flag needed.
+    `argus-prod-aws-ubuntu (2026-05-23)`. **Write access ENABLED**
+    (deliberately, on 2026-05-23 -- Marco's call, overriding the
+    provisioning script default of read-only). The AWS box can
+    therefore both `git pull` and `git push` against `origin`.
+    Security tradeoff: anyone with read access to
+    `/home/ubuntu/.ssh/id_ed25519` (mode 600, owned by `ubuntu`)
+    can push to the repo; this is accepted because the AWS box is
+    SSH-restricted to Marco's IP via `argus-uplink-sg` and only
+    Marco has the EC2 SSH key. The older `argus-prod-aws
+    (2026-05-20)` key entry can be removed from GitHub Deploy
+    Keys at Marco's convenience (it's no longer functional since
+    the paperspace-user key is gone), but leaving it doesn't
+    cause harm -- it just can't authenticate anything anymore.
+    **Operational implication**: `git fetch`, `git pull`, and
+    `git push` from the AWS box now all work transparently using
+    the ubuntu-user key; no SSH agent or `-i` flag needed.
+  - **Git identity configured on AWS box (2026-05-23)**: previously
+    unset, which silently broke `git commit`. Set globally on this
+    box to `ArgusQuote <argusquote@gmail.com>` (the project
+    persona, not Marco's personal `msoto777 <marcoengnr@gmail.com>`
+    used on most other commits in this repo's history). Commits
+    authored from the AWS box will therefore appear under the
+    `ArgusQuote` name in `git log`. If a future agent finds
+    commits attributed to either identity, that's expected -- the
+    persona is host-scoped (laptop = personal, AWS = project), not
+    a sign of confusion.
   - **NVIDIA driver mismatch resolved by reboot**. `apt`'s
     unattended-upgrades had upgraded the userspace NVIDIA libraries
     from 535.274.02 to 535.309.01 (specifically: `nvidia-dkms-535-
