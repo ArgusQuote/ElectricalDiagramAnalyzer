@@ -1,0 +1,116 @@
+{
+  "ok": true,
+  "job_id": "G__20260525_161555",
+  "job_dir": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/G__20260525_161555",
+  "saved_pdf": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/G.pdf",
+  "output_dir": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/G__20260525_161555",
+  "images": [
+    "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/G_electrical_filtered_page001_panel01.png",
+    "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/G_electrical_filtered_page001_panel02.png",
+    "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/G_electrical_filtered_page001_panel03.png"
+  ],
+  "image_count": 3,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "M.1",
+      "source": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/G_electrical_filtered_page001_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 600,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 600,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "M.ZA",
+      "source": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/G_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "ED.P.",
+      "source": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/G_electrical_filtered_page001_panel03.png",
+      "panelStatus": "detected but skipped (ED.P.)",
+      "panelNote": "bus amperage 1600A exceeds max allowed system amperage (1200A)",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "M.1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "M.ZA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "ED.P.": {
+      "Skipped": "bus amperage 1600A exceeds max allowed system amperage (1200A)"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 55896,
+  "cycle_time_str": "00:00:55:896",
+  "noticed_ts_ms": 1779725755010,
+  "parse_done_ts_ms": 1779725810907,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/PdfOutput/G_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_11",
+    "header_breakers_total": 0,
+    "table_breakers_total": 21
+  }
+}

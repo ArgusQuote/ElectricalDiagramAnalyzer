@@ -1,0 +1,40 @@
+{
+  "simultaneous_jobs": 1,
+  "api_version": "API_11",
+  "input_pdf": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf",
+  "batch_elapsed_sec": 30.61,
+  "success_count": 1,
+  "failure_count": 0,
+  "avg_job_elapsed_sec": 30.53,
+  "min_job_elapsed_sec": 30.53,
+  "max_job_elapsed_sec": 30.53,
+  "avg_worker_warmup_sec": 2.62,
+  "max_worker_warmup_sec": 2.62,
+  "slowdown_vs_1x": null,
+  "ready_results": [
+    {
+      "worker_idx": 0,
+      "ok": true,
+      "warmup_sec": 2.62,
+      "vram": {
+        "free_gib": 21.57,
+        "total_gib": 21.99
+      },
+      "error": null
+    }
+  ],
+  "results": [
+    {
+      "job_name": "job_0",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 30.53,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_1/job_0"
+    }
+  ]
+}

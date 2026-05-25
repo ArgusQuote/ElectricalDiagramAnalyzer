@@ -20,7 +20,7 @@ from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/E.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -201,7 +201,7 @@ def main():
         longest_cap_px=9000,
         proc_scale=0.5,
         use_ocr=True,
-        ocr_gpu=False,
+        ocr_gpu=True,
         verbose=True,
         debug=False,
         rect_w_fr_range=(0.10, 0.55),

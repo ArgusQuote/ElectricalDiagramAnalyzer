@@ -52,7 +52,7 @@ set_runtime_determinism()
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv9 import (
+from OcrLibrary.BreakerTableParserAPIv11 import (
     BreakerTablePipeline,
     API_VERSION,
     reset_name_deduper,
@@ -60,7 +60,7 @@ from OcrLibrary.BreakerTableParserAPIv9 import (
 import RulesEngine.RulesEngine4 as RE2
 
 # ---------- CONFIG ----------
-INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/derekfirst.pdf").expanduser()
+INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf").expanduser()
 TEST_ROOT = Path("~/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput").expanduser()
 TEST_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +69,7 @@ WORKER_READY_TIMEOUT_SEC = 240
 JOB_TIMEOUT_SEC = 600
 WORKER_RECYCLE_AFTER_JOBS = 25   # for optional multi-wave runs later
 
-CONCURRENCY_LEVELS = [6]
+CONCURRENCY_LEVELS = [1, 6]
 
 SERVER_PANEL_FINDER_DEFAULTS = {
     "render_dpi": 1400,
@@ -280,7 +280,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400) -> list
             longest_cap_px=9000,
             proc_scale=0.5,
             use_ocr=True,
-            ocr_gpu=False,
+            ocr_gpu=True,
             verbose=True,
             debug=False,
             rect_w_fr_range=(0.20, 0.60),
