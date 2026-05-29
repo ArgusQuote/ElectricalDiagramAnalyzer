@@ -32,7 +32,7 @@ from pathlib import Path
 
 from docx import Document
 
-DOCX = Path("/path/to/Vendor_Security_Questionnaire_FILLED.docx")
+DOCX = Path("ArgusDocumentation/Vendor_Security_Questionnaire_FILLED_20260529_020601.docx")
 BACKUP = DOCX.with_suffix(".pre_edit.docx")
 
 EDITS = [

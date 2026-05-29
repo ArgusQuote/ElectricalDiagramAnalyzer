@@ -22,10 +22,12 @@ internal software architecture.
 ## Inputs
 
 - **The customer questionnaire**, typically a `.docx` file with a 2-row
-  question-table layout. Argus's first such questionnaire was filed at
-  `~/Documents/ArgusDocumentation/Vendor_Security_Questionnaire_FILLED_052526.docx`
-  (the canonical reference for tone and depth).
-- **The published Argus policy artifacts** at `~/Documents/ArgusDocumentation/`:
+  question-table layout. Argus's reference questionnaire (tone and depth)
+  lives in the repo at `ArgusDocumentation/` — use the latest
+  `Vendor_Security_Questionnaire_FILLED_*.docx` there (currently
+  `Vendor_Security_Questionnaire_FILLED_20260529_020601.docx`).
+- **The published Argus policy artifacts** at `ArgusDocumentation/` (repo root;
+  full path `/home/marco/ElectricalDiagramAnalyzer/ArgusDocumentation/`):
   - `Argus_Privacy_Policy.pdf`
   - `Argus_Terms_of_Service.pdf`
   - `Argus_IT_Security_Overview.pdf`
@@ -403,8 +405,9 @@ Stop and ask Marco if any of the following come up:
 ## References
 
 - The corrected reference questionnaire (canonical example of Argus tone and
-  depth): `~/Documents/ArgusDocumentation/Vendor_Security_Questionnaire_FILLED_052526.docx`
-- The seven published Argus policy PDFs at `~/Documents/ArgusDocumentation/`.
+  depth): `ArgusDocumentation/Vendor_Security_Questionnaire_FILLED_20260529_020601.docx`
+  (or the latest `Vendor_Security_Questionnaire_FILLED_*.docx` in that folder).
+- The seven published Argus policy PDFs at `ArgusDocumentation/` (repo root).
 - Project-level obscuring rules and committed-state conventions:
   `.cursor/rules/project/docs/known-issues.mdc` and
   `.cursor/rules/project/doc-conventions.mdc`. The customer-facing answers
