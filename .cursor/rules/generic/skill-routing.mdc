@@ -12,3 +12,4 @@ alwaysApply: true
 - When preparing a commit or pull request, load the `preparing-pull-requests` skill
 - When reviewing code for quality, load the `reviewing-code` skill
 - When assessing code for security vulnerabilities, load the `reviewing-security` skill
+- When drafting or refining answers to a vendor security / privacy / compliance questionnaire, load the `answering-vendor-questionnaires` skill
