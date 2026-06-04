@@ -18,6 +18,139 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **AWS third-party Marketplace AMI billing trap + new server rebuild -- OPEN 2026-06-03** --
+  The original AWS dev box was rebuilt from scratch in this session, and
+  in the process we identified the root cause of an unexpected **$162
+  AWS charge**: the *old* instance was launched from a **third-party
+  AWS Marketplace AMI**, not the free AWS-published one. The two have
+  nearly identical names, which is the trap:
+  - **Free (correct)**: "Deep Learning Base OSS Nvidia Driver GPU AMI"
+    published by **AWS itself (AMI owner alias `amazon`)**. Software
+    cost is **$0** -- you pay only for EC2 compute + EBS + the EIP.
+  - **Paid (what bit us)**: confusingly-named Marketplace repackages
+    of the same idea, sold by third parties (e.g. "Galaxys Cloud").
+    AWS's own listing text describes these as *"a repackaged software
+    product wherein additional charges apply for support... the free
+    trial gets automatically converted to a paid subscription."* That
+    recurring per-hour software fee on top of EC2 is the source of the
+    $162. It also explains the old box's documented "OS surprise" (the
+    listing said Ubuntu 20.04 but it booted 24.04 -- a classic
+    repackaged-Marketplace-AMI mismatch, see the "AWS dev-box
+    provisioning" entry below).
+
+  **Decision / standing rule to prevent future third-party charges:**
+  - Always launch AWS instances from the **Quickstart AMIs** tab with
+    **Owner = `amazon`**, never from the "AWS Marketplace AMIs" tab.
+  - After launch, verify the instance's **Usage operation = `RunInstances`**
+    and **Platform details = `Linux/UNIX`** (EC2 -> Instances ->
+    Details tab). A Marketplace AMI shows a product code / marketplace
+    reference there instead.
+  - **Cancel the old Marketplace subscription** at **AWS Marketplace ->
+    Manage subscriptions** -- deleting the instance stops the hourly
+    fee but the subscription itself can linger and must be explicitly
+    cancelled. **DONE 2026-06-03**: Marco cancelled the third-party
+    Marketplace subscription, so the recurring per-hour software fee is
+    fully stopped (not just the instance compute).
+
+  **New server state (as of 2026-06-03):**
+  - Instance `i-05a721f0f6b122179`, Name tag **"Argus Server"**,
+    **`g6.2xlarge`** (L4 24 GB GPU), AMI "Deep Learning Base OSS Nvidia
+    Driver GPU AMI (Ubuntu 22.04) 20260529" -- *believed* to be the
+    free AWS-owned image, **pending the Usage-operation verification
+    above**.
+  - EIP `52.21.216.68` (`eipalloc-03c197d64b32193a9`, Name
+    `argus-prod-aws-eip`) is associated to the new instance (private IP
+    `172.31.66.62`). The laptop's `ssh argus-prod-aws` alias (User
+    `ubuntu`, key `~/.ssh/argus-prod-key.pem`) is unchanged and points
+    at this EIP. The stale `known_hosts` entry for the IP was cleared
+    this session (`ssh-keygen -R 52.21.216.68`).
+  - **AWS capacity block RESOLVED 2026-06-03 PM (was transient)**: the
+    earlier `InsufficientInstanceCapacity` on start (`us-east-1f` had no
+    free `g6.2xlarge`) cleared on its own -- a later start attempt
+    succeeded with **no config change**. The instance is running in
+    `us-east-1f`. Lesson for future sessions: this error is an AWS-side
+    AZ capacity fluctuation, not a config problem; just retry, and if it
+    persists, relaunch in a different AZ within `us-east-1` (`1a/1b/1c/1d`)
+    or switch GPU family (`g6e.2xlarge`, `g5.4xlarge`). The EIP and the
+    16-vCPU G/VT quota are region-scoped, so any same-region AZ keeps both
+    working. **Region must stay `us-east-1`** (Anvil's cloud is there;
+    EIP and quota are there).
+  - **Security group changed on the rebuilt box**: the new instance is
+    attached to **`launch-wizard-1` (`sg-04b7f9bd135ac9cce`)**, an
+    auto-generated group, NOT the old `argus-uplink-sg`. Its inbound SSH
+    (port 22) rule was pinned to a **stale IP** (`99.159.80.230/32`).
+  - **G/VT quota** remains 16 vCPUs in `us-east-1` (`g6.2xlarge` = 8,
+    `g5.4xlarge` = 16, `g6e.2xlarge` = 8).
+
+  **The old provisioned environment is GONE and may need to be rebuilt:**
+  The previous instance (`i-0ecb7e8fabdb8548e`) and the third-party AMI
+  were **deleted**. Everything that lived on its root volume -- the
+  Python 3.10 venv, the `ElectricalDiagramAnalyzer` clone on
+  `TOOL_DEVELOPMENT_V3_MS`, the v7 TATR weights, the `ANVIL_UPLINK_KEY`
+  env file, and the `argus-uplink.service` unit -- is no longer
+  available on AWS. If the AWS dev box is wanted again, the full
+  provisioning must be redone from scratch on the new "Argus Server"
+  instance, following the procedure in the "AWS dev-box provisioning"
+  entry below and `AWSMigration/` (script `provision-aws-uplink.sh`,
+  HANDOFF.md). The deploy key, Anvil key, and v7 weights all have to be
+  re-transferred per that procedure. Paperspace was never touched and
+  continues to serve 100% of customer traffic, so this is not urgent.
+
+  **SSH access being migrated to SSM Session Manager -- IN PROGRESS 2026-06-03 PM:**
+  The rebuilt box's `launch-wizard-1` security group pins inbound SSH to
+  a single `/32` IP, which broke SSH the moment Marco connected from a
+  different location (traveling in Colorado: laptop public IP changed
+  from `99.159.80.230` to `47.5.49.120`, so the old rule dropped his
+  traffic -> connection timeout). Rather than keep editing the inbound
+  rule on every IP change, the decision (Marco's pick on 2026-06-03) is
+  to switch to **AWS Systems Manager (SSM) Session Manager**, which
+  tunnels SSH through AWS's managed channel so **port 22 can be closed
+  entirely** and connections work from any IP / location. This is also
+  more secure (no public SSH surface) -- relevant because the box holds
+  a write-enabled GitHub deploy key.
+  - **DONE so far:**
+    - IAM role **`argus-ssm-role`** (managed policy
+      `AmazonSSMManagedInstanceCore`, EC2 trust) created and attached to
+      instance `i-05a721f0f6b122179` (the instance previously had no IAM
+      role). The box's outbound rule is already `All -> 0.0.0.0/0`, so
+      the SSM agent can reach the SSM endpoints.
+    - Laptop tooling installed **sudo-free** into `~/.local/bin` (already
+      on PATH via `~/.profile`): **AWS CLI v2** (`aws` 2.34.61, installed
+      with `--install-dir ~/.local/aws-cli --bin-dir ~/.local/bin`) and
+      the **session-manager-plugin** (1.2.814.0, extracted from the
+      Ubuntu `.deb` via `dpkg-deb -x` since `sudo` needs a password on
+      the laptop). The laptop is Ubuntu 22.04 x86_64.
+  - **REMAINING (next session):**
+    1. Verify the instance shows **Online** in **Systems Manager ->
+       Fleet Manager** (confirms the SSM agent registered with the new
+       role; allow ~2-3 min after attach).
+    2. Configure laptop AWS credentials: create an access key for the
+       `marco-admin` IAM user and run `aws configure` (region
+       `us-east-1`, output `json`). The key must NOT be pasted into chat;
+       Marco runs `aws configure` himself. Verify with
+       `aws sts get-caller-identity` (no secrets shown).
+    3. Rewrite the `argus-prod-aws` block in the laptop's `~/.ssh/config`
+       to tunnel through SSM. Target by **instance ID** (not the EIP) via
+       a ProxyCommand, e.g.:
+       ```
+       Host argus-prod-aws
+           HostName i-05a721f0f6b122179
+           User ubuntu
+           IdentityFile ~/.ssh/argus-prod-key.pem
+           IdentitiesOnly yes
+           ProxyCommand sh -c "~/.local/bin/aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'"
+       ```
+       (SSH-over-SSM still authenticates with the `argus-prod-key.pem`
+       key pair, so the matching public key must be in the box's
+       `~ubuntu/.ssh/authorized_keys` -- it should be, since the instance
+       was launched with that key pair. Confirm on first connect.)
+    4. Once `ssh argus-prod-aws` works over SSM, **delete the port-22
+       inbound rule** on `launch-wizard-1` entirely (no more IP pinning).
+    5. Then proceed to the full re-provisioning (venv, repo clone, v7
+       weights, Anvil key, systemd unit) per the "old provisioned
+       environment is GONE" note above -- still pending; the box has not
+       been SSH'd into yet.
+
 - **AWS dev-box provisioning -- COMPLETE 2026-05-20 PM (box dormant by design); end-to-end heavyweight verification DONE 2026-05-23; paths migrated `/home/paperspace` → `/home/ubuntu` 2026-05-23** --
   EC2 g5.2xlarge `i-0ecb7e8fabdb8548e` in `us-east-1` is fully
   provisioned and verified in the **"ready but not running"** state:
