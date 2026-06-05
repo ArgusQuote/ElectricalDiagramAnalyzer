@@ -18,7 +18,15 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
-- **AWS third-party Marketplace AMI billing trap + new server rebuild -- OPEN 2026-06-03** --
+- **AWS third-party Marketplace AMI billing trap + new server rebuild -- MOSTLY RESOLVED 2026-06-04 (1 item deferred: Anvil key)** --
+  **Status rollup**: the $162 Marketplace billing leak is stopped
+  (subscription cancelled 2026-06-03); the transient `InsufficientInstanceCapacity`
+  cleared on its own; SSH was migrated to SSM Session Manager and the public
+  port-22 rule removed (2026-06-04); and the rebuilt box was fully
+  re-provisioned to the `/home/ubuntu` layout (2026-06-04). The **only**
+  remaining open item is ferrying the `ANVIL_UPLINK_KEY` from Paperspace into
+  `/home/ubuntu/.anvil_env` (currently a placeholder), which is blocked solely
+  on Paperspace being powered on. Details of each item follow.
   The original AWS dev box was rebuilt from scratch in this session, and
   in the process we identified the root cause of an unexpected **$162
   AWS charge**: the *old* instance was launched from a **third-party
@@ -96,60 +104,143 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   re-transferred per that procedure. Paperspace was never touched and
   continues to serve 100% of customer traffic, so this is not urgent.
 
-  **SSH access being migrated to SSM Session Manager -- IN PROGRESS 2026-06-03 PM:**
-  The rebuilt box's `launch-wizard-1` security group pins inbound SSH to
-  a single `/32` IP, which broke SSH the moment Marco connected from a
+  **Re-provisioning of the rebuilt box -- COMPLETE 2026-06-04 (one item
+  deferred):** the rebuilt "Argus Server" (`i-05a721f0f6b122179`,
+  g6.2xlarge / NVIDIA L4 / Ubuntu 22.04.5) was re-provisioned end-to-end
+  via `AWSMigration/provision-aws-uplink.sh` over the new SSM tunnel. The
+  box matches the canonical `/home/ubuntu` layout (no `paperspace` user --
+  that mistake from the old AMI is not repeated; the script already used
+  `UPLINK_USER=ubuntu` from the 2026-05-23 migration). Final state:
+  - **Repo**: cloned to `/home/ubuntu/ElectricalDiagramAnalyzer` on branch
+    `TOOL_DEVELOPMENT_V3_MS` (HEAD `df8c0b6` at provisioning time). A new
+    GitHub deploy key was generated on the box and registered as
+    `argus-prod-aws-ubuntu (2026-06-05)` (public key
+    `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKbkwyyDKLzkGe2f1/tdJI5b6U+NCFr+h42PWT/ijUZo argus-prod-aws-ubuntu-ip-172-31-66-62@20260605`).
+    The prior `argus-prod-aws-ubuntu (2026-05-23)` key is tied to the
+    deleted box and no longer functions.
+  - **venv**: `/home/ubuntu/venv` (Python 3.10.12), all packages from
+    `AWSMigration/paperspace-freeze.txt` installed minus the intentionally-
+    excluded `detectron2`. torch `2.4.1+cu121`, `transformers 4.55.4`.
+  - **CUDA verified**: `torch.cuda.is_available()` True, device
+    **NVIDIA L4**. (Driver 580.159.04, nvcc 12.9 on the box; the
+    `+cu121` wheels run fine on the newer driver since they bundle their
+    own runtime.)
+  - **v7 TATR weights**: transferred laptop -> AWS (the laptop's local
+    copy at `~/Documents/TableAnnotations/models_v7/best/` was used, NOT
+    Paperspace). sha256 of `model.safetensors` on the box is
+    `47401faaf34ee8a797801aca5c510e1d845cf2343260b0761d9260d08c4d9ede`,
+    matching the canonical value. v7 loads with `num_queries == 15`
+    (correct v7 signature). Owned `ubuntu:ubuntu`.
+  - **systemd unit**: `argus-uplink.service` installed,
+    **`disabled` / inactive** (correct -- must never be enabled; running
+    it round-robins Anvil jobs with Paperspace).
+  - **DEFERRED -- `ANVIL_UPLINK_KEY`**: `/home/ubuntu/.anvil_env` still
+    contains the literal placeholder `PASTE_KEY_HERE`. Paperspace was
+    powered off by Marco mid-session before the key could be ferried, and
+    the key lives only on Paperspace (the old AWS box that also had it was
+    deleted). **To finish**: with Paperspace powered on, run the pipe-only
+    transfer (never prints the key, never lands on the laptop disk):
+    ```
+    ssh paperspace-vm 'cat ~/.anvil_env' | ssh argus-prod-aws \
+      'cat | sudo tee /home/ubuntu/.anvil_env >/dev/null \
+       && sudo chown ubuntu:ubuntu /home/ubuntu/.anvil_env \
+       && sudo chmod 600 /home/ubuntu/.anvil_env'
+    ```
+    then verify by sha256 match against Paperspace (documented canonical
+    value: `da78f3f9fdb43a0f1641eb7d4aedd842e7bc3118f1bd661c17d043e24a13a39b`).
+    The box is otherwise fully ready; the key is only needed to actually
+    run `uplink_server.py` for a manual test.
+  - **Provision-script bug found + fixed**: Step 1 was gated on
+    "is the `python3.10` binary missing?" -- true only on Ubuntu 24.04.
+    On the 22.04 box python3.10 is the system interpreter, so the whole
+    step (including the `python3.10-venv` install) was skipped, and Step 4
+    then failed with "ensurepip is not available". The script's Step 1 was
+    rewritten to (a) install only missing base packages, (b) add deadsnakes
+    only when the interpreter is genuinely absent, and (c) **always ensure
+    `python3.10-venv` and `python3.10-dev`** regardless. The header comment
+    was updated to note both the 24.04/A10G and 22.04/L4 layouts are
+    supported. (This is a committed-code fix to
+    `AWSMigration/provision-aws-uplink.sh`.)
+
+  **SSH access migrated to SSM Session Manager -- COMPLETE 2026-06-04:**
+  The rebuilt box's `launch-wizard-1` security group pinned inbound SSH
+  to a single `/32` IP, which broke SSH the moment Marco connected from a
   different location (traveling in Colorado: laptop public IP changed
   from `99.159.80.230` to `47.5.49.120`, so the old rule dropped his
   traffic -> connection timeout). Rather than keep editing the inbound
-  rule on every IP change, the decision (Marco's pick on 2026-06-03) is
-  to switch to **AWS Systems Manager (SSM) Session Manager**, which
-  tunnels SSH through AWS's managed channel so **port 22 can be closed
-  entirely** and connections work from any IP / location. This is also
-  more secure (no public SSH surface) -- relevant because the box holds
-  a write-enabled GitHub deploy key.
-  - **DONE so far:**
+  rule on every IP change, the box was switched to **AWS Systems Manager
+  (SSM) Session Manager**, which tunnels SSH through AWS's managed
+  channel so **port 22 is now closed entirely** and `ssh argus-prod-aws`
+  works from any IP / location. This is also more secure (no public SSH
+  surface) -- relevant because the box holds a write-enabled GitHub
+  deploy key. **SSM Session Manager + Fleet Manager add $0 to the bill**
+  for EC2 managed nodes (Standard tier); only optional session logging to
+  S3/CloudWatch would cost, and it's off.
+  - **Instance side (done in AWS Console by Marco):**
     - IAM role **`argus-ssm-role`** (managed policy
       `AmazonSSMManagedInstanceCore`, EC2 trust) created and attached to
       instance `i-05a721f0f6b122179` (the instance previously had no IAM
-      role). The box's outbound rule is already `All -> 0.0.0.0/0`, so
-      the SSM agent can reach the SSM endpoints.
-    - Laptop tooling installed **sudo-free** into `~/.local/bin` (already
-      on PATH via `~/.profile`): **AWS CLI v2** (`aws` 2.34.61, installed
+      role). The box's outbound rule is `All -> 0.0.0.0/0`, so the SSM
+      agent reaches the SSM endpoints. **The instance needed a reboot
+      after the role attach** before the agent picked up the new
+      credentials and registered -- attaching a role to an
+      already-running instance does not always refresh the agent's
+      creds; a reboot (or waiting/agent restart) is the fix. After
+      reboot it showed **Online** in Systems Manager -> Fleet Manager
+      (agent 3.3.4121.0, Ubuntu).
+  - **Laptop side (done via this agent):**
+    - Tooling installed **sudo-free** into `~/.local/bin` (already on
+      PATH via `~/.profile`): **AWS CLI v2** (`aws` 2.34.61, installed
       with `--install-dir ~/.local/aws-cli --bin-dir ~/.local/bin`) and
       the **session-manager-plugin** (1.2.814.0, extracted from the
       Ubuntu `.deb` via `dpkg-deb -x` since `sudo` needs a password on
-      the laptop). The laptop is Ubuntu 22.04 x86_64.
-  - **REMAINING (next session):**
-    1. Verify the instance shows **Online** in **Systems Manager ->
-       Fleet Manager** (confirms the SSM agent registered with the new
-       role; allow ~2-3 min after attach).
-    2. Configure laptop AWS credentials: create an access key for the
-       `marco-admin` IAM user and run `aws configure` (region
-       `us-east-1`, output `json`). The key must NOT be pasted into chat;
-       Marco runs `aws configure` himself. Verify with
-       `aws sts get-caller-identity` (no secrets shown).
-    3. Rewrite the `argus-prod-aws` block in the laptop's `~/.ssh/config`
-       to tunnel through SSM. Target by **instance ID** (not the EIP) via
-       a ProxyCommand, e.g.:
-       ```
-       Host argus-prod-aws
-           HostName i-05a721f0f6b122179
-           User ubuntu
-           IdentityFile ~/.ssh/argus-prod-key.pem
-           IdentitiesOnly yes
-           ProxyCommand sh -c "~/.local/bin/aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'"
-       ```
-       (SSH-over-SSM still authenticates with the `argus-prod-key.pem`
-       key pair, so the matching public key must be in the box's
-       `~ubuntu/.ssh/authorized_keys` -- it should be, since the instance
-       was launched with that key pair. Confirm on first connect.)
-    4. Once `ssh argus-prod-aws` works over SSM, **delete the port-22
-       inbound rule** on `launch-wizard-1` entirely (no more IP pinning).
-    5. Then proceed to the full re-provisioning (venv, repo clone, v7
-       weights, Anvil key, systemd unit) per the "old provisioned
-       environment is GONE" note above -- still pending; the box has not
-       been SSH'd into yet.
+      the laptop). Laptop is Ubuntu 22.04 x86_64.
+    - AWS credentials configured via `aws configure` (Marco ran it
+      himself so the secret never hit chat). Identity verified:
+      `arn:aws:iam::766851565012:user/marco-admin`, region `us-east-1`.
+      Long-lived access key stored in `~/.aws/credentials` on the laptop.
+    - The `argus-prod-aws` block in `~/.ssh/config` was rewritten to
+      tunnel through SSM. **HostName is now the instance ID
+      `i-05a721f0f6b122179`, not the EIP**, and a ProxyCommand opens the
+      SSM session:
+      ```
+      Host argus-prod-aws
+          HostName i-05a721f0f6b122179
+          User ubuntu
+          IdentityFile ~/.ssh/argus-prod-key.pem
+          IdentitiesOnly yes
+          ProxyCommand sh -c "PATH=/home/marco/.local/bin:$PATH exec aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
+      ```
+      (The explicit `PATH=` prefix ensures `aws` finds
+      `session-manager-plugin` in `~/.local/bin` regardless of how `ssh`
+      is launched. SSH-over-SSM still authenticates with the
+      `argus-prod-key.pem` key pair -- the matching public key was
+      already in the box's `~ubuntu/.ssh/authorized_keys` from launch, so
+      auth worked on first connect.)
+  - **Inbound rule removed**: the port-22 ingress rule
+    (`sgr-00c283a8c0fc091f6`, was `99.159.80.230/32`) was revoked from
+    `sg-04b7f9bd135ac9cce` via
+    `aws ec2 revoke-security-group-ingress`. The security group now has
+    **zero inbound rules**. Verified `ssh argus-prod-aws` still connects
+    over SSM with port 22 fully closed (GPU confirmed: **NVIDIA L4**,
+    driver 580.159.04).
+  - **Operational implications for future sessions:**
+    - `ssh argus-prod-aws` and `scp` Just Work from any network/IP, no
+      inbound-rule editing ever again. No EIP dependency for SSH either
+      (SSM targets the instance ID).
+    - The laptop must have valid AWS creds (`aws sts get-caller-identity`)
+      and the instance must be **running + SSM-Online** for SSH to work.
+      If `ssh argus-prod-aws` fails: check the instance is started, then
+      `aws ssm describe-instance-information` shows it Online. A stopped
+      instance or an un-refreshed agent (rare) is the usual cause, not a
+      firewall issue.
+    - The EIP `52.21.216.68` is no longer used for SSH but is still
+      allocated/associated (~$3.60/mo). It can be kept (harmless) or
+      released if no other use emerges -- not decided.
+  - **Re-provisioning now COMPLETE** -- see the dedicated subsection
+    below ("Re-provisioning of the rebuilt box -- COMPLETE 2026-06-04").
+    Only the `ANVIL_UPLINK_KEY` is still a placeholder (Paperspace was
+    powered off mid-session before the key could be ferried).
 
 - **AWS dev-box provisioning -- COMPLETE 2026-05-20 PM (box dormant by design); end-to-end heavyweight verification DONE 2026-05-23; paths migrated `/home/paperspace` → `/home/ubuntu` 2026-05-23** --
   EC2 g5.2xlarge `i-0ecb7e8fabdb8548e` in `us-east-1` is fully

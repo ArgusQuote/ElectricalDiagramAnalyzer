@@ -5,9 +5,12 @@
 # environment for the "Argus Automated BOM" Anvil uplink server.
 #
 # Target host:
-#   - Ubuntu 24.04 (Noble Numbat) on g5.2xlarge with the "Deep Learning Base
-#     GPU AMI (Ubuntu 20.04)" Marketplace image (the OS is actually 24.04
-#     despite the AMI listing's name; verified 2026-05-20).
+#   - An AWS "Deep Learning Base OSS Nvidia Driver GPU AMI" on a GPU instance.
+#     Verified on two layouts: the original g5.2xlarge / A10G / Ubuntu 24.04
+#     box (2026-05-20) and the rebuilt g6.2xlarge / L4 / Ubuntu 22.04 box
+#     (2026-06-05). Step 1 handles both: on 22.04 python3.10 is the system
+#     interpreter; on 24.04 it is installed via the deadsnakes PPA. Either way
+#     python3.10-venv / -dev are ensured explicitly.
 #   - Runs as the default 'ubuntu' user via sudo. No additional user is
 #     created. (Until 2026-05-23 this script created a separate 'paperspace'
 #     user to mirror the Paperspace VM exactly; that turned out to be
@@ -81,24 +84,53 @@ log "Pre-checks OK on $(hostname). GPU: $(nvidia-smi --query-gpu=name --format=c
 # -----------------------------------------------------------------------------
 log "Step 1/8: APT packages"
 
-if ! command -v python3.10 >/dev/null; then
-  apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    git rsync curl wget \
-    build-essential \
-    ghostscript poppler-utils \
-    software-properties-common \
-    ca-certificates
-  ok "base packages installed"
+# Run `apt-get update` at most once, and only if something actually needs it.
+APT_UPDATED=0
+ensure_apt_update() { [ "$APT_UPDATED" = "1" ] || { apt-get update -qq; APT_UPDATED=1; }; }
 
-  # deadsnakes PPA for Python 3.10 on Noble (24.04 ships 3.12 by default)
-  add-apt-repository -y ppa:deadsnakes/ppa >/dev/null
-  apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    python3.10 python3.10-venv python3.10-dev
-  ok "python3.10 installed: $(python3.10 --version)"
+# Install only the base packages that are actually missing (idempotent).
+MISSING_BASE=""
+for pkg in git rsync curl wget build-essential ghostscript poppler-utils \
+           software-properties-common ca-certificates; do
+  dpkg -s "$pkg" >/dev/null 2>&1 || MISSING_BASE="$MISSING_BASE $pkg"
+done
+if [ -n "$MISSING_BASE" ]; then
+  ensure_apt_update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $MISSING_BASE
+  ok "base packages installed:${MISSING_BASE}"
 else
-  skip "python3.10 already installed: $(python3.10 --version)"
+  skip "base packages already installed"
+fi
+
+# Python 3.10 interpreter. Ubuntu 22.04 (Jammy) ships it as the system python;
+# Ubuntu 24.04 (Noble) ships 3.12, so deadsnakes is needed there. Only add the
+# PPA when the interpreter is genuinely absent.
+if ! command -v python3.10 >/dev/null; then
+  add-apt-repository -y ppa:deadsnakes/ppa >/dev/null
+  apt-get update -qq; APT_UPDATED=1
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3.10
+  ok "python3.10 installed via deadsnakes: $(python3.10 --version)"
+else
+  skip "python3.10 interpreter present: $(python3.10 --version)"
+fi
+
+# python3.10-venv and python3.10-dev are SEPARATE packages from the interpreter
+# and are NOT guaranteed to be present just because `python3.10` is -- notably
+# on the Deep Learning AMI's Ubuntu 22.04, where python3.10 is the system
+# interpreter but -venv (needed for Step 4) and -dev (needed to build any
+# C-extension wheels) are not installed. Ensure both regardless of how the
+# interpreter got here; without -venv, `python3.10 -m venv` fails with an
+# "ensurepip is not available" error in Step 4.
+MISSING_PY=""
+for pkg in python3.10-venv python3.10-dev; do
+  dpkg -s "$pkg" >/dev/null 2>&1 || MISSING_PY="$MISSING_PY $pkg"
+done
+if [ -n "$MISSING_PY" ]; then
+  ensure_apt_update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $MISSING_PY
+  ok "python venv/dev packages installed:${MISSING_PY}"
+else
+  skip "python3.10-venv and python3.10-dev already installed"
 fi
 
 # -----------------------------------------------------------------------------
