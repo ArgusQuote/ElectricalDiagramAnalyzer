@@ -6,7 +6,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from PartNumberSelector.PartNumberBuilder import mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer as TransformerBuilder, loadcenter
+from PartNumberSelector.PartNumberBuilder import mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer as TransformerBuilder, loadcenter, erms
 import math 
  
 INTERRUPTING_RATINGS = {
@@ -2682,6 +2682,49 @@ class PanelboardEngine(BaseEngine):
 
             return None, False
 
+        def should_add_mms(panel_result: dict, raw: dict, series: str) -> bool:
+            if series not in ("HCP", "HCR-U"):
+                return False
+
+            type_of_main = str(raw.get("typeOfMain", "")).upper()
+            if type_of_main != "MAIN BREAKER":
+                return False
+
+            main_amps = _safe_int(raw.get("mainBreakerAmperage"), 0)
+            if main_amps < 1200:
+                return False
+
+            return True
+
+        def choose_side_for_mms(profiles: dict, remaining: dict, voltage: int):
+            # MMS uses 6 inches of I-Line bus space.
+            inches_needed = 6.0
+
+            # 600V MMS only exists in wide-side versions.
+            if voltage == 600:
+                candidates = [
+                    s for s in ("left", "right")
+                    if profiles[s]["type"] == "wide" and remaining[s] >= inches_needed
+                ]
+            else:
+                # Prefer wide side first so narrow side stays available for H/J breakers.
+                wide_candidates = [
+                    s for s in ("left", "right")
+                    if profiles[s]["type"] == "wide" and remaining[s] >= inches_needed
+                ]
+                if wide_candidates:
+                    candidates = wide_candidates
+                else:
+                    candidates = [
+                        s for s in ("left", "right")
+                        if remaining[s] >= inches_needed
+                    ]
+
+            if not candidates:
+                return None
+
+            return max(candidates, key=lambda s: remaining[s])
+
         def _try_build_branch(mccb_builder, attrs, frame_letter, rating_voltage):
             import re
 
@@ -3058,6 +3101,72 @@ class PanelboardEngine(BaseEngine):
 
             if poles == 2 and placed_units > 0:
                 phasing_index += placed_units
+
+        # ---- MMS / ERMS add-on for 1200A+ I-Line main breakers ----
+        if should_add_mms(panel_result, raw, series):
+            mms_side = choose_side_for_mms(profiles, side_remaining, rating_voltage)
+
+            if mms_side is None:
+                old_spaces = int(panel_result.get("spaces", raw.get("spaces", 0)))
+
+                bumped_spaces = self._iline_snap_spaces(
+                    iLinePanelboard(),
+                    series,
+                    "MAIN BREAKER",
+                    str(raw.get("enclosure", "")).upper(),
+                    str(raw.get("material", "")).upper(),
+                    str(raw.get("trimStyle", "")).upper(),
+                    old_spaces + 4
+                )
+
+                if bumped_spaces > old_spaces:
+                    panel_result.setdefault("Notes", []).append(
+                        f"I-Line panel size bumped from {old_spaces} to {bumped_spaces} spaces "
+                        f"to accommodate NEC 240.87 MMS/ERMS requirement. User review required."
+                    )
+
+                    panel_result["spaces"] = bumped_spaces
+
+                    added_inches = (bumped_spaces - old_spaces) * 1.5
+                    side_remaining["left"] += added_inches / 2
+                    side_remaining["right"] += added_inches / 2
+
+                    mms_side = choose_side_for_mms(profiles, side_remaining, rating_voltage)
+
+                if mms_side is None:
+                    panel_result.setdefault("Notes", []).append(
+                        "1200A+ I-Line main breaker requires MMS/ERMS for NEC 240.87, "
+                        "but no valid side location could be created. User review required."
+                    )
+
+            if mms_side is not None:
+                mms_width = profiles[mms_side]["type"].upper()
+                mms_side_upper = mms_side.upper()
+
+                mms_part = erms().generateERMSPartNumber({
+                    "voltage": rating_voltage,
+                    "width": mms_width,
+                    "side": mms_side_upper,
+                })
+
+                if isinstance(mms_part, dict) and "Part Number" in mms_part:
+                    side_remaining[mms_side] = max(0.0, side_remaining[mms_side] - 6.0)
+
+                    panel_result["I-LINE MMS / ERMS"] = {
+                        "Part Number": mms_part["Part Number"],
+                        "Type": "MMS",
+                        "Bus Space Required": 6,
+                        "Side": mms_side_upper,
+                        "Width": mms_width,
+                    }
+
+                    panel_result.setdefault("Notes", []).append(
+                        "MMS added for 1200A+ I-Line main breaker / NEC 240.87 arc-energy reduction."
+                    )
+                else:
+                    panel_result.setdefault("Notes", []).append(
+                        f"MMS required but no valid MMS part number was found for voltage={rating_voltage}, width={mms_width}, side={mms_side_upper}."
+                    )
 
         for side in ("left", "right"):
             rem = max(0.0, side_remaining[side])
