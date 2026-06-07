@@ -712,9 +712,6 @@ class PanelboardEngine(BaseEngine):
             needed = min(candidates) if candidates else 0
             if panel_spaces > 0 and needed > panel_spaces:
                 raw["_overcapacity_spaces"] = int(needed - panel_spaces)
-                raw.setdefault("_notes", []).append(
-                    "too many breakers detected. user review required."
-                )
 
         # 1-PHASE FAST-PATH: Try HOM/QO loadcenters for '120'
         lc_candidate = self._try_build_loadcenter_first(raw)
@@ -3107,37 +3104,10 @@ class PanelboardEngine(BaseEngine):
             mms_side = choose_side_for_mms(profiles, side_remaining, rating_voltage)
 
             if mms_side is None:
-                old_spaces = int(panel_result.get("spaces", raw.get("spaces", 0)))
-
-                bumped_spaces = self._iline_snap_spaces(
-                    iLinePanelboard(),
-                    series,
-                    "MAIN BREAKER",
-                    str(raw.get("enclosure", "")).upper(),
-                    str(raw.get("material", "")).upper(),
-                    str(raw.get("trimStyle", "")).upper(),
-                    old_spaces + 4
+                panel_result.setdefault("Notes", []).append(
+                    "Not enough space for MMS/ERMS required by NEC 240.87 "
+                    "for 1200A+ I-Line main breaker. User review required."
                 )
-
-                if bumped_spaces > old_spaces:
-                    panel_result.setdefault("Notes", []).append(
-                        f"I-Line panel size bumped from {old_spaces} to {bumped_spaces} spaces "
-                        f"to accommodate NEC 240.87 MMS/ERMS requirement. User review required."
-                    )
-
-                    panel_result["spaces"] = bumped_spaces
-
-                    added_inches = (bumped_spaces - old_spaces) * 1.5
-                    side_remaining["left"] += added_inches / 2
-                    side_remaining["right"] += added_inches / 2
-
-                    mms_side = choose_side_for_mms(profiles, side_remaining, rating_voltage)
-
-                if mms_side is None:
-                    panel_result.setdefault("Notes", []).append(
-                        "1200A+ I-Line main breaker requires MMS/ERMS for NEC 240.87, "
-                        "but no valid side location could be created. User review required."
-                    )
 
             if mms_side is not None:
                 mms_width = profiles[mms_side]["type"].upper()
@@ -3201,9 +3171,14 @@ class PanelboardEngine(BaseEngine):
             panel_result["_side_deficit_spaces"] = needed_extra_spaces
         # Uniform overflow flag
         if side_deficit_inches > 0 or raw.get("_overcapacity_spaces"):
-            panel_result.setdefault("Notes", []).append(
-                "too many breakers detected. user review required."
+            msg = (
+                "I-Line panel bus mounting space may be insufficient for all "
+                "required breakers and accessories. User review required."
             )
+
+            notes_list = panel_result.setdefault("Notes", [])
+            if msg not in notes_list:
+                notes_list.append(msg)
 
         panel_result.pop("spaces", None)
         if not DEBUG_ILINE:

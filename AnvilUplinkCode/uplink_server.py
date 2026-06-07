@@ -91,7 +91,7 @@ _log_run_fingerprint("init")
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine5 as RE2  # must expose process_job(payload)
+import RulesEngine.RulesEngine6 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
