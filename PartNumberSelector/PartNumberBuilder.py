@@ -3153,3 +3153,72 @@ class mccb():
 
 # End MCCB ^
 
+#-----------------------------------------------------
+
+# Start ERMS (Ilines) 
+class erms():
+
+    def generateERMSPartNumber(self, attributes):
+        voltage = attributes.get("voltage")
+        width = str(attributes.get("width", "")).upper()
+        side = str(attributes.get("side", "")).upper()
+
+        try:
+            voltage = int(float(str(voltage)))
+        except Exception:
+            return {"Error": f"Invalid voltage input: {voltage}"}
+
+        # Normalize voltage
+        if voltage in [120, 208, 240]:
+            voltageClass = 240
+        elif voltage in [277, 480]:
+            voltageClass = 480
+        elif voltage == 600:
+            voltageClass = 600
+        else:
+            return {
+                "Error": "Invalid voltage for I-Line MMS.",
+                "Valid Voltages": [120, 208, 240, 277, 480, 600]
+            }
+
+        # key = (voltageClass, width, side)
+        ermsLibrary = {
+            # 120/208/240 systems
+            (240, "NARROW", "LEFT"):  "ICNL2222MMS",
+            (240, "NARROW", "RIGHT"): "ICNR2222MMS",
+            (240, "WIDE", "LEFT"):    "ICWL2222MMS",
+            (240, "WIDE", "RIGHT"):   "ICWR2222MMS",
+
+            # 277/480 systems
+            (480, "NARROW", "LEFT"):  "ICNL2422MMS",
+            (480, "NARROW", "RIGHT"): "ICNR2422MMS",
+            (480, "WIDE", "LEFT"):    "ICWL2422MMS",
+            (480, "WIDE", "RIGHT"):   "ICWR2422MMS",
+
+            # 600V systems - wide side only
+            (600, "WIDE", "LEFT"):    "ICWL2622MMS",
+            (600, "WIDE", "RIGHT"):   "ICWR2622MMS",
+        }
+
+        key = (voltageClass, width, side)
+
+        if key not in ermsLibrary:
+            return {
+                "Error": "Invalid I-Line MMS configuration.",
+                "Requested Key": key,
+                "Valid Widths": ["NARROW", "WIDE"],
+                "Valid Sides": ["LEFT", "RIGHT"],
+                "Note": "600V MMS modules are wide-side only."
+            }
+
+        return {
+            "Part Number": ermsLibrary[key],
+            "Bus Space Required": 6,
+            "Bus Space Unit": "inches",
+            "Type": "MMS",
+            "Voltage Class": voltageClass,
+            "Width": width,
+            "Side": side
+        }
+
+# End ERMS

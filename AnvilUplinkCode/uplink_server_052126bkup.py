@@ -12,13 +12,7 @@ import os as _os
 from anvil import BlobMedia
 
 # ---------- CONFIG ----------
-# Resolve the repo root from this file's location so the server runs
-# unchanged on both production hosts -- Paperspace
-# (/home/paperspace/ElectricalDiagramAnalyzer) and the AWS dev box
-# (/home/ubuntu/ElectricalDiagramAnalyzer) -- as well as on any future
-# host with a different checkout path. uplink_server.py is one level
-# below the repo root at AnvilUplinkCode/uplink_server.py.
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -78,7 +72,6 @@ def _set_runtime_determinism():
     set_runtime_determinism()
 
 def _log_run_fingerprint(tag: str = ""):
-    """Log CUDA device names and cuDNN determinism settings for diagnostics."""
     try:
         import torch
         devs = []
@@ -98,7 +91,7 @@ _log_run_fingerprint("init")
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine6 as RE2  # must expose process_job(payload)
+import RulesEngine.RulesEngine5 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
@@ -117,7 +110,6 @@ if not _IS_WORKER_SUBPROCESS:
 
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
-    """Pre-load EasyOCR models by running BreakerTablePipeline on a dummy 32x32 image."""
     try:
         _log_run_fingerprint("warmup")
         import numpy as np, cv2, tempfile
@@ -151,16 +143,13 @@ if not _IS_WORKER_SUBPROCESS:
 
 # ---------- UTILITIES ----------
 def _now_utc():
-    """Return the current UTC datetime."""
     return datetime.now(timezone.utc)
 
 def _epoch_ms(dt=None) -> int:
-    """Convert a datetime (default: now UTC) to epoch milliseconds."""
     dt = dt or datetime.now(timezone.utc)
     return int(dt.timestamp() * 1000)
 
 def _fmt_cycle_time(ms: int) -> str:
-    """Format milliseconds as HH:MM:SS:mmm for display in status payloads."""
     if ms is None or ms < 0:
         return "00:00:00:000"
     hours = ms // 3_600_000
@@ -172,13 +161,11 @@ def _fmt_cycle_time(ms: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{millis:03d}"
 
 def _slugify(s: str) -> str:
-    """Normalize a string to a filesystem-safe slug (alphanumeric, dots, hyphens, underscores)."""
     s = (s or "").strip().replace(" ", "_")
     s = re.sub(r"[^A-Za-z0-9._-]+", "", s)
     return s or "untitled"
 
 def _json_read_or_none(path: Path):
-    """Load JSON from *path*; return None on any read/parse error."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -215,7 +202,6 @@ def _parse_job_note(job_note: str) -> dict:
     return out
 
 def _iso_to_stamp(s: str) -> str:
-    """Parse an ISO-8601 datetime string into a YYYYMMDD_HHMMSS stamp for job directory names."""
     try:
         s2 = s.rstrip("Z")
         dt = datetime.fromisoformat(s2)
@@ -227,7 +213,6 @@ def _iso_to_stamp(s: str) -> str:
         return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
-    """Create and return a timestamped job directory under BASE_JOBS_DIR with uploaded_pdfs/ and pdf_images/ subdirs."""
     meta = _parse_job_note(job_note)
     job_name = _slugify(meta.get("job_name") or Path(fallback_filename).stem)
     stamp = _iso_to_stamp(meta.get("submitted_at_utc") or "")
@@ -237,7 +222,6 @@ def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
     return job_dir
 
 def _save_media_to_disk(media, dest_dir: Path) -> Path:
-    """Write an Anvil BlobMedia's bytes to *dest_dir* as a PDF file; return the saved path."""
     fname = _slugify(getattr(media, "name", None) or "uploaded.pdf")
     if not fname.lower().endswith(".pdf"):
         fname += ".pdf"
@@ -247,7 +231,6 @@ def _save_media_to_disk(media, dest_dir: Path) -> Path:
     return dst
 
 def _normalize_component_for_none(obj):
-    """Recursively normalize a component dict: convert None to 'NONE', numpy types to Python ints/floats, and numeric strings to numbers."""
     import re
     try:
         import numpy as np
@@ -296,7 +279,6 @@ def _normalize_component_for_none(obj):
 
 # ----- status.json / result.json on disk -----
 def _status_paths(dir_path: Path):
-    """Return a dict with 'status' and 'result' keys pointing to the respective JSON files in *dir_path*."""
     dir_path = Path(dir_path)
     return {"status": dir_path / "status.json", "result": dir_path / "result.json"}
 
@@ -323,14 +305,12 @@ def _status_write(dir_path: Path, state: str, **extras):
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
 
 def _result_write(dir_path: Path, result: dict):
-    """Write *result* dict to result.json in the job directory."""
     paths = _status_paths(dir_path)
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
 
 # ----- Data Tables helpers (disabled here; leave no-ops) -----
 def _jobs_upsert(job_id: str, **fields):
-    """No-op placeholder for a Data Tables upsert (disabled in disk-only mode)."""
     return
 
 # ---------- UI OVERRIDES ----------
@@ -363,7 +343,6 @@ _DEFAULT_OVERRIDES = {
 }
 
 def _deep_merge(dst: dict, src: dict) -> dict:
-    """Recursively merge *src* into *dst*, returning a new dict (nested dicts are merged, scalars overwritten)."""
     out = dict(dst)
     for k, v in (src or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -373,7 +352,6 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     return out
 
 def _coerce_types(overrides: dict) -> dict:
-    """Recursively coerce string values in UI overrides: 'true'/'false' to bool, digit strings to int."""
     def coerce(v):
         if isinstance(v, str):
             s = v.strip().lower()
@@ -394,12 +372,10 @@ def _coerce_types(overrides: dict) -> dict:
     return walk(overrides or {})
 
 def _normalize_ui_overrides(overrides: dict | None) -> dict:
-    """Merge coerced user overrides on top of _DEFAULT_OVERRIDES, returning the combined config."""
     return _deep_merge(_DEFAULT_OVERRIDES, _coerce_types(overrides or {}))
 
 # Delete unused images and folders for storage
 def _rel(p: Path, root: Path) -> str:
-    """Return *p* relative to *root* with forward slashes (for portable JSON paths)."""
     return str(p.relative_to(root)).replace("\\", "/")
 
 def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
@@ -412,7 +388,6 @@ def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
     # Always keep status/result
     keep.add("status.json")
     keep.add("result.json")
-    keep.add("edits.json")
 
     pdf_images = job_dir / "pdf_images"
     if not pdf_images.is_dir():
@@ -490,7 +465,6 @@ def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
 
 @anvil.server.callable
 def vm_get_default_overrides() -> dict:
-    """RPC callable: return a deep copy of the default UI overrides for panelboards/transformers/disconnects."""
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
 # ---------- PDF → images ----------
@@ -588,448 +562,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
 
 # ---------- Rules payload helper ----------
 def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
-    """Assemble the payload dict expected by RulesEngine4.process_job() from UI defaults and component items."""
     return {"defaults": defaults or {}, "items": items or []}
-
-def _edit_log_path(job_dir: Path) -> Path:
-    return Path(job_dir) / "edits.json"
-
-
-def _deep_copy_jsonable(obj):
-    try:
-        return json.loads(json.dumps(obj, default=str))
-    except Exception:
-        return obj
-
-
-def _fmt_edit_value(value, suffix=""):
-    if value in (None, "", "NONE", "-", "X"):
-        return "-"
-    return f"{value}{suffix}"
-
-
-def _safe_int_for_edit(value):
-    try:
-        if value in (None, "", "NONE", "-", "X"):
-            return None
-        return int(float(str(value).strip()))
-    except Exception:
-        return None
-
-
-def _normalize_breaker_option(value):
-    s = str(value or "").strip().upper()
-    if s in ("", "NONE", "-", "X", "STANDARD"):
-        return ""
-    return s
-
-
-def _breaker_group_map_for_edit(breakers) -> dict:
-    """
-    Convert breaker rows into grouped counts:
-      {(amps, poles, option): count}
-    """
-    grouped = {}
-
-    if not isinstance(breakers, list):
-        return grouped
-
-    for b in breakers:
-        if not isinstance(b, dict):
-            continue
-
-        amps = _safe_int_for_edit(b.get("amperage"))
-        poles = _safe_int_for_edit(b.get("poles"))
-
-        if amps is None or poles is None:
-            continue
-
-        try:
-            count = int(b.get("count", 1) or 1)
-        except Exception:
-            count = 1
-
-        if count <= 0:
-            continue
-
-        option = _normalize_breaker_option(
-            b.get("specialFeatures")
-            or b.get("special_features")
-            or b.get("breakerOption")
-            or b.get("breaker_option")
-            or ""
-        )
-
-        key = (amps, poles, option)
-        grouped[key] = grouped.get(key, 0) + count
-
-    return grouped
-
-
-def _format_breaker_key_for_edit(key) -> str:
-    amps, poles, option = key
-    base = f"{poles}P {amps}A"
-    if option:
-        return f"{base} {option}"
-    return base
-
-
-def _build_panel_edit_changes(old_component: dict, new_component: dict) -> list[str]:
-    """
-    Build human-readable edit lines like:
-      int rating: 30K -> 22K
-      bus amps: 1200A -> 200A
-      removed 1 - 1P 20A
-      added 1 - 2P 20A
-    """
-
-    old_component = old_component or {}
-    new_component = new_component or {}
-
-    old_attrs = old_component.get("attrs") or {}
-    new_attrs = new_component.get("attrs") or {}
-
-    changes = []
-
-    field_specs = [
-        ("bus amps", old_attrs.get("amperage"), new_attrs.get("amperage"), "A", True),
-        ("volts", old_attrs.get("voltage"), new_attrs.get("voltage"), "V", True),
-        ("main amps", old_attrs.get("mainBreakerAmperage"), new_attrs.get("mainBreakerAmperage"), "A", True),
-        ("int rating", old_attrs.get("intRating"), new_attrs.get("intRating"), "K", True),
-        ("spaces", old_attrs.get("spaces"), new_attrs.get("spaces"), "", True),
-
-        # These can be injected by modal/defaults, so only log if old value existed.
-        ("material", old_attrs.get("material") or old_attrs.get("bussingMaterial") or old_attrs.get("bussing_material"), new_attrs.get("material") or new_attrs.get("bussingMaterial") or new_attrs.get("bussing_material"), "", False),
-        ("rating", old_attrs.get("ratingType") or old_attrs.get("rating_type") or old_attrs.get("panelRatingType"), new_attrs.get("ratingType") or new_attrs.get("rating_type") or new_attrs.get("panelRatingType"), "", False),
-        ("trim", old_attrs.get("trimStyle") or old_attrs.get("trim_style"), new_attrs.get("trimStyle") or new_attrs.get("trim_style"), "", False),
-        ("enclosure", old_attrs.get("enclosure"), new_attrs.get("enclosure"), "", False),
-    ]
-
-    # Panel name is top-level, not attrs.
-    old_name = old_component.get("name")
-    new_name = new_component.get("name")
-    if str(old_name or "").strip() != str(new_name or "").strip():
-        changes.append(f"name: {_fmt_edit_value(old_name)} -> {_fmt_edit_value(new_name)}")
-
-    for label, old_val, new_val, suffix, always_log_if_changed in field_specs:
-        if not always_log_if_changed and old_val in (None, "", "NONE", "-", "X"):
-            continue
-
-        old_display = _fmt_edit_value(old_val, suffix)
-        new_display = _fmt_edit_value(new_val, suffix)
-
-        if str(old_display).strip().upper() != str(new_display).strip().upper():
-            changes.append(f"{label}: {old_display} -> {new_display}")
-
-    old_breakers = _breaker_group_map_for_edit(old_attrs.get("detected_breakers") or [])
-    new_breakers = _breaker_group_map_for_edit(new_attrs.get("detected_breakers") or [])
-
-    all_keys = sorted(
-        set(old_breakers.keys()) | set(new_breakers.keys()),
-        key=lambda k: (int(k[1]), int(k[0]), str(k[2] or ""))
-    )
-
-    for key in all_keys:
-        old_count = int(old_breakers.get(key, 0) or 0)
-        new_count = int(new_breakers.get(key, 0) or 0)
-
-        if old_count == new_count:
-            continue
-
-        label = _format_breaker_key_for_edit(key)
-        delta = new_count - old_count
-
-        if old_count == 0 and new_count > 0:
-            changes.append(f"added {new_count} - {label}")
-        elif new_count == 0 and old_count > 0:
-            changes.append(f"removed {old_count} - {label}")
-        elif delta > 0:
-            changes.append(f"added {delta} - {label}")
-        else:
-            changes.append(f"removed {abs(delta)} - {label}")
-
-    return changes
-
-
-def _append_panel_edit_log(job_dir: Path, job_id: str, old_component: dict, new_component: dict) -> dict:
-    """
-    Append one edit event to edits.json.
-
-    File shape:
-    {
-      "job_id": "...",
-      "updated_at_utc": "...",
-      "edits": [
-        {
-          "edited_at_utc": "...",
-          "panel_original": "HC",
-          "panel_current": "HC",
-          "changes": [...]
-        }
-      ]
-    }
-    """
-
-    path = _edit_log_path(job_dir)
-
-    existing = _json_read_or_none(path) or {}
-    if not isinstance(existing, dict):
-        existing = {}
-
-    edits = existing.get("edits") or []
-    if not isinstance(edits, list):
-        edits = []
-
-    changes = _build_panel_edit_changes(old_component, new_component)
-
-    if not changes:
-        changes = ["No meaningful field changes detected."]
-
-    now = _now_utc().isoformat()
-
-    event = {
-        "edited_at_utc": now,
-        "panel_original": str((old_component or {}).get("name") or "").strip(),
-        "panel_current": str((new_component or {}).get("name") or "").strip(),
-        "changes": changes,
-    }
-
-    edits.append(event)
-
-    payload = {
-        "job_id": job_id,
-        "updated_at_utc": now,
-        "edits": edits,
-    }
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
-
-    return payload
-
-@anvil.server.callable
-def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel_name: str, edited_component: dict, original_source_path: str = None) -> dict:
-    """
-    Fast rules-only rerun after the user edits one panel.
-
-    IMPORTANT:
-    - Does NOT enter the normal job queue.
-    - Does NOT rerun OCR.
-    - Does NOT rerender PDF/images.
-    - Does NOT touch worker subprocesses.
-    - Only reads result.json, swaps one component, reruns RulesEngine, writes result.json.
-    """
-
-    if not job_id or not str(job_id).strip():
-        return {"ok": False, "error": "Missing job_id."}
-
-    if not owner_email or not str(owner_email).strip():
-        return {"ok": False, "error": "Missing owner_email."}
-
-    if (not original_panel_name or not str(original_panel_name).strip()) and (not original_source_path or not str(original_source_path).strip()):
-        return {"ok": False, "error": "Missing original_panel_name or original_source_path."}
-
-    if not isinstance(edited_component, dict):
-        return {"ok": False, "error": "edited_component must be a dict."}
-
-    job_id = str(job_id).strip()
-    owner_email = str(owner_email).strip().lower()
-    original_panel_name = str(original_panel_name or "").strip()
-    original_source_path = str(original_source_path or "").strip().replace("\\", "/")
-
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-
-    status = _json_read_or_none(sp["status"]) or {}
-    if not status:
-        return {"ok": False, "error": f"Unknown job_id: {job_id}"}
-
-    job_owner = str(
-        status.get("owner_email")
-        or status.get("owner_id")
-        or ""
-    ).strip().lower()
-
-    if not job_owner or job_owner != owner_email:
-        return {"ok": False, "error": "Owner mismatch."}
-
-    state = str(status.get("state") or "").strip().lower()
-    if state != "done":
-        return {
-            "ok": False,
-            "error": f"Cannot edit this job yet. Current state: {state or 'unknown'}."
-        }
-
-    result = _json_read_or_none(sp["result"]) or {}
-    if not isinstance(result, dict) or not result:
-        return {"ok": False, "error": "Could not load saved result.json."}
-
-    components = result.get("components") or []
-    if not isinstance(components, list):
-        return {"ok": False, "error": "Saved result does not contain a valid components list."}
-
-    def _norm_name(value):
-        return str(value or "").strip().upper()
-
-    def _norm_path_for_edit(value):
-        s = str(value or "").strip().replace("\\", "/")
-        while "//" in s:
-            s = s.replace("//", "/")
-        return s
-
-    target_norm = _norm_name(original_panel_name)
-    target_source = _norm_path_for_edit(original_source_path)
-    target_source_l = target_source.lower()
-    target_source_base_l = target_source_l.split("/")[-1] if target_source_l else ""
-
-    cleaned = dict(edited_component)
-    cleaned["type"] = "panelboard"
-
-    attrs = cleaned.get("attrs") or {}
-    if not isinstance(attrs, dict):
-        attrs = {}
-    cleaned["attrs"] = attrs
-
-    # User manually fixed the panel, so parser skip flags should not survive.
-    cleaned.pop("_skipped", None)
-    cleaned.pop("reason", None)
-
-    replaced = False
-    old_component_for_edit_log = None
-
-    def _component_source_matches(comp: dict) -> bool:
-        if not target_source_l:
-            return False
-
-        candidates = (
-            comp.get("source"),
-            comp.get("overlay_source"),
-            comp.get("overlaySource"),
-            comp.get("preview_source"),
-            comp.get("previewSource"),
-            comp.get("reviewOverlayPath"),
-            comp.get("review_overlay_path"),
-        )
-
-        for cand in candidates:
-            cand_n = _norm_path_for_edit(cand).lower()
-            if not cand_n:
-                continue
-
-            cand_base = cand_n.split("/")[-1]
-
-            if cand_n == target_source_l or (target_source_base_l and cand_base == target_source_base_l):
-                return True
-
-        return False
-
-    def _replace_component_at(idx: int, comp: dict):
-        nonlocal replaced, old_component_for_edit_log
-
-        # Preserve visual/source/status metadata unless the edited component explicitly supplied it.
-        for key in (
-            "source",
-            "overlay_source",
-            "overlaySource",
-            "preview_source",
-            "previewSource",
-            "reviewOverlayPath",
-            "review_overlay_path",
-            "panelStatus",
-            "panelNote",
-            "specialHeaderType",
-        ):
-            if key not in cleaned and key in comp:
-                cleaned[key] = comp.get(key)
-
-        old_component_for_edit_log = _deep_copy_jsonable(comp)
-        components[idx] = cleaned
-        replaced = True
-
-    # 1) Source match first. This lets bad/problem edits target the exact crop.
-    if target_source_l:
-        for idx, comp in enumerate(components):
-            if not isinstance(comp, dict):
-                continue
-
-            if str(comp.get("type") or "").strip().lower() != "panelboard":
-                continue
-
-            if not _component_source_matches(comp):
-                continue
-
-            _replace_component_at(idx, comp)
-            break
-
-    # 2) Backward-compatible name match for normal BOM-card edits.
-    if not replaced and target_norm:
-        for idx, comp in enumerate(components):
-            if not isinstance(comp, dict):
-                continue
-
-            if str(comp.get("type") or "").strip().lower() != "panelboard":
-                continue
-
-            if _norm_name(comp.get("name")) != target_norm:
-                continue
-
-            _replace_component_at(idx, comp)
-            break
-
-    if not replaced:
-        return {"ok": False, "error": f"Panel not found: {original_panel_name or original_source_path}"}
-
-    edit_log_payload = _append_panel_edit_log(
-        job_dir=job_dir,
-        job_id=job_id,
-        old_component=old_component_for_edit_log or {},
-        new_component=cleaned,
-    )
-
-    ui_overrides = (
-        result.get("ui_overrides")
-        or status.get("ui_overrides")
-        or _DEFAULT_OVERRIDES
-    )
-
-    # Mirror the normal final processing step, but only for rules.
-    rules_payload = _build_rules_payload(ui_overrides, components)
-
-    try:
-        new_rules_result = RE2.process_job(rules_payload) or {}
-    except Exception as e:
-        new_rules_result = {
-            "error": f"{type(e).__name__}: {e}"
-        }
-
-    result["components"] = components
-    result["rules_result"] = new_rules_result
-    result["ui_overrides"] = ui_overrides
-    result["manually_edited"] = True
-    result["last_edited_panel"] = cleaned.get("name") or original_panel_name
-    result["last_edited_at_utc"] = _now_utc().isoformat()
-    result["edit_log_path"] = str(_edit_log_path(job_dir))
-    result["edit_log"] = edit_log_payload
-
-    _result_write(job_dir, result)
-
-    _status_write(
-        job_dir,
-        "done",
-        result_path=str(sp["result"]),
-        progress=100.0,
-        manually_edited=True,
-        last_edited_panel=cleaned.get("name") or original_panel_name,
-        last_edited_at_utc=result["last_edited_at_utc"],
-        edit_log_path=str(_edit_log_path(job_dir)),
-        edit_count=len((edit_log_payload or {}).get("edits") or []),
-    )
-
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "result": result
-    }
 
 # ---------- Queue / Pool state ----------
 _JOB_Q: "Queue[tuple[str,str]]" = Queue()
@@ -1055,11 +588,9 @@ _WORKER_SLOTS: list[_WorkerSlot] = [_WorkerSlot() for _ in range(MAX_WORKERS)]
 _SPAWN_LOCK = threading.Lock()  # serializes env-var set/start/unset across slots
 
 def _enqueue_job(job_id: str, owner_id: str):
-    """Put a (job_id, owner_id) tuple onto the shared job queue for worker threads to dequeue."""
     _JOB_Q.put((job_id, owner_id))
 
 def _enter_inflight(owner_id: str) -> bool:
-    """Try to increment the per-user inflight count; return False if at MAX_INFLIGHT_PER_USER."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         if c >= MAX_INFLIGHT_PER_USER:
@@ -1068,18 +599,15 @@ def _enter_inflight(owner_id: str) -> bool:
         return True
 
 def _leave_inflight(owner_id: str):
-    """Decrement the per-user inflight count (floor at 0)."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         _INFLIGHT_BY_USER[owner_id] = max(0, c - 1)
 
 # ---------- Cancel helpers ----------
 def _cancel_path(job_dir: Path) -> Path:
-    """Return the path to the .cancel marker file used to signal job cancellation."""
     return job_dir / ".cancel"
 
 def _is_canceled(job_dir: Path) -> bool:
-    """Check whether a job has been marked as canceled by the presence of its .cancel file."""
     return _cancel_path(job_dir).exists()
 
 def _peek_owner_id(job_dir: Path) -> str:
@@ -1106,7 +634,6 @@ def _is_queue_timed_out(job_dir: Path) -> tuple[bool, int | None]:
 
 # ---------- Shared helpers for component mapping ----------
 def _to_int_or_none(x):
-    """Parse *x* as an integer (stripping commas); return None on failure."""
     try:
         return int(str(x).replace(",", "").strip())
     except Exception:
@@ -2131,7 +1658,7 @@ def vm_delete_specs_job(job_id: str, owner_email: str) -> bool:
         return False
 
 def _natural_key(p: Path):
-    """Generate a natural sort key so 'page2' sorts before 'page10'."""
+    # Sort like page2 before page10
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 @anvil.server.callable
@@ -2187,7 +1714,6 @@ def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
 
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str) -> list[str]:
-    """RPC callable: return job-relative paths of per-panel review overlay PNGs."""
     if not job_id:
         return []
     job_root = (BASE_JOBS_DIR / job_id).resolve()
@@ -2266,7 +1792,6 @@ def vm_set_watchdog_timeout(minutes: int) -> dict:
 
 @anvil.server.callable
 def vm_get_watchdog_timeout() -> int:
-  """RPC callable: return the current watchdog timeout in minutes."""
   return int(WATCHDOG_TIMEOUT_MIN)
 
 def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[int | None, int]:
@@ -2499,15 +2024,6 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
                 "progress": float(st.get("progress", 0.0) or 0.0),
                 "image_count": int(st.get("image_count", 0) or 0),
                 "cycle_time_str": (st.get("cycle_time_str") or ""),
-
-                # Manual edit marker for My Jobs page
-                "manually_edited": bool(
-                    st.get("manually_edited")
-                    or st.get("manual_edit")
-                    or st.get("edited")
-                ),
-                "last_edited_panel": st.get("last_edited_panel") or "",
-                "last_edited_at_utc": st.get("last_edited_at_utc") or "",
             }
             rows.append(row)
 
