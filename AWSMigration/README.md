@@ -54,6 +54,8 @@ different EC2 instance. For day-to-day use, substitute
 |---|---|
 | `provision-aws-uplink.sh` | Idempotent bootstrap script run on the AWS box as `root`. Installs deps, generates a GitHub deploy key for the `ubuntu` user, clones the repo, creates the venv at `/home/ubuntu/venv/`, writes the systemd unit. Does NOT start, enable, or otherwise auto-run the uplink. |
 | `paperspace-freeze.txt` | Canonical `pip freeze` from production Paperspace. Used as the authoritative install spec for the AWS venv to avoid drift between `MISC/requirements.txt` and actual production. The filename refers to the source of the freeze (Paperspace), not the install target. |
+| `SSH-ACCESS.md` | How team members set up `ssh argus-prod-aws` via SSM Session Manager (IAM + EC2 key). Secrets stay out of git — Marco sends keys separately. |
+| `setup-ssh-access.sh` | One-time laptop bootstrap referenced by `SSH-ACCESS.md` (AWS CLI, Session Manager plugin, SSH config). |
 | `HANDOFF.md` | Concrete step-by-step execution plan, designed to be the first file a new agent reads when resuming this work. |
 
 ## End-to-end workflow
