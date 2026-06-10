@@ -2204,26 +2204,6 @@ def vm_fetch_image(job_id: str, owner_email: str, source_path: str):
     return BlobMedia(ctype, p.read_bytes(), name=p.name)
 
 @anvil.server.callable
-def vm_set_queue_timeout(minutes: int) -> dict:
-  """
-  Set the queue timeout (minutes) at runtime.
-  Persists only for this process lifetime.
-  """
-  global QUEUE_TIMEOUT_MIN
-  try:
-    m = int(minutes)
-    if m < 1 or m > 120:
-      raise ValueError("minutes must be between 1 and 120")
-    QUEUE_TIMEOUT_MIN = m
-    return {"ok": True, "queue_timeout_min": QUEUE_TIMEOUT_MIN}
-  except Exception as e:
-    return {"ok": False, "error": str(e), "queue_timeout_min": QUEUE_TIMEOUT_MIN}
-
-@anvil.server.callable
-def vm_get_queue_timeout() -> int:
-  return int(QUEUE_TIMEOUT_MIN)
-
-@anvil.server.callable
 def vm_set_watchdog_timeout(minutes: int) -> dict:
   """
   Set the watchdog timeout (minutes) at runtime.
