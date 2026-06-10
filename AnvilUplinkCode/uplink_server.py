@@ -2164,29 +2164,37 @@ def vm_list_overlay_images(job_id: str) -> list[str]:
     return [str(p.relative_to(job_root)) for p in sorted(overlay_dir.glob("*.png"))]
 
 @anvil.server.callable
-def vm_fetch_image(job_id: str, source_path: str):
+def vm_fetch_image(job_id: str, owner_email: str, source_path: str):
     """
     Return an image as BlobMedia.
     Accepts either:
       - absolute paths inside this job folder, OR
       - job-relative paths like: 'pdf_images/review_overlays/foo.png'
     """
-    if not job_id or not source_path:
-        raise RuntimeError("job_id and source_path are required")
+    if not job_id or not owner_email or not source_path:
+        raise RuntimeError("job_id, owner_email, and source_path are required")
+
+    owner_email = str(owner_email).strip().lower()
 
     job_root = (BASE_JOBS_DIR / job_id).resolve()
+    sp = _status_paths(job_root)
+    st = _json_read_or_none(sp["status"]) or {}
+
+    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+    if not job_owner or job_owner != owner_email:
+        raise RuntimeError("Owner mismatch")
 
     raw = str(source_path).strip().replace("\\", "/")
     p_in = Path(raw)
 
-    # If client sent a relative path, interpret it under the job folder.
     if not p_in.is_absolute():
         p = (job_root / p_in).resolve()
     else:
         p = p_in.resolve()
 
-    # Security: ensure requested file is inside this job folder
-    if not str(p).startswith(str(job_root)):
+    try:
+        p.relative_to(job_root)
+    except ValueError:
         raise RuntimeError(f"Invalid image path for this job: {raw}")
 
     if not p.is_file():
