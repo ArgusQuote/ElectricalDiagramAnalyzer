@@ -1452,7 +1452,17 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         }
 
         _result_write(job_dir, result)
-        _status_write(job_dir, "done", result_path=str(_status_paths(job_dir)["result"]), progress=100.0)
+        _status_write(
+            job_dir,
+            "done",
+            result_path=str(_status_paths(job_dir)["result"]),
+            image_count=len(imgs),
+            component_count=len(components),
+            progress=100.0,
+            step="done",
+            cycle_time_ms=cycle_time_ms,
+            cycle_time_str=cycle_time_str,
+        )
         _jobs_upsert(job_id, state="done", updated_at=_now_utc(), result_json=result)
         print(f">>> worker done: {job_id}")
 
@@ -1918,18 +1928,9 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
     return {
         "ok": True,
         "job_id": job_id,
-        "job_dir": str(job_dir),
-        "saved_pdf": str(saved_pdf),
-        "output_dir": str(job_dir / "pdf_images"),
-        "images": [],                  # not rendered yet
-        "image_count": 0,              # not rendered yet
-        "ui_overrides": normalized_overrides,
-        "noticed_ts_ms": noticed_ts_ms,
-        "owner_email": owner_email,
-        "owner_id": owner_email,
-        "node_id": NODE_ID,
+        "images": [],
+        "image_count": 0,
         "state": "queued",
-        "deferred_render": True
     }
 
 @anvil.server.callable
@@ -2291,116 +2292,180 @@ def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[in
     return (None, active_count)
 
 @anvil.server.callable
-def vm_get_job_result(job_id: str, owner_email: str) -> dict:
+def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
     """
-    Fetch the completed result for a job.
-    This is separate from vm_get_job_status so polling stays lightweight.
+    Return saved result.json for a completed job.
+    This should never return {} silently.
     """
-    if not job_id or not owner_email:
+    try:
+        job_id = str(job_id or "").strip()
+        req_email = str(owner_email or "").strip().lower()
+
+        if not job_id:
+            return {"ok": False, "error": "Missing job_id."}
+
+        if "/" in job_id or "\\" in job_id or ".." in job_id:
+            return {"ok": False, "error": "Job not found. Please resubmit your PDF."}
+
+        job_dir = (BASE_JOBS_DIR / job_id).resolve()
+        sp = _status_paths(job_dir)
+
+        status = _json_read_or_none(sp["status"]) or {}
+
+        if not isinstance(status, dict) or not status:
+            return {
+                "ok": False,
+                "error": "Job not found. Please resubmit your PDF.",
+                "debug_job_id": job_id,
+                "debug_job_dir": str(job_dir),
+                "debug_status_path": str(sp["status"]),
+                "debug_status_exists": sp["status"].exists(),
+            }
+
+        job_email = str(
+            status.get("owner_email")
+            or status.get("owner_id")
+            or ""
+        ).strip().lower()
+
+        if req_email and job_email and req_email != job_email:
+            return {
+                "ok": False,
+                "error": "Job not found. Please resubmit your PDF.",
+                "debug_req_email": req_email,
+                "debug_job_email": job_email,
+            }
+
+        # Prefer explicit result_path from status.json if present.
+        result_path_raw = str(status.get("result_path") or "").strip()
+        if result_path_raw:
+            result_path = Path(result_path_raw)
+        else:
+            result_path = sp["result"]
+
+        result = _json_read_or_none(result_path) or {}
+
+        if not isinstance(result, dict) or not result:
+            return {
+                "ok": False,
+                "error": "Could not load saved result.json.",
+                "debug_job_id": job_id,
+                "debug_job_dir": str(job_dir),
+                "debug_result_path": str(result_path),
+                "debug_result_exists": result_path.exists(),
+                "debug_status_result_path": result_path_raw,
+                "debug_status_state": status.get("state"),
+            }
+
+        # Always wrap result for Anvil client.
         return {
-            "ok": False,
-            "error": "job_id and owner_email are required"
+            "ok": True,
+            "result": result
         }
 
-    owner_email = str(owner_email or "").strip().lower()
-    job_dir = BASE_JOBS_DIR / job_id
-    sp = _status_paths(job_dir)
-
-    st = _json_read_or_none(sp["status"])
-    if not st:
+    except Exception as e:
         return {
             "ok": False,
-            "error": f"Unknown job_id {job_id}"
+            "error": f"Result fetch failed: {type(e).__name__}: {e}"
         }
-
-    job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-
-    if not owner_email or not job_email or owner_email != job_email:
-        return {
-            "ok": False,
-            "error": "Owner mismatch"
-        }
-
-    state = str(st.get("state") or "").strip().lower()
-    if state != "done":
-        return {
-            "ok": False,
-            "error": f"Job is not done yet. Current state: {state}"
-        }
-
-    result = _json_read_or_none(sp["result"]) or {}
-
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "result": result
-    }
 
 @anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str) -> dict:
     """Status primarily from disk; does not return final result. Enforces ownership by email."""
+    job_id = str(job_id or "").strip()
+    owner_email = str(owner_email or "").strip().lower()
+
+    if not job_id or not owner_email:
+        return {
+            "state": "not_found",
+            "error": "Job not found. Please resubmit your PDF."
+        }
+
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+        return {
+            "state": "not_found",
+            "error": "Job not found. Please resubmit your PDF."
+        }
+
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
 
     st = _json_read_or_none(sp["status"])
-    if not st:
-        return {"state": "error", "error": f"Unknown job_id {job_id}"}
+    if not isinstance(st, dict) or not st:
+        return {
+            "state": "not_found",
+            "error": "Job not found. Please resubmit your PDF."
+        }
 
-    req_email = str(owner_email or "").strip().lower()
+    req_email = owner_email
     job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
 
-    # Optional node hint (non-fatal)
-    job_node = (st.get("node_id") or "").strip()
+    # Optional node hint
+    job_node = str(st.get("node_id") or "").strip()
     node_hint = {"node_id": NODE_ID}
     if job_node and job_node != NODE_ID:
-        node_hint.update({"job_node_id": job_node})
+        node_hint["job_node_id"] = job_node
 
-    if not req_email or not job_email:
-        return {"state": "not_found", **node_hint}
-
-    # ENFORCE OWNERSHIP
-    if req_email != job_email:
-        return {"state": "not_found", **node_hint}
-
-    state = (st.get("state") or "unknown").lower()
-    if st.get("canceled") is True and state != "done":
-        return {"state": "canceled", **node_hint}
-
-    if state == "done":
+    if not req_email or not job_email or req_email != job_email:
         return {
-            "state": "done",
-            "job_id": job_id,
-            "progress": 100.0,
-            "result_ready": True,
+            "state": "not_found",
+            "error": "Job not found. Please resubmit your PDF.",
             **node_hint
         }
-    if state == "error":
-        out = {
-            "state": "error",
-            "error": st.get("error") or "Unknown error",
-            **node_hint
-        }
-        for k in ("queue_timeout", "queue_timeout_min", "queue_age_ms", "queue_age_str"):
-            if k in st:
-                out[k] = st[k]
-        return out
 
-    out = {"state": state, **node_hint}
-    for k in ("step", "image_count", "ui_overrides", "noticed_ts_ms",
-            "cycle_time_str", "cycle_time_ms", "progress"):
+    state = str(st.get("state") or "unknown").strip().lower()
+
+    if st.get("canceled") is True and state != "done":
+        return {
+            "state": "canceled",
+            **node_hint
+        }
+
+    # Build one status object for ALL states so fields do not disappear.
+    out = {
+        "state": state,
+        "job_id": job_id,
+        **node_hint
+    }
+
+    # Always pass through lightweight status fields the processing UI needs.
+    for k in (
+        "step",
+        "progress",
+        "image_count",
+        "component_count",
+        "items",
+        "detected_images",
+        "kept_pages",
+        "dropped_pages",
+        "noticed_ts_ms",
+        "cycle_time_ms",
+        "cycle_time_str",
+        "queue_timeout",
+        "queue_timeout_min",
+        "queue_age_ms",
+        "queue_age_str",
+    ):
         if k in st:
             out[k] = st[k]
 
-    if state in ("queued", "running"):
-        queue_position, active_count = _get_queue_position(job_id, req_email)
-        if queue_position is not None:
-            out["queue_position"] = int(queue_position)
-        out["active_count"] = int(active_count)
+    if state == "done":
+        out["progress"] = 100.0
+        out["result_ready"] = True
+        return out
 
-    if "noticed_ts_ms" in st and isinstance(st["noticed_ts_ms"], int):
-        elapsed_ms = max(0, _epoch_ms() - int(st["noticed_ts_ms"]))
-        out["elapsed_ms"]  = elapsed_ms
-        out["elapsed_str"] = _fmt_cycle_time(elapsed_ms)
+    if state == "error":
+        out["error"] = st.get("error") or "Unknown error"
+        return out
+
+    if state in ("queued", "running"):
+        try:
+            queue_position, active_count = _get_queue_position(job_id, req_email)
+            if queue_position is not None:
+                out["queue_position"] = int(queue_position)
+            out["active_count"] = int(active_count)
+        except Exception:
+            pass
 
     return out
 
