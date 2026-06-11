@@ -1,0 +1,520 @@
+from ._anvil_designer import processingTemplate
+from anvil import *
+from routing import router
+import stripe.checkout
+import anvil.server
+import anvil.users
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+import anvil.server, anvil.users, json
+from anvil import js
+from .. import router_state
+
+class processing(processingTemplate):
+  """
+  A true loading screen with:
+    - Async upload/submit (doesn't freeze UI)
+    - Live status polling with backoff
+    - Cancel button
+    - Automatic handoff to `output` when done
+  """
+  def __init__(self, file=None, ui_overrides=None, job_note=None, job_id=None, job_name=None, **properties):
+    self.init_components(**properties)
+
+    # FULL WIDTH
+    self.set_event_handler("show", self._force_full_width_everywhere)
+
+    if not anvil.users.get_user():
+      self._restore_spinner()
+      self._go("landing", replace=True)
+      return
+    
+    # One-time entitlement check
+    try:
+      ent = anvil.server.call("is_current_user_entitled") or {}
+      if not ent.get("ok"):
+        alert("Your access is not active. Please contact your admin.")
+        self._restore_spinner()
+        self._go("upload", replace=True)
+        return
+    except Exception:
+      self._restore_spinner()
+      self._go("landing", replace=True)
+      return
+  
+    self._phase = "init"
+    self._job_id = (job_id or "").strip()
+    self._job_name = (job_name or "").strip()
+    self._poll_backoff = 1.0
+    self._last_status_text = ""   # to debounce UI updates
+
+    # Progress / items widgets (Label or TextBox—doesn't matter)
+    self._processing_prcnt = getattr(self, "processing_prcnt", None)
+    self._det_items = getattr(self, "det_items", None)
+    self._safe_set_text(self._processing_prcnt, "Processing: --%")
+    self._safe_set_text(self._det_items, "Items Detected: 0")
+    
+    # Use your existing widgets
+    self._img = getattr(self, "image_1", None)
+    self._status_lbl = getattr(self, "label_status", None)
+  
+    # Make sure only your label shows (hide any extra labels/spinners you added earlier)
+    for name in ("title_lbl", "sub_lbl", "progress_lbl", "eta_lbl", "spinner"):
+      c = getattr(self, name, None)
+      if c:
+        try: c.visible = False
+        except: pass
+  
+    # Show an initial line
+    self._set_status("Processing…")
+
+    # --- Hide Anvil's global spinner while this form is open ---
+    self._css_node = None
+    try:
+      from anvil import js
+      css = """
+      .anvil-loading-indicator,
+      .anvil-loading,
+      .anvil-spinner,
+      .anvil-loading-overlay {
+        display: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }"""
+      node = js.document.createElement("style")
+      node.type = "text/css"
+      node.setAttribute("data-argus", "no-spinner")
+      node.appendChild(js.document.createTextNode(css))
+      js.document.head.appendChild(node)
+      self._css_node = node
+    except Exception:
+      pass
+    
+    # Timers
+    if not hasattr(self, "poll_timer"):
+      self.poll_timer = Timer(interval=0)
+      self.poll_timer.set_event_handler('tick', self._poll_once)
+      self.add_component(self.poll_timer)
+    else:
+      self.poll_timer.interval = 0
+      self.poll_timer.set_event_handler('tick', self._poll_once)
+  
+    # Cancel (if you have a button named cancel_btn)
+    if hasattr(self, "cancel_btn"):
+      self.cancel_btn.set_event_handler('click', self._cancel_clicked)
+  
+    # Start flow
+    if file:
+      self._job_id = ""
+    else:
+      if self._job_id:
+        self._phase = "queued"
+        self._set_status("Processing…\nQueued")
+        self._begin_polling()
+        return
+    
+      alert("Missing job info. Please resubmit your PDF.")
+      self._to_upload(replace=True)
+      return
+
+    # Submit now (async if available; else sync)
+    try:
+      self._phase = "uploading"
+      self._set_status("Processing…\nUploading PDF")
+      call_async_fn = getattr(anvil.server, "call_async", None)
+      if callable(call_async_fn):
+        fut = call_async_fn("submit_for_detection", file, (ui_overrides or {}), job_note=job_note)
+        fut.set_event_handler('success', lambda r, **e: self._on_submit_ok(r))
+        fut.set_event_handler('failure', lambda err, **e: self._on_submit_fail(err))
+      else:
+        resp = anvil.server.call("submit_for_detection", file, (ui_overrides or {}), job_note=job_note)
+        self._on_submit_ok(resp)
+    except Exception as err:
+      self._on_submit_fail(err)
+
+  def _force_full_width_everywhere(self, **e):
+    try:
+      js.window.setTimeout(self._force_full_width_now, 0)
+    except Exception:
+      self._force_full_width_now()
+
+  def _force_full_width_now(self):
+    try:
+      node = js.get_dom_node(self)
+
+      # Walk up and kill max-width on every ancestor (this is what actually fixes "skinny")
+      el = node
+      hops = 0
+      while el is not None and hops < 60:
+        try:
+          s = el.style
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("width", "100%", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+        except Exception:
+          pass
+
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+
+        hops += 1
+
+      # Optional: small horizontal padding so it’s not edge-to-edge
+      try:
+        node.style.setProperty("padding-left", "24px", "important")
+        node.style.setProperty("padding-right", "24px", "important")
+      except Exception:
+        pass
+
+    except Exception:
+      pass
+
+  def _set_hash(self, name: str, replace: bool = False):
+    # replace=True is your "replace_current_url=True" equivalent
+    try:
+      if replace:
+        js.window.history.replaceState(None, "", f"#{name}")
+      else:
+        js.window.location.hash = name
+    except Exception:
+      pass
+  
+  def _restore_spinner(self):
+    # undo the CSS you injected that hides Anvil’s global spinner
+    try:
+      if getattr(self, "_css_node", None):
+        self._css_node.remove()
+        self._css_node = None
+    except Exception:
+      pass
+        
+  def _go(self, hash_name: str, replace: bool = False):
+    try:
+      if replace:
+        js.window.history.replaceState(None, "", f"#{hash_name}")
+      else:
+        js.window.location.hash = hash_name
+    except Exception:
+      pass
+  
+  def _to_output(self, finished: dict):
+    try:
+      self._closed = True
+    except Exception:
+      pass
+  
+    try:
+      self.poll_timer.interval = 0
+    except Exception:
+      pass
+  
+    router_state.output_args = {
+      "result": (finished or {}),
+      "job_name": (self._job_name or "")
+    }
+  
+    self._restore_spinner()
+    self._go("output2") #  -------------------------------------------------------------------------output is original... output2 is the new experimental look----------------------------------------
+  
+  def _to_upload(self, replace: bool = False):
+    self._restore_spinner()
+    self._go("upload", replace=replace)
+
+  # ---------- Submit handlers ----------
+  def _on_submit_ok(self, submit_resp):
+    try:
+      self._job_id = (submit_resp or {}).get("job_id") or ""
+      if not self._job_id:
+        raise Exception(f"No job_id from submit_for_detection. Server said: {submit_resp}")
+  
+      try:
+        router_state.processing_args = None
+      except Exception:
+        pass
+  
+      self._phase = "queued"
+      self._set_status("Processing…\nQueued")
+  
+      try:
+        _ = anvil.server.call("get_job_status", self._job_id)
+      except Exception:
+        pass
+  
+      self._begin_polling()
+    except Exception as e:
+      self._on_submit_fail(e)
+  
+  def _on_submit_fail(self, err):
+    self._phase = "error"
+    print("SUBMIT FAIL:", repr(err))
+    alert("Upload failed. Please try again.", title="Upload failed")
+    self._to_upload(replace=True)
+    return
+
+  # ---------- UI helpers ----------
+  def _set_status(self, text: str):
+    if not isinstance(self._status_lbl, Label):
+      return
+    # Debounce: only update if changed
+    if text != self._last_status_text:
+      self._status_lbl.text = text
+      self._last_status_text = text
+
+  def _safe_set_text(self, comp, value):
+    """Set .text on Label/TextBox/RichText if available; ignore otherwise."""
+    try:
+      if comp is not None and hasattr(comp, "text"):
+        comp.text = value
+    except Exception:
+      pass
+    
+  def _pretty_step(self, step: str) -> str:
+    """
+    Convert backend step strings into clean, user-facing copy.
+    Examples:
+      'finding_panels'       -> 'Finding panels'
+      'parsing'              -> 'Analyzing drawings'
+      'analyzing_item_3'     -> 'Analyzing item 3'
+      'finalizing_bom'       -> 'Finalizing BOM'
+    """
+    import re
+    s = (step or "").strip().lower()
+    if not s:
+      return ""
+    if s in ("queued", "uploading"):
+      return s.capitalize()
+    if s in ("parsing", "analyzing", "processing"):
+      return "Analyzing drawings"
+    if s in ("finding_relevant_pages",):
+      return "Finding relevant pages"
+    if s in ("finding_components", "finding_panels", "detecting_panels"):
+      return "Finding components"
+    if s in ("removing_false_positives",):
+      return "Removing false positives"
+    m = re.match(r".*?(?:item[_\s-]*|#)(\d+)", s)
+    if m:
+      return f"Analyzing item {m.group(1)}"
+    if "final" in s:
+      return "Finalizing BOM"
+    # Default: Title Case words, swap underscores for spaces
+    return s.replace("_", " ").title()
+
+  def _format_percent(self, p):
+    """
+    Accepts 0–100 or 0–1 scales.
+    Returns a string like '23%'. Uses floor/truncation to match 23.333 -> 23%.
+    """
+    try:
+      val = float(p)
+    except Exception:
+      return None
+    if val <= 1.0001:   # treat as 0–1
+      val *= 100.0
+    if val < 0: val = 0.0
+    if val > 100: val = 100.0
+    return f"{int(val)}%"
+
+  def _write_progress(self, status: dict):
+    try:
+      # --- progress ---
+      prog = (
+        status.get("progress", None)
+        if status.get("progress", None) is not None
+        else status.get("pct", None)
+      )
+  
+      if prog is None:
+        prog = (status.get("meta", {}) or {}).get("progress")
+  
+      pct_txt = self._format_percent(prog)
+      if pct_txt:
+        self._safe_set_text(self._processing_prcnt, f"Processing: {pct_txt}")
+  
+        # --- items detected ---
+        # Prefer component_count because that is the real "items found" count.
+      items = status.get("component_count", None)
+  
+      if items is None:
+        items = status.get("image_count", None)
+  
+      if items is None:
+        items = status.get("items", None)
+  
+      if items is None:
+        items = status.get("detected_images", None)
+  
+      if items is None:
+        meta = status.get("meta", {}) or {}
+        items = meta.get("component_count", None)
+        if items is None:
+          items = meta.get("image_count", None)
+  
+      if items is not None:
+        try:
+          items_int = int(float(items))
+        except Exception:
+          items_int = items
+  
+        self._safe_set_text(self._det_items, f"Items Detected: {items_int}")
+  
+    except Exception:
+      pass
+  
+  # ---------- Polling ----------
+  def _begin_polling(self):
+    self._poll_backoff = 1.0
+    self.poll_timer.interval = 0.2
+
+  def _fetch_result_and_go(self):
+    """
+      Fetch the completed job result after polling confirms state='done'.
+      Keeps polling lightweight and prevents large result payloads from breaking status updates.
+      """
+    try:
+      call_async_fn = getattr(anvil.server, "call_async", None)
+  
+      if callable(call_async_fn):
+        fut = call_async_fn("get_job_result", self._job_id)
+        fut.set_event_handler("success", lambda r, **e: self._on_result_fetch_ok(r))
+        fut.set_event_handler("failure", lambda err, **e: self._on_result_fetch_fail(err))
+      else:
+        resp = anvil.server.call("get_job_result", self._job_id)
+        self._on_result_fetch_ok(resp)
+  
+    except Exception as err:
+      self._on_result_fetch_fail(err)
+  
+  
+  def _on_result_fetch_ok(self, resp):
+    try:
+      if not resp or not resp.get("ok"):
+        raise Exception(
+          (resp or {}).get("error")
+          or f"Unknown result fetch error. Response was: {resp}"
+        )
+  
+      finished = resp.get("result") or {}
+  
+      if not finished:
+        raise Exception(f"Empty result payload. Response was: {resp}")
+  
+      self._to_output(finished)
+  
+    except Exception as err:
+      self._on_result_fetch_fail(err)
+  
+  def _on_result_fetch_fail(self, err):
+      self._phase = "error"
+      print("RESULT FETCH FAIL:", repr(err))
+      alert("Processing finished, but the result could not be loaded. Please try again.",
+            title="Result unavailable")
+      self._to_upload()
+  
+  def _poll_once(self, **e):
+    try:
+      if not self._job_id:
+        self.poll_timer.interval = 0; return
+  
+      status = anvil.server.call("get_job_status", self._job_id) or {}
+      self._write_progress(status)
+      state = (status.get("state") or "unknown").lower()
+      raw_step = status.get("step") or ""
+      pretty = self._pretty_step(raw_step)
+  
+      if state == "queued":
+        self._phase = "queued"
+        qp = status.get("queue_position", None)
+      
+        if isinstance(qp, int):
+          if qp == 1:
+            line2 = "Queued — 1 job ahead of you"
+          elif qp > 1:
+            line2 = f"Queued — {qp} jobs ahead of you"
+          else:
+            line2 = "Queued"
+        else:
+          line2 = "Queued"
+      
+        self._set_status(f"Processing…\n{line2}")
+        self._poll_backoff = 1.0
+        self.poll_timer.interval = 1.0
+        return
+  
+      if state == "running":
+        self._phase = "running"
+        # Always "Processing…" on line 1, step (if any) on line 2
+        line2 = pretty or "Working"
+        self._set_status(f"Processing…\n{line2}")
+        self._poll_backoff = 1.0
+        self.poll_timer.interval = 1.0
+        return
+  
+      if state == "unknown" and (status.get("error") == "uplink_disconnected"):
+        self._phase = "unknown"
+        self._set_status("Processing…\nReconnecting")
+        self._poll_backoff = min(3.0, self._poll_backoff + 0.5)
+        self.poll_timer.interval = self._poll_backoff
+        return
+  
+      if state == "done":
+        self._write_progress(status)
+        self.poll_timer.interval = 0
+        self._phase = "done"
+        self._set_status("Processing…\nLoading results")
+        self._fetch_result_and_go()
+        return
+  
+      if state == "error":
+        self.poll_timer.interval = 0
+        self._phase = "error"
+        print("PROCESSING ERROR STATUS:", status)
+        alert("Processing failed. Please try again.", title="Processing failed")
+        self._to_upload()
+        return
+            
+      if state == "not_found":
+        self.poll_timer.interval = 0
+        self._phase = "not_found"
+        alert("This job could not be found. Please resubmit your PDF.",
+              title="Job not found")
+        self._to_upload()
+        return
+  
+      # Fallback: unknown → keep trying
+      self._set_status("Processing…\nReconnecting")
+      self._poll_backoff = min(3.0, self._poll_backoff + 0.5)
+      self.poll_timer.interval = self._poll_backoff
+  
+    except Exception as e:
+      if "UplinkDisconnectedError" in str(type(e)) or "Uplink disconnected" in str(e):
+        self._set_status("Processing…\nReconnecting")
+        self._poll_backoff = min(3.0, self._poll_backoff + 0.5)
+        self.poll_timer.interval = self._poll_backoff
+        return
+      self.poll_timer.interval = 0
+      self._phase = "error"
+      print("POLLING ERROR:", repr(e))
+      alert("Connection error while checking job status. Please try again.",
+      title="Status unavailable")
+      self._to_upload()
+      return
+
+  # ---------- Cancel ----------
+  def _cancel_clicked(self, **e):
+    if not self._job_id:
+      self._phase = "canceled"
+      self._to_upload()
+      return
+    try:
+      anvil.server.call('cancel_job', self._job_id)
+    except Exception:
+      pass
+    self._phase = "canceled"
+    Notification("Job canceled", timeout=1.5).show()
+    self._to_upload()
+    return

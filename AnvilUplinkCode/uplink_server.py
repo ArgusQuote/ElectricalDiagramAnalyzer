@@ -1,11 +1,12 @@
 # Anvil Uplink VM (disk only) + Rules Engine defaults + cycle-time
 # -------------------------------
-import os, re, json, sys, threading, traceback
+import os, re, json, sys, threading, traceback, uuid
 import contextlib
+import shutil
 from multiprocessing import get_context
 from queue import Queue, Empty
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import anvil.server
 import platform
 import os as _os
@@ -19,6 +20,17 @@ if str(REPO_ROOT) not in sys.path:
 # Put jobs directly under the home directory
 BASE_JOBS_DIR = Path.home() / "jobs"
 BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+
+EXCLUDED_JOB_RETENTION_HOURS = 24
+EXCLUDED_JOB_MARKER_FILENAME = "ARGUS_EXCLUDED_FROM_IMPROVEMENT_REVIEW_README.txt"
+
+EXCLUDED_JOB_MARKER_TEXT = """This job was excluded from Argus improvement review.
+
+Raw PDF is deleted after processing.
+Processed job artifacts are retained for up to 24 hours so the user can view, edit, regenerate, and download results.
+After 24 hours, the full job folder should be automatically deleted.
+Do not use this job for troubleshooting, QA review, style analysis, training, or product improvement unless the customer explicitly authorizes it.
+"""
 
 # ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
 PANEL_FINDER_DEFAULTS = {
@@ -212,11 +224,177 @@ def _iso_to_stamp(s: str) -> str:
     except Exception:
         return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-def _make_job_dir(job_note: str, fallback_filename: str) -> Path:
+def _safe_folder_key(value: str, fallback: str = "ungrouped") -> str:
+    s = str(value or "").strip().lower()
+    s = re.sub(r"[^a-z0-9._-]+", "_", s)
+    s = s.strip("._-")
+    return s or fallback
+
+
+def _owner_folder_key(owner_email: str) -> str:
+    # readable but safe
+    s = str(owner_email or "").strip().lower().replace("@", "_at_")
+    return _safe_folder_key(s, "user")
+
+
+def _group_users_root(group_folder: str) -> Path:
+    group_key = _safe_folder_key(group_folder, "ungrouped")
+    return (BASE_JOBS_DIR / "groups" / group_key / "users").resolve()
+
+
+def _user_jobs_root(owner_email: str, group_folder: str) -> Path:
+    return (_group_users_root(group_folder) / _owner_folder_key(owner_email)).resolve()
+
+
+def _assert_under_base(path: Path) -> Path:
+    path = Path(path).resolve()
+    base = BASE_JOBS_DIR.resolve()
+    if base not in path.parents and path != base:
+        raise RuntimeError("Path escaped jobs directory.")
+    return path
+
+
+def _resolve_job_dir_for_owner(job_id: str, owner_email: str, group_folder: str = None) -> Path | None:
+    """
+    Resolve a user-owned job path without trusting the client.
+    Checks new grouped storage first, then legacy flat storage for old jobs.
+    """
+    job_id = str(job_id or "").strip()
+    owner_email = str(owner_email or "").strip().lower()
+    group_folder = _safe_folder_key(group_folder or "personal", "personal")
+
+    if not job_id or not owner_email:
+        return None
+
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+        return None
+
+    candidates = []
+
+    # New grouped path
+    candidates.append(_user_jobs_root(owner_email, group_folder) / job_id)
+
+    # Legacy flat path fallback so current jobs do not disappear immediately.
+    candidates.append(BASE_JOBS_DIR / job_id)
+
+    for cand in candidates:
+        try:
+            cand = _assert_under_base(cand)
+        except Exception:
+            continue
+
+        sp = _status_paths(cand)
+        st = _json_read_or_none(sp["status"]) or {}
+        if not isinstance(st, dict) or not st:
+            continue
+
+        job_owner = str(
+            st.get("owner_email")
+            or st.get("owner_id")
+            or ""
+        ).strip().lower()
+
+        if job_owner != owner_email:
+            continue
+
+        # If status has group_folder, require it to match for grouped jobs.
+        st_group = _safe_folder_key(st.get("group_folder") or group_folder, group_folder)
+        if st_group and group_folder and st_group != group_folder:
+            continue
+
+        return cand
+
+    return None
+
+
+def _resolve_job_dir_any(job_id: str) -> Path | None:
+    """
+    Worker-only resolver.
+    Finds a job by id under grouped storage or legacy flat storage.
+    Job ids should be globally unique due to suffix in _make_job_dir().
+    """
+    job_id = str(job_id or "").strip()
+
+    if not job_id or "/" in job_id or "\\" in job_id or ".." in job_id:
+        return None
+
+    legacy = BASE_JOBS_DIR / job_id
+    try:
+        legacy = _assert_under_base(legacy)
+        if (_status_paths(legacy)["status"]).exists():
+            return legacy
+    except Exception:
+        pass
+
+    groups = BASE_JOBS_DIR / "groups"
+    try:
+        if groups.is_dir():
+            for p in groups.rglob(job_id):
+                if not p.is_dir():
+                    continue
+                try:
+                    p = _assert_under_base(p)
+                except Exception:
+                    continue
+                if (_status_paths(p)["status"]).exists():
+                    return p
+    except Exception:
+        pass
+
+    return None
+
+
+def _iter_job_dirs_for_owner(owner_email: str, group_folder: str = None):
+    """
+    Yield grouped jobs for this owner, plus legacy flat jobs for backwards compatibility.
+    """
+    owner_email = str(owner_email or "").strip().lower()
+    group_folder = _safe_folder_key(group_folder or "personal", "personal")
+
+    if not owner_email:
+        return
+
+    # New grouped jobs
+    root = _user_jobs_root(owner_email, group_folder)
+    try:
+        root = _assert_under_base(root)
+        if root.is_dir():
+            for d in root.iterdir():
+                if d.is_dir():
+                    yield d
+    except Exception:
+        pass
+
+    # Legacy flat jobs
+    try:
+        for d in BASE_JOBS_DIR.iterdir():
+            if not d.is_dir():
+                continue
+            if d.name == "groups":
+                continue
+
+            st = _json_read_or_none(_status_paths(d)["status"]) or {}
+            st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+            if st_owner == owner_email:
+                yield d
+    except Exception:
+        pass
+
+def _make_job_dir(job_note: str, fallback_filename: str, owner_email: str = "", group_folder: str = "personal") -> Path:
     meta = _parse_job_note(job_note)
     job_name = _slugify(meta.get("job_name") or Path(fallback_filename).stem)
     stamp = _iso_to_stamp(meta.get("submitted_at_utc") or "")
-    job_dir = BASE_JOBS_DIR / f"{job_name}__{stamp}"
+
+    # Add a short suffix so job_id remains globally unique even inside grouped folders.
+    suffix = uuid.uuid4().hex[:8]
+    job_id = f"{job_name}__{stamp}__{suffix}"
+
+    root = _user_jobs_root(owner_email, group_folder)
+    root.mkdir(parents=True, exist_ok=True)
+
+    job_dir = root / job_id
+    job_dir = _assert_under_base(job_dir)
+
     (job_dir / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
     (job_dir / "pdf_images").mkdir(parents=True, exist_ok=True)
     return job_dir
@@ -309,6 +487,106 @@ def _result_write(dir_path: Path, result: dict):
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
 
+def _utc_iso_z(dt=None) -> str:
+    dt = dt or datetime.now(timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _excluded_delete_after_utc() -> str:
+    return _utc_iso_z(datetime.now(timezone.utc) + timedelta(hours=EXCLUDED_JOB_RETENTION_HOURS))
+
+
+def _write_excluded_job_marker(job_dir: Path):
+    try:
+        marker = Path(job_dir) / EXCLUDED_JOB_MARKER_FILENAME
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(EXCLUDED_JOB_MARKER_TEXT)
+    except Exception as e:
+        print(f">>> excluded marker write failed: {e}")
+
+
+def _is_excluded_job_expired(status: dict) -> bool:
+    if not isinstance(status, dict):
+        return False
+
+    if not bool(status.get("exclude_from_improvement")):
+        return False
+
+    delete_after = str(status.get("delete_after_utc") or "").strip()
+    if not delete_after:
+        return False
+
+    try:
+        dt = datetime.fromisoformat(delete_after.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) >= dt.astimezone(timezone.utc)
+    except Exception:
+        return False
+
+
+def _cleanup_expired_excluded_jobs():
+    """
+    Deletes full job folders for excluded jobs once their 24-hour retention expires.
+    Safe to run often.
+    Handles both legacy flat jobs and grouped jobs.
+    """
+    try:
+        if not BASE_JOBS_DIR.is_dir():
+            return
+
+        candidates = []
+
+        # Legacy flat jobs directly under BASE_JOBS_DIR
+        try:
+            for job_dir in BASE_JOBS_DIR.iterdir():
+                if not job_dir.is_dir():
+                    continue
+                if job_dir.name == "groups":
+                    continue
+                candidates.append(job_dir)
+        except Exception:
+            pass
+
+        # Grouped jobs under BASE_JOBS_DIR/groups/<group>/users/<user>/<job>
+        groups_root = BASE_JOBS_DIR / "groups"
+        try:
+            if groups_root.is_dir():
+                for status_path in groups_root.rglob("status.json"):
+                    try:
+                        candidates.append(status_path.parent)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        seen = set()
+        for job_dir in candidates:
+            try:
+                job_dir = _assert_under_base(job_dir)
+            except Exception:
+                continue
+
+            key = str(job_dir)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            sp = _status_paths(job_dir)
+            st = _json_read_or_none(sp["status"]) or {}
+
+            if not _is_excluded_job_expired(st):
+                continue
+
+            try:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                print(f">>> deleted expired excluded job: {job_dir}")
+            except Exception as e:
+                print(f">>> failed deleting expired excluded job {job_dir}: {e}")
+
+    except Exception as e:
+        print(f">>> excluded cleanup sweep failed: {e}")
+
 # ----- Data Tables helpers (disabled here; leave no-ops) -----
 def _jobs_upsert(job_id: str, **fields):
     return
@@ -385,10 +663,11 @@ def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
     """
     keep: set[str] = set()
 
-    # Always keep status/result
+    # Always keep status/result/edit log/excluded marker
     keep.add("status.json")
     keep.add("result.json")
     keep.add("edits.json")
+    keep.add(EXCLUDED_JOB_MARKER_FILENAME)
 
     pdf_images = job_dir / "pdf_images"
     if not pdf_images.is_dir():
@@ -782,7 +1061,7 @@ def _append_panel_edit_log(job_dir: Path, job_id: str, old_component: dict, new_
     return payload
 
 @anvil.server.callable
-def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel_name: str, edited_component: dict, original_source_path: str = None) -> dict:
+def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: str, original_panel_name: str, edited_component: dict, original_source_path: str = None) -> dict:
     """
     Fast rules-only rerun after the user edits one panel.
 
@@ -811,12 +1090,22 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel
     original_panel_name = str(original_panel_name or "").strip()
     original_source_path = str(original_source_path or "").strip().replace("\\", "/")
 
-    job_dir = BASE_JOBS_DIR / job_id
+    job_dir = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    if job_dir is None:
+        return {"ok": False, "error": "Job not found. Please resubmit your PDF."}
     sp = _status_paths(job_dir)
 
     status = _json_read_or_none(sp["status"]) or {}
     if not status:
         return {"ok": False, "error": f"Unknown job_id: {job_id}"}
+
+    if _is_excluded_job_expired(status):
+        try:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            print(f">>> deleted expired excluded job on edit rerun: {job_dir}")
+        except Exception:
+            pass
+        return {"ok": False, "error": "Job not found. Please resubmit your PDF."}
 
     job_owner = str(
         status.get("owner_email")
@@ -1009,6 +1298,7 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, original_panel
 _JOB_Q: "Queue[tuple[str,str]]" = Queue()
 _INFLIGHT_BY_USER: dict[str, int] = {}
 _Q_LOCK = threading.RLock()
+_SUBMIT_LOCK = threading.RLock()
 _WORKERS: list[threading.Thread] = []
 _STOP = threading.Event()
 _SPECS_RUNNING: dict[str, bool] = {}
@@ -1209,6 +1499,34 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
 
     return comp
 
+def _finalize_canceled_job(job_dir: Path, job_id: str, noticed_ts_ms=None, step="canceled"):
+    """
+    Final cancel cleanup called by the worker once it notices .cancel.
+    Removes the job folder so it disappears from My Jobs.
+    """
+    try:
+        _status_write(
+            job_dir,
+            "canceled",
+            canceled=True,
+            step=step,
+            noticed_ts_ms=noticed_ts_ms,
+            progress=0.0,
+        )
+    except Exception:
+        pass
+
+    try:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        print(f">>> canceled job folder deleted: {job_id}")
+    except Exception as e:
+        print(f">>> canceled job folder delete failed [{job_id}]: {e}")
+
+    try:
+        _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
+    except Exception:
+        pass
+
 # ---------- Core job processing ----------
 def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
     """
@@ -1219,13 +1537,17 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
     """
     if pipeline is None:
         pipeline = BreakerTablePipeline(debug=True)
-    job_dir = BASE_JOBS_DIR / job_id
+    job_dir = _resolve_job_dir_any(job_id)
+    if job_dir is None:
+        print(f">>> worker could not resolve job_id: {job_id}")
+        return
     sp = _status_paths(job_dir)
 
     try:
         print(f">>> worker start: {job_id}")
         _log_run_fingerprint(f"job_start:{job_id}")
         prev = _json_read_or_none(sp["status"]) or {}
+        exclude_from_improvement = bool(prev.get("exclude_from_improvement"))
         print(f">>> DIAG worker prev keys: {sorted(list(prev.keys()))}")
         print(f">>> DIAG worker prev.owner_id: {str(prev.get('owner_id') or '').strip().lower()!r}")
 
@@ -1237,9 +1559,8 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
         # Respect early cancel
         if _is_canceled(job_dir):
-            _status_write(job_dir, "canceled", **_prev_carry, noticed_ts_ms=noticed_ts_ms, progress=0.0)
-            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
             print(f">>> worker canceled before start: {job_id}")
+            _finalize_canceled_job(job_dir, job_id, noticed_ts_ms=noticed_ts_ms, step="canceled_before_start")
             return
 
         # First running write — owner_id should still be present in _prev_carry
@@ -1300,9 +1621,8 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             raise RuntimeError("PDF rendered but produced no crops/images.")
 
         if _is_canceled(job_dir):
-            _status_write(job_dir, "canceled", step="rendered", noticed_ts_ms=noticed_ts_ms, progress=5.0)
-            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
             print(f">>> worker canceled after render: {job_id}")
+            _finalize_canceled_job(job_dir, job_id, noticed_ts_ms=noticed_ts_ms, step="canceled_after_render")
             return
 
         print(f">>> parsing {len(imgs)} images")
@@ -1323,10 +1643,8 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         components = [None] * total  # preserve order
         for idx, img_path in enumerate(imgs):
             if _is_canceled(job_dir):
-                pct = 20.0 + (done / max(1, total)) * 80.0
-                _status_write(job_dir, "canceled", step="parsing", image_count=total, noticed_ts_ms=noticed_ts_ms, progress=pct)
-                _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
                 print(f">>> worker canceled mid-parse: {job_id}")
+                _finalize_canceled_job(job_dir, job_id, noticed_ts_ms=noticed_ts_ms, step="canceled_mid_parse")
                 return
 
             try:
@@ -1390,9 +1708,8 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
         # ---- RUN RULES with defaults ----
         _status_write(job_dir, "running", step="rules", image_count=len(imgs), noticed_ts_ms=noticed_ts_ms, progress=95.0)
         if _is_canceled(job_dir):
-            _status_write(job_dir, "canceled", step="rules", noticed_ts_ms=noticed_ts_ms, progress=95.0)
-            _jobs_upsert(job_id, state="canceled", updated_at=_now_utc())
             print(f">>> worker canceled before rules: {job_id}")
+            _finalize_canceled_job(job_dir, job_id, noticed_ts_ms=noticed_ts_ms, step="canceled_before_rules")
             return
 
         ui_defaults = prev.get("ui_overrides") or _DEFAULT_OVERRIDES
@@ -1438,7 +1755,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             "ok": True,
             "job_id": job_id,
             "job_dir": str(job_dir),
-            "saved_pdf": first_pdf,
+            "saved_pdf": "" if exclude_from_improvement else first_pdf,
             "output_dir": "",
             "images": [],
             "image_count": len(imgs),
@@ -1449,6 +1766,9 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             "cycle_time_str": cycle_time_str,
             "noticed_ts_ms": noticed_ts_ms,
             "parse_done_ts_ms": parse_done_ts_ms,
+            "exclude_from_improvement": exclude_from_improvement,
+            "retention_mode": "excluded_24h" if exclude_from_improvement else "standard",
+            "delete_after_utc": prev.get("delete_after_utc"),
         }
 
         _result_write(job_dir, result)
@@ -1462,22 +1782,55 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
             step="done",
             cycle_time_ms=cycle_time_ms,
             cycle_time_str=cycle_time_str,
+            exclude_from_improvement=exclude_from_improvement,
+            retention_mode="excluded_24h" if exclude_from_improvement else "standard",
+            delete_after_utc=prev.get("delete_after_utc"),
+            raw_pdf_deleted=exclude_from_improvement,
+            file_path="" if exclude_from_improvement else prev.get("file_path", ""),
         )
         _jobs_upsert(job_id, state="done", updated_at=_now_utc(), result_json=result)
         print(f">>> worker done: {job_id}")
 
         # ---- AUTO CLEANUP (keep only what UI uses) ----
         try:
-            keep = _collect_keep_relpaths(job_dir, keep_pdf=True)
+            if exclude_from_improvement:
+                _write_excluded_job_marker(job_dir)
+
+            keep = _collect_keep_relpaths(job_dir, keep_pdf=(not exclude_from_improvement))
             _cleanup_job_dir(job_dir, keep)
-            print(f">>> cleanup complete: kept {len(keep)} files")
+
+            print(
+                f">>> cleanup complete: kept {len(keep)} files | "
+                f"exclude_from_improvement={exclude_from_improvement}"
+            )
         except Exception as ce:
             print(f">>> cleanup failed: {ce}")
 
     except Exception as e:
         tb = traceback.format_exc()
         print(f">>> worker error [{job_id}]: {e}\n{tb}")
-        _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
+
+        try:
+            prev = _json_read_or_none(sp["status"]) or {}
+            exclude_from_improvement = bool(prev.get("exclude_from_improvement"))
+        except Exception:
+            exclude_from_improvement = False
+
+        _status_write(
+            job_dir,
+            "error",
+            error=f"{type(e).__name__}: {e}",
+            raw_pdf_deleted=exclude_from_improvement,
+            file_path="" if exclude_from_improvement else None,
+        )
+
+        if exclude_from_improvement:
+            try:
+                _write_excluded_job_marker(job_dir)
+                _cleanup_job_dir(job_dir, {"status.json", EXCLUDED_JOB_MARKER_FILENAME})
+            except Exception as ce:
+                print(f">>> excluded error cleanup failed: {ce}")
+
         _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=f"{type(e).__name__}: {e}")
 
 # ---------- Persistent worker subprocess ----------
@@ -1537,8 +1890,9 @@ def _persistent_worker_main(slot_idx, job_q, done_q):
             tb = traceback.format_exc()
             print(f">>> Worker [{tag}] job error [{job_id}]: {e}\n{tb}")
             try:
-                job_dir = BASE_JOBS_DIR / job_id
-                _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
+                job_dir = _resolve_job_dir_any(job_id)
+                if job_dir is not None:
+                    _status_write(job_dir, "error", error=f"{type(e).__name__}: {e}")
             except Exception:
                 pass
             done_q.put(("error", job_id, f"{type(e).__name__}: {e}"))
@@ -1644,9 +1998,9 @@ def _dequeue_loop(idx: int):
         except Empty:
             continue
 
-        job_dir = BASE_JOBS_DIR / job_id
+        job_dir = _resolve_job_dir_any(job_id)
 
-        if not job_dir.exists():
+        if job_dir is None or not job_dir.exists():
             _JOB_Q.task_done()
             continue
 
@@ -1668,6 +2022,14 @@ def _dequeue_loop(idx: int):
                 queue_timeout=True, queue_timeout_min=QUEUE_TIMEOUT_MIN,
                 queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
             )
+
+            if bool(st.get("exclude_from_improvement")):
+                try:
+                    _write_excluded_job_marker(job_dir)
+                    _cleanup_job_dir(job_dir, {"status.json", EXCLUDED_JOB_MARKER_FILENAME})
+                except Exception as ce:
+                    print(f">>> excluded queue-timeout cleanup failed: {ce}")
+
             _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
             print(f">>> queue timeout: {job_id} | age={age_str} | limit={QUEUE_TIMEOUT_MIN} min")
             _JOB_Q.task_done()
@@ -1691,6 +2053,14 @@ def _dequeue_loop(idx: int):
                     queue_timeout=True, queue_timeout_min=QUEUE_TIMEOUT_MIN,
                     queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
                 )
+
+                if bool(st.get("exclude_from_improvement")):
+                    try:
+                        _write_excluded_job_marker(job_dir)
+                        _cleanup_job_dir(job_dir, {"status.json", EXCLUDED_JOB_MARKER_FILENAME})
+                    except Exception as ce:
+                        print(f">>> excluded queue-timeout cleanup failed: {ce}")
+
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
                 print(f">>> queue timeout (pre-start): {job_id} | age={age_str}")
                 continue
@@ -1724,7 +2094,11 @@ def _dequeue_loop(idx: int):
 
                 _status_write(job_dir, "error", error=msg)
                 try:
-                    _cleanup_job_dir(job_dir, {"status.json"})
+                    st_after_error = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
+                    if bool(st_after_error.get("exclude_from_improvement")):
+                        _cleanup_job_dir(job_dir, {"status.json", EXCLUDED_JOB_MARKER_FILENAME})
+                    else:
+                        _cleanup_job_dir(job_dir, {"status.json"})
                 except Exception:
                     pass
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
@@ -1850,6 +2224,66 @@ if not _IS_WORKER_SUBPROCESS:
         print(f">>> Worker pool startup failed: {e}")
         print(traceback.format_exc())
 
+def _active_job_for_owner(owner_email: str, group_folder: str = "personal") -> dict | None:
+    """
+    Return the user's active queued/running job, if any.
+    Excludes canceled/done/error jobs and deletes expired excluded jobs opportunistically.
+    """
+    owner_email = str(owner_email or "").strip().lower()
+    if not owner_email:
+        return None
+
+    try:
+        if not BASE_JOBS_DIR.is_dir():
+            return None
+
+        for job_dir in _iter_job_dirs_for_owner(owner_email, group_folder):
+            if not job_dir.is_dir():
+                continue
+
+            sp = _status_paths(job_dir)
+            st = _json_read_or_none(sp["status"]) or {}
+            if not isinstance(st, dict) or not st:
+                continue
+
+            if _is_excluded_job_expired(st):
+                try:
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                continue
+
+            job_owner = str(
+                st.get("owner_email")
+                or st.get("owner_id")
+                or ""
+            ).strip().lower()
+
+            if job_owner != owner_email:
+                continue
+
+            state = str(st.get("state") or "").strip().lower()
+            canceled = bool(st.get("canceled"))
+
+            if canceled:
+                continue
+
+            if state in ("queued", "running", "unknown"):
+                meta = _parse_job_note(st.get("job_note") or "")
+                return {
+                    "job_id": job_dir.name,
+                    "job_name": meta.get("job_name") or job_dir.name,
+                    "state": state or "unknown",
+                    "step": st.get("step"),
+                    "progress": st.get("progress"),
+                    "created_at": st.get("created_at"),
+                }
+
+    except Exception as e:
+        print(f">>> active job check failed for {owner_email}: {e}")
+
+    return None
+
 # ---------- API: submit / status / list / cancel ----------
 @anvil.server.callable
 def vm_ping():
@@ -1857,7 +2291,38 @@ def vm_ping():
     return {"ok": True, "node_id": NODE_ID}
 
 @anvil.server.callable
-def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email=None):
+def vm_get_active_job_for_user(owner_email: str, group_folder: str = "personal") -> dict:
+    owner_email = str(owner_email or "").strip().lower()
+    group_folder = _safe_folder_key(group_folder or "personal", "personal")
+
+    if not owner_email:
+        return {"ok": False, "active": False}
+
+    active = _active_job_for_owner(owner_email, group_folder)
+    if active:
+        return {
+            "ok": True,
+            "active": True,
+            "job": active
+        }
+
+    return {
+        "ok": True,
+        "active": False
+    }
+
+@anvil.server.callable
+def vm_submit_for_detection(
+    media,
+    ui_overrides=None,
+    job_note=None,
+    owner_email=None,
+    group_folder="personal",
+    access_code_value="",
+    plan_key="",
+    company_name="",
+    exclude_from_improvement=False
+):
     """
     Create job folder, save PDF, record 'noticed' time, render images, persist normalized overrides, enqueue worker.
     Ownership is always the lowercased email address.
@@ -1866,72 +2331,84 @@ def vm_submit_for_detection(media, ui_overrides=None, job_note=None, owner_email
         raise RuntimeError("owner_email required")
 
     owner_email = str(owner_email).strip().lower()
+    group_folder = _safe_folder_key(group_folder or "personal", "personal")
+    access_code_value = str(access_code_value or "").strip()
+    plan_key = str(plan_key or "").strip().lower()
+    company_name = str(company_name or "").strip()
 
-    original_name = getattr(media, "name", "uploaded.pdf")
-    job_dir = _make_job_dir(job_note, original_name)
-    job_id = job_dir.name
-    print(f">>> vm_submit_for_detection: job_dir={job_dir}, owner_email={owner_email!r}")
+    exclude_from_improvement = bool(exclude_from_improvement)
 
-    # 1) Save the uploaded PDF
-    pdf_dir = job_dir / "uploaded_pdfs"
-    pdf_dir.mkdir(parents=True, exist_ok=True)
-    saved_pdf = _save_media_to_disk(media, pdf_dir)
-    print(f">>> saved_pdf={saved_pdf}")
+    # Opportunistic cleanup 
+    _cleanup_expired_excluded_jobs()
 
-    # 2) Normalize overrides
-    normalized_overrides = _normalize_ui_overrides(ui_overrides if isinstance(ui_overrides, dict) else {})
+    with _SUBMIT_LOCK:
+        active = _active_job_for_owner(owner_email, group_folder)
+        if active:
+            return {
+                "ok": False,
+                "state": "active_job_exists",
+                "error": "You already have a job processing. Please wait for it to finish or cancel it from My Jobs.",
+                "active_job": active,
+            }
 
-    # 3) Record "noticed" time immediately
-    noticed_ts_ms = _epoch_ms()
+        original_name = getattr(media, "name", "uploaded.pdf")
+        job_dir = _make_job_dir(job_note, original_name, owner_email=owner_email, group_folder=group_folder)
+        job_id = job_dir.name
+        print(f">>> vm_submit_for_detection: job_dir={job_dir}, owner_email={owner_email!r}")
 
-    # 4) Persist initial status BEFORE any heavy work
-    _status_write(
-        job_dir,
-        "queued",
-        created_at=_now_utc().isoformat(),
-        file_path=str(saved_pdf),
-        job_dir_path=str(job_dir),
-        ui_overrides=normalized_overrides,
-        job_note=(job_note or ""),
-        image_count=0,                 # unknown yet
-        step="received",               # explicit early step
-        noticed_ts_ms=noticed_ts_ms,
-        owner_email=owner_email,
-        owner_id=owner_email,
-        node_id=NODE_ID,
-        canceled=False,
-        progress=0.0
-    )
+        # 1) Save the uploaded PDF
+        pdf_dir = job_dir / "uploaded_pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        saved_pdf = _save_media_to_disk(media, pdf_dir)
+        print(f">>> saved_pdf={saved_pdf}")
 
-    # 5) (Optional) upsert – store meta with zero images for now
-    meta = _parse_job_note(job_note or "")
-    _jobs_upsert(
-        job_id,
-        state="queued",
-        created_at=_now_utc(),
-        updated_at=_now_utc(),
-        job_dir=str(job_dir),
-        file_path=str(saved_pdf),
-        job_note=(job_note or ""),
-        user_email=meta.get("user") or "",
-        image_count=0,                 # unknown yet
-        ui_overrides=normalized_overrides,
-        owner_email=owner_email,
-        owner_id=owner_email,
-        node_id=NODE_ID,
-    )
+        # 2) Normalize overrides
+        normalized_overrides = _normalize_ui_overrides(ui_overrides if isinstance(ui_overrides, dict) else {})
 
-    # 6) Enqueue (worker will render/parse/rule)
-    _enqueue_job(job_id, owner_email)
+        # 3) Record noticed time immediately
+        noticed_ts_ms = _epoch_ms()
 
-    print(f">>> Job queued: {job_id} (deferred render)")
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "images": [],
-        "image_count": 0,
-        "state": "queued",
-    }
+        # 4) Persist initial status BEFORE enqueueing
+        _status_write(
+            job_dir,
+            "queued",
+            group_folder=group_folder,
+            owner_folder=_owner_folder_key(owner_email),
+            access_code_value=access_code_value,
+            plan_key=plan_key,
+            company_name=company_name,
+            created_at=_now_utc().isoformat(),
+            file_path=str(saved_pdf),
+            job_dir_path=str(job_dir),
+            ui_overrides=normalized_overrides,
+            job_note=(job_note or ""),
+            image_count=0,
+            step="received",
+            noticed_ts_ms=noticed_ts_ms,
+            owner_email=owner_email,
+            owner_id=owner_email,
+            node_id=NODE_ID,
+            canceled=False,
+            progress=0.0,
+            exclude_from_improvement=exclude_from_improvement,
+            retention_mode=("excluded_24h" if exclude_from_improvement else "standard"),
+            delete_after_utc=(_excluded_delete_after_utc() if exclude_from_improvement else None),
+            raw_pdf_deleted=False
+        )
+
+        if exclude_from_improvement:
+            _write_excluded_job_marker(job_dir)
+
+        _enqueue_job(job_id, owner_email)
+
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "state": "queued",
+            "node_id": NODE_ID,
+            "group_folder": group_folder,
+            "exclude_from_improvement": exclude_from_improvement,
+        }
 
 @anvil.server.callable
 def vm_upload_specs_pdf(media, owner_email=None, job_name=""):
@@ -2127,7 +2604,7 @@ def _natural_key(p: Path):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 @anvil.server.callable
-def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
+def vm_list_magenta_overlay_images(job_id: str, owner_email: str, group_folder: str = "personal") -> list[str]:
     """
     Returns job-relative PNG paths for FULL-PAGE magenta overlays.
     Enforces ownership.
@@ -2141,9 +2618,20 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
     if "/" in job_id or "\\" in job_id or ".." in job_id:
         return []
 
-    job_root = (BASE_JOBS_DIR / job_id).resolve()
+    job_root = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    if job_root is None:
+        return []
+
     sp = _status_paths(job_root)
     st = _json_read_or_none(sp["status"]) or {}
+
+    if _is_excluded_job_expired(st):
+        try:
+            shutil.rmtree(job_root, ignore_errors=True)
+            print(f">>> deleted expired excluded job on magenta overlay list: {job_root}")
+        except Exception:
+            pass
+        return []
 
     job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
     if not job_owner or job_owner != owner_email:
@@ -2186,7 +2674,7 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
     return rel_paths
 
 @anvil.server.callable
-def vm_list_overlay_images(job_id: str, owner_email: str) -> list[str]:
+def vm_list_overlay_images(job_id: str, owner_email: str, group_folder: str = "personal") -> list[str]:
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
 
@@ -2196,9 +2684,20 @@ def vm_list_overlay_images(job_id: str, owner_email: str) -> list[str]:
     if "/" in job_id or "\\" in job_id or ".." in job_id:
         return []
 
-    job_root = (BASE_JOBS_DIR / job_id).resolve()
+    job_root = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    if job_root is None:
+        return []
+
     sp = _status_paths(job_root)
     st = _json_read_or_none(sp["status"]) or {}
+
+    if _is_excluded_job_expired(st):
+        try:
+            shutil.rmtree(job_root, ignore_errors=True)
+            print(f">>> deleted expired excluded job on overlay list: {job_root}")
+        except Exception:
+            pass
+        return []
 
     job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
     if not job_owner or job_owner != owner_email:
@@ -2218,7 +2717,7 @@ def vm_list_overlay_images(job_id: str, owner_email: str) -> list[str]:
     return out
 
 @anvil.server.callable
-def vm_fetch_image(job_id: str, owner_email: str, source_path: str):
+def vm_fetch_image(job_id: str, owner_email: str, source_path: str, group_folder: str = "personal"):
     """
     Return an image as BlobMedia.
     Accepts only job-relative paths inside this job folder.
@@ -2241,9 +2740,20 @@ def vm_fetch_image(job_id: str, owner_email: str, source_path: str):
     if ".." in p_in.parts:
         raise RuntimeError("Image unavailable.")
 
-    job_root = (BASE_JOBS_DIR / job_id).resolve()
+    job_root = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    if job_root is None:
+        raise RuntimeError("Image unavailable.")
+
     sp = _status_paths(job_root)
     st = _json_read_or_none(sp["status"]) or {}
+
+    if _is_excluded_job_expired(st):
+        try:
+            shutil.rmtree(job_root, ignore_errors=True)
+            print(f">>> deleted expired excluded job on image fetch: {job_root}")
+        except Exception:
+            pass
+        raise FileNotFoundError("Job not found. Please resubmit your PDF.")
 
     job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
     if not job_owner or job_owner != owner_email:
@@ -2305,7 +2815,13 @@ def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[in
     active_count:
       count of jobs on this node that are still queued/running
     """
-    job_dir = BASE_JOBS_DIR / job_id
+    job_id = str(job_id or "").strip()
+    owner_email = str(owner_email or "").strip().lower()
+
+    job_dir = _resolve_job_dir_any(job_id)
+    if job_dir is None:
+        return (None, 0)
+
     sp = _status_paths(job_dir)
     target = _json_read_or_none(sp["status"]) or {}
     if not target:
@@ -2324,11 +2840,43 @@ def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[in
         target_node = NODE_ID
 
     rows = []
-    for d in BASE_JOBS_DIR.iterdir():
-        if not d.is_dir():
+
+    # Scan grouped + legacy jobs by looking for status.json files.
+    candidates = []
+
+    try:
+        for d in BASE_JOBS_DIR.iterdir():
+            if d.is_dir() and d.name != "groups":
+                candidates.append(d)
+    except Exception:
+        pass
+
+    groups_root = BASE_JOBS_DIR / "groups"
+    try:
+        if groups_root.is_dir():
+            for status_path in groups_root.rglob("status.json"):
+                try:
+                    candidates.append(status_path.parent)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    seen = set()
+
+    for d in candidates:
+        try:
+            d = _assert_under_base(d)
+        except Exception:
             continue
 
+        key = str(d)
+        if key in seen:
+            continue
+        seen.add(key)
+
         st = _json_read_or_none(_status_paths(d)["status"]) or {}
+
         state = str(st.get("state") or "").lower()
         if state not in ("queued", "running"):
             continue
@@ -2347,20 +2895,18 @@ def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[in
             "noticed_ts_ms": noticed,
         })
 
-    # Oldest first, then job_id for stable ordering
     rows.sort(key=lambda r: (r["noticed_ts_ms"], r["job_id"]))
 
     active_count = len(rows)
 
     for idx, row in enumerate(rows):
         if row["job_id"] == job_id:
-            # idx is zero-based among active queued/running jobs
             return (idx, active_count)
 
     return (None, active_count)
 
 @anvil.server.callable
-def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
+def vm_get_job_result(job_id: str, owner_email: str, group_folder: str = "personal") -> dict:
     """
     Return saved result.json for a completed job.
     This should never return {} silently.
@@ -2375,7 +2921,13 @@ def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
         if "/" in job_id or "\\" in job_id or ".." in job_id:
             return {"ok": False, "error": "Job not found. Please resubmit your PDF."}
 
-        job_dir = (BASE_JOBS_DIR / job_id).resolve()
+        job_dir = _resolve_job_dir_for_owner(job_id, req_email, group_folder)
+        if job_dir is None:
+            return {
+                "ok": False,
+                "error": "Job not found. Please resubmit your PDF."
+            }
+
         sp = _status_paths(job_dir)
 
         status = _json_read_or_none(sp["status"]) or {}
@@ -2385,7 +2937,19 @@ def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
                 "ok": False,
                 "error": "Job not found. Please resubmit your PDF."
             }
+        
+        if _is_excluded_job_expired(status):
+            try:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                print(f">>> deleted expired excluded job on result fetch: {job_dir}")
+            except Exception:
+                pass
 
+            return {
+                "ok": False,
+                "error": "Job not found. Please resubmit your PDF."
+            }
+        
         job_email = str(
             status.get("owner_email")
             or status.get("owner_id")
@@ -2426,10 +2990,11 @@ def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
         }
 
 @anvil.server.callable
-def vm_get_job_status(job_id: str, owner_email: str) -> dict:
+def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "personal") -> dict:
     """Status primarily from disk; does not return final result. Enforces ownership by email."""
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
+    _cleanup_expired_excluded_jobs()
 
     if not job_id or not owner_email:
         return {
@@ -2443,10 +3008,27 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
             "error": "Job not found. Please resubmit your PDF."
         }
 
-    job_dir = BASE_JOBS_DIR / job_id
+    job_dir = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    if job_dir is None:
+        return {
+            "state": "not_found",
+            "error": "Job not found. Please resubmit your PDF."
+        }
+
     sp = _status_paths(job_dir)
 
     st = _json_read_or_none(sp["status"])
+    if _is_excluded_job_expired(st):
+        try:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            print(f">>> deleted expired excluded job on status check: {job_dir}")
+        except Exception:
+            pass
+
+        return {
+            "state": "not_found",
+            "error": "Job not found. Please resubmit your PDF."
+        }
     if not isinstance(st, dict) or not st:
         return {
             "state": "not_found",
@@ -2501,6 +3083,10 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
         "queue_timeout_min",
         "queue_age_ms",
         "queue_age_str",
+        "exclude_from_improvement",
+        "retention_mode",
+        "delete_after_utc",
+        "raw_pdf_deleted",
     ):
         if k in st:
             out[k] = st[k]
@@ -2526,8 +3112,10 @@ def vm_get_job_status(job_id: str, owner_email: str) -> dict:
     return out
 
 @anvil.server.callable
-def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
+def vm_list_jobs(owner_id: str, limit: int = 50, group_folder: str = "personal") -> list[dict]:
     print(f">>> vm_list_jobs called | owner_id={owner_id!r} | NODE_ID={NODE_ID}")
+
+    _cleanup_expired_excluded_jobs()
 
     owner_id = str(owner_id or "").strip().lower()
     if not owner_id:
@@ -2541,7 +3129,10 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
 
     rows = []
     try:
-        for d in sorted(BASE_JOBS_DIR.iterdir(), reverse=True):
+        job_dirs = list(_iter_job_dirs_for_owner(owner_id, group_folder))
+        job_dirs = sorted(job_dirs, key=lambda p: p.name, reverse=True)
+
+        for d in job_dirs:
             if not d.is_dir():
                 continue
 
@@ -2550,6 +3141,15 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
                 continue
 
             st = _json_read_or_none(_status_paths(d)["status"]) or {}
+
+            if _is_excluded_job_expired(st):
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                    print(f">>> deleted expired excluded job during list: {d}")
+                except Exception:
+                    pass
+                continue
+
             st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
             if st_owner != owner_id:
                 continue
@@ -2583,6 +3183,13 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
                 ),
                 "last_edited_panel": st.get("last_edited_panel") or "",
                 "last_edited_at_utc": st.get("last_edited_at_utc") or "",
+
+                # Excluded job marker for My Jobs page
+                "exclude_from_improvement": bool(st.get("exclude_from_improvement")),
+                "retention_mode": st.get("retention_mode") or "standard",
+                "delete_after_utc": st.get("delete_after_utc") or "",
+                "raw_pdf_deleted": bool(st.get("raw_pdf_deleted")),
+                "group_folder": st.get("group_folder") or group_folder,
             }
             rows.append(row)
 
@@ -2598,26 +3205,162 @@ def vm_list_jobs(owner_id: str, limit: int = 50) -> list[dict]:
         raise
 
 @anvil.server.callable
-def vm_cancel_job(job_id: str, owner_id: str) -> bool:
-    """Mark a job as canceled (queued or running), enforcing ownership."""
-    job_dir = BASE_JOBS_DIR / job_id
+def vm_delete_job(job_id: str, owner_id: str, group_folder: str = "personal") -> dict:
+    """
+    Permanently delete a non-active job owned by the user.
+
+    Security:
+    - job_id is path-sanitized
+    - resolved path must stay under BASE_JOBS_DIR
+    - status owner must match owner_id
+    - active queued/running/unknown jobs are not hard-deleted here; cancel them instead
+    """
+    job_id = str(job_id or "").strip()
+    owner_id = str(owner_id or "").strip().lower()
+
+    if not job_id or not owner_id:
+        return {"ok": False, "error": "Missing job id or owner."}
+
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+        return {"ok": False, "error": "Job not found."}
+
+    job_dir = _resolve_job_dir_for_owner(job_id, owner_id, group_folder)
+    if job_dir is None:
+        return {"ok": False, "error": "Job not found."}
+
     sp = _status_paths(job_dir)
-    st = _json_read_or_none(sp["status"])
-    if not st or str(st.get("owner_id") or "").strip().lower() != str(owner_id or "").strip().lower():
-        return False
+    st = _json_read_or_none(sp["status"]) or {}
 
-    if st.get("state") in ("done", "error"):
-        return False
+    if not isinstance(st, dict) or not st:
+        return {"ok": False, "error": "Job not found."}
 
-    # mark cancellation file
-    with open(_cancel_path(job_dir), "w") as f:
-        f.write("1")
+    job_owner = str(
+        st.get("owner_email")
+        or st.get("owner_id")
+        or ""
+    ).strip().lower()
 
-    # update status snapshot
-    st["canceled"] = True
-    st["state"] = "canceled" if st.get("state") == "queued" else st.get("state")
-    _status_write(job_dir, st["state"], **{k: v for k, v in st.items() if k not in ("state", "ts")})
-    return True
+    if not job_owner or job_owner != owner_id:
+        return {"ok": False, "error": "Job not found."}
+
+    state = str(st.get("state") or "").strip().lower()
+
+    if state in ("queued", "running", "unknown"):
+        return {
+            "ok": False,
+            "error": "This job is still processing. Please cancel it first.",
+            "state": state or "unknown"
+        }
+
+    try:
+        shutil.rmtree(job_dir)
+        print(f">>> user deleted job folder: {job_id}")
+    except FileNotFoundError:
+        return {"ok": False, "error": "Job not found."}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not delete job: {e}"}
+
+    if job_dir.exists():
+        return {"ok": False, "error": "Could not delete job."}
+
+    return {
+        "ok": True,
+        "state": "deleted"
+    }
+
+@anvil.server.callable
+def vm_cancel_job(job_id: str, owner_id: str, group_folder: str = "personal") -> dict:
+    """
+    Cancel a queued/running job, enforcing ownership.
+
+    Security:
+    - job_id is path-sanitized
+    - owner_id must match owner_email/owner_id in status.json
+    - completed/error/canceled jobs cannot be canceled
+    """
+    job_id = str(job_id or "").strip()
+    owner_id = str(owner_id or "").strip().lower()
+
+    if not job_id or not owner_id:
+        return {"ok": False, "error": "Missing job id or owner."}
+
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+        return {"ok": False, "error": "Job not found."}
+
+    job_dir = _resolve_job_dir_for_owner(job_id, owner_id, group_folder)
+    if job_dir is None:
+        return {"ok": False, "error": "Job not found."}
+
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
+
+    if not isinstance(st, dict) or not st:
+        return {"ok": False, "error": "Job not found."}
+
+    job_owner = str(
+        st.get("owner_email")
+        or st.get("owner_id")
+        or ""
+    ).strip().lower()
+
+    if not job_owner or job_owner != owner_id:
+        return {"ok": False, "error": "Job not found."}
+
+    state = str(st.get("state") or "").strip().lower()
+
+    if state in ("done", "error", "canceled", "cancelled"):
+        return {
+            "ok": False,
+            "error": "This job is no longer cancelable.",
+            "state": state or "unknown"
+        }
+
+    if state not in ("queued", "running", "unknown"):
+        return {
+            "ok": False,
+            "error": "This job is not currently processing.",
+            "state": state or "unknown"
+        }
+
+    try:
+        job_dir.mkdir(parents=True, exist_ok=True)
+        with open(_cancel_path(job_dir), "w") as f:
+            f.write("1")
+    except Exception as e:
+        return {"ok": False, "error": f"Could not mark job canceled: {e}"}
+
+    now = _now_utc().isoformat()
+
+    _status_write(
+        job_dir,
+        "canceled",
+        canceled=True,
+        canceled_at_utc=now,
+        cancel_requested_by=owner_id,
+        step="canceled",
+        progress=0.0,
+    )
+
+    # If queued, no worker is actively using the files yet. Delete immediately.
+    if state == "queued":
+        try:
+            shutil.rmtree(job_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "state": "canceled",
+            "deleted": True
+        }
+
+    # If running, do not delete files immediately while the worker may be inside OCR/render.
+    # The .cancel marker is enough. The worker will hit a cancel checkpoint and delete the folder.
+    return {
+        "ok": True,
+        "state": "canceled",
+        "deleted": False
+    }
 
 # ---------- MAIN ----------
 if not _IS_WORKER_SUBPROCESS:

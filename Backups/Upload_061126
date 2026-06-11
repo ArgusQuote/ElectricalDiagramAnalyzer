@@ -1,0 +1,697 @@
+from ._anvil_designer import uploadTemplate
+from anvil import *
+from routing import router
+import stripe.checkout
+import anvil.server, anvil.users, json, time
+from anvil import js
+from .. import router_state
+from ..AccessCodeDialog import AccessCodeDialog
+from ..SpecsUploadDialog import SpecsUploadDialog
+from ..SpecsResultsDialog import SpecsResultsDialog
+
+USE_UI_OVERRIDES = True
+
+class upload(uploadTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+
+    # FULL WIDTH
+    self.set_event_handler("show", self._force_full_width_everywhere)
+
+    if not anvil.users.get_user():
+      js.window.location.hash = "landing"
+      return
+    # --- Entitlement gate (access code) ---
+    try:
+      anvil.server.call("auto_claim_reserved_admin_seat")
+    except Exception:
+      pass
+
+    if not self._ensure_entitled():
+      # _ensure_entitled() already showed messaging
+      js.window.location.hash = "landing"
+      return
+
+    self._job_name = None
+    self._job_start_ts_ms = 0
+
+    if hasattr(self, "go_btn"):
+      self.go_btn.text = "Generate BOM"
+
+    if hasattr(self, "instructions_btn"):
+      self.instructions_btn.set_event_handler('click', self.instructions_btn_click)
+
+    if hasattr(self, "jobs_btn"):
+      self.jobs_btn.set_event_handler('click', self.jobs_btn_click)
+
+    if hasattr(self, "logout_btn"):
+      self.logout_btn.set_event_handler('click', self.logout_btn_click)
+
+    if hasattr(self, "enclosure_style_dd"):
+      self.enclosure_style_dd.items = [
+        ("NEMA 1 — Flush", "NEMA1_FLUSH"),
+        ("NEMA 1 — Surface", "NEMA1_SURFACE"),
+        ("NEMA 3R (Outdoor)", "NEMA3R"),
+      ]
+      self.enclosure_style_dd.selected_value = "NEMA1_FLUSH"
+
+    if hasattr(self, "file_loader"):
+      self.file_loader.accept = "application/pdf,.pdf"
+      self.file_loader.set_event_handler('change', self.file_loader_change)
+
+    if not hasattr(self, "result_panel"):
+      self.result_panel = FlowPanel()
+      self.add_component(self.result_panel)
+
+    if not hasattr(self, "timer_1"):
+      self.timer_1 = Timer()
+      self.timer_1.interval = 0
+      self.timer_1.set_event_handler('tick', self.timer_1_tick)
+      self.add_component(self.timer_1)
+
+    self._job_id = None
+    self._node_id = None  # owner is always resolved server-side by email
+    self._specs_upload_task_id = None
+    self._specs_job_id = None
+    self._specs_poll_phase = None
+    self._specs_result = None
+    
+  def _ensure_entitled(self) -> bool:
+    """
+    Returns True if user is allowed to use the app.
+    If not entitled, prompts for code redemption.
+    """
+    # 1) Are we already entitled?
+    try:
+      status = anvil.server.call("is_current_user_entitled") or {}
+    except Exception as e:
+      alert(f"Server error checking access:\n{e}")
+      return False
+
+    if status.get("ok"):
+      return True
+
+    # 2) Not entitled -> prompt for access code
+    msg = status.get("message") or "Not entitled."
+    Notification(msg, style="warning").show()
+
+    code = self._prompt_for_access_code()
+    if not code:
+      return False
+
+    # 3) Try redeem
+    try:
+      res = anvil.server.call("redeem_access_code", code) or {}
+    except Exception as e:
+      alert(f"Could not redeem access code:\n{e}")
+      return False
+
+    if not res.get("ok"):
+      alert(res.get("message") or "Access code rejected.")
+      return False
+
+    # 4) Re-check entitlement (should now pass)
+    try:
+      status2 = anvil.server.call("is_current_user_entitled") or {}
+    except Exception:
+      status2 = {}
+
+    if status2.get("ok"):
+      Notification("Access code accepted.", style="success").show()
+      return True
+
+    alert(status2.get("message") or "Access still not active.")
+    return False
+
+  def _prompt_for_access_code(self) -> str:
+    code = alert(
+      content=AccessCodeDialog(),
+      title="Access Code Required",
+      buttons=[],
+      large=False,
+      dismissible=False
+    )
+    return (code or "").strip().upper()
+
+  def _force_full_width_everywhere(self, **e):
+    try:
+      js.window.setTimeout(self._force_full_width_now, 0)
+    except Exception:
+      self._force_full_width_now()
+
+  def _force_full_width_now(self):
+    try:
+      node = js.get_dom_node(self)
+
+      # Walk up and kill max-width on every ancestor
+      el = node
+      hops = 0
+      while el is not None and hops < 50:
+        try:
+          s = el.style
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("width", "100%", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+        except Exception:
+          pass
+
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+
+        hops += 1
+
+      # Also force root elements
+      for root in [js.document.documentElement, js.document.body]:
+        try:
+          root.style.setProperty("max-width", "none", "important")
+          root.style.setProperty("width", "100%", "important")
+          root.style.setProperty("margin", "0", "important")
+        except Exception:
+          pass
+
+      # Common Anvil mount point
+      try:
+        agh = js.document.getElementById("appGoesHere")
+        if agh:
+          agh.style.setProperty("max-width", "none", "important")
+          agh.style.setProperty("width", "100%", "important")
+      except Exception:
+        pass
+
+    except Exception:
+      pass
+
+  # --- make the job note string ---
+  def _build_job_note(self, file_media):
+    if hasattr(self, "text_box_1") and self.text_box_1.text:
+      job_name = self.text_box_1.text.strip()
+    else:
+      fname = (getattr(file_media, "name", "") or "").strip()
+      job_name = fname.rsplit(".", 1)[0] if fname else "untitled"
+
+    job_name = job_name.replace("|", "/").replace("\n", " ").replace("\r", " ")
+    if len(job_name) > 80:
+      job_name = job_name[:80]
+    self._job_name = job_name
+
+    try:
+      submitted_at_utc = js.window.Date().toISOString()
+      submitted_local  = js.window.Date().toLocaleString()
+      tz_offset_min    = int(js.window.Date().getTimezoneOffset())
+    except Exception:
+      from datetime import datetime
+      submitted_at_utc = datetime.utcnow().isoformat() + "Z"
+      submitted_local  = submitted_at_utc
+      tz_offset_min    = 0
+
+    user = anvil.users.get_user()
+    user_email = ""
+    if user:
+      try:
+        user_email = user['email'] or ""
+      except Exception:
+        pass
+
+    return (
+      f"job_name={job_name} | submitted_at_utc={submitted_at_utc} | "
+      f"submitted_local={submitted_local} | tz_offset_min={tz_offset_min} | user={user_email}"
+    )
+
+  # --- helper: ensure uploaded file is a PDF ---
+  def _is_pdf(self, media):
+    if not media:
+      return False
+    ct = (getattr(media, "content_type", "") or "").lower()
+    name = (getattr(media, "name", "") or "").lower()
+    return ("pdf" in ct) or name.endswith(".pdf")
+
+  def file_loader_change(self, file=None, **event_args):
+    media = file or getattr(self.file_loader, "file", None)
+    if not self._is_pdf(media):
+      try:
+        self.file_loader.file = None
+      except Exception:
+        pass
+      Notification("PDFs only (.pdf).", style="warning").show()
+
+  def build_ui_overrides(self):
+    overrides = {"panelboards": {}, "transformers": {}, "disconnects": {}}
+    if getattr(self, "check_box_1", None) and self.check_box_1.checked:
+      overrides["panelboards"]["bussing_material"] = "COPPER"
+
+    sel = getattr(self, "enclosure_style_dd", None)
+    choice = sel.selected_value if sel else "NEMA1_FLUSH"
+    if choice == "NEMA3R":
+      overrides["panelboards"]["enclosure"] = "NEMA3R"
+    elif choice == "NEMA1_SURFACE":
+      overrides["panelboards"]["enclosure"] = "NEMA1"
+      overrides["panelboards"]["default_trim_style"] = "SURFACE"
+    else:
+      overrides["panelboards"]["enclosure"] = "NEMA1"
+      overrides["panelboards"]["default_trim_style"] = "FLUSH"
+
+    if getattr(self, "check_box_4", None) and self.check_box_4.checked:
+      overrides["panelboards"]["rating_type"] = "SERIES_RATED"
+    if getattr(self, "check_box_5", None) and self.check_box_5.checked:
+      overrides["panelboards"]["allow_plug_on_breakers"] = False
+    if getattr(self, "check_box_6", None) and (not self.check_box_6.checked):
+      overrides["panelboards"]["allow_square_d_spd"] = False
+    if getattr(self, "check_box_10", None) and (not self.check_box_10.checked):
+      overrides["disconnects"]["allow_littlefuse"] = False
+
+    return {k: v for k, v in overrides.items() if v}
+
+  def go_btn_click(self, **event_args):
+    if not anvil.users.get_user():
+      js.window.location.hash = "landing"
+      return
+  
+    f = getattr(self.file_loader, "file", None)
+    if not self._is_pdf(f):
+      Notification("Please choose a PDF.", style="warning").show()
+      return
+  
+    try:
+      # Build the job name + note (same as before)
+      job_note = self._build_job_note(f)
+      ui_overrides = self.build_ui_overrides() if USE_UI_OVERRIDES else {}
+  
+      # Optional: stash job_name for the downstream form
+      _ = self._job_name  # set by _build_job_note
+  
+      # Hand off to the dedicated full-screen processing form.
+      # That form will:
+      #   - Upload/submit asynchronously
+      #   - Show progress and elapsed time
+      #   - Poll until done
+      #   - Navigate to output on completion
+      # Router navigation (do NOT open_form)
+      router_state.processing_args = {
+        "file": f,
+        "ui_overrides": ui_overrides,
+        "job_note": job_note,
+        "job_name": self._job_name
+      }
+      js.window.location.hash = "processing"
+      return
+
+  
+    except Exception as e:
+      msg = (getattr(e, "args", [""]) or [""])[0] or str(e) or type(e).__name__
+      alert(f"❌ Failed to start job:\n{msg}")
+  
+  def timer_1_tick(self, **event_args):
+    try:
+      if getattr(self, "_specs_poll_phase", None):
+        self._specs_timer_tick()
+        return
+      if not getattr(self, "_job_id", None):
+        self.timer_1.interval = 0
+        return
+  
+      status = anvil.server.call("get_job_status", self._job_id) or {}
+      state = (status.get("state") or "unknown").lower()
+      step  = status.get("step", "")
+  
+      # Update visible status line
+      for c in self.result_panel.get_components():
+        if isinstance(c, Label) and c.text.startswith("Status:"):
+          c.text = f"Status: {state}{(' · ' + step) if step else ''}"
+          break
+  
+      # Soft-unknown from server when Uplink briefly drops → quietly keep polling
+      if state == "unknown" and (status.get("error") == "uplink_disconnected"):
+        # gentle backoff (cap at 3s)
+        try:
+          cur = float(self.timer_1.interval or 1.0)
+        except Exception:
+          cur = 1.0
+        self.timer_1.interval = min(3.0, cur + 0.5)
+        return
+  
+      if state == "done":
+        self.timer_1.interval = 0
+        finished = status.get("result") or status
+        self._render_finished(finished)
+        self.go_btn.enabled = True
+        self.go_btn.text = "Generate BOM"
+        return
+  
+      if state == "error":
+        self.timer_1.interval = 0
+        alert(f"❌ Processing failed:\n{status.get('error','Unknown error')}")
+        self.go_btn.enabled = True
+        self.go_btn.text = "Generate BOM"
+        return
+  
+      if state == "not_found":
+        self.timer_1.interval = 0
+        alert("Session mismatch or job not found.\nTry logging in again and resubmitting.",
+              title="Owner mismatch")
+        self.go_btn.enabled = True
+        self.go_btn.text = "Generate BOM"
+        return
+  
+      # queued / running / unknown → keep polling
+      return
+  
+    except Exception as e:
+      # If the client itself sees an uplink drop in the exception text, treat as transient
+      msg_type = str(type(e))
+      msg = f"{type(e).__name__}: {e}"
+      if "UplinkDisconnectedError" in msg_type or "Uplink disconnected" in str(e):
+        try:
+          cur = float(self.timer_1.interval or 1.0)
+        except Exception:
+          cur = 1.0
+        self.timer_1.interval = min(3.0, cur + 0.5)
+        return
+  
+      self.timer_1.interval = 0
+      alert(f"Polling error:\n{msg}")
+      self.go_btn.enabled = True
+      self.go_btn.text = "Generate BOM"
+
+  def _render_finished(self, resp: dict):
+    router_state.output_args = {"result": resp, "job_name": self._job_name}
+    js.window.location.hash = "output"
+    return
+
+    summary = (
+      f"✅ Saved PDF: {resp.get('saved_pdf','(n/a)')}\n"
+      f"📂 Output: {resp.get('output_dir','(n/a)')}\n"
+      f"🖼️ Images: {resp.get('image_count', len(resp.get('images', []) or []))}"
+    )
+    self.result_panel.add_component(Label(text=summary))
+
+    comp_json = json.dumps(resp.get("component", {}) or {}, indent=2, default=str)
+    self.result_panel.add_component(Label(text="Parsed Component:"))
+    self.result_panel.add_component(TextArea(text=comp_json, height=200, width="100%"))
+
+    rules_json = json.dumps(resp.get("rules_result", {}) or {}, indent=2, default=str)
+    self.result_panel.add_component(Label(text="Rules Engine Output:"))
+    self.result_panel.add_component(TextArea(text=rules_json, height=250, width="100%"))
+
+    images = resp.get("images") or []
+    if images:
+      paths_preview = "\n".join(images[:5])
+      self.result_panel.add_component(Label(text="First image paths (on VM):"))
+      self.result_panel.add_component(TextArea(text=paths_preview, height=120, width="100%"))
+
+  def logout_btn_click(self, **event_args):
+    anvil.users.logout()
+    Notification("Logged out", timeout=1.5).show()
+    js.window.location.hash = "landing"
+
+  def instructions_btn_click(self, **event_args):
+    js.window.location.hash = "instructions"
+
+  def jobs_btn_click(self, **event_args):
+    js.window.location.hash = "myjobs"
+
+  @handle("button_1", "click")
+  def button_1_click(self, **event_args):
+    js.window.location.hash = "coveragemap"
+
+  @handle("specs_btn", "click")
+  def specs_btn_click(self, **event_args):
+    self._run_specs_modal_flow()
+
+  # specs helpers
+  def _apply_specs_defaults_to_page(self, detected_overrides: dict):
+    """
+    Push detected spec defaults back into the page controls.
+    """
+    detected_overrides = detected_overrides or {}
+    pb = detected_overrides.get("panelboards") or {}
+
+    # Bussing material
+    bussing = pb.get("bussing_material")
+    if hasattr(self, "check_box_1") and bussing is not None:
+      self.check_box_1.checked = (str(bussing).upper() == "COPPER")
+
+    # Rating type
+    rating_type = pb.get("rating_type")
+    if hasattr(self, "check_box_4") and rating_type is not None:
+      self.check_box_4.checked = (str(rating_type).upper() == "SERIES_RATED")
+
+    # Plug-on breakers
+    # Your UI override means:
+    # check_box_5.checked == True  -> allow_plug_on_breakers = False
+    allow_plug_on = pb.get("allow_plug_on_breakers")
+    if hasattr(self, "check_box_5") and allow_plug_on is not None:
+      self.check_box_5.checked = (allow_plug_on is False)
+
+    Notification("Specs defaults applied to this page.", style="success").show()
+
+  def _run_specs_modal_flow(self):
+    upload_result = alert(
+      content=SpecsUploadDialog(),
+      title="Specs PDF Analyzer",
+      foreground="white",
+      buttons=[],
+      large=False,
+      dismissible=True
+    )
+  
+    if not upload_result or not upload_result.get("file"):
+      return
+  
+    specs_pdf = upload_result["file"]
+  
+    try:
+      self.specs_btn.enabled = False
+      self.specs_btn.text = "Uploading..."
+  
+      start_task_resp = anvil.server.call(
+        "start_specs_upload_task",
+        specs_pdf,
+        self._job_name or ""
+      ) or {}
+  
+      self._specs_upload_task_id = start_task_resp.get("task_id")
+      if not self._specs_upload_task_id:
+        raise Exception("Could not start specs upload task.")
+  
+      self._specs_job_id = None
+      self._specs_poll_phase = "upload_task"
+      self.timer_1.interval = 0.75
+  
+    except Exception as e:
+      self._specs_upload_task_id = None
+      self._specs_job_id = None
+      self._specs_poll_phase = None
+      self.specs_btn.enabled = True
+      self.specs_btn.text = "Specs Analyzer"
+      alert(f"❌ Specs analysis failed:\n{e}")
+
+  def _specs_timer_tick(self):
+    try:
+      if self._specs_poll_phase == "upload_task":
+        task_status = anvil.server.call(
+          "get_specs_upload_task_status",
+          self._specs_upload_task_id
+        ) or {}
+  
+        task_state = (task_status.get("state") or "").lower()
+  
+        if task_state == "done":
+          task_result = task_status.get("result") or {}
+          self._specs_job_id = task_result.get("job_id")
+          if not self._specs_job_id:
+            raise Exception("Upload task finished but no specs job_id was returned.")
+  
+          self._specs_poll_phase = "specs_job"
+          self.specs_btn.text = "Analyzing..."
+          return
+  
+        if task_state == "error":
+          raise Exception(task_status.get("error") or "Specs upload failed.")
+  
+        self.specs_btn.text = "Uploading..."
+        return
+  
+      if self._specs_poll_phase == "specs_job":
+        status = anvil.server.call("get_specs_status", self._specs_job_id) or {}
+        state = (status.get("state") or "").lower()
+  
+        # TEMP DEBUG
+        self.specs_btn.text = f"Specs: {state}"
+  
+        if state == "unknown" and (status.get("error") == "uplink_disconnected"):
+          return
+  
+        if state == "done":
+          self.timer_1.interval = 0
+          self._specs_poll_phase = None
+          self.specs_btn.text = "Completed"
+        
+          result = status.get("result") or {}
+        
+          modal_result = alert(
+            content=SpecsResultsDialog(result),
+            title="Specs Analysis Results",
+            buttons=[],
+            large=True,
+            dismissible=True
+          )
+        
+          if modal_result and modal_result.get("apply"):
+            self._apply_specs_defaults_to_page(
+              modal_result.get("detected_overrides") or {}
+            )
+        
+          self._specs_result = None
+          self._specs_upload_task_id = None
+          self._specs_job_id = None
+          self.specs_btn.enabled = True
+          self.specs_btn.text = "Specs Analyzer"
+          return
+  
+        if state == "error":
+          raise Exception(status.get("error") or "Specs analysis failed.")
+  
+        if state == "not_found":
+          raise Exception(
+            f"Specs job not found or owner mismatch.\n"
+            f"job_id={self._specs_job_id}\n"
+            f"status={status}"
+          )
+  
+        return
+  
+    except Exception as e:
+      self.timer_1.interval = 0
+      self._specs_result = None
+      self._specs_upload_task_id = None
+      self._specs_job_id = None
+      self._specs_poll_phase = None
+      self.specs_btn.enabled = True
+      self.specs_btn.text = "Specs Analyzer"
+      alert(f"❌ Specs analysis failed:\n{type(e).__name__}: {e}")
+
+  @handle("Checklist", "click")
+  def Checklist_click(self, **event_args):
+    """Will It Run checklist modal"""
+  
+    body_panel = ColumnPanel(spacing="medium")
+  
+    def add_section(title, rows):
+      body_panel.add_component(
+        Label(
+          text=title,
+          bold=True,
+          font_size=18,
+          foreground="#117bc3"
+        )
+      )
+  
+      for row in rows:
+        if isinstance(row, tuple):
+          kind, text = row
+        else:
+          kind, text = "check", row
+  
+        if kind == "note":
+          body_panel.add_component(
+            Label(
+              text=text,
+              font_size=13,
+              italic=True,
+              foreground="#666666"
+            )
+          )
+        elif kind == "plain":
+          body_panel.add_component(
+            Label(
+              text=text,
+              font_size=14,
+            )
+          )
+        else:
+          body_panel.add_component(
+            CheckBox(
+              text=text,
+              checked=False,
+              font_size=14
+            )
+          )
+  
+    def download_checklist_click(sender, **event_args):
+      try:
+        checklist_pdf = anvil.server.call("get_will_it_run_checklist_pdf")
+        download(checklist_pdf)
+      except Exception as e:
+        alert(f"Could not download checklist:\n{e}")
+  
+    add_section("Panel Identification", [
+      "PDF trimmed to only relevant pages.",      
+      "Panels do not touch other panels or unrelated items.",
+      "Each panel schedule is visually separate and has a clear boundary.",
+    ])
+  
+    add_section("General Structure", [
+      "Header section is above the breaker section.",
+      "Breaker section uses a clear grid/table layout.",
+      "Text is readable with a simple, standard font.",
+    ])
+  
+    add_section("Header Section", [
+      "Strong Label - Value association. (higher confidence)",
+      ("note", "Example: “Bus Amps: 225A” or “Volts: 480Y/277V”"),
+      "Traditional wording or common abbreviations are used. (higher confidence)",
+      ("note", "Example: Bus Amps, AIC, kAIC, Volts, BRKR, etc."),
+      ("plain", "Required panel attributes are included:"),
+      "Bus Amps.",
+      "Main Breaker Amps, if applicable.",
+      "Voltage.",
+      "kAIC Rating. (default is 22k if not found)",
+    ])
+  
+    add_section("Breaker Section", [
+      "Clear column headers.",
+      "Breaker information is contained in a single clear table.",
+      "Odd and even circuits are mirrored left and right.",
+      "Breaker amps and poles are listed in the same row for each breaker.",
+      "Minimal revision clouds/obscured information.",
+    ])
+  
+    body_panel.add_component(
+      Label(
+        text="*If the breaker analysis cannot be completed, you may still receive panel part numbers.",
+        font_size=13,
+        italic=True
+      )
+    )
+  
+    body_panel.add_component(
+      Label(
+        text="The more items checked on this list, the more likely Argus will have a strong analysis and give a usable output. Review the “Coverage Map” for more information and deeper explanation.",
+        font_size=13,
+        italic=True
+      )
+    )
+  
+    download_btn = Button(
+      text="Download Checklist",
+      role="primary-color",
+      icon="fa:download"
+    )
+    download_btn.set_event_handler("click", download_checklist_click)
+    body_panel.add_component(download_btn)
+  
+    alert(
+      content=body_panel,
+      title="Quick Compatibility Checklist",
+      buttons=[("Exit", True)],
+      large=True,
+      dismissible=True,
+    )
+
+  @handle("exclude_box", "change")
+  def exclude_box_change(self, **event_args):
+    """This method is called when this checkbox is checked or unchecked"""
+    pass  # Write Code Here

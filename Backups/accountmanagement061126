@@ -1,0 +1,168 @@
+import anvil.server
+import anvil.users
+from anvil.tables import app_tables
+import stripe
+import anvil.secrets
+
+def _user_email(u) -> str:
+  try:
+    return (u["email"] or "").strip().lower()
+  except Exception:
+    return ""
+
+def _require_billing_admin():
+  u = anvil.users.get_user()
+  if not u:
+    raise Exception("Not logged in.")
+
+  email = _user_email(u)
+  if not email:
+    raise Exception("Missing user email.")
+
+  # Path A: seated billing admin (takes a seat)
+  link = app_tables.code_users.get(user=u, is_billing_admin=True)
+  if link and link["access_code"]:
+    return u, link["access_code"]
+
+  # Path B: billing-only admin (does NOT take a seat)
+  ac = app_tables.access_codes.get(billing_email=email)
+  if ac:
+    return u, ac
+
+  raise Exception("Billing admin access required.")
+
+@anvil.server.callable
+def require_current_user_billing_admin():
+  u = anvil.users.get_user()
+  if not u:
+    return {"ok": False, "reason": "not_logged_in"}
+
+  email = _user_email(u)
+  if not email:
+    return {"ok": False, "reason": "missing_email"}
+
+  # A: seated billing admin
+  link = app_tables.code_users.get(user=u, is_billing_admin=True)
+  if link and link["access_code"]:
+    ac = link["access_code"]
+    return {"ok": True, "code": ac["code"], "mode": "seated"}
+
+  # B: billing-only admin
+  ac = app_tables.access_codes.get(billing_email=email)
+  if ac:
+    return {"ok": True, "code": ac["code"], "mode": "billing_only"}
+
+  return {"ok": False, "reason": "not_admin"}
+
+@anvil.server.callable
+def get_account_management_context():
+  _, ac = _require_billing_admin()
+
+  links = app_tables.code_users.search(access_code=ac)
+  users = []
+  for l in links:
+    usr = l["user"]
+    if not usr:
+      continue
+    users.append({
+      "email": usr["email"],
+      "is_billing_admin": bool(l["is_billing_admin"])
+    })
+
+  users = sorted(users, key=lambda x: (not x["is_billing_admin"], x["email"].lower()))
+
+  return {
+    "code": ac["code"],
+    "plan_key": ac["plan_key"],
+    "seat_limit": ac["seat_limit"],
+    "user_count": len(users),
+    "users": users
+  }
+
+@anvil.server.callable
+def remove_user_from_code(target_email: str):
+  admin_user, ac = _require_billing_admin()
+
+  if not target_email:
+    raise Exception("Missing email.")
+
+  target_user = app_tables.users.get(email=target_email)
+  if not target_user:
+    raise Exception("User not found.")
+
+  link = app_tables.code_users.get(user=target_user, access_code=ac)
+  if not link:
+    raise Exception("That user is not on your code.")
+
+  if link["is_billing_admin"]:
+    raise Exception("You can't remove the billing admin from the code.")
+
+  # Delete the membership
+  link.delete()
+  return True
+
+def _stripe_init():
+  stripe.api_key = anvil.secrets.get_secret("STRIPE_SECRET_KEY")
+  return stripe
+
+
+@anvil.server.callable
+def create_portal_session_for_current_admin():
+  _, ac = _require_billing_admin()  # <-- now supports billing-only admins too
+
+  customer_id = ac["stripe_customer_id"]
+  if not customer_id:
+    raise Exception("Stripe customer id not found for this access code.")
+
+  s = _stripe_init()
+
+  return_url = "https://argusquotes.com/?portal_return=landing"
+  session = s.billing_portal.Session.create(
+    customer=customer_id,
+    return_url=return_url
+  )
+
+  return session["url"]
+
+@anvil.server.callable
+def release_my_admin_seat():
+  u = anvil.users.get_user()
+  if not u:
+    raise Exception("Not logged in.")
+
+  email = _user_email(u)
+  if not email:
+    raise Exception("Missing user email.")
+
+  # Find the billing admin's access code (billing-only admin source of truth)
+  ac = app_tables.access_codes.get(billing_email=email)
+  if not ac:
+    # Fallback: if they’re seated billing admin but billing_email isn’t set correctly
+    link_admin = app_tables.code_users.get(user=u, is_billing_admin=True)
+    if link_admin and link_admin["access_code"]:
+      ac = link_admin["access_code"]
+      # Ensure billing_email is correct so they remain billing-only admin after releasing seat
+      try:
+        if (ac["billing_email"] or "").strip().lower() != email:
+          ac.update(billing_email=email)
+      except Exception:
+        pass
+    else:
+      raise Exception("You are not the billing admin for any subscription.")
+
+  # If they currently occupy a seat, remove that seat link
+  link = app_tables.code_users.get(user=u, access_code=ac)
+  if not link:
+    return {"ok": True, "message": "You are not currently using a seat."}
+
+  # Only allow if they are the billing admin seat
+  try:
+    is_billing_admin = bool(link["is_billing_admin"])
+  except Exception:
+    is_billing_admin = False
+
+  if not is_billing_admin:
+    raise Exception("Only the billing admin can release their admin seat.")
+
+  link.delete()
+  return {"ok": True, "message": "Seat released. You are still the billing admin."}
