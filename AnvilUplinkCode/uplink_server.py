@@ -32,6 +32,8 @@ After 24 hours, the full job folder should be automatically deleted.
 Do not use this job for troubleshooting, QA review, style analysis, training, or product improvement unless the customer explicitly authorizes it.
 """
 
+CLEANUP_SWEEP_INTERVAL_SEC = int(os.environ.get("CLEANUP_SWEEP_INTERVAL_SEC", "600"))  # 10 minutes
+
 # ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
 PANEL_FINDER_DEFAULTS = {
     "render_dpi": 1400,
@@ -524,7 +526,6 @@ def _is_excluded_job_expired(status: dict) -> bool:
     except Exception:
         return False
 
-
 def _cleanup_expired_excluded_jobs():
     """
     Deletes full job folders for excluded jobs once their 24-hour retention expires.
@@ -586,6 +587,23 @@ def _cleanup_expired_excluded_jobs():
 
     except Exception as e:
         print(f">>> excluded cleanup sweep failed: {e}")
+
+def _excluded_cleanup_loop():
+    """
+    Lightweight background maintenance loop.
+    Runs only in the main uplink process, not worker subprocesses.
+    Deletes expired excluded jobs every CLEANUP_SWEEP_INTERVAL_SEC.
+    """
+    threading.current_thread().name = "excluded-job-cleanup"
+
+    while not _STOP.is_set():
+        try:
+            _cleanup_expired_excluded_jobs()
+        except Exception as e:
+            print(f">>> excluded cleanup loop error: {e}")
+
+        # Wait is better than time.sleep because it can exit cleanly if _STOP is set.
+        _STOP.wait(CLEANUP_SWEEP_INTERVAL_SEC)
 
 # ----- Data Tables helpers (disabled here; leave no-ops) -----
 def _jobs_upsert(job_id: str, **fields):
@@ -2207,7 +2225,7 @@ def _run_specs_analysis_job(job_id: str):
         with _SPECS_LOCK:
             _SPECS_RUNNING.pop(job_id, None)
 
-# ---------- Start worker pool (per-slot) ----------
+# ---------- Start worker pool + cleanup loop ----------
 if not _IS_WORKER_SUBPROCESS:
     try:
         for i in range(MAX_WORKERS):
@@ -2222,6 +2240,18 @@ if not _IS_WORKER_SUBPROCESS:
         )
     except Exception as e:
         print(f">>> Worker pool startup failed: {e}")
+        print(traceback.format_exc())
+
+    try:
+        cleanup_thread = threading.Thread(
+            target=_excluded_cleanup_loop,
+            daemon=True,
+            name="excluded-job-cleanup",
+        )
+        cleanup_thread.start()
+        print(f">>> excluded cleanup loop started | interval={CLEANUP_SWEEP_INTERVAL_SEC}s")
+    except Exception as e:
+        print(f">>> excluded cleanup loop startup failed: {e}")
         print(traceback.format_exc())
 
 def _active_job_for_owner(owner_email: str, group_folder: str = "personal") -> dict | None:
