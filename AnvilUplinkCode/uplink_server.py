@@ -24,6 +24,9 @@ BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 EXCLUDED_JOB_RETENTION_HOURS = 24
 EXCLUDED_JOB_MARKER_FILENAME = "ARGUS_EXCLUDED_FROM_IMPROVEMENT_REVIEW_README.txt"
 
+STANDARD_JOB_RETENTION_DAYS = int(os.environ.get("STANDARD_JOB_RETENTION_DAYS", "90"))
+STANDARD_JOB_HISTORY_LIMIT = int(os.environ.get("STANDARD_JOB_HISTORY_LIMIT", "30"))
+
 EXCLUDED_JOB_MARKER_TEXT = """This job was excluded from Argus improvement review.
 
 Raw PDF is deleted after processing.
@@ -526,6 +529,71 @@ def _is_excluded_job_expired(status: dict) -> bool:
     except Exception:
         return False
 
+def _parse_utc_dt(value):
+    """
+    Best-effort UTC datetime parser.
+    Returns timezone-aware UTC datetime or None.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _job_created_dt(job_dir: Path, status: dict):
+    """
+    Determine a job's created/submitted timestamp.
+    Prefer status.created_at, then job_note submitted_at_utc, then folder mtime.
+    """
+    status = status or {}
+
+    dt = _parse_utc_dt(status.get("created_at"))
+    if dt:
+        return dt
+
+    try:
+        meta = _parse_job_note(status.get("job_note") or "")
+        dt = _parse_utc_dt(meta.get("submitted_at_utc"))
+        if dt:
+            return dt
+    except Exception:
+        pass
+
+    try:
+        return datetime.fromtimestamp(Path(job_dir).stat().st_mtime, tz=timezone.utc)
+    except Exception:
+        return None
+
+
+def _is_active_job_state(status: dict) -> bool:
+    state = str((status or {}).get("state") or "").strip().lower()
+    return state in ("queued", "running", "unknown")
+
+
+def _is_standard_retention_job(status: dict) -> bool:
+    """
+    Standard retention applies only to non-excluded jobs.
+    Excluded jobs follow the shorter 24-hour policy.
+    """
+    if not isinstance(status, dict):
+        return False
+
+    if bool(status.get("exclude_from_improvement")):
+        return False
+
+    retention_mode = str(status.get("retention_mode") or "standard").strip().lower()
+    if retention_mode == "excluded_24h":
+        return False
+
+    return True
+
 def _cleanup_expired_excluded_jobs():
     """
     Deletes full job folders for excluded jobs once their 24-hour retention expires.
@@ -588,19 +656,183 @@ def _cleanup_expired_excluded_jobs():
     except Exception as e:
         print(f">>> excluded cleanup sweep failed: {e}")
 
+def _cleanup_standard_retention_for_owner(owner_email: str, group_folder: str = "personal", reserve_slots: int = 0):
+    """
+    Enforce standard/non-excluded retention for one owner:
+      1. Delete standard jobs older than STANDARD_JOB_RETENTION_DAYS.
+      2. Keep at most STANDARD_JOB_HISTORY_LIMIT standard jobs per user.
+         If reserve_slots=1 before a new upload, make room for the new job.
+
+    Does not delete queued/running/unknown jobs.
+    Does not touch excluded jobs.
+    Does not touch specs jobs.
+    """
+    owner_email = str(owner_email or "").strip().lower()
+    group_folder = _safe_folder_key(group_folder or "personal", "personal")
+
+    if not owner_email:
+        return
+
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=STANDARD_JOB_RETENTION_DAYS)
+        max_existing = max(0, int(STANDARD_JOB_HISTORY_LIMIT) - int(reserve_slots or 0))
+
+        standard_jobs = []
+
+        for job_dir in list(_iter_job_dirs_for_owner(owner_email, group_folder)):
+            try:
+                job_dir = _assert_under_base(job_dir)
+            except Exception:
+                continue
+
+            if not job_dir.is_dir():
+                continue
+
+            if job_dir.name.startswith("specs_"):
+                continue
+
+            st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
+            if not isinstance(st, dict) or not st:
+                continue
+
+            st_owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+            if st_owner != owner_email:
+                continue
+
+            if _is_active_job_state(st):
+                continue
+
+            if not _is_standard_retention_job(st):
+                continue
+
+            created_dt = _job_created_dt(job_dir, st)
+            if created_dt is None:
+                try:
+                    created_dt = datetime.fromtimestamp(job_dir.stat().st_mtime, tz=timezone.utc)
+                except Exception:
+                    continue
+
+            # 1) Age-based deletion
+            if created_dt < cutoff:
+                try:
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                    print(
+                        f">>> deleted standard job older than {STANDARD_JOB_RETENTION_DAYS} days: "
+                        f"{job_dir}"
+                    )
+                except Exception as e:
+                    print(f">>> failed deleting old standard job {job_dir}: {e}")
+                continue
+
+            standard_jobs.append({
+                "job_dir": job_dir,
+                "created_dt": created_dt,
+            })
+
+        # 2) Count-based deletion: newest kept, oldest deleted
+        standard_jobs.sort(key=lambda x: x["created_dt"], reverse=True)
+
+        if len(standard_jobs) > max_existing:
+            to_delete = standard_jobs[max_existing:]
+
+            for item in to_delete:
+                job_dir = item["job_dir"]
+                try:
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                    print(
+                        f">>> deleted standard job over {STANDARD_JOB_HISTORY_LIMIT}-job limit: "
+                        f"{job_dir}"
+                    )
+                except Exception as e:
+                    print(f">>> failed deleting over-limit standard job {job_dir}: {e}")
+
+    except Exception as e:
+        print(f">>> standard retention cleanup failed for {owner_email!r}: {e}")
+
+
+def _cleanup_standard_retention_all_users():
+    """
+    Background sweep for standard/non-excluded retention.
+    Groups jobs by owner + group_folder, then applies the 90-day / 30-job policy.
+    """
+    try:
+        if not BASE_JOBS_DIR.is_dir():
+            return
+
+        pairs = set()
+
+        # Legacy flat jobs
+        try:
+            for job_dir in BASE_JOBS_DIR.iterdir():
+                if not job_dir.is_dir():
+                    continue
+                if job_dir.name == "groups":
+                    continue
+                if job_dir.name.startswith("specs_"):
+                    continue
+
+                st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
+                owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+                group = _safe_folder_key(st.get("group_folder") or "personal", "personal")
+
+                if owner:
+                    pairs.add((owner, group))
+        except Exception:
+            pass
+
+        # Grouped jobs
+        groups_root = BASE_JOBS_DIR / "groups"
+        try:
+            if groups_root.is_dir():
+                for status_path in groups_root.rglob("status.json"):
+                    try:
+                        job_dir = status_path.parent
+                        if job_dir.name.startswith("specs_"):
+                            continue
+
+                        st = _json_read_or_none(status_path) or {}
+                        owner = str(st.get("owner_id") or st.get("owner_email") or "").strip().lower()
+                        group = _safe_folder_key(st.get("group_folder") or "personal", "personal")
+
+                        if owner:
+                            pairs.add((owner, group))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        for owner, group in sorted(pairs):
+            _cleanup_standard_retention_for_owner(owner, group, reserve_slots=0)
+
+    except Exception as e:
+        print(f">>> standard retention global sweep failed: {e}")
+
+
+def _cleanup_all_retention_policies():
+    """
+    One retention entry point:
+      - excluded jobs: 24-hour full-folder cleanup
+      - standard jobs: 90-day / 30-job-per-user cleanup
+    """
+    _cleanup_expired_excluded_jobs()
+    _cleanup_standard_retention_all_users()
+
 def _excluded_cleanup_loop():
     """
     Lightweight background maintenance loop.
     Runs only in the main uplink process, not worker subprocesses.
-    Deletes expired excluded jobs every CLEANUP_SWEEP_INTERVAL_SEC.
+
+    Enforces:
+      - excluded jobs: 24-hour cleanup
+      - standard jobs: 90-day retention / 30-job per-user history limit
     """
-    threading.current_thread().name = "excluded-job-cleanup"
+    threading.current_thread().name = "job-retention-cleanup"
 
     while not _STOP.is_set():
         try:
-            _cleanup_expired_excluded_jobs()
+            _cleanup_all_retention_policies()
         except Exception as e:
-            print(f">>> excluded cleanup loop error: {e}")
+            print(f">>> retention cleanup loop error: {e}")
 
         # Wait is better than time.sleep because it can exit cleanly if _STOP is set.
         _STOP.wait(CLEANUP_SWEEP_INTERVAL_SEC)
@@ -2246,12 +2478,17 @@ if not _IS_WORKER_SUBPROCESS:
         cleanup_thread = threading.Thread(
             target=_excluded_cleanup_loop,
             daemon=True,
-            name="excluded-job-cleanup",
+            name="job-retention-cleanup",
         )
         cleanup_thread.start()
-        print(f">>> excluded cleanup loop started | interval={CLEANUP_SWEEP_INTERVAL_SEC}s")
+        print(
+            f">>> job retention cleanup loop started | "
+            f"interval={CLEANUP_SWEEP_INTERVAL_SEC}s | "
+            f"standard_days={STANDARD_JOB_RETENTION_DAYS} | "
+            f"standard_limit={STANDARD_JOB_HISTORY_LIMIT}"
+        )
     except Exception as e:
-        print(f">>> excluded cleanup loop startup failed: {e}")
+        print(f">>> job retention cleanup loop startup failed: {e}")
         print(traceback.format_exc())
 
 def _active_job_for_owner(owner_email: str, group_folder: str = "personal") -> dict | None:
@@ -2368,8 +2605,8 @@ def vm_submit_for_detection(
 
     exclude_from_improvement = bool(exclude_from_improvement)
 
-    # Opportunistic cleanup 
-    _cleanup_expired_excluded_jobs()
+    # Opportunistic retention cleanup
+    _cleanup_all_retention_policies()
 
     with _SUBMIT_LOCK:
         active = _active_job_for_owner(owner_email, group_folder)
@@ -2380,6 +2617,15 @@ def vm_submit_for_detection(
                 "error": "You already have a job processing. Please wait for it to finish or cancel it from My Jobs.",
                 "active_job": active,
             }
+
+        # Make room for this new standard job before creating it.
+        # Excluded jobs follow the separate 24-hour retention policy.
+        if not exclude_from_improvement:
+            _cleanup_standard_retention_for_owner(
+                owner_email,
+                group_folder,
+                reserve_slots=1
+            )
 
         original_name = getattr(media, "name", "uploaded.pdf")
         job_dir = _make_job_dir(job_note, original_name, owner_email=owner_email, group_folder=group_folder)
@@ -3145,12 +3391,15 @@ def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "person
 def vm_list_jobs(owner_id: str, limit: int = 50, group_folder: str = "personal") -> list[dict]:
     print(f">>> vm_list_jobs called | owner_id={owner_id!r} | NODE_ID={NODE_ID}")
 
-    _cleanup_expired_excluded_jobs()
+    _cleanup_all_retention_policies()
 
     owner_id = str(owner_id or "").strip().lower()
     if not owner_id:
         print(">>> vm_list_jobs: empty owner_id")
         return []
+
+    # Enforce this user's standard retention before building the visible list.
+    _cleanup_standard_retention_for_owner(owner_id, group_folder, reserve_slots=0)
 
     def _safe_iso(dt_s):
         if not isinstance(dt_s, str) or not dt_s.strip():
