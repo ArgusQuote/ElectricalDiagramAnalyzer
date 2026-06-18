@@ -1047,7 +1047,7 @@ class HeaderBandScanner:
                 or int(info.get("hero_poles_rank", 0)) > 0
             )
         ]
-
+ 
         if not hero_candidates:
             role_to_index: Dict[str, int] = {}
             summaries: List[Dict] = []

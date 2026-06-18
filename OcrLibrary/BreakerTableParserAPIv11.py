@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParserAPIv10.py
+# OcrLibrary/BreakerTableParserAPIv11.py
 import sys, os, inspect
 import re
 import cv2
@@ -571,6 +571,7 @@ class BreakerTablePipeline:
                 _dn2, volts, bus_amps, main_amps, trim_style, enclosure, spaces = self._extract_panel_keys(
                     analyzer_result, header_result, parser_result
                 )
+
                 volts_i = self._parse_voltage(volts)
                 volts_invalid  = (volts_i is None) or (volts_i not in VALID_VOLTAGES)
                 bus_invalid    = not self._is_valid_amp(bus_amps)
@@ -581,9 +582,52 @@ class BreakerTablePipeline:
                     spaces_norm = SNAP_MAP.get(spaces, spaces)
                     spaces_invalid = spaces_norm is None or spaces_norm <= 0
                 else:
+                    spaces_norm = None
                     spaces_invalid = True
 
-                if spaces_invalid or volts_invalid or bus_invalid or main_invalid:
+                ar = analyzer_result or {}
+                prs = parser_result or {}
+
+                panel_size_unknown = (
+                    spaces_invalid
+                    and ar.get("panel_size") is None
+                    and ar.get("footer_y") is None
+                ) or prs.get("sizeDetectionStatus") == "unknown"
+
+                header_fields_invalid = volts_invalid or bus_invalid or main_invalid
+
+                # Case 1:
+                # Header is valid, but footer/panel size could not be determined.
+                # This is a BAD panel for UI sorting, but NOT a "missing amps/volts" panel.
+                if panel_size_unknown and not header_fields_invalid:
+                    note = "Could not determine panel size."
+
+                    # Important: UI already recognizes this as a bad/problem panel bucket
+                    panel_status = f"detected but skipped ({dedup_name})"
+
+                    if isinstance(header_result, dict):
+                        header_result["panelNote"] = note
+
+                        attrs = header_result.get("attrs")
+                        if isinstance(attrs, dict):
+                            attrs["detected_breakers"] = []
+
+                    if not isinstance(parser_result, dict):
+                        parser_result = {}
+
+                    parser_result["name"] = dedup_name
+                    parser_result["spaces"] = None
+                    parser_result["detected_breakers"] = []
+                    parser_result["breakerCounts"] = {}
+                    parser_result["gfiBreakerCounts"] = {}
+                    parser_result["sizeDetectionStatus"] = "unknown"
+                    parser_result["bodyParseStatus"] = "skipped"
+                    parser_result["bodyParseNote"] = note
+
+                # Case 2:
+                # Actual key header info is missing/bad.
+                # This should keep the old behavior.
+                elif spaces_invalid or header_fields_invalid:
                     special_note = self._special_header_note(header_result)
 
                     if special_note:
