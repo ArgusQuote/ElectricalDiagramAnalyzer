@@ -1,0 +1,794 @@
+import anvil.secrets
+import anvil.stripe
+import anvil.email
+import anvil.users
+import anvil.server
+import json, time, io, re
+from anvil.tables import app_tables
+
+MAX_PDF_SIZE_MB = 50
+MAX_PDF_SIZE_BYTES = MAX_PDF_SIZE_MB * 1024 * 1024
+MAX_PDF_PAGES = 50
+
+def _jsonify(x):
+  return json.loads(json.dumps(x, default=str))
+
+def _pdf_page_count(data: bytes) -> int:
+  """
+  Best-effort PDF page count.
+  If page count cannot be read in Anvil, do not block upload.
+  The VM/pipeline can still fail safely later if the PDF is bad.
+  """
+  try:
+    try:
+      from pypdf import PdfReader
+    except Exception:
+      from PyPDF2 import PdfReader
+
+    reader = PdfReader(io.BytesIO(data))
+
+    if getattr(reader, "is_encrypted", False):
+      raise Exception("Encrypted PDFs are not supported.")
+
+    return len(reader.pages)
+
+  except Exception as e:
+    if "Encrypted PDFs are not supported" in str(e):
+      raise
+
+    return 0
+
+def _is_pdf(media):
+  if not media:
+    return False
+
+  try:
+    name = (getattr(media, "name", "") or "").lower()
+
+    data = media.get_bytes()
+
+    if not data:
+      return False
+
+    # Size limit
+    if len(data) > MAX_PDF_SIZE_BYTES:
+      raise Exception(
+        f"PDF exceeds {MAX_PDF_SIZE_MB}MB limit."
+      )
+
+    # PDF magic bytes
+    if not data.startswith(b"%PDF-"):
+      return False
+
+    # Extension sanity check
+    if not name.endswith(".pdf"):
+      return False
+
+    # Page-count limit, best-effort only.
+    # If Anvil cannot read page count, page_count returns 0 and we skip this check.
+    page_count = _pdf_page_count(data)
+
+    if page_count > MAX_PDF_PAGES:
+      raise Exception(
+        f"PDF has {page_count} pages. The current limit is {MAX_PDF_PAGES} pages."
+      )
+
+    return True
+
+  except Exception as e:
+    msg = str(e)
+    if (
+      "PDF exceeds" in msg
+      or "PDF has" in msg
+      or "Encrypted PDFs are not supported" in msg
+    ):
+      raise
+    return False
+
+def _owner_email() -> str:
+  u = anvil.users.get_user()
+  if not u:
+    raise Exception("User not logged in")
+  try:
+    em = (u['email'] or "").strip().lower()
+  except Exception:
+    em = ""
+  if not em:
+    raise Exception("Your account has no email address.")
+  return em
+
+def _is_internal_admin_email(email: str) -> bool:
+  email = str(email or "").strip().lower()
+  if not email:
+    return False
+
+  # Supports either:
+  # internal_admins.email = "you@email.com"
+  # OR internal_admins.user = users row
+  try:
+    if app_tables.internal_admins.get(email=email):
+      return True
+  except Exception:
+    pass
+
+  try:
+    u = anvil.users.get_user()
+    if u and app_tables.internal_admins.get(user=u):
+      return True
+  except Exception:
+    pass
+
+  return False
+
+def _require_entitled_owner_email() -> str:
+  owner_email = _owner_email()
+
+  # Internal admins may not be code_users.
+  # Allow them through before requiring normal customer entitlement.
+  try:
+    if _is_internal_admin_email(owner_email):
+      return owner_email
+  except Exception:
+    pass
+
+  ent = anvil.server.call("is_current_user_entitled") or {}
+  if not ent.get("ok"):
+    raise Exception("Your access is not active. Please contact your admin.")
+
+  return owner_email
+
+def _safe_folder_key(value: str, fallback: str = "ungrouped") -> str:
+  s = str(value or "").strip().lower()
+  s = re.sub(r"[^a-z0-9._-]+", "_", s)
+  s = s.strip("._-")
+  return s or fallback
+
+def _access_code_exclusion_default(ac) -> bool:
+  """
+  Group/account-level default exclusion setting.
+  If True, every upload under this access code is forced into excluded retention.
+  """
+  if not ac:
+    return False
+
+  try:
+    return bool(ac["exclude_from_improvement_default"])
+  except Exception:
+    return False
+
+def _current_storage_context() -> dict:
+  """
+  Server-derived storage routing context.
+  Never accept group_folder from the browser/client.
+
+  Routing rule:
+    1. internal_admins table wins first
+    2. normal code_users/access_code next
+    3. personal fallback last
+  """
+  u = anvil.users.get_user()
+  if not u:
+    raise Exception("User not logged in.")
+
+  owner_email = _require_entitled_owner_email()
+
+  # Internal admins always route to the admin folder.
+  # This must happen before code_users lookup.
+  if _is_internal_admin_email(owner_email):
+    return {
+      "owner_email": owner_email,
+      "access_code_value": "INTERNAL_ADMIN",
+      "plan_key": "internal_admin",
+      "company_name": "Argus Internal Admins",
+      "group_folder": "internal_admins",
+      "exclude_from_improvement_default": False,
+    }
+
+  link = app_tables.code_users.get(user=u)
+  ac = link["access_code"] if link and link["access_code"] else None
+
+  # Personal fallback for any unusual entitled user without a code row.
+  if not ac:
+    return {
+      "owner_email": owner_email,
+      "access_code_value": "",
+      "plan_key": "",
+      "company_name": "",
+      "group_folder": "personal",
+      "exclude_from_improvement_default": False,
+    }
+
+  group_folder = _safe_folder_key(ac["group_folder"] or "", "")
+
+  if not group_folder:
+    raise Exception(
+      "This account is missing a storage group folder. Please contact support."
+    )
+
+  company_name = ""
+  try:
+    company_name = (ac["company_name"] or "").strip()
+  except Exception:
+    company_name = ""
+
+  return {
+    "owner_email": owner_email,
+    "access_code_value": (ac["code"] or "").strip(),
+    "plan_key": (ac["plan_key"] or "").strip().lower(),
+    "company_name": company_name,
+    "group_folder": group_folder,
+    "exclude_from_improvement_default": _access_code_exclusion_default(ac),
+  }
+
+@anvil.server.callable(require_user=True)
+def get_upload_retention_policy():
+  """
+  Returns the current user's upload retention policy.
+  Used by the Upload page to show/lock the exclusion checkbox when the group requires it.
+  Server-side enforcement still happens in submit_for_detection().
+  """
+  storage_ctx = _current_storage_context()
+
+  group_default = bool(storage_ctx.get("exclude_from_improvement_default", False))
+
+  return _jsonify({
+    "ok": True,
+    "exclude_from_improvement_default": group_default,
+    "retention_mode": "excluded_24h" if group_default else "standard",
+    "group_folder": storage_ctx.get("group_folder") or "personal",
+    "company_name": storage_ctx.get("company_name") or "",
+    "plan_key": storage_ctx.get("plan_key") or "",
+  })
+
+@anvil.server.callable(require_user=True)
+def submit_for_detection(file, ui_overrides=None, **kwargs):
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+
+  if not _is_pdf(file):
+    raise Exception("PDFs only")
+
+  job_note = kwargs.get("job_note")
+
+  user_requested_exclusion = bool(kwargs.get("exclude_from_improvement", False))
+  group_default_exclusion = bool(storage_ctx.get("exclude_from_improvement_default", False))
+
+  # Server-side enforcement:
+  # If the access code/group requires exclusion, the browser cannot override it.
+  exclude_from_improvement = bool(user_requested_exclusion or group_default_exclusion)
+
+  out = anvil.server.call(
+    "vm_submit_for_detection",
+    media=file,
+    ui_overrides=(ui_overrides or {}),
+    job_note=job_note,
+    owner_email=owner_email,
+    group_folder=storage_ctx["group_folder"],
+    access_code_value=storage_ctx["access_code_value"],
+    plan_key=storage_ctx["plan_key"],
+    company_name=storage_ctx["company_name"],
+    exclude_from_improvement=exclude_from_improvement
+  )
+
+  out = dict(out or {})
+
+  # Expected user-facing block: user already has an active queued/running job.
+  # Return this normally instead of raising, so the client can show the real message.
+  if out.get("ok") is False:
+    state = str(out.get("state") or "").strip().lower()
+    if state == "active_job_exists":
+      return _jsonify({
+        "ok": False,
+        "state": "active_job_exists",
+        "error": out.get("error") or (
+          "You already have a job processing. Please wait for it to finish "
+          "or cancel it from My Jobs."
+        )
+      })
+
+    raise Exception(
+      out.get("error") or "Could not submit job."
+    )
+
+  out["owner_email"] = owner_email
+  out["owner_id"] = owner_email
+  out["group_folder"] = storage_ctx["group_folder"]
+  out["exclude_from_improvement"] = exclude_from_improvement
+  out["exclude_from_improvement_default"] = group_default_exclusion
+  return _jsonify(out)
+
+@anvil.server.callable(require_user=True)
+def get_job_status(job_id):
+  """Resilient poll: auto-retry on Uplink disconnects; generic not_found for missing/stale jobs."""
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+  group_folder = storage_ctx["group_folder"]
+
+  job_id = str(job_id or "").strip()
+
+  if not job_id:
+    return {
+      "state": "not_found",
+      "error": "Job not found. Please resubmit your PDF."
+    }
+
+  # Security: do not pass path traversal or absolute-ish IDs to the VM.
+  if "/" in job_id or "\\" in job_id or ".." in job_id:
+    return {
+      "state": "not_found",
+      "error": "Job not found. Please resubmit your PDF."
+    }
+
+  for attempt in range(3):
+    try:
+      out = anvil.server.call("vm_get_job_status", job_id, owner_email, group_folder) or {}
+      out = dict(out)
+
+      # Backward-compatible safety in case the VM still returns the old message.
+      err = str(out.get("error") or "")
+      if (out.get("state") == "error") and ("Unknown job_id" in err):
+        return {
+          "state": "not_found",
+          "error": "Job not found. Please resubmit your PDF."
+        }
+
+      return _jsonify(out)
+
+    except anvil.server.UplinkDisconnectedError:
+      if attempt < 2:
+        time.sleep(0.75 * (attempt + 1))
+        continue
+      return {"state": "unknown", "error": "uplink_disconnected"}
+
+    except Exception:
+      return {
+        "state": "unknown",
+        "error": "Status unavailable. Please try again."
+      }
+
+@anvil.server.callable(require_user=True)
+def rerun_rules_with_panel_edit(job_id: str, original_panel_name: str, edited_component: dict, original_source_path: str = None):
+  """
+  Client-safe wrapper for editing one panel and rerunning the rules engine only.
+
+  This function should NEVER throw normal user-facing errors.
+  It should return:
+    {"ok": True, "result": ...}
+  or:
+    {"ok": False, "error": "..."}
+  """
+
+  try:
+    storage_ctx = _current_storage_context()
+    owner_email = storage_ctx["owner_email"]
+    group_folder = storage_ctx["group_folder"]
+
+    job_id = (job_id or "").strip()
+    original_panel_name = (original_panel_name or "").strip()
+    original_source_path = (original_source_path or "").strip()
+
+    if not job_id:
+      return _jsonify({
+        "ok": False,
+        "error": "Missing job_id."
+      })
+
+    if not original_panel_name and not original_source_path:
+      return _jsonify({
+        "ok": False,
+        "error": "Missing original_panel_name or original_source_path."
+      })
+
+    if not isinstance(edited_component, dict):
+      return _jsonify({
+        "ok": False,
+        "error": "edited_component must be a dictionary."
+      })
+
+    last_error = None
+
+    for attempt in range(3):
+      try:
+        out = anvil.server.call(
+          "vm_rerun_rules_with_panel_edit",
+          job_id,
+          owner_email,
+          group_folder,
+          original_panel_name,
+          edited_component,
+          original_source_path
+        ) or {}
+
+        if not out.get("ok"):
+          return _jsonify({
+            "ok": False,
+            "error": out.get("error") or "Could not rerun rules.",
+            "raw": out
+          })
+
+        return _jsonify(out)
+
+      except anvil.server.UplinkDisconnectedError as e:
+        last_error = "Rules rerun unavailable. Please try again."
+        if attempt < 2:
+          time.sleep(0.5 * (attempt + 1))
+          continue
+
+        return _jsonify({
+          "ok": False,
+          "error": last_error
+        })
+
+      except Exception:
+        return _jsonify({
+          "ok": False,
+          "error": "Rules rerun unavailable. Please try again."
+        })
+
+    return _jsonify({
+      "ok": False,
+      "error": last_error or "Rules rerun failed for an unknown reason."
+    })
+
+  except Exception:
+    return _jsonify({
+      "ok": False,
+      "error": "Rules rerun unavailable. Please try again."
+    })
+
+@anvil.server.callable(require_user=True)
+def get_job_result(job_id):
+  """
+  Fetch completed job result after polling confirms the job is done.
+  Returns:
+    {"ok": True, "result": {...}}
+  or:
+    {"ok": False, "error": "..."}
+  """
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+  group_folder = storage_ctx["group_folder"]
+
+  job_id = str(job_id or "").strip()
+
+  if not job_id:
+    return {
+      "ok": False,
+      "error": "Job not found. Please resubmit your PDF."
+    }
+
+  if "/" in job_id or "\\" in job_id or ".." in job_id:
+    return {
+      "ok": False,
+      "error": "Job not found. Please resubmit your PDF."
+    }
+
+  for attempt in range(3):
+    try:
+      out = anvil.server.call("vm_get_job_result", job_id, owner_email, group_folder) or {}
+      out = dict(out or {})
+
+      err = str(out.get("error") or "")
+
+      if "Unknown job_id" in err:
+        return {
+          "ok": False,
+          "error": "Job not found. Please resubmit your PDF."
+        }
+
+      if out.get("ok") is False:
+        return {
+          "ok": False,
+          "error": out.get("error") or "Result unavailable. Please try again."
+        }
+
+      # Already wrapped correctly
+      if isinstance(out.get("result"), dict):
+        return _jsonify({
+          "ok": True,
+          "result": out.get("result")
+        })
+
+      # Raw result.json shape
+      if isinstance(out, dict) and out:
+        # Remove status/debug wrapper fields only if result is not present.
+        # Otherwise just send whatever VM gave us to output2.
+        return _jsonify({
+          "ok": True,
+          "result": out
+        })
+
+      return {
+        "ok": False,
+        "error": "Result was empty."
+      }
+
+    except anvil.server.UplinkDisconnectedError:
+      if attempt < 2:
+        time.sleep(0.75 * (attempt + 1))
+        continue
+      return {
+        "ok": False,
+        "error": "uplink_disconnected"
+      }
+
+    except Exception:
+      return {
+        "ok": False,
+        "error": "Result unavailable. Please try again."
+      }
+
+@anvil.server.callable(require_user=True)
+def list_magenta_overlay_images(job_id):
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+  group_folder = storage_ctx["group_folder"]
+
+  job_id = str(job_id or "").strip()
+
+  if not job_id or "/" in job_id or "\\" in job_id or ".." in job_id:
+    return []
+
+  try:
+    return anvil.server.call("vm_list_magenta_overlay_images", job_id, owner_email, group_folder) or []
+  except Exception:
+    return []
+    
+@anvil.server.callable(require_user=True)
+def list_overlay_images(job_id):
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+  group_folder = storage_ctx["group_folder"]
+
+  job_id = str(job_id or "").strip()
+
+  if not job_id or "/" in job_id or "\\" in job_id or ".." in job_id:
+    return []
+
+  try:
+    return anvil.server.call("vm_list_overlay_images", job_id, owner_email, group_folder) or []
+  except Exception:
+    return []
+
+@anvil.server.callable(require_user=True)
+def delete_job_for_user(job_id: str):
+  """
+  Secure user-facing delete endpoint.
+  Deletes a completed/error/canceled job owned by the logged-in user.
+  Active queued/running jobs should be canceled instead.
+  """
+  try:
+    storage_ctx = _current_storage_context()
+    owner_email = storage_ctx["owner_email"]
+    group_folder = storage_ctx["group_folder"]
+
+    job_id = str(job_id or "").strip()
+    if not job_id:
+      return {"ok": False, "error": "Missing job id."}
+
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+      return {"ok": False, "error": "Job not found."}
+
+    out = anvil.server.call("vm_delete_job", job_id, owner_email, group_folder) or {}
+    out = dict(out or {})
+
+    if out.get("ok"):
+      return {
+        "ok": True,
+        "state": out.get("state") or "deleted"
+      }
+
+    return {
+      "ok": False,
+      "error": out.get("error") or "Could not delete job."
+    }
+
+  except Exception:
+    return {
+      "ok": False,
+      "error": "Delete unavailable. Please try again."
+    }
+
+@anvil.server.callable(require_user=True)
+def cancel_job_for_user(job_id: str):
+  """
+  Secure user-facing cancel endpoint.
+  Client provides only job_id. Owner identity comes from logged-in user.
+  """
+  try:
+    storage_ctx = _current_storage_context()
+    owner_email = storage_ctx["owner_email"]
+    group_folder = storage_ctx["group_folder"]
+
+    job_id = str(job_id or "").strip()
+    if not job_id:
+      return {"ok": False, "error": "Missing job id."}
+
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+      return {"ok": False, "error": "Job not found."}
+
+    out = anvil.server.call("vm_cancel_job", job_id, owner_email, group_folder) or {}
+
+    # Backward compatibility if VM returns True/False
+    if isinstance(out, bool):
+      return {
+        "ok": bool(out),
+        "state": "canceled" if out else "not_canceled",
+        "error": "" if out else "Job could not be canceled."
+      }
+
+    out = dict(out or {})
+
+    if out.get("ok"):
+      return {
+        "ok": True,
+        "state": out.get("state") or "canceled",
+        "deleted": bool(out.get("deleted"))
+      }
+
+    return {
+      "ok": False,
+      "error": out.get("error") or "Job could not be canceled."
+    }
+
+  except Exception:
+    return {
+      "ok": False,
+      "error": "Cancel unavailable. Please try again."
+    }
+
+@anvil.server.callable(require_user=True)
+def list_jobs(limit: int = 50):
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+  group_folder = storage_ctx["group_folder"]
+
+  out = anvil.server.call("vm_list_jobs", owner_email, int(limit), group_folder)
+  return _jsonify(out)
+
+# Specs analysis
+@anvil.server.callable(require_user=True)
+def upload_specs_pdf(file, job_name=None):
+  owner_email = _require_entitled_owner_email()
+
+  if not _is_pdf(file):
+    raise Exception("PDFs only")
+
+  out = anvil.server.call(
+    "vm_upload_specs_pdf",
+    media=file,
+    owner_email=owner_email,
+    job_name=(job_name or "")
+  )
+
+  return out or {}
+
+@anvil.server.callable(require_user=True)
+def start_specs_analysis(job_id):
+  owner_email = _require_entitled_owner_email()
+  out = anvil.server.call("vm_start_specs_analysis", job_id, owner_email)
+  return out or {}
+
+
+@anvil.server.callable(require_user=True)
+def get_specs_status(job_id):
+  owner_email = _require_entitled_owner_email()
+
+  for attempt in range(3):
+    try:
+      out = anvil.server.call("vm_get_specs_status", job_id, owner_email)
+      return _jsonify(out)
+
+    except anvil.server.UplinkDisconnectedError:
+      if attempt < 2:
+        time.sleep(0.75 * (attempt + 1))
+        continue
+      return {"state": "unknown", "error": "uplink_disconnected"}
+
+    except Exception:
+      return {"state": "error", "error": "Status unavailable. Please try again."}
+
+@anvil.server.callable(require_user=True)
+def fetch_specs_image(job_id, source_path):
+  job_id = str(job_id or "").strip()
+
+  # Specs jobs are still legacy/non-grouped.
+  if job_id.startswith("specs_"):
+    owner_email = _require_entitled_owner_email()
+    return anvil.server.call("vm_fetch_image", job_id, owner_email, source_path)
+
+  # Normal BOM jobs are grouped.
+  storage_ctx = _current_storage_context()
+  owner_email = storage_ctx["owner_email"]
+  group_folder = storage_ctx["group_folder"]
+
+  return anvil.server.call(
+    "vm_fetch_image",
+    job_id,
+    owner_email,
+    source_path,
+    group_folder
+  )
+
+@anvil.server.callable(require_user=True)
+def delete_specs_job(job_id):
+  owner_email = _require_entitled_owner_email()
+  ok = bool(anvil.server.call("vm_delete_specs_job", job_id, owner_email))
+  if not ok:
+    raise Exception(f"Could not delete specs temp job: {job_id}")
+  return True
+
+@anvil.server.background_task
+def _bg_upload_and_start_specs(file, owner_email, job_name=""):
+  if not _is_pdf(file):
+    raise Exception("PDFs only")
+
+  upload_out = anvil.server.call(
+    "vm_upload_specs_pdf",
+    media=file,
+    owner_email=owner_email,
+    job_name=(job_name or "")
+  ) or {}
+
+  job_id = upload_out.get("job_id")
+  if not job_id:
+    raise Exception("No specs job_id returned after upload.")
+
+  start_out = anvil.server.call("vm_start_specs_analysis", job_id, owner_email) or {}
+  if not start_out.get("ok"):
+    raise Exception("Could not start specs analysis.")
+
+  return {
+    "ok": True,
+    "job_id": job_id,
+    "upload": upload_out,
+    "start": start_out
+  }
+
+
+@anvil.server.callable(require_user=True)
+def start_specs_upload_task(file, job_name=None):
+  owner_email = _require_entitled_owner_email()
+
+  if not _is_pdf(file):
+    raise Exception("PDFs only")
+
+  task = anvil.server.launch_background_task(
+    "_bg_upload_and_start_specs",
+    file,
+    owner_email,
+    (job_name or "")
+  )
+
+  return {
+    "ok": True,
+    "task_id": task.get_id()
+  }
+
+
+@anvil.server.callable(require_user=True)
+def get_specs_upload_task_status(task_id):
+  task = anvil.server.get_background_task(task_id)
+  if not task:
+    return {"state": "error", "error": "Upload task not found."}
+
+  term = task.get_termination_status()
+
+  if term is None:
+    return {"state": "running"}
+
+  if term == "completed":
+    try:
+      result = task.get_return_value() or {}
+      return {"state": "done", "result": result}
+    except Exception:
+      return {"state": "error", "error": "Upload task status unavailable. Please try again."}
+
+  if term in ("failed", "killed", "missing"):
+    try:
+      task.get_return_value()
+      return {"state": "error", "error": f"Upload task {term}."}
+    except Exception:
+      return {"state": "error", "error": "Upload task status unavailable. Please try again."}
+
+  return {"state": "error", "error": "Upload task status unavailable. Please try again."}

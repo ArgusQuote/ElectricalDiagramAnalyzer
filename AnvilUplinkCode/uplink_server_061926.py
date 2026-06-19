@@ -22,7 +22,6 @@ BASE_JOBS_DIR = Path.home() / "jobs"
 BASE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
 EXCLUDED_JOB_RETENTION_HOURS = 24
-EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES = int(os.environ.get("EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES", "10"))
 EXCLUDED_JOB_MARKER_FILENAME = "ARGUS_EXCLUDED_FROM_IMPROVEMENT_REVIEW_README.txt"
 
 STANDARD_JOB_RETENTION_DAYS = int(os.environ.get("STANDARD_JOB_RETENTION_DAYS", "90"))
@@ -405,92 +404,6 @@ def _make_job_dir(job_note: str, fallback_filename: str, owner_email: str = "", 
     (job_dir / "pdf_images").mkdir(parents=True, exist_ok=True)
     return job_dir
 
-def _specs_group_users_root(group_folder: str) -> Path:
-    group_key = _safe_folder_key(group_folder, "ungrouped")
-    return (BASE_JOBS_DIR / "specs" / "groups" / group_key / "users").resolve()
-
-
-def _user_specs_root(owner_email: str, group_folder: str) -> Path:
-    return (_specs_group_users_root(group_folder) / _owner_folder_key(owner_email)).resolve()
-
-
-def _make_specs_job_dir(media, owner_email: str, group_folder: str = "personal", job_name: str = "") -> Path:
-    safe_job_name = _slugify(job_name or Path(getattr(media, "name", "specs.pdf")).stem)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    suffix = uuid.uuid4().hex[:8]
-
-    job_id = f"specs_{safe_job_name}__{stamp}__{suffix}"
-
-    root = _user_specs_root(owner_email, group_folder)
-    root.mkdir(parents=True, exist_ok=True)
-
-    job_dir = _assert_under_base(root / job_id)
-    (job_dir / "uploaded_pdfs").mkdir(parents=True, exist_ok=True)
-
-    return job_dir
-
-
-def _resolve_specs_job_dir_for_owner(job_id: str, owner_email: str, group_folder: str = "personal") -> Path | None:
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-    group_folder = _safe_folder_key(group_folder or "personal", "personal")
-
-    if not job_id or not owner_email:
-        return None
-
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
-        return None
-
-    candidates = [
-        _user_specs_root(owner_email, group_folder) / job_id,
-        BASE_JOBS_DIR / job_id,  # legacy fallback
-    ]
-
-    for cand in candidates:
-        try:
-            cand = _assert_under_base(cand)
-        except Exception:
-            continue
-
-        st = _json_read_or_none(_status_paths(cand)["status"]) or {}
-        if not isinstance(st, dict) or not st:
-            continue
-
-        job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-        if job_owner != owner_email:
-            continue
-
-        return cand
-
-    return None
-
-
-def _resolve_specs_job_dir_any(job_id: str) -> Path | None:
-    job_id = str(job_id or "").strip()
-
-    if not job_id or "/" in job_id or "\\" in job_id or ".." in job_id:
-        return None
-
-    legacy = BASE_JOBS_DIR / job_id
-    try:
-        legacy = _assert_under_base(legacy)
-        if (_status_paths(legacy)["status"]).exists():
-            return legacy
-    except Exception:
-        pass
-
-    specs_root = BASE_JOBS_DIR / "specs"
-    try:
-        if specs_root.is_dir():
-            for status_path in specs_root.rglob("status.json"):
-                d = status_path.parent
-                if d.name == job_id:
-                    return _assert_under_base(d)
-    except Exception:
-        pass
-
-    return None
-
 def _save_media_to_disk(media, dest_dir: Path) -> Path:
     fname = _slugify(getattr(media, "name", None) or "uploaded.pdf")
     if not fname.lower().endswith(".pdf"):
@@ -587,10 +500,6 @@ def _utc_iso_z(dt=None) -> str:
 def _excluded_delete_after_utc() -> str:
     return _utc_iso_z(datetime.now(timezone.utc) + timedelta(hours=EXCLUDED_JOB_RETENTION_HOURS))
 
-def _excluded_specs_delete_after_utc() -> str:
-    return _utc_iso_z(
-        datetime.now(timezone.utc) + timedelta(minutes=EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES)
-    )
 
 def _write_excluded_job_marker(job_dir: Path):
     try:
@@ -688,10 +597,8 @@ def _is_standard_retention_job(status: dict) -> bool:
 def _cleanup_expired_excluded_jobs():
     """
     Deletes full job folders for excluded jobs once their 24-hour retention expires.
-    Handles:
-      - legacy flat jobs
-      - grouped drawing jobs
-      - grouped specs jobs
+    Safe to run often.
+    Handles both legacy flat jobs and grouped jobs.
     """
     try:
         if not BASE_JOBS_DIR.is_dir():
@@ -699,24 +606,28 @@ def _cleanup_expired_excluded_jobs():
 
         candidates = []
 
+        # Legacy flat jobs directly under BASE_JOBS_DIR
         try:
             for job_dir in BASE_JOBS_DIR.iterdir():
                 if not job_dir.is_dir():
                     continue
-                if job_dir.name in ("groups", "specs"):
+                if job_dir.name == "groups":
                     continue
                 candidates.append(job_dir)
         except Exception:
             pass
 
-        for root_name in ("groups", "specs"):
-            root = BASE_JOBS_DIR / root_name
-            try:
-                if root.is_dir():
-                    for status_path in root.rglob("status.json"):
+        # Grouped jobs under BASE_JOBS_DIR/groups/<group>/users/<user>/<job>
+        groups_root = BASE_JOBS_DIR / "groups"
+        try:
+            if groups_root.is_dir():
+                for status_path in groups_root.rglob("status.json"):
+                    try:
                         candidates.append(status_path.parent)
-            except Exception:
-                pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         seen = set()
         for job_dir in candidates:
@@ -730,7 +641,9 @@ def _cleanup_expired_excluded_jobs():
                 continue
             seen.add(key)
 
-            st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
+            sp = _status_paths(job_dir)
+            st = _json_read_or_none(sp["status"]) or {}
+
             if not _is_excluded_job_expired(st):
                 continue
 
@@ -1051,38 +964,6 @@ def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
                 keep.add(_rel(p, job_dir))
 
     return keep
-
-def _cleanup_excluded_specs_job_dir(job_dir: Path):
-    """
-    For excluded specs jobs:
-      - delete raw uploaded PDFs
-      - keep result.json, status.json, marker, and generated images/artifacts
-        so the user can view results for the 24-hour window
-    """
-    job_dir = Path(job_dir).resolve()
-
-    uploaded = job_dir / "uploaded_pdfs"
-    if uploaded.is_dir():
-        for p in uploaded.rglob("*"):
-            if p.is_file():
-                try:
-                    p.unlink()
-                except Exception:
-                    pass
-
-        for d in sorted([x for x in uploaded.rglob("*") if x.is_dir()], reverse=True):
-            try:
-                next(d.iterdir())
-            except StopIteration:
-                try:
-                    d.rmdir()
-                except Exception:
-                    pass
-
-        try:
-            uploaded.rmdir()
-        except Exception:
-            pass
 
 def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
     """
@@ -2481,28 +2362,17 @@ def _dequeue_loop(idx: int):
             _JOB_Q.task_done()
 
 def _run_specs_analysis_job(job_id: str):
-    job_dir = _resolve_specs_job_dir_any(job_id)
-    if job_dir is None:
-        print(f">>> specs analysis could not resolve job_id: {job_id}")
-        with _SPECS_LOCK:
-            _SPECS_RUNNING.pop(job_id, None)
-        return
-
+    job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
     st = _json_read_or_none(sp["status"]) or {}
 
-    group_folder = _safe_folder_key(st.get("group_folder") or "personal", "personal")
-    exclude_from_improvement = bool(st.get("exclude_from_improvement"))
-
-    owner_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+    owner_email = str(st.get("owner_email") or "").strip().lower()
     saved_pdf = Path(st.get("file_path") or "").resolve()
-    specs_delete_after_utc = _excluded_specs_delete_after_utc() if exclude_from_improvement else None
-    
+
     try:
         _status_write(
             job_dir,
             "running",
-            group_folder=group_folder,
             created_at=st.get("created_at"),
             file_path=str(saved_pdf),
             job_dir_path=str(job_dir),
@@ -2510,12 +2380,7 @@ def _run_specs_analysis_job(job_id: str):
             owner_id=owner_email,
             node_id=NODE_ID,
             step="specs_analyzing",
-            progress=15.0,
-            exclude_from_improvement=exclude_from_improvement,
-            retention_mode=("excluded_specs_short" if exclude_from_improvement else "standard"),
-            delete_after_utc=specs_delete_after_utc,
-            raw_pdf_deleted=False,
-            job_type="specs_analysis",
+            progress=15.0
         )
 
         module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
@@ -2548,43 +2413,24 @@ def _run_specs_analysis_job(job_id: str):
         result = dict(result)
         result["job_id"] = job_id
         result["job_dir"] = str(job_dir)
-        result["saved_pdf"] = "" if exclude_from_improvement else str(saved_pdf)
-        result["exclude_from_improvement"] = exclude_from_improvement
-        result["retention_mode"] = "excluded_specs_short" if exclude_from_improvement else "standard"
-        result["delete_after_utc"] = specs_delete_after_utc
+        result["saved_pdf"] = str(saved_pdf)
         result["owner_email"] = owner_email
         result["owner_id"] = owner_email
-        result["group_folder"] = group_folder
-        result["job_type"] = "specs_analysis"
 
         _result_write(job_dir, result)
 
         _status_write(
             job_dir,
             "done",
-            group_folder=group_folder,
             created_at=st.get("created_at"),
-            file_path=("" if exclude_from_improvement else str(saved_pdf)),
+            file_path=str(saved_pdf),
             job_dir_path=str(job_dir),
-            result_path=str(sp["result"]),
             owner_email=owner_email,
             owner_id=owner_email,
             node_id=NODE_ID,
             step="specs_complete",
-            progress=100.0,
-            exclude_from_improvement=exclude_from_improvement,
-            retention_mode=("excluded_specs_short" if exclude_from_improvement else "standard"),
-            delete_after_utc=specs_delete_after_utc,
-            raw_pdf_deleted=exclude_from_improvement,
-            job_type="specs_analysis",
+            progress=100.0
         )
-
-        if exclude_from_improvement:
-            try:
-                _write_excluded_job_marker(job_dir)
-                _cleanup_excluded_specs_job_dir(job_dir)
-            except Exception as ce:
-                print(f">>> excluded specs cleanup failed: {ce}")
 
         print(f">>> specs analysis done: {job_id}")
 
@@ -2595,9 +2441,8 @@ def _run_specs_analysis_job(job_id: str):
         _status_write(
             job_dir,
             "error",
-            group_folder=group_folder,
             created_at=st.get("created_at"),
-            file_path=("" if exclude_from_improvement else str(saved_pdf)),
+            file_path=str(saved_pdf),
             job_dir_path=str(job_dir),
             owner_email=owner_email,
             owner_id=owner_email,
@@ -2605,20 +2450,8 @@ def _run_specs_analysis_job(job_id: str):
             step="specs_error",
             error=f"{type(e).__name__}: {e}",
             traceback=tb,
-            progress=100.0,
-            exclude_from_improvement=exclude_from_improvement,
-            retention_mode=("excluded_specs_short" if exclude_from_improvement else "standard"),
-            delete_after_utc=(_excluded_specs_delete_after_utc() if exclude_from_improvement else None),
-            raw_pdf_deleted=exclude_from_improvement,
-            job_type="specs_analysis",
+            progress=100.0
         )
-
-        if exclude_from_improvement:
-            try:
-                _write_excluded_job_marker(job_dir)
-                _cleanup_excluded_specs_job_dir(job_dir)
-            except Exception as ce:
-                print(f">>> excluded specs cleanup failed: {ce}")
 
     finally:
         with _SPECS_LOCK:
@@ -2854,53 +2687,28 @@ def vm_submit_for_detection(
         }
 
 @anvil.server.callable
-def vm_upload_specs_pdf(
-    media,
-    owner_email=None,
-    group_folder="personal",
-    access_code_value="",
-    plan_key="",
-    company_name="",
-    job_name="",
-    exclude_from_improvement=False
-):
+def vm_upload_specs_pdf(media, owner_email=None, job_name=""):
     """
-    Upload/save specs PDF into:
-      /jobs/specs/groups/<group>/users/<owner>/<specs_job_id>
-
-    Excluded specs:
-      - raw PDF is deleted after analysis
-      - generated artifacts remain only until the next short cleanup window
+    Upload/save only. Do NOT analyze yet.
     """
     if not owner_email or not str(owner_email).strip():
         raise RuntimeError("owner_email required")
 
     owner_email = str(owner_email).strip().lower()
-    group_folder = _safe_folder_key(group_folder or "personal", "personal")
-    access_code_value = str(access_code_value or "").strip()
-    plan_key = str(plan_key or "").strip().lower()
-    company_name = str(company_name or "").strip()
-    exclude_from_improvement = bool(exclude_from_improvement)
 
-    job_dir = _make_specs_job_dir(
-        media=media,
-        owner_email=owner_email,
-        group_folder=group_folder,
-        job_name=job_name
-    )
-    job_id = job_dir.name
+    safe_job_name = _slugify(job_name or Path(getattr(media, "name", "specs.pdf")).stem)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    job_id = f"specs_{safe_job_name}__{stamp}"
 
+    job_dir = BASE_JOBS_DIR / job_id
     pdf_dir = job_dir / "uploaded_pdfs"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+
     saved_pdf = _save_media_to_disk(media, pdf_dir)
 
     _status_write(
         job_dir,
         "uploaded",
-        group_folder=group_folder,
-        owner_folder=_owner_folder_key(owner_email),
-        access_code_value=access_code_value,
-        plan_key=plan_key,
-        company_name=company_name,
         created_at=_now_utc().isoformat(),
         file_path=str(saved_pdf),
         job_dir_path=str(job_dir),
@@ -2908,16 +2716,8 @@ def vm_upload_specs_pdf(
         owner_id=owner_email,
         node_id=NODE_ID,
         step="specs_uploaded",
-        progress=5.0,
-        exclude_from_improvement=exclude_from_improvement,
-        retention_mode=("excluded_specs_short" if exclude_from_improvement else "standard"),
-        delete_after_utc=None,
-        raw_pdf_deleted=False,
-        job_type="specs_analysis"
+        progress=5.0
     )
-
-    if exclude_from_improvement:
-        _write_excluded_job_marker(job_dir)
 
     return {
         "ok": True,
@@ -2927,19 +2727,17 @@ def vm_upload_specs_pdf(
         "owner_email": owner_email,
         "owner_id": owner_email,
         "node_id": NODE_ID,
-        "state": "uploaded",
-        "group_folder": group_folder,
-        "exclude_from_improvement": exclude_from_improvement
+        "state": "uploaded"
     }
 
+
 @anvil.server.callable
-def vm_start_specs_analysis(job_id: str, owner_email: str, group_folder: str = "personal"):
+def vm_start_specs_analysis(job_id: str, owner_email: str):
     """
-    Start analysis only after the specs PDF has already been uploaded/saved.
+    Start analysis only after the PDF has already been uploaded/saved.
     """
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
-    group_folder = _safe_folder_key(group_folder or "personal", "personal")
 
     if not job_id or not owner_email:
         return {
@@ -2955,15 +2753,10 @@ def vm_start_specs_analysis(job_id: str, owner_email: str, group_folder: str = "
             "error": "Job not found. Please resubmit your PDF."
         }
 
-    job_dir = _resolve_specs_job_dir_for_owner(job_id, owner_email, group_folder)
-    if job_dir is None:
-        return {
-            "ok": False,
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
+    job_dir = BASE_JOBS_DIR / job_id
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
 
-    st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
     if not st:
         return {
             "ok": False,
@@ -2991,10 +2784,9 @@ def vm_start_specs_analysis(job_id: str, owner_email: str, group_folder: str = "
     return {"ok": True, "job_id": job_id, "state": "running"}
 
 @anvil.server.callable
-def vm_get_specs_status(job_id: str, owner_email: str, group_folder: str = "personal") -> dict:
+def vm_get_specs_status(job_id: str, owner_email: str) -> dict:
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
-    group_folder = _safe_folder_key(group_folder or "personal", "personal")
 
     if not job_id or not owner_email:
         return {
@@ -3008,29 +2800,11 @@ def vm_get_specs_status(job_id: str, owner_email: str, group_folder: str = "pers
             "error": "Job not found. Please resubmit your PDF."
         }
 
-    job_dir = _resolve_specs_job_dir_for_owner(job_id, owner_email, group_folder)
-    if job_dir is None:
-        return {
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
-
+    job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
+
     st = _json_read_or_none(sp["status"])
-
     if not isinstance(st, dict) or not st:
-        return {
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
-
-    if _is_excluded_job_expired(st):
-        try:
-            shutil.rmtree(job_dir, ignore_errors=True)
-            print(f">>> deleted expired excluded specs job on status check: {job_dir}")
-        except Exception:
-            pass
-
         return {
             "state": "not_found",
             "error": "Job not found. Please resubmit your PDF."
@@ -3062,49 +2836,37 @@ def vm_get_specs_status(job_id: str, owner_email: str, group_folder: str = "pers
 
     out = {"state": state}
 
-    for k in (
-        "step",
-        "progress",
-        "exclude_from_improvement",
-        "retention_mode",
-        "delete_after_utc",
-        "raw_pdf_deleted",
-        "group_folder",
-    ):
+    for k in ("step", "progress"):
         if k in st:
             out[k] = st[k]
 
     return out
 
 @anvil.server.callable
-def vm_delete_specs_job(job_id: str, owner_email: str, group_folder: str = "personal") -> bool:
+def vm_delete_specs_job(job_id: str, owner_email: str) -> bool:
     """
-    Delete a specs-only temp job folder.
-    Supports grouped specs storage and legacy flat specs jobs.
+    Delete a specs-only temp job folder after the results modal is finished.
+    Only allows deletion of specs_* jobs owned by the requesting user.
     """
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-    group_folder = _safe_folder_key(group_folder or "personal", "personal")
-
     if not job_id or not owner_email:
         return False
 
+    owner_email = str(owner_email).strip().lower()
     if not job_id.startswith("specs_"):
         return False
 
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
+    job_dir = BASE_JOBS_DIR / job_id
+    if not job_dir.exists() or not job_dir.is_dir():
         return False
 
-    job_dir = _resolve_specs_job_dir_for_owner(job_id, owner_email, group_folder)
-    if job_dir is None or not job_dir.exists() or not job_dir.is_dir():
-        return False
-
-    st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
+    sp = _status_paths(job_dir)
+    st = _json_read_or_none(sp["status"]) or {}
     job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
 
     if not job_owner or job_owner != owner_email:
         return False
 
+    import shutil
     try:
         shutil.rmtree(job_dir, ignore_errors=False)
         print(f">>> deleted specs temp job folder: {job_dir}")
@@ -3254,10 +3016,7 @@ def vm_fetch_image(job_id: str, owner_email: str, source_path: str, group_folder
     if ".." in p_in.parts:
         raise RuntimeError("Image unavailable.")
 
-    if job_id.startswith("specs_"):
-        job_root = _resolve_specs_job_dir_for_owner(job_id, owner_email, group_folder)
-    else:
-        job_root = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    job_root = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
     if job_root is None:
         raise RuntimeError("Image unavailable.")
 
