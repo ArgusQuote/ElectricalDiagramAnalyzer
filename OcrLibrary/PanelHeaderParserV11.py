@@ -539,8 +539,40 @@ class PanelParser:
 
             return best if best is not None and best_iou >= 0.70 else c
 
-        def _is_colon_labeled(c: dict | None) -> bool:
-            return bool(c and c.get("fromColonLabel"))
+        def _is_colon_labeled(c: dict | None, role: str | None = None) -> bool:
+            if not c:
+                return False
+
+            if c.get("fromColonLabel"):
+                return True
+
+            if not role:
+                return False
+
+            t = self._normalize_digits(str(c.get("text", "")).upper()).strip()
+            t = re.sub(r"\s+", " ", t)
+
+            amp_value = r"[1-9]\d{1,3}\s*(?:A|AMP|AMPS|AMPERES|AMPERE|MAP)?"
+
+            if role == "BUS":
+                return bool(re.search(
+                    rf"\bBUSS?\b(?:\s+(?:AMPS?|AMPERES?|AMPERE|RATING|SIZE|RATED))*\s*:\s*{amp_value}\b",
+                    t
+                ))
+
+            if role == "MAIN":
+                return bool(
+                    re.search(
+                        rf"\bMAINS?\b(?:\s+(?:BREAKER|BRKR|BKR|DEVICE|AMPS?|AMPERES?|AMPERE|RATING|SIZE|RATED))*\s*:\s*{amp_value}\b",
+                        t
+                    )
+                    or re.search(
+                        rf"\bM\s*\.?\s*C\s*\.?\s*B\s*\.?\s*:\s*{amp_value}\b",
+                        t
+                    )
+                )
+
+            return False
 
         def _overlaps_chosen_name(c: dict | None) -> bool:
             """
@@ -788,8 +820,8 @@ class PanelParser:
         bus_pick = chosen_map.get("BUS")
         main_pick = chosen_map.get("MAIN")
 
-        bus_colon = _is_colon_labeled(bus_pick)
-        main_colon = _is_colon_labeled(main_pick)
+        bus_colon = _is_colon_labeled(bus_pick, "BUS")
+        main_colon = _is_colon_labeled(main_pick, "MAIN")
 
         if bus_colon and main_pick and not main_colon:
             _set_role("MAIN", None)
@@ -1084,8 +1116,8 @@ class PanelParser:
         bus_pick = chosen_map.get("BUS")
         main_pick = chosen_map.get("MAIN")
 
-        bus_colon = _is_colon_labeled(bus_pick)
-        main_colon = _is_colon_labeled(main_pick)
+        bus_colon = _is_colon_labeled(bus_pick, "BUS")
+        main_colon = _is_colon_labeled(main_pick, "MAIN")
 
         if bus_colon and main_pick and not main_colon:
             _set_role("MAIN", None)

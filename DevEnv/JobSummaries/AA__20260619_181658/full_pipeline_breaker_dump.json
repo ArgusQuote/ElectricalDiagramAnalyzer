@@ -1,0 +1,2339 @@
+[
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel01.png",
+    "results": {
+      "apiVersion": "API_11",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv11.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel01.png",
+          "header_y": 443,
+          "header_bottom_y": 596,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "L1",
+          "spaces": null,
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 443,
+            "band_y2": 596,
+            "tokens": [
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.9873507354476317,
+                "box_band": [
+                  232,
+                  44,
+                  683,
+                  110
+                ],
+                "box_page": [
+                  232,
+                  487,
+                  683,
+                  553
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9980499148368835,
+                "box_band": [
+                  907,
+                  12,
+                  1053,
+                  76
+                ],
+                "box_page": [
+                  907,
+                  455,
+                  1053,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.6713702396529266,
+                "box_band": [
+                  909,
+                  79,
+                  1049,
+                  143
+                ],
+                "box_page": [
+                  909,
+                  522,
+                  1049,
+                  586
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.9992440938949585,
+                "box_band": [
+                  1105,
+                  45,
+                  1240,
+                  109
+                ],
+                "box_page": [
+                  1105,
+                  488,
+                  1240,
+                  552
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.9999831318855286,
+                "box_band": [
+                  1292,
+                  45,
+                  1435,
+                  108
+                ],
+                "box_page": [
+                  1292,
+                  488,
+                  1435,
+                  551
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.999984860420227,
+                "box_band": [
+                  2030,
+                  45,
+                  2173,
+                  108
+                ],
+                "box_page": [
+                  2030,
+                  488,
+                  2173,
+                  551
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.9933529496192932,
+                "box_band": [
+                  2229,
+                  45,
+                  2364,
+                  109
+                ],
+                "box_page": [
+                  2229,
+                  488,
+                  2364,
+                  552
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9980694055557251,
+                "box_band": [
+                  2415,
+                  12,
+                  2561,
+                  76
+                ],
+                "box_page": [
+                  2415,
+                  455,
+                  2561,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999626874923706,
+                "box_band": [
+                  2417,
+                  79,
+                  2556,
+                  143
+                ],
+                "box_page": [
+                  2417,
+                  522,
+                  2556,
+                  586
+                ]
+              },
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.9857597369303474,
+                "box_band": [
+                  2783,
+                  44,
+                  3234,
+                  110
+                ],
+                "box_page": [
+                  2783,
+                  487,
+                  3234,
+                  553
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel01_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel01_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 32,
+                "x_right": 882,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.9873507354476317,
+                    "box_band": [
+                      232,
+                      44,
+                      683,
+                      110
+                    ],
+                    "box_page": [
+                      232,
+                      487,
+                      683,
+                      553
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 882,
+                "x_right": 1074,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9980499148368835,
+                    "box_band": [
+                      907,
+                      12,
+                      1053,
+                      76
+                    ],
+                    "box_page": [
+                      907,
+                      455,
+                      1053,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.6713702396529266,
+                    "box_band": [
+                      909,
+                      79,
+                      1049,
+                      143
+                    ],
+                    "box_page": [
+                      909,
+                      522,
+                      1049,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1074,
+                "x_right": 1267,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.9992440938949585,
+                    "box_band": [
+                      1105,
+                      45,
+                      1240,
+                      109
+                    ],
+                    "box_page": [
+                      1105,
+                      488,
+                      1240,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1267,
+                "x_right": 1459,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.9999831318855286,
+                    "box_band": [
+                      1292,
+                      45,
+                      1435,
+                      108
+                    ],
+                    "box_page": [
+                      1292,
+                      488,
+                      1435,
+                      551
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1459,
+                "x_right": 2005,
+                "items": []
+              },
+              {
+                "index": 6,
+                "x_left": 2005,
+                "x_right": 2197,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.999984860420227,
+                    "box_band": [
+                      2030,
+                      45,
+                      2173,
+                      108
+                    ],
+                    "box_page": [
+                      2030,
+                      488,
+                      2173,
+                      551
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2197,
+                "x_right": 2390,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.9933529496192932,
+                    "box_band": [
+                      2229,
+                      45,
+                      2364,
+                      109
+                    ],
+                    "box_page": [
+                      2229,
+                      488,
+                      2364,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2390,
+                "x_right": 2582,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9980694055557251,
+                    "box_band": [
+                      2415,
+                      12,
+                      2561,
+                      76
+                    ],
+                    "box_page": [
+                      2415,
+                      455,
+                      2561,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999626874923706,
+                    "box_band": [
+                      2417,
+                      79,
+                      2556,
+                      143
+                    ],
+                    "box_page": [
+                      2417,
+                      522,
+                      2556,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2582,
+                "x_right": 3433,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.9857597369303474,
+                    "box_band": [
+                      2783,
+                      44,
+                      3234,
+                      110
+                    ],
+                    "box_page": [
+                      2783,
+                      487,
+                      3234,
+                      553
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "description": 1,
+                "combo": 4
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 32,
+                  "x_right": 882,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 882,
+                  "x_right": 1074,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1074,
+                  "x_right": 1267,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1267,
+                  "x_right": 1459,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1459,
+                  "x_right": 2005,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2005,
+                  "x_right": 2197,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2197,
+                  "x_right": 2390,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2390,
+                  "x_right": 2582,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 2582,
+                  "x_right": 3433,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "reviewOverlayPath": "review_overlays/L1_review_overlay.png",
+          "sizeDetectionStatus": "unknown",
+          "bodyParseStatus": "skipped",
+          "bodyParseNote": "Could not determine panel size."
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "L1",
+          "attrs": {
+            "amperage": 400,
+            "voltage": 208,
+            "intRating": 22,
+            "detected_breakers": [],
+            "mainBreakerAmperage": null
+          },
+          "winningBoxes": {
+            "name": [
+              1314,
+              37,
+              2147,
+              152
+            ],
+            "voltage": [
+              102,
+              321,
+              468,
+              401
+            ],
+            "bus": [
+              99,
+              186,
+              460,
+              260
+            ],
+            "aic": [
+              1042,
+              325,
+              1304,
+              394
+            ]
+          },
+          "boxImageShape": {
+            "w": 3465,
+            "h": 2919
+          },
+          "reviewOverlayPath": "review_overlays/L1_review_overlay.png",
+          "panelNote": "Could not determine panel size."
+        }
+      },
+      "panelStatus": "detected but skipped (L1)"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel02.png",
+    "results": {
+      "apiVersion": "API_11",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv11.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel02.png",
+          "header_y": 443,
+          "header_bottom_y": 596,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "L2",
+          "spaces": null,
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 443,
+            "band_y2": 596,
+            "tokens": [
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.8336341449532818,
+                "box_band": [
+                  231,
+                  44,
+                  683,
+                  111
+                ],
+                "box_page": [
+                  231,
+                  487,
+                  683,
+                  554
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9972834587097168,
+                "box_band": [
+                  907,
+                  12,
+                  1054,
+                  76
+                ],
+                "box_page": [
+                  907,
+                  455,
+                  1054,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999646544456482,
+                "box_band": [
+                  909,
+                  79,
+                  1048,
+                  143
+                ],
+                "box_page": [
+                  909,
+                  522,
+                  1048,
+                  586
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.9994410276412964,
+                "box_band": [
+                  1104,
+                  45,
+                  1240,
+                  109
+                ],
+                "box_page": [
+                  1104,
+                  488,
+                  1240,
+                  552
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.9999924302101135,
+                "box_band": [
+                  1292,
+                  45,
+                  1435,
+                  109
+                ],
+                "box_page": [
+                  1292,
+                  488,
+                  1435,
+                  552
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.9999930262565613,
+                "box_band": [
+                  2030,
+                  45,
+                  2172,
+                  109
+                ],
+                "box_page": [
+                  2030,
+                  488,
+                  2172,
+                  552
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.9996550679206848,
+                "box_band": [
+                  2227,
+                  45,
+                  2363,
+                  109
+                ],
+                "box_page": [
+                  2227,
+                  488,
+                  2363,
+                  552
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.997507631778717,
+                "box_band": [
+                  2415,
+                  12,
+                  2562,
+                  76
+                ],
+                "box_page": [
+                  2415,
+                  455,
+                  2562,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9552460533035225,
+                "box_band": [
+                  2417,
+                  79,
+                  2556,
+                  143
+                ],
+                "box_page": [
+                  2417,
+                  522,
+                  2556,
+                  586
+                ]
+              },
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.8580250946904378,
+                "box_band": [
+                  2782,
+                  44,
+                  3234,
+                  111
+                ],
+                "box_page": [
+                  2782,
+                  487,
+                  3234,
+                  554
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel02_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel02_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 32,
+                "x_right": 882,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.8336341449532818,
+                    "box_band": [
+                      231,
+                      44,
+                      683,
+                      111
+                    ],
+                    "box_page": [
+                      231,
+                      487,
+                      683,
+                      554
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 882,
+                "x_right": 1075,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9972834587097168,
+                    "box_band": [
+                      907,
+                      12,
+                      1054,
+                      76
+                    ],
+                    "box_page": [
+                      907,
+                      455,
+                      1054,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999646544456482,
+                    "box_band": [
+                      909,
+                      79,
+                      1048,
+                      143
+                    ],
+                    "box_page": [
+                      909,
+                      522,
+                      1048,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1075,
+                "x_right": 1267,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.9994410276412964,
+                    "box_band": [
+                      1104,
+                      45,
+                      1240,
+                      109
+                    ],
+                    "box_page": [
+                      1104,
+                      488,
+                      1240,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1267,
+                "x_right": 1460,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.9999924302101135,
+                    "box_band": [
+                      1292,
+                      45,
+                      1435,
+                      109
+                    ],
+                    "box_page": [
+                      1292,
+                      488,
+                      1435,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1460,
+                "x_right": 2005,
+                "items": []
+              },
+              {
+                "index": 6,
+                "x_left": 2005,
+                "x_right": 2198,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.9999930262565613,
+                    "box_band": [
+                      2030,
+                      45,
+                      2172,
+                      109
+                    ],
+                    "box_page": [
+                      2030,
+                      488,
+                      2172,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2198,
+                "x_right": 2390,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.9996550679206848,
+                    "box_band": [
+                      2227,
+                      45,
+                      2363,
+                      109
+                    ],
+                    "box_page": [
+                      2227,
+                      488,
+                      2363,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2390,
+                "x_right": 2583,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.997507631778717,
+                    "box_band": [
+                      2415,
+                      12,
+                      2562,
+                      76
+                    ],
+                    "box_page": [
+                      2415,
+                      455,
+                      2562,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9552460533035225,
+                    "box_band": [
+                      2417,
+                      79,
+                      2556,
+                      143
+                    ],
+                    "box_page": [
+                      2417,
+                      522,
+                      2556,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2583,
+                "x_right": 3432,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.8580250946904378,
+                    "box_band": [
+                      2782,
+                      44,
+                      3234,
+                      111
+                    ],
+                    "box_page": [
+                      2782,
+                      487,
+                      3234,
+                      554
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "description": 1,
+                "combo": 4
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 32,
+                  "x_right": 882,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 882,
+                  "x_right": 1075,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1075,
+                  "x_right": 1267,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1267,
+                  "x_right": 1460,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1460,
+                  "x_right": 2005,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2005,
+                  "x_right": 2198,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2198,
+                  "x_right": 2390,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2390,
+                  "x_right": 2583,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 2583,
+                  "x_right": 3432,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "reviewOverlayPath": "review_overlays/L2_review_overlay.png",
+          "sizeDetectionStatus": "unknown",
+          "bodyParseStatus": "skipped",
+          "bodyParseNote": "Could not determine panel size."
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "L2",
+          "attrs": {
+            "amperage": 250,
+            "voltage": 208,
+            "intRating": 10,
+            "detected_breakers": []
+          },
+          "winningBoxes": {
+            "name": [
+              1317,
+              39,
+              2147,
+              149
+            ],
+            "voltage": [
+              102,
+              321,
+              468,
+              401
+            ],
+            "bus": [
+              98,
+              185,
+              464,
+              269
+            ],
+            "aic": [
+              1042,
+              325,
+              1304,
+              394
+            ]
+          },
+          "boxImageShape": {
+            "w": 3465,
+            "h": 2919
+          },
+          "reviewOverlayPath": "review_overlays/L2_review_overlay.png",
+          "panelNote": "Could not determine panel size."
+        }
+      },
+      "panelStatus": "detected but skipped (L2)"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel03.png",
+    "results": {
+      "apiVersion": "API_11",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv11.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel03.png",
+          "header_y": 444,
+          "header_bottom_y": 597,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "H1",
+          "spaces": null,
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 444,
+            "band_y2": 597,
+            "tokens": [
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.817715911889175,
+                "box_band": [
+                  233,
+                  43,
+                  685,
+                  110
+                ],
+                "box_page": [
+                  233,
+                  487,
+                  685,
+                  554
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9977880716323853,
+                "box_band": [
+                  909,
+                  11,
+                  1055,
+                  75
+                ],
+                "box_page": [
+                  909,
+                  455,
+                  1055,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999623894691467,
+                "box_band": [
+                  911,
+                  78,
+                  1051,
+                  142
+                ],
+                "box_page": [
+                  911,
+                  522,
+                  1051,
+                  586
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.9995795488357544,
+                "box_band": [
+                  1106,
+                  44,
+                  1241,
+                  108
+                ],
+                "box_page": [
+                  1106,
+                  488,
+                  1241,
+                  552
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.9999936819076538,
+                "box_band": [
+                  1294,
+                  44,
+                  1436,
+                  108
+                ],
+                "box_page": [
+                  1294,
+                  488,
+                  1436,
+                  552
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.9999940991401672,
+                "box_band": [
+                  2032,
+                  44,
+                  2174,
+                  108
+                ],
+                "box_page": [
+                  2032,
+                  488,
+                  2174,
+                  552
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.9995241761207581,
+                "box_band": [
+                  2229,
+                  44,
+                  2364,
+                  108
+                ],
+                "box_page": [
+                  2229,
+                  488,
+                  2364,
+                  552
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9983635544776917,
+                "box_band": [
+                  2415,
+                  9,
+                  2564,
+                  76
+                ],
+                "box_page": [
+                  2415,
+                  453,
+                  2564,
+                  520
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.601071974011362,
+                "box_band": [
+                  2419,
+                  78,
+                  2559,
+                  142
+                ],
+                "box_page": [
+                  2419,
+                  522,
+                  2559,
+                  586
+                ]
+              },
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.8743314972331382,
+                "box_band": [
+                  2784,
+                  43,
+                  3236,
+                  110
+                ],
+                "box_page": [
+                  2784,
+                  487,
+                  3236,
+                  554
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel03_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel03_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 884,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.817715911889175,
+                    "box_band": [
+                      233,
+                      43,
+                      685,
+                      110
+                    ],
+                    "box_page": [
+                      233,
+                      487,
+                      685,
+                      554
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 884,
+                "x_right": 1076,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9977880716323853,
+                    "box_band": [
+                      909,
+                      11,
+                      1055,
+                      75
+                    ],
+                    "box_page": [
+                      909,
+                      455,
+                      1055,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999623894691467,
+                    "box_band": [
+                      911,
+                      78,
+                      1051,
+                      142
+                    ],
+                    "box_page": [
+                      911,
+                      522,
+                      1051,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1076,
+                "x_right": 1269,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.9995795488357544,
+                    "box_band": [
+                      1106,
+                      44,
+                      1241,
+                      108
+                    ],
+                    "box_page": [
+                      1106,
+                      488,
+                      1241,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1269,
+                "x_right": 1461,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.9999936819076538,
+                    "box_band": [
+                      1294,
+                      44,
+                      1436,
+                      108
+                    ],
+                    "box_page": [
+                      1294,
+                      488,
+                      1436,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1461,
+                "x_right": 2007,
+                "items": []
+              },
+              {
+                "index": 6,
+                "x_left": 2007,
+                "x_right": 2199,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.9999940991401672,
+                    "box_band": [
+                      2032,
+                      44,
+                      2174,
+                      108
+                    ],
+                    "box_page": [
+                      2032,
+                      488,
+                      2174,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2199,
+                "x_right": 2392,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.9995241761207581,
+                    "box_band": [
+                      2229,
+                      44,
+                      2364,
+                      108
+                    ],
+                    "box_page": [
+                      2229,
+                      488,
+                      2364,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2392,
+                "x_right": 2584,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9983635544776917,
+                    "box_band": [
+                      2415,
+                      9,
+                      2564,
+                      76
+                    ],
+                    "box_page": [
+                      2415,
+                      453,
+                      2564,
+                      520
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.601071974011362,
+                    "box_band": [
+                      2419,
+                      78,
+                      2559,
+                      142
+                    ],
+                    "box_page": [
+                      2419,
+                      522,
+                      2559,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2584,
+                "x_right": 3434,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.8743314972331382,
+                    "box_band": [
+                      2784,
+                      43,
+                      3236,
+                      110
+                    ],
+                    "box_page": [
+                      2784,
+                      487,
+                      3236,
+                      554
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "description": 1,
+                "combo": 4
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 884,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 884,
+                  "x_right": 1076,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1076,
+                  "x_right": 1269,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1269,
+                  "x_right": 1461,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1461,
+                  "x_right": 2007,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2007,
+                  "x_right": 2199,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2199,
+                  "x_right": 2392,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2392,
+                  "x_right": 2584,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 2584,
+                  "x_right": 3434,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "reviewOverlayPath": "review_overlays/H1_review_overlay.png",
+          "sizeDetectionStatus": "unknown",
+          "bodyParseStatus": "skipped",
+          "bodyParseNote": "Could not determine panel size."
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "H1",
+          "attrs": {
+            "amperage": 250,
+            "voltage": 480,
+            "intRating": null,
+            "detected_breakers": [],
+            "mainBreakerAmperage": 225
+          },
+          "winningBoxes": {
+            "name": [
+              1314,
+              37,
+              2155,
+              152
+            ],
+            "voltage": [
+              102,
+              321,
+              471,
+              401
+            ],
+            "bus": [
+              98,
+              185,
+              464,
+              269
+            ],
+            "main": [
+              102,
+              256,
+              731,
+              333
+            ]
+          },
+          "boxImageShape": {
+            "w": 3464,
+            "h": 2919
+          },
+          "reviewOverlayPath": "review_overlays/H1_review_overlay.png",
+          "panelNote": "Could not determine panel size."
+        }
+      },
+      "panelStatus": "detected but skipped (H1)"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel04.png",
+    "results": {
+      "apiVersion": "API_11",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv11.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel04.png",
+          "header_y": 443,
+          "header_bottom_y": 596,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser10",
+          "name": "L3",
+          "spaces": null,
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "headerScan": {
+            "band_y1": 443,
+            "band_y2": 596,
+            "tokens": [
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.9363981801479551,
+                "box_band": [
+                  233,
+                  44,
+                  684,
+                  111
+                ],
+                "box_page": [
+                  233,
+                  487,
+                  684,
+                  554
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9980664849281311,
+                "box_band": [
+                  909,
+                  12,
+                  1055,
+                  76
+                ],
+                "box_page": [
+                  909,
+                  455,
+                  1055,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999640583992004,
+                "box_band": [
+                  911,
+                  79,
+                  1051,
+                  143
+                ],
+                "box_page": [
+                  911,
+                  522,
+                  1051,
+                  586
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.999584972858429,
+                "box_band": [
+                  1106,
+                  45,
+                  1242,
+                  109
+                ],
+                "box_page": [
+                  1106,
+                  488,
+                  1242,
+                  552
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.9999914169311523,
+                "box_band": [
+                  1294,
+                  45,
+                  1435,
+                  108
+                ],
+                "box_page": [
+                  1294,
+                  488,
+                  1435,
+                  551
+                ]
+              },
+              {
+                "text": "BRKR",
+                "conf": 0.999994158744812,
+                "box_band": [
+                  2032,
+                  45,
+                  2173,
+                  109
+                ],
+                "box_page": [
+                  2032,
+                  488,
+                  2173,
+                  552
+                ]
+              },
+              {
+                "text": "WIRE",
+                "conf": 0.999534547328949,
+                "box_band": [
+                  2229,
+                  45,
+                  2364,
+                  109
+                ],
+                "box_page": [
+                  2229,
+                  488,
+                  2364,
+                  552
+                ]
+              },
+              {
+                "text": "WATT",
+                "conf": 0.9981402158737183,
+                "box_band": [
+                  2417,
+                  12,
+                  2563,
+                  76
+                ],
+                "box_page": [
+                  2417,
+                  455,
+                  2563,
+                  519
+                ]
+              },
+              {
+                "text": "LOAD",
+                "conf": 0.9999684691429138,
+                "box_band": [
+                  2419,
+                  79,
+                  2559,
+                  143
+                ],
+                "box_page": [
+                  2419,
+                  522,
+                  2559,
+                  586
+                ]
+              },
+              {
+                "text": "CRT. DESCRIPTION",
+                "conf": 0.9447007274105343,
+                "box_band": [
+                  2784,
+                  44,
+                  3235,
+                  111
+                ],
+                "box_page": [
+                  2784,
+                  487,
+                  3235,
+                  554
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel04_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/AA_electrical_filtered_page001_panel04_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 884,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.9363981801479551,
+                    "box_band": [
+                      233,
+                      44,
+                      684,
+                      111
+                    ],
+                    "box_page": [
+                      233,
+                      487,
+                      684,
+                      554
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 884,
+                "x_right": 1076,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9980664849281311,
+                    "box_band": [
+                      909,
+                      12,
+                      1055,
+                      76
+                    ],
+                    "box_page": [
+                      909,
+                      455,
+                      1055,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999640583992004,
+                    "box_band": [
+                      911,
+                      79,
+                      1051,
+                      143
+                    ],
+                    "box_page": [
+                      911,
+                      522,
+                      1051,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 1076,
+                "x_right": 1269,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.999584972858429,
+                    "box_band": [
+                      1106,
+                      45,
+                      1242,
+                      109
+                    ],
+                    "box_page": [
+                      1106,
+                      488,
+                      1242,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1269,
+                "x_right": 1461,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.9999914169311523,
+                    "box_band": [
+                      1294,
+                      45,
+                      1435,
+                      108
+                    ],
+                    "box_page": [
+                      1294,
+                      488,
+                      1435,
+                      551
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 1461,
+                "x_right": 2007,
+                "items": []
+              },
+              {
+                "index": 6,
+                "x_left": 2007,
+                "x_right": 2199,
+                "items": [
+                  {
+                    "text": "BRKR",
+                    "conf": 0.999994158744812,
+                    "box_band": [
+                      2032,
+                      45,
+                      2173,
+                      109
+                    ],
+                    "box_page": [
+                      2032,
+                      488,
+                      2173,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2199,
+                "x_right": 2392,
+                "items": [
+                  {
+                    "text": "WIRE",
+                    "conf": 0.999534547328949,
+                    "box_band": [
+                      2229,
+                      45,
+                      2364,
+                      109
+                    ],
+                    "box_page": [
+                      2229,
+                      488,
+                      2364,
+                      552
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 2392,
+                "x_right": 2584,
+                "items": [
+                  {
+                    "text": "WATT",
+                    "conf": 0.9981402158737183,
+                    "box_band": [
+                      2417,
+                      12,
+                      2563,
+                      76
+                    ],
+                    "box_page": [
+                      2417,
+                      455,
+                      2563,
+                      519
+                    ]
+                  },
+                  {
+                    "text": "LOAD",
+                    "conf": 0.9999684691429138,
+                    "box_band": [
+                      2419,
+                      79,
+                      2559,
+                      143
+                    ],
+                    "box_page": [
+                      2419,
+                      522,
+                      2559,
+                      586
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 2584,
+                "x_right": 3434,
+                "items": [
+                  {
+                    "text": "CRT. DESCRIPTION",
+                    "conf": 0.9447007274105343,
+                    "box_band": [
+                      2784,
+                      44,
+                      3235,
+                      111
+                    ],
+                    "box_page": [
+                      2784,
+                      487,
+                      3235,
+                      554
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "description": 1,
+                "combo": 4
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 884,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 884,
+                  "x_right": 1076,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 1076,
+                  "x_right": 1269,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1269,
+                  "x_right": 1461,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 1461,
+                  "x_right": 2007,
+                  "texts": [],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2007,
+                  "x_right": 2199,
+                  "texts": [
+                    "BRKR"
+                  ],
+                  "role": "combo",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2199,
+                  "x_right": 2392,
+                  "texts": [
+                    "WIRE"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 2392,
+                  "x_right": 2584,
+                  "texts": [
+                    "WATT",
+                    "LOAD"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 2584,
+                  "x_right": 3434,
+                  "texts": [
+                    "CRT.",
+                    "DESCRIPTION"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "combined"
+            }
+          },
+          "separatedScan": null,
+          "combinedScan": {
+            "layout": "combined",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "reviewOverlayPath": "review_overlays/L3_review_overlay.png",
+          "sizeDetectionStatus": "unknown",
+          "bodyParseStatus": "skipped",
+          "bodyParseNote": "Could not determine panel size."
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "L3",
+          "attrs": {
+            "amperage": 100,
+            "voltage": 208,
+            "intRating": 10,
+            "detected_breakers": [],
+            "mainBreakerAmperage": 100
+          },
+          "winningBoxes": {
+            "name": [
+              1317,
+              37,
+              2149,
+              152
+            ],
+            "voltage": [
+              103,
+              320,
+              472,
+              404
+            ],
+            "bus": [
+              98,
+              185,
+              464,
+              269
+            ],
+            "main": [
+              102,
+              256,
+              717,
+              336
+            ],
+            "aic": [
+              1044,
+              321,
+              1310,
+              401
+            ]
+          },
+          "boxImageShape": {
+            "w": 3464,
+            "h": 2919
+          },
+          "reviewOverlayPath": "review_overlays/L3_review_overlay.png",
+          "panelNote": "Could not determine panel size."
+        }
+      },
+      "panelStatus": "detected but skipped (L3)"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  }
+]

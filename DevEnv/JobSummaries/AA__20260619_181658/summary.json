@@ -1,0 +1,136 @@
+{
+  "ok": true,
+  "job_id": "AA__20260619_181658",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/AA__20260619_181658",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/AA.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/AA__20260619_181658",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel04.png"
+  ],
+  "image_count": 4,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "L1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel01.png",
+      "panelStatus": "detected but skipped (L1)",
+      "panelNote": "Could not determine panel size.",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel02.png",
+      "panelStatus": "detected but skipped (L2)",
+      "panelNote": "Could not determine panel size.",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 250,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "H1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel03.png",
+      "panelStatus": "detected but skipped (H1)",
+      "panelNote": "Could not determine panel size.",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 250,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/AA_electrical_filtered_page001_panel04.png",
+      "panelStatus": "detected but skipped (L3)",
+      "panelNote": "Could not determine panel size.",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "L1": {
+      "Skipped": "Could not determine panel size."
+    },
+    "L2": {
+      "Skipped": "Could not determine panel size."
+    },
+    "H1": {
+      "Skipped": "Could not determine panel size."
+    },
+    "L3": {
+      "Skipped": "Could not determine panel size."
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 30450,
+  "cycle_time_str": "00:00:30:450",
+  "noticed_ts_ms": 1781893018057,
+  "parse_done_ts_ms": 1781893048507,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PdfOutput/AA_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_11",
+    "header_breakers_total": 0,
+    "table_breakers_total": 0
+  }
+}
