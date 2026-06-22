@@ -1,0 +1,767 @@
+import anvil.server
+import anvil.secrets
+import anvil.users
+from anvil.tables import app_tables
+from datetime import datetime, timedelta
+import secrets
+import string
+import stripe
+from anvil.server import request
+from anvil import js
+import anvil.email
+
+# STRIPE_SECRET_KEY for live, STRIPE_SECRET_KEY2 for test
+stripe.api_key = anvil.secrets.get_secret("STRIPE_SECRET_KEY")
+SUPPORT_EMAIL = "argusquote@gmail.com"
+def _send_internal_email(subject: str, text: str):
+  try:
+    anvil.email.send(
+      to=SUPPORT_EMAIL,
+      subject=subject,
+      text=text
+    )
+  except Exception as e:
+    print("INTERNAL EMAIL FAILED:", type(e).__name__, str(e))
+
+PRICE_IDS = {
+  # live
+  ("starter", "monthly"): "price_1Sr0HDEiTWaGi6OIjAHYNFrI",
+  ("starter", "yearly"):  "price_1Sr0HDEiTWaGi6OIetSKFhvp",
+
+  # test (commented for now)
+  #("starter", "monthly"): "price_1Sr1GzEiTWaGi6OIStXm9hyo",
+  #("starter", "yearly"):  "price_1Sr1HgEiTWaGi6OIdmfwjONA",
+
+  # live leave alone...
+  ("pro",     "monthly"): "price_1Sr0S4EiTWaGi6OIKS3YTQFg",
+  ("pro",     "yearly"):  "price_1Sr0S4EiTWaGi6OInYQPOOrP",
+  ("elite",   "monthly"): "price_1Sr0V9EiTWaGi6OIaaNci1ZJ",
+  ("elite",   "yearly"):  "price_1Sr0V9EiTWaGi6OIBEzzFF4G",
+}
+
+SEAT_LIMITS = {"starter": 2, "pro": 5, "elite": 8}
+
+PRICE_ID_TO_PLAN = {
+  # live
+  "price_1Sr0HDEiTWaGi6OIjAHYNFrI": "starter",  # monthly
+  "price_1Sr0HDEiTWaGi6OIetSKFhvp": "starter",  # yearly
+
+  "price_1Sr0S4EiTWaGi6OIKS3YTQFg": "pro",      # monthly
+  "price_1Sr0S4EiTWaGi6OInYQPOOrP": "pro",      # yearly
+
+  "price_1Sr0V9EiTWaGi6OIaaNci1ZJ": "elite",    # monthly
+  "price_1Sr0V9EiTWaGi6OIBEzzFF4G": "elite",    # yearly
+}
+
+# IMPORTANT:
+WEBHOOK_SECRET = anvil.secrets.get_secret("STRIPE_WEBHOOK_SECRET")
+
+
+# -------------------------
+# Helpers
+# -------------------------
+
+def _now():
+  return datetime.now()
+
+def _generate_access_code(length: int = 10) -> str:
+  alphabet = string.ascii_letters + string.digits
+  while True:
+    code = "".join(secrets.choice(alphabet) for _ in range(length))
+    if not app_tables.access_codes.get(code=code):
+      return code
+
+def _user_email(user) -> str:
+  if not user:
+    return ""
+  # Anvil user row: use dict-style first
+  try:
+    return str((user["email"] or "")).strip().lower()
+  except Exception:
+    pass
+  # Fallbacks (just in case)
+  try:
+    return str((getattr(user, "email", "") or "")).strip().lower()
+  except Exception:
+    return ""
+
+def _utcnow():
+  # you currently use datetime.now() (local); use utc for consistent expiration
+  return datetime.utcnow()
+
+def _norm_email(email: str) -> str:
+  return (email or "").strip().lower()
+  
+def _is_free_trial(user) -> bool:
+  email = _user_email(user)
+  if not email:
+    return False
+  try:
+    return bool(anvil.server.call("is_email_on_active_trial", email))
+  except Exception as e:
+    print("TRIAL CHECK FAILED:", type(e).__name__, str(e), "email=", email)
+    return False
+  
+def _is_internal_admin(user) -> bool:
+  email = _user_email(user)
+  if not email:
+    return False
+  # internal_admins table: column "email"
+  return bool(app_tables.internal_admins.get(email=email))
+
+def _row_get(row, key, default=None):
+  try:
+    return row[key]
+  except Exception:
+    return default
+
+def _reserved_seats(code_row) -> int:
+  try:
+    return int(code_row["reserved_seats"] or 0)
+  except Exception:
+    return 0
+
+def _clean_text(s: str, max_len: int = 200) -> str:
+  s = (s or "").strip()
+  if len(s) > max_len:
+    s = s[:max_len]
+  return s
+
+def _valid_email(s: str) -> bool:
+  s = (s or "").strip()
+  return ("@" in s) and ("." in s) and (len(s) >= 5)
+
+def _is_code_active(code_row) -> bool:
+  # Your “block immediately on failure” rule:
+  # allow only "active" (you can add "trialing" if you ever do trials)
+  status = (code_row["status"] or "").lower()
+  return status == "active"
+
+def _count_seats_used(code_row) -> int:
+  # Requires code_users table with column access_code linking to access_codes
+  rows = app_tables.code_users.search(access_code=code_row)
+  return len(list(rows))
+
+def _seat_limit(code_row) -> int:
+  try:
+    v = code_row["seat_limit"]
+    if v is not None:
+      return int(v)
+  except Exception:
+    pass
+  pk = (code_row["plan_key"] or "").lower()
+  return SEAT_LIMITS.get(pk, 0)
+
+# -------------------------
+# Checkout
+# -------------------------
+
+@anvil.server.callable
+def create_checkout_session_v2(payload: dict) -> str:
+  """
+  payload comes from PlanSignupModal:
+    plan_key, billing_cycle, admin_email, admin_is_seat, company, location
+  """
+  if not isinstance(payload, dict):
+    raise ValueError("Invalid payload.")
+
+  plan_key = _clean_text(payload.get("plan_key"), 50).lower()
+  billing_cycle = _clean_text(payload.get("billing_cycle"), 20).lower()
+
+  admin_email = _clean_text(payload.get("admin_email"), 200).strip().lower()
+  admin_is_seat = bool(payload.get("admin_is_seat"))
+  company = _clean_text(payload.get("company"), 200)
+  location = _clean_text(payload.get("location"), 200)
+
+  if plan_key not in ("starter", "pro", "elite"):
+    raise ValueError("Invalid plan.")
+  if billing_cycle not in ("monthly", "yearly"):
+    raise ValueError("Invalid billing cycle.")
+  if not _valid_email(admin_email):
+    raise ValueError("Enter a valid admin email.")
+  if not company:
+    raise ValueError("Company is required.")
+  if not location:
+    raise ValueError("Location is required.")
+
+  price_id = PRICE_IDS.get((plan_key, billing_cycle))
+  if not price_id:
+    raise ValueError("Invalid plan or billing cycle.")
+
+  pending = app_tables.pending_signups.add_row(
+    created_at=_now(),
+    status="pending",
+    plan_key=plan_key,
+    billing_cycle=billing_cycle,
+    admin_email=admin_email,
+    admin_is_seat=admin_is_seat,
+    company=company,
+    location=location,
+    stripe_session_id=None,
+    stripe_customer_id=None,
+    stripe_subscription_id=None,
+  )
+
+  origin = anvil.server.get_app_origin("published")
+  success_url = f"{origin}/?billing=success&session_id={{CHECKOUT_SESSION_ID}}"
+  cancel_url  = f"{origin}/?billing=cancel"
+
+  session = stripe.checkout.Session.create(
+    mode="subscription",
+    customer_email=admin_email,
+    success_url=success_url,
+    cancel_url=cancel_url,
+    line_items=[{"price": price_id, "quantity": 1}],
+    allow_promotion_codes=True,
+    metadata={
+      "pending_id": str(pending.get_id()),
+      "plan_key": plan_key,
+      "billing_cycle": billing_cycle,
+      "billing_email": admin_email,
+    },
+  )
+
+  pending.update(stripe_session_id=session.get("id"))
+  return session.url
+
+# -------------------------
+# Manage Billing (Stripe Customer Portal)
+# -------------------------
+
+@anvil.server.callable
+def create_portal_session_for_current_user() -> str:
+  user = anvil.users.get_user()
+  if not user:
+    raise PermissionError("Not logged in.")
+
+  # User email from your Users table
+  user_email = _user_email(user)
+  if not user_email:
+    raise PermissionError("Missing user email.")
+
+  # 1) If the user is a seated user, use their linked access code
+  link = app_tables.code_users.get(user=user)
+  if link:
+    # Optional: only billing admin can manage billing
+    try:
+      if not link["is_billing_admin"]:
+        raise PermissionError("Only the billing admin can manage the subscription.")
+    except KeyError:
+      # column doesn't exist; ignore
+      pass
+
+    code_row = link["access_code"]
+    if not code_row:
+      raise PermissionError("Missing access code record.")
+
+  else:
+    # 2) Billing-only admin path:
+    # Allow portal access ONLY if logged-in email matches billing_email on access_codes
+    code_row = app_tables.access_codes.get(billing_email=user_email)
+    if not code_row:
+      raise PermissionError("This account is not the billing admin for any subscription.")
+
+  customer_id = _row_get(code_row, "stripe_customer_id", None)
+  if not customer_id:
+    raise PermissionError("Billing is not set up for this account yet.")
+
+  origin = anvil.server.get_app_origin("published")
+  portal = stripe.billing_portal.Session.create(
+    customer=customer_id,
+    return_url=f"{origin}/#landing"
+  )
+  return portal.url
+
+# -------------------------
+# Code Redemption (users sign up under a code)
+# -------------------------
+
+@anvil.server.callable
+def redeem_access_code(code: str) -> dict:
+  """
+  Called after a user creates/logs in, to attach them to an access code.
+  Returns {ok: bool, message: str, seatsUsed: int, seatLimit: int}
+  """
+  user = anvil.users.get_user()
+  if not user:
+    return {"ok": False, "message": "You must be logged in first."}
+
+  code = (code or "").strip()
+  if not code:
+    return {"ok": False, "message": "Enter an access code."}
+
+  code_row = app_tables.access_codes.get(code=code)
+  if not code_row:
+    return {"ok": False, "message": "Invalid access code."}
+
+  # Subscription must be active
+  if not _is_code_active(code_row):
+    return {"ok": False, "message": "This subscription is not active. Contact your billing admin."}
+
+  # Already linked?
+  existing = app_tables.code_users.get(user=user)
+  if existing:
+    return {"ok": False, "message": "This user is already linked to an access code. Contact support if you need changes."}
+
+  seat_limit = _seat_limit(code_row)
+  used = _count_seats_used(code_row)
+  reserved = _reserved_seats(code_row)
+  
+  # Regular users can only take a seat if room exists after reservations
+  if used + reserved >= seat_limit:
+    return {"ok": False, "message": "No seats available for this code. Contact your billing admin."}
+
+  user_email = _user_email(user)
+  billing_email = str(_row_get(code_row, "billing_email", "") or "").strip().lower()
+  is_billing_admin = (user_email != "" and user_email == billing_email)
+
+  app_tables.code_users.add_row(
+    user=user,
+    access_code=code_row,
+    is_billing_admin=is_billing_admin,
+    created_at=_now()
+  )
+
+  used_after = used + 1
+  return {"ok": True, "message": "Access code accepted.", "seatsUsed": used_after, "seatLimit": seat_limit}
+
+
+DEBUG_ENTITLEMENT = False  # flip False after testing
+
+@anvil.server.callable
+def is_current_user_entitled():
+  user = anvil.users.get_user()
+  if not user:
+    return {"ok": False, "message": "Not logged in."}
+
+  email = _user_email(user)
+
+  # IMPORTANT:
+  # Internal admins should be allowed immediately and should NOT auto-claim
+  # any reserved customer/admin seat.
+  internal_ok = _is_internal_admin(user)
+  if internal_ok:
+    resp = {
+      "ok": True,
+      "message": "ok",
+      "mode": "internal_admin",
+      "plan_key": "internal_admin",
+      "scope": "personal",
+      "group_folder": "internal_admins",
+    }
+    if DEBUG_ENTITLEMENT:
+      resp.update({"email": email, "internalAdmin": True})
+    return resp
+
+  # Only normal non-internal users should auto-claim reserved seats.
+  try:
+    auto_claim_reserved_admin_seat()
+  except Exception:
+    pass
+
+  trial_ok = False
+  trial_err = None
+  try:
+    trial_ok = bool(anvil.server.call("is_email_on_active_trial", email))
+  except Exception as e:
+    trial_err = f"{type(e).__name__}: {e}"
+
+  # 1) trial users
+  if trial_ok:
+    resp = {"ok": True, "message": "ok", "mode": "trial"}
+    if DEBUG_ENTITLEMENT:
+      resp.update({
+        "email": email,
+        "internalAdmin": False,
+        "trialOk": trial_ok,
+        "trialErr": trial_err
+      })
+    return resp
+
+  # 2) normal access code gating
+  link = app_tables.code_users.get(user=user)
+  if not link:
+    resp = {
+      "ok": False,
+      "reason": "no_code",
+      "message": "Enter your access code to continue."
+    }
+    if DEBUG_ENTITLEMENT:
+      resp.update({
+        "email": email,
+        "internalAdmin": False,
+        "trialOk": trial_ok,
+        "trialErr": trial_err
+      })
+    return resp
+
+  code_row = link["access_code"]
+  if not code_row:
+    resp = {"ok": False, "message": "Access code record missing."}
+    if DEBUG_ENTITLEMENT:
+      resp.update({"email": email})
+    return resp
+
+  if not _is_code_active(code_row):
+    resp = {"ok": False, "message": "Subscription inactive. Contact your billing admin."}
+    if DEBUG_ENTITLEMENT:
+      resp.update({"email": email})
+    return resp
+
+  seat_limit = _seat_limit(code_row)
+  used = _count_seats_used(code_row)
+
+  try:
+    is_admin = bool(link["is_billing_admin"])
+  except Exception:
+    is_admin = False
+
+  if used > seat_limit:
+    if is_admin:
+      resp = {
+        "ok": False,
+        "reason": "over_limit_admin",
+        "route": "account",
+        "seatLimit": seat_limit,
+        "seatsUsed": used,
+        "message": f"Your plan allows {seat_limit} users but this code currently has {used}. Remove users to continue.",
+      }
+    else:
+      resp = {
+        "ok": False,
+        "reason": "over_limit",
+        "seatLimit": seat_limit,
+        "seatsUsed": used,
+        "message": f"This subscription now allows {seat_limit} users but currently has {used}. Ask your billing admin to remove users.",
+      }
+
+    if DEBUG_ENTITLEMENT:
+      resp.update({"email": email})
+    return resp
+
+  resp = {
+    "ok": True,
+    "message": "ok",
+    "seatLimit": seat_limit,
+    "seatsUsed": used
+  }
+  if DEBUG_ENTITLEMENT:
+    resp.update({"email": email})
+
+  return resp
+
+# -------------------------
+# Stripe Webhook
+# -------------------------
+
+@anvil.server.http_endpoint("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+  payload = request.body.get_bytes()
+
+  # request.headers is usually dict-like, but be defensive
+  try:
+    sig_header = request.headers.get("Stripe-Signature") or request.headers.get("stripe-signature")
+  except Exception:
+    sig_header = request.headers["Stripe-Signature"]
+
+  if not sig_header:
+    return anvil.server.HttpResponse(400, "Missing Stripe-Signature header")
+
+  try:
+    event = stripe.Webhook.construct_event(payload, sig_header, WEBHOOK_SECRET)
+  except Exception as e:
+    return anvil.server.HttpResponse(400, f"Webhook error: {e}")
+
+  event_type = event["type"]
+  obj = event["data"]["object"]
+
+  # ✅ Convert StripeObject -> plain dict so .get() works everywhere
+  if hasattr(obj, "to_dict_recursive"):
+    obj = obj.to_dict_recursive()
+  else:
+    obj = dict(obj)
+
+  try:
+    if event_type == "checkout.session.completed":
+      _handle_checkout_completed(obj)
+
+    elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
+      _handle_subscription_change(obj, event_type)
+
+    elif event_type == "invoice.payment_failed":
+      _handle_payment_failed(obj)
+
+    # (optional) you can ignore invoice.payment_succeeded entirely
+  except Exception as e:
+    # Return 500 so Stripe retries (good during setup)
+    return anvil.server.HttpResponse(500, f"Handler error: {type(e).__name__}: {e}")
+
+  return anvil.server.HttpResponse(200, "ok")
+
+def _handle_checkout_completed(session_obj):
+  meta = session_obj.get("metadata", {}) or {}
+
+  pending_id = meta.get("pending_id")
+  plan_key = (meta.get("plan_key") or "").strip().lower()
+  billing_email = (meta.get("billing_email") or "").strip().lower()
+
+  customer_id = session_obj.get("customer")
+  subscription_id = session_obj.get("subscription")
+  session_id = session_obj.get("id")
+
+  if not pending_id:
+    return
+  if plan_key not in SEAT_LIMITS or not subscription_id:
+    return
+
+  pending = app_tables.pending_signups.get_by_id(pending_id)
+  if not pending:
+    return
+
+  if pending["status"] == "completed":
+    return
+
+  existing_code = app_tables.access_codes.get(stripe_subscription_id=subscription_id)
+  if existing_code:
+    pending.update(
+      status="completed",
+      stripe_session_id=session_id,
+      stripe_customer_id=customer_id,
+      stripe_subscription_id=subscription_id,
+    )
+    return
+
+  admin_email = ((pending["admin_email"] or billing_email) or "").strip().lower()
+  company = (pending["company"] or "").strip()
+  location = (pending["location"] or "").strip()
+
+  code = _generate_access_code()
+  seat_limit = SEAT_LIMITS[plan_key]
+
+  code_row = app_tables.access_codes.add_row(
+    code=code,
+    plan_key=plan_key,
+    seat_limit=seat_limit,
+    status="active",
+    stripe_customer_id=customer_id,
+    stripe_subscription_id=subscription_id,
+    billing_email=admin_email,
+    company=company,
+    location=location,
+    created_at=_now()
+  )
+  # Internal notification email
+  try:
+    _send_internal_email(
+      "NEW ARGUS SIGNUP",
+      (
+        "New signup completed\n\n"
+        f"Created at: {_now()}\n"
+        f"Admin email: {admin_email}\n"
+        f"Plan: {plan_key}\n"
+        f"Seats: {seat_limit}\n"
+        f"Billing cycle: {pending['billing_cycle']}\n"
+        f"Company: {company}\n"
+        f"Location: {location}\n"
+        f"Access code: {code}\n"
+      )
+    )
+  except Exception as e:
+    print("INTERNAL SIGNUP EMAIL FAILED:", type(e).__name__, str(e))
+
+  admin_is_seat = bool(pending["admin_is_seat"])
+  
+  if admin_is_seat:
+    code_row.update(
+      reserved_seats=1,
+      reserved_admin_email=admin_email,
+      reserved_admin_claimed=False
+    )
+  else:
+    code_row.update(
+      reserved_seats=0,
+      reserved_admin_email=None,
+      reserved_admin_claimed=False
+    )
+
+  pending.update(
+    status="completed",
+    stripe_session_id=session_id,
+    stripe_customer_id=customer_id,
+    stripe_subscription_id=subscription_id,
+  )
+
+  # Email the code
+  try:
+    import anvil.email
+    anvil.email.send(
+      to=admin_email,
+      subject="Your Argus Access Code",
+      text=(
+        "Thanks for subscribing to Argus.\n\n"
+        f"Company: {company}\n"
+        f"Location: {location}\n"
+        f"Plan: {plan_key}\n"
+        f"Seats included: {seat_limit}\n\n"
+        f"Access code: {code}\n\n"
+        "IMPORTANT: Admin login setup\n"
+        f"- Your billing admin email is: {admin_email}\n"
+        "- To create your admin login, go to Argus -> Login -> New User\n"
+        "- Enter your billing admin email, and check your email for a password reset link.\n"
+        "- Click the link. This will take you back to the Argus page. Click Login -> Existing User.\n"
+        "- You will be prompted to create a password for your account which you can then use to log in.\n"
+        "***Important note***\n"
+        " *if you enter the access code, you will occupy a seat on your plan as a user.*\n"
+        "*If you do not wish to be a user, do not enter the access code.*\n\n"
+        "How seats work:\n"
+        "- Share this access code with your team.\n"
+        "- Each user creates their own login and redeems the code to claim a seat.\n"
+        "*Note - Each user will need to create a login in the same way as the admin. Go to Argus -> Login -> New User.\n"
+        "- Click the link in your email. This will take you back to the Argus page. Click Login -> Existing User.\n"
+        "- You will be prompted to create a password for your account which you can then use to log in.\n"
+        "- Once a user has created a login, Go to Argus -> Login -> Existing user.\n"
+        "- Log in with your credentials. You will then be prompted to enter the access code.\n"
+        "- If you selected 'Admin is also a user', the admin should also redeem the code when they log in for the first time.\n"
+        "- If the billing admin redeems the code, they will automatically be marked as the billing admin.\n\n"
+        "Billing:\n"
+        "- Click 'Manage Account' to open the Stripe portal.\n"
+        f"- To add/remove users or adjust seat assignments, contact: {SUPPORT_EMAIL}\n\n"
+        "Rules:\n"
+        "- Cancel anytime; access continues through the end of the paid period.\n"
+        "- No refunds.\n"
+        "- If payment fails, access is blocked immediately.\n\n"
+        f"Support: {SUPPORT_EMAIL}\n"
+      )
+    )
+  except Exception as e:
+    print("EMAIL SEND FAILED:", type(e).__name__, str(e))
+
+def _handle_subscription_change(sub_obj, event_type: str = ""):
+  sub_id = sub_obj.get("id")
+  status = (sub_obj.get("status") or "").lower()
+  if not sub_id:
+    return
+
+  row = app_tables.access_codes.get(stripe_subscription_id=sub_id)
+  if not row:
+    return
+
+  # BEFORE snapshot
+  old_plan = (row["plan_key"] or "").lower()
+  try:
+    old_seat_limit = int(row["seat_limit"] or 0)
+  except Exception:
+    old_seat_limit = 0
+  old_status = (row["status"] or "").lower()
+
+  # Pull plan from Stripe items
+  new_plan = old_plan
+  new_seat_limit = old_seat_limit
+  try:
+    items = (((sub_obj.get("items") or {}).get("data")) or [])
+    if items:
+      price = (items[0].get("price") or {})
+      price_id = (price.get("id") or "").strip()
+      mapped_plan = PRICE_ID_TO_PLAN.get(price_id)
+      if mapped_plan:
+        new_plan = mapped_plan
+        new_seat_limit = SEAT_LIMITS.get(mapped_plan, 0)
+  except Exception as e:
+    print("PLAN UPDATE FAILED:", type(e).__name__, str(e))
+
+  # Update row
+  try:
+    row.update(plan_key=new_plan, seat_limit=new_seat_limit)
+  except Exception:
+    pass
+
+  if status == "active":
+    row.update(status="active")
+  else:
+    row.update(status=status)
+
+  # Decide if we should notify
+  plan_changed = (new_plan != old_plan) or (new_seat_limit != old_seat_limit)
+  status_changed = (status != old_status)
+
+  cancel_at_period_end = bool(sub_obj.get("cancel_at_period_end"))
+  deleted = (event_type == "customer.subscription.deleted") or (status in ("canceled", "cancelled"))
+
+  if not (plan_changed or status_changed or cancel_at_period_end or deleted):
+    return
+
+  # Internal email
+  try:
+    _send_internal_email(
+      "ARGUS SUBSCRIPTION UPDATE" if not deleted else "ARGUS SUBSCRIPTION CANCELED",
+      (
+        "Stripe subscription change\n\n"
+        f"Time: {_now()}\n"
+        f"Event: {event_type or 'customer.subscription.updated'}\n"
+        f"Access code: {row['code']}\n"
+        f"Company: {row['company']}\n"
+        f"Location: {row['location']}\n"
+        f"Billing admin: {row['billing_email']}\n"
+        f"Subscription id: {sub_id}\n\n"
+        f"Status: {old_status} -> {status}\n"
+        f"Plan: {old_plan} ({old_seat_limit} seats) -> {new_plan} ({new_seat_limit} seats)\n"
+        f"Cancel at period end: {cancel_at_period_end}\n"
+      )
+    )
+  except Exception as e:
+    print("INTERNAL SUBSCRIPTION EMAIL FAILED:", type(e).__name__, str(e))
+
+def _handle_payment_failed(invoice_obj):
+  sub_id = invoice_obj.get("subscription")
+  if not sub_id:
+    return
+
+  row = app_tables.access_codes.get(stripe_subscription_id=sub_id)
+  if not row:
+    return
+
+  row.update(status="past_due")
+
+@anvil.server.callable
+def auto_claim_reserved_admin_seat():
+  user = anvil.users.get_user()
+  if not user:
+    return {"ok": False, "message": "Not logged in."}
+
+  if _is_internal_admin(user):
+    return {
+      "ok": True,
+      "skipped": True,
+      "reason": "internal_admin"
+    }
+
+  email = _user_email(user)
+  if not email:
+    return False
+
+  code_row = app_tables.access_codes.get(
+    reserved_admin_email=email,
+    reserved_admin_claimed=False
+  )
+  if not code_row:
+    return False
+
+  # If already linked, just mark claimed + ensure billing admin
+  link = app_tables.code_users.get(user=user)
+  if link:
+    if link["access_code"] == code_row:
+      link.update(is_billing_admin=True)
+      code_row.update(reserved_admin_claimed=True, reserved_seats=0)
+      return True
+    return False
+
+  # Create the seat link now (consumes the reserved seat, not an extra one)
+  app_tables.code_users.add_row(
+    user=user,
+    access_code=code_row,
+    is_billing_admin=True,
+    created_at=_now()
+  )
+
+  code_row.update(reserved_admin_claimed=True, reserved_seats=0)
+  return True
