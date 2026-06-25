@@ -813,21 +813,18 @@ class PanelParser:
                 chosen_map[role] = None
         print("AFTER LOOP NAME =", chosen_map.get("NAME", {}).get("text") if chosen_map.get("NAME") else None)
 
-        # --- Mutual exclusivity guard for colon-led BUS/MAIN ---
-        # If one amps role is colon-labeled, the other amps role must also be colon-labeled
-        # to remain distinct. Otherwise, clear the non-colon one and let the later BUS/MAIN
-        # reconciliation logic handle shared fallback cleanly.
+        # --- Colon evidence for BUS/MAIN ---
+        # Colon labeling is a confidence signal, NOT a hard exclusivity requirement.
+        # OCR may produce both "BUS AMPS: 100" and bare "100"; the chosen candidate
+        # may be bare even though the visual label/value association had a colon.
         bus_pick = chosen_map.get("BUS")
         main_pick = chosen_map.get("MAIN")
 
         bus_colon = _is_colon_labeled(bus_pick, "BUS")
         main_colon = _is_colon_labeled(main_pick, "MAIN")
 
-        if bus_colon and main_pick and not main_colon:
-            _set_role("MAIN", None)
-
-        elif main_colon and bus_pick and not bus_colon:
-            _set_role("BUS", None)
+        # Do not clear BUS/MAIN purely because only one selected candidate is colon-labeled.
+        # The colon-led extractor already boosts confidence through fromColonLabel/shape/ctx.
 
         # If NAME was claimed from a colon label, do not allow MAIN/BUS to reuse
         # overlapping text from that same name region.
@@ -1111,18 +1108,15 @@ class PanelParser:
             # No explicit-unit amps → keep ranked picks but still apply mode enforcement
             pass
 
-        # Re-apply colon-led BUS/MAIN exclusivity AFTER the unit-first amps reassignment,
-        # because that later pass can otherwise reintroduce a non-colon amps pick.
+        # Re-check colon evidence AFTER the unit-first amps reassignment.
+        # Colon is useful evidence, but it should not hard-clear the opposite role.
+        # OCR can split the same printed field into both a colon-labeled candidate
+        # and a bare-number candidate, so colon mismatch alone is not a reliable veto.
         bus_pick = chosen_map.get("BUS")
         main_pick = chosen_map.get("MAIN")
 
         bus_colon = _is_colon_labeled(bus_pick, "BUS")
         main_colon = _is_colon_labeled(main_pick, "MAIN")
-
-        if bus_colon and main_pick and not main_colon:
-            _set_role("MAIN", None)
-        elif main_colon and bus_pick and not bus_colon:
-            _set_role("BUS", None)
 
         # Final mode enforcement (last word)
         if (main_mode or "").upper() == "MLO":
@@ -1808,7 +1802,7 @@ class PanelParser:
         elif re.search(r"\bSURFACE\b", u):
             trim_style = "SURFACE"
 
-        if re.search(r"\bNEMA\s*3R\b|\bN3R\b", u):
+        if re.search(r"\bNEMA\s*3R\b|\bN3R\b|\b(OUTDOOR|WEATHERPROOF)\b", u):
             enclosure = "Nema3R"
         elif re.search(r"\bNEMA\s*1\b|\bN1\b", u):
             enclosure = "Nema1"
@@ -1826,7 +1820,7 @@ class PanelParser:
         u = self._normalize_digits(str(s).upper())
         u = re.sub(r"\s+", " ", u).strip()
 
-        if re.search(r"\bNEMA\s*3R\b|\bN3R\b|\bTYPE\s*3R\b", u):
+        if re.search(r"\bNEMA\s*3R\b|\bN3R\b|\bTYPE\s*3R\b|\b(OUTDOOR|WEATHERPROOF)\b", u):
             return "Nema3R"
         if re.search(r"\bNEMA\s*1\b|\bN1\b|\bTYPE\s*1\b", u):
             return "Nema1"
@@ -2593,10 +2587,13 @@ class PanelParser:
                 return False
 
             if role == "MOUNTING":
-                return bool(re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up))
+                return bool(re.search(r"\b(SURFACE|FLUSH|RECESSED|OUTDOOR|WEATHERPROOF)\b", up))
 
             if role == "ENCLOSURE":
-                return bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up))
+                return bool(re.search(
+                    r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b|\b(OUTDOOR|WEATHERPROOF)\b",
+                    up
+                ))
 
             return False
 
@@ -2781,19 +2778,20 @@ class PanelParser:
 
             has_mount_word = bool(re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up_mount))
             has_nema_word = bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up_mount))
+            has_outdoor_word = bool(re.search(r"\b(OUTDOOR|WEATHERPROOF)\b", up_mount))
 
-            if has_mount_word or has_nema_word:
+            if has_mount_word or has_nema_word or has_outdoor_word:
                 shape = 0.0
                 if has_mount_word:
                     shape += 0.72
-                if has_nema_word:
+                if has_nema_word or has_outdoor_word:
                     shape += 0.16
 
                 # extra context if token itself includes mounting-ish wording
                 ctx = 0.0
                 if re.search(r"\b(SURFACE|FLUSH|RECESSED)\b", up_mount):
                     ctx += 0.10
-                if re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b", up_mount):
+                if re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\b(OUTDOOR|WEATHERPROOF)\b", up_mount):
                     ctx += 0.05
 
                 out["MOUNTING"].append({
@@ -2806,7 +2804,10 @@ class PanelParser:
                 })
 
             # ENCLOSURE value candidates
-            has_enclosure_word = bool(re.search(r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b", up_mount))
+            has_enclosure_word = bool(re.search(
+                r"\bNEMA\s*1\b|\bNEMA\s*3R\b|\bN1\b|\bN3R\b|\bTYPE\s*1\b|\bTYPE\s*3R\b|\b(OUTDOOR|WEATHERPROOF)\b",
+                up_mount
+            ))
 
             if has_enclosure_word:
                 shape = 0.72
