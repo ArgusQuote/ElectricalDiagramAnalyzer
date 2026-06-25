@@ -760,8 +760,8 @@ class PanelParser:
                 # V9 gate: must pass label-led / value-led acceptance
                 if not _passes_gate(role, c, labels_map):
                     continue
-
-                print(f"{role} CHECK", c.get("text"), c.get("rank"), "used=", _is_used(c), "gate=", _passes_gate(role, c, labels_map))
+                if self.debug:
+                    print(f"{role} CHECK", c.get("text"), c.get("rank"), "used=", _is_used(c), "gate=", _passes_gate(role, c, labels_map))
 
                 return c
             return None
@@ -811,8 +811,9 @@ class PanelParser:
                 _set_role(role, picked)
             else:
                 chosen_map[role] = None
-        print("AFTER LOOP NAME =", chosen_map.get("NAME", {}).get("text") if chosen_map.get("NAME") else None)
-
+        if self.debug:
+            print("AFTER LOOP NAME =", chosen_map.get("NAME", {}).get("text") if chosen_map.get("NAME") else None)
+        
         # --- Colon evidence for BUS/MAIN ---
         # Colon labeling is a confidence signal, NOT a hard exclusivity requirement.
         # OCR may produce both "BUS AMPS: 100" and bare "100"; the chosen candidate
@@ -884,7 +885,8 @@ class PanelParser:
         if chosen_map.get("NAME") and _looks_like_electrical_value_for_name(chosen_map["NAME"].get("text", "")):
             chosen_map["NAME"] = None
 
-        print("AFTER ELECTRICAL-NUKE NAME =", chosen_map.get("NAME", {}).get("text") if chosen_map.get("NAME") else None)
+        if self.debug:
+            print("AFTER ELECTRICAL-NUKE NAME =", chosen_map.get("NAME", {}).get("text") if chosen_map.get("NAME") else None)
 
         # ---- AIC FALLBACK: if nothing chosen, scan whole band for kA-like tokens (22K, 22KAIC, 22AIC, etc.) ----
         if not chosen_map.get("AIC"):

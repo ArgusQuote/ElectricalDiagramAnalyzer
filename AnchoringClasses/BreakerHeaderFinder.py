@@ -610,7 +610,17 @@ class BreakerHeaderFinder:
                 for cat, aliases in self.CATEGORY_ALIASES.items():
                     if cat == "ckt":
                         continue
-                    if any(alias in norm for alias in aliases):
+
+                    if cat == "poles":
+                        matched = (
+                            norm == "P"
+                            or "POLE" in norm
+                            or "POLES" in norm
+                        )
+                    else:
+                        matched = any(alias in norm for alias in aliases)
+
+                    if matched:
                         cat_counts[cat] += 1
                         cats_present.add(cat)
 
@@ -658,7 +668,17 @@ class BreakerHeaderFinder:
                 for cat, aliases in self.CATEGORY_ALIASES.items():
                     if cat == "ckt":
                         continue
-                    if any(alias in norm for alias in aliases):
+
+                    if cat == "poles":
+                        matched = (
+                            norm == "P"
+                            or "POLE" in norm
+                            or "POLES" in norm
+                        )
+                    else:
+                        matched = any(alias in norm for alias in aliases)
+
+                    if matched:
                         is_header = True
                         break
 
@@ -691,7 +711,17 @@ class BreakerHeaderFinder:
                 for cat, aliases in self.CATEGORY_ALIASES.items():
                     if cat == "ckt":
                         continue
-                    if any(alias in norm for alias in aliases):
+
+                    if cat == "poles":
+                        matched = (
+                            norm == "P"
+                            or "POLE" in norm
+                            or "POLES" in norm
+                        )
+                    else:
+                        matched = any(alias in norm for alias in aliases)
+
+                    if matched:
                         is_header = True
                         break
 

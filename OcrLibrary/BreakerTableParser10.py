@@ -1551,6 +1551,14 @@ class SeparatedLayoutParser:
         if val <= 0:
             return None
 
+        # Match combined-mode amp validation:
+        # reject row numbers / OCR junk like 1, 2, 3, 22, 27, etc.
+        if val < 10:
+            return None
+
+        if val % 5 != 0:
+            return None
+
         return val
 
     def _parse_poles_value(self, text: str):
