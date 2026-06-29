@@ -1663,6 +1663,186 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
         "result": result
     }
 
+@anvil.server.callable
+def vm_rerun_rules_with_global_defaults(job_id: str, owner_email: str, group_folder: str, clean_defaults: dict) -> dict:
+    """
+    Fast rules-only rerun after editing whole-job defaults.
+
+    Does not rerun OCR.
+    Does not rerender images.
+    Updates ui_overrides.panelboards, applies override-level fields where needed,
+    reruns RulesEngine, writes result.json/status.json, and returns updated result.
+    """
+
+    if not job_id or not str(job_id).strip():
+        return {"ok": False, "error": "Missing job_id."}
+
+    if not owner_email or not str(owner_email).strip():
+        return {"ok": False, "error": "Missing owner_email."}
+
+    if not isinstance(clean_defaults, dict):
+        return {"ok": False, "error": "clean_defaults must be a dict."}
+
+    job_id = str(job_id).strip()
+    owner_email = str(owner_email).strip().lower()
+
+    job_dir = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
+    if job_dir is None:
+        return {"ok": False, "error": "Job not found. Please resubmit your PDF."}
+
+    sp = _status_paths(job_dir)
+
+    status = _json_read_or_none(sp["status"]) or {}
+    if not status:
+        return {"ok": False, "error": f"Unknown job_id: {job_id}"}
+
+    if _is_excluded_job_expired(status):
+        try:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            print(f">>> deleted expired excluded job on global defaults rerun: {job_dir}")
+        except Exception:
+            pass
+        return {"ok": False, "error": "Job not found. Please resubmit your PDF."}
+
+    job_owner = str(
+        status.get("owner_email")
+        or status.get("owner_id")
+        or ""
+    ).strip().lower()
+
+    if not job_owner or job_owner != owner_email:
+        return {"ok": False, "error": "Owner mismatch."}
+
+    state = str(status.get("state") or "").strip().lower()
+    if state != "done":
+        return {
+            "ok": False,
+            "error": f"Cannot edit this job yet. Current state: {state or 'unknown'}."
+        }
+
+    result = _json_read_or_none(sp["result"]) or {}
+    if not isinstance(result, dict) or not result:
+        return {"ok": False, "error": "Could not load saved result.json."}
+
+    components = result.get("components") or []
+    if not isinstance(components, list):
+        return {"ok": False, "error": "Saved result does not contain a valid components list."}
+
+    ui_overrides = (
+        result.get("ui_overrides")
+        or status.get("ui_overrides")
+        or _DEFAULT_OVERRIDES
+    )
+
+    ui_overrides = _normalize_ui_overrides(ui_overrides)
+
+    pb = dict((ui_overrides.get("panelboards") or {}))
+    pb.update(clean_defaults or {})
+
+    # Important compatibility key:
+    # Your default schema already uses allow_plug_on_breakers.
+    breaker_type = str(
+        clean_defaults.get("breaker_type")
+        or clean_defaults.get("branch_breaker_type")
+        or clean_defaults.get("breaker_mounting")
+        or ""
+    ).strip().upper()
+
+    if breaker_type == "PLUG_ON":
+        pb["allow_plug_on_breakers"] = True
+    elif breaker_type == "BOLT_ON":
+        pb["allow_plug_on_breakers"] = False
+
+    ui_overrides["panelboards"] = pb
+
+    # Enclosure override means override detected enclosure/trim for the regenerated BOM.
+    override_enclosure = str(pb.get("enclosure") or "").strip().upper()
+    override_trim = str(
+        pb.get("default_trim_style")
+        or pb.get("trim_style")
+        or ""
+    ).strip().upper()
+
+    override_material = str(
+        pb.get("bussing_material")
+        or pb.get("material")
+        or ""
+    ).strip().upper()
+
+    override_rating = str(
+        pb.get("rating_type")
+        or pb.get("panel_rating_type")
+        or ""
+    ).strip().upper()
+
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+
+        if str(comp.get("type") or "").strip().lower() != "panelboard":
+            continue
+
+        attrs = comp.get("attrs") or {}
+        if not isinstance(attrs, dict):
+            attrs = {}
+
+        if override_material:
+            attrs["material"] = override_material
+            attrs["bussingMaterial"] = override_material
+            attrs["bussing_material"] = override_material
+
+        if override_rating:
+            attrs["panelRatingType"] = override_rating
+            attrs["ratingType"] = override_rating
+            attrs["rating_type"] = override_rating
+
+        if override_enclosure:
+            attrs["enclosure"] = override_enclosure
+
+        if override_trim:
+            attrs["trimStyle"] = override_trim
+            attrs["trim_style"] = override_trim
+
+        comp["attrs"] = attrs
+
+    rules_payload = _build_rules_payload(ui_overrides, components)
+
+    try:
+        new_rules_result = RE2.process_job(rules_payload) or {}
+    except Exception as e:
+        new_rules_result = {
+            "error": f"{type(e).__name__}: {e}"
+        }
+
+    now = _now_utc().isoformat()
+
+    result["components"] = components
+    result["rules_result"] = new_rules_result
+    result["ui_overrides"] = ui_overrides
+    result["manually_edited"] = True
+    result["global_defaults_edited"] = True
+    result["last_edited_panel"] = "GLOBAL_DEFAULTS"
+    result["last_edited_at_utc"] = now
+
+    _result_write(job_dir, result)
+
+    _status_write(
+        job_dir,
+        "done",
+        result_path=str(sp["result"]),
+        progress=100.0,
+        manually_edited=True,
+        global_defaults_edited=True,
+        last_edited_panel="GLOBAL_DEFAULTS",
+        last_edited_at_utc=now,
+    )
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "result": result
+    }
+
 # ---------- Queue / Pool state ----------
 _JOB_Q: "Queue[tuple[str,str]]" = Queue()
 _INFLIGHT_BY_USER: dict[str, int] = {}
