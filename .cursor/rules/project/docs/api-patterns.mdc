@@ -19,42 +19,98 @@ This project uses Anvil Uplink RPC -- not REST/HTTP. The backend exposes callabl
 
 All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.server.callable`.
 
+> **Note on signatures**: Most job-scoped callables now take a `group_folder`
+> parameter (default `"personal"`) and an `owner_email` used for ownership
+> checks and to resolve the grouped, per-user job path. Confirm exact
+> signatures against `uplink_server.py`.
+
+### vm_ping
+- **Purpose**: Liveness check for the uplink server
+- **Parameters**: None
+- **Returns**: Truthy/heartbeat value
+
 ### vm_submit_for_detection
 - **Purpose**: Upload a PDF and start a detection job
-- **Parameters**: `media` (Anvil BlobMedia), `ui_overrides=None` (dict), `job_note=None` (str), `owner_email=None` (str)
+- **Parameters**: `media` (Anvil BlobMedia), `ui_overrides=None` (dict), `job_note=None` (str), `owner_email=None` (str), `group_folder="personal"` (str), `access_code_value=""` (str), `plan_key=""` (str), `company_name=""` (str), `exclude_from_improvement=False` (bool)
 - **Returns**: Dict with `job_id`, `job_dir`, and submission metadata
-- **Side effects**: Creates job directory, saves PDF, writes initial status.json, enqueues job
+- **Side effects**: Creates grouped per-user job directory, saves PDF, writes initial status.json, enqueues job; writes an `ARGUS_EXCLUDED_FROM_IMPROVEMENT_REVIEW_README.txt` marker when `exclude_from_improvement` is set
+
+### vm_get_active_job_for_user
+- **Purpose**: Return the user's currently in-flight job (if any), used by the UI to resume polling
+- **Parameters**: `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: Dict with active job info or an empty/`None`-equivalent result
 
 ### vm_get_job_status
-- **Purpose**: Get current status and result for a job
-- **Parameters**: `job_id` (str), `owner_email` (str)
+- **Purpose**: Get current status (and, when done, result) for a job
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder="personal"` (str)
 - **Returns**: Dict with `state`, `progress`, `step`, and `result` when state is "done"
-- **Auth**: Validates `owner_email` matches job owner; returns error dict if mismatch
+- **Auth**: Validates `owner_email` matches job owner; returns `not_found`/error dict if mismatch
+
+### vm_get_job_result
+- **Purpose**: Fetch the full `result.json` for a completed job
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: Dict with the stored result (or an error dict)
 
 ### vm_list_jobs
-- **Purpose**: List jobs owned by a user
-- **Parameters**: `owner_id` (str), `limit=50` (int)
+- **Purpose**: List jobs owned by a user within a group
+- **Parameters**: `owner_id` (str), `limit=50` (int), `group_folder="personal"` (str)
 - **Returns**: List of dicts with job metadata (job_id, state, job_name, submitted_at)
 
 ### vm_cancel_job
 - **Purpose**: Cancel a queued or running job
-- **Parameters**: `job_id` (str), `owner_id` (str)
-- **Returns**: `True` if canceled, `False` if not found or unauthorized
-- **Side effects**: Creates `.cancel` file in job directory; worker checks for it
+- **Parameters**: `job_id` (str), `owner_id` (str), `group_folder="personal"` (str)
+- **Returns**: Dict result (ok/state); creates `.cancel` file in the job directory which the worker checks for
+
+### vm_delete_job
+- **Purpose**: Delete a detection job folder owned by the user
+- **Parameters**: `job_id` (str), `owner_id` (str), `group_folder="personal"` (str)
+- **Returns**: Dict result (ok/state)
+- **Security**: Ownership-checked; path-traversal-guarded before `rmtree`
+
+### vm_rerun_rules_with_panel_edit
+- **Purpose**: Re-run only the rules engine after the user edits one component (no re-OCR)
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder` (str), `original_panel_name` (str), `edited_component` (dict), `original_source_path=None` (str)
+- **Returns**: Updated result dict; reads `result.json`, swaps the one component, reruns RulesEngine, rewrites `result.json`
+
+### vm_rerun_rules_with_global_defaults
+- **Purpose**: Re-run the rules engine for all components after a global defaults change (no re-OCR)
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder` (str), `clean_defaults` (dict)
+- **Returns**: Updated result dict; rewrites `result.json`
+
+### vm_upload_specs_pdf
+- **Purpose**: Upload a specification PDF for spec-sheet analysis (separate from detection)
+- **Parameters**: `media` (BlobMedia), `owner_email=None`, `group_folder="personal"`, `access_code_value=""`, `plan_key=""`, `company_name=""`, `job_name=""`, `exclude_from_improvement=False`
+- **Returns**: Dict with `job_id` (prefixed `specs_`), `job_dir`, `saved_pdf`, `state="uploaded"`
+- **Side effects**: Saves the PDF under `~/jobs/specs/groups/<group>/users/<owner>/specs_<id>/uploaded_pdfs/`
+
+### vm_start_specs_analysis
+- **Purpose**: Start analysis of an already-uploaded specs PDF in a background thread
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: Dict with `ok`, `job_id`, `state` ("running"/"not_found")
+
+### vm_get_specs_status
+- **Purpose**: Poll the status (and, when done, result) of a specs analysis job
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: Dict with `state` and, when done, `result`; expired excluded jobs return `not_found` and are purged
+
+### vm_delete_specs_job
+- **Purpose**: Delete a specs (temp) job folder
+- **Parameters**: `job_id` (str, must start with `specs_`), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: `True` if deleted, `False` otherwise (ownership-checked, path-traversal-guarded)
 
 ### vm_list_magenta_overlay_images
 - **Purpose**: List full-page magenta overlay PNG paths for a job (detection visualization)
-- **Parameters**: `job_id` (str)
-- **Returns**: List of job-relative PNG paths
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: List of job-relative PNG paths (ownership-checked)
 
 ### vm_list_overlay_images
 - **Purpose**: List review overlay PNG paths for a job (OCR visualization)
-- **Parameters**: `job_id` (str)
+- **Parameters**: `job_id` (str), `owner_email` (str), `group_folder="personal"` (str)
 - **Returns**: List of job-relative paths from `pdf_images/review_overlays/`
 
 ### vm_fetch_image
 - **Purpose**: Return an image file as BlobMedia for display in the UI
-- **Parameters**: `job_id` (str), `source_path` (str -- absolute or job-relative)
+- **Parameters**: `job_id` (str), `owner_email` (str), `source_path` (str -- absolute or job-relative), `group_folder="personal"` (str)
 - **Returns**: `anvil.BlobMedia` with image bytes
 - **Security**: Validates path is under the job directory to prevent path traversal
 
@@ -62,16 +118,6 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 - **Purpose**: Return default UI override settings (panelboard, transformer, disconnect defaults)
 - **Parameters**: None
 - **Returns**: Deep copy of `_DEFAULT_OVERRIDES` dict
-
-### vm_set_queue_timeout
-- **Purpose**: Set the queue timeout at runtime (persists for process lifetime only)
-- **Parameters**: `minutes` (int)
-- **Returns**: Dict with `ok`, `old`, `new` values
-
-### vm_get_queue_timeout
-- **Purpose**: Get the current queue timeout
-- **Parameters**: None
-- **Returns**: int (minutes)
 
 ### vm_set_watchdog_timeout
 - **Purpose**: Set the watchdog timeout at runtime (persists for process lifetime only)
@@ -86,8 +132,9 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 ## Authentication Pattern
 
 - No session tokens or JWT -- Anvil handles user authentication on the frontend
-- The frontend passes `owner_email` (lowercased) with each request
-- Backend validates ownership by comparing `owner_email` against the `owner_id` stored in `status.json`
+- The frontend passes `owner_email` (lowercased) with each request, plus a `group_folder` (default `"personal"`) that namespaces the user's jobs
+- Backend validates ownership by comparing `owner_email` against the `owner_id`/`owner_email` stored in `status.json`, and resolves the on-disk job path from `(group_folder, owner_email, job_id)` rather than trusting any client-supplied path
+- All `job_id` / `group_folder` / `owner_email` inputs are sanitized (`_safe_folder_key`, `_owner_folder_key`) and checked for path-traversal (`/`, `\`, `..`) before filesystem use
 - Per-user concurrency is enforced server-side via `_INFLIGHT_BY_USER` dict
 
 ## Error Handling Convention
@@ -104,5 +151,11 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 |---|---|---|
 | `WATCHDOG_TIMEOUT_MIN` | Env var or `vm_set_watchdog_timeout` | 10 minutes |
 | `WATCHDOG_KILL_GRACE_SEC` | Env var | 3 seconds |
-| `QUEUE_TIMEOUT_MIN` | Env var or `vm_set_queue_timeout` | 25 minutes |
+| `QUEUE_TIMEOUT_MIN` | Env var | 25 minutes |
+| `EXCLUDED_JOB_RETENTION_HOURS` | Constant | 24 hours |
+| `EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES` | Env var | 10 minutes |
 | Anvil Uplink connection timeout | Managed by anvil-uplink library | Library default |
+
+> The runtime queue-timeout setters (`vm_set_queue_timeout` / `vm_get_queue_timeout`)
+> no longer exist; only the watchdog timeout is adjustable at runtime. `QUEUE_TIMEOUT_MIN`
+> is set via env var at startup.

@@ -17,6 +17,8 @@ ElectricalDiagramAnalyzer/
 ├── AnchoringClasses/          # Header/footer anchor detection
 ├── RulesEngine/               # Part number selection rules
 ├── PartNumberSelector/        # Equipment part number lookup tables
+├── Spec_Sheet_Analysis/       # Specification-PDF analysis (text-based, no OCR)
+├── WorkerSetup/               # Thread-pool caps + runtime determinism for workers
 ├── DevEnv/                    # Development and testing scripts
 ├── Backups/                   # Anvil app exports and server backups
 ├── MISC/                      # Utilities, configs, requirements
@@ -33,22 +35,31 @@ ElectricalDiagramAnalyzer/
 | File | Purpose |
 |---|---|
 | `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, worker pool, all RPC callables |
-| `PageFilter/PageFilterV4.py` | Page filtering (latest heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints |
-| `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel), drop-in replacement for PageFilterV4 |
-| `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping |
-| `MLTableDetection/TableDetectorML.py` | ML table detection -- Table Transformer (DETR) for bounding-box-level panel detection |
-| `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO/YOLO format) |
-| `MLTableDetection/train_page_classifier.py` | Training script for MobileNetV2 binary page classifier |
-| `MLTableDetection/evaluate_model.py` | Evaluation script -- mAP metrics, inference, box-level comparison with heuristic |
-| `MLTableDetection/render_pdfs_for_annotation.py` | Renders PDF pages to PNGs for annotation in Label Studio |
-| `OcrLibrary/BreakerTableParserAPIv9.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class |
+| `PageFilter/PageFilterV2.py` | Page filtering (older heuristic) -- kept for reference / regression comparison; not imported by production. |
+| `PageFilter/PageFilterV3.py` | Page filtering (last heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints. Currently the production import in `uplink_server.py`. |
+| `PageFilter/PageFilterV4.py` | Page filtering (ML wrapper) -- thin compatibility layer that wraps `PageClassifierML` behind the legacy `PageFilter` class / `readPdf()` API. No heuristic logic. |
+| `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel). Used directly or via the `PageFilterV4` wrapper. Training script not in-repo (was a one-shot on Marco's laptop). |
+| `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping. Used as ground truth for ML evaluation. |
+| `MLTableDetection/TableDetectorML.py` | ML table detection -- Table Transformer (DETR) for bounding-box-level panel detection. Default model path resolves to the fine-tuned v7 checkpoint at `~/Documents/TableAnnotations/models_v7/best/` and falls back to the HF pretrained `microsoft/table-transformer-detection` if no local checkpoint is found. See `_resolve_default_tatr_model_path()`. |
+| `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO format). Exposes `--num-queries`, `--freeze-backbone-epochs`, `--hard-negatives-dir` flags. Recipe used for the production v7 model is recorded in `baselines/v7_2026-05-15/SUMMARY.md`. |
+| `MLTableDetection/evaluate_model.py` | Evaluation script -- mAP metrics, inference, box-level comparison with the heuristic. Modes: `--data` (COCO mAP), `--images` (inference), `--pdf` (heuristic-vs-ML box comparison). |
+| `MLTableDetection/render_pdfs_for_annotation.py` | Renders PDF pages to PNGs for annotation in Label Studio. |
+| `MLTableDetection/pseudo_label.py` | TATR threshold-based pseudo-labeler -- routes rendered PNGs into auto_accepted / review / hard_negatives. |
+| `MLTableDetection/synthesize_panels.py` | Cut-and-paste synthetic data generator (Dwibedi et al. 2017) -- composites cropped panels onto blank engineering-drawing backgrounds. |
+| `MLTableDetection/merge_annotations.py` | Multi-source COCO merger -- re-keys IDs, hardlinks images, tracks source role per image. |
+| `MLTableDetection/README.md` | Module reference doc. Has a 2026-05-08 preamble pointing readers at `known-issues.mdc` and the `training-panel-detector` skill for current state; the rest is original reference material for the "annotate, fine-tune" workflow. |
+| `MLTableDetection/requirements.txt` | ML-specific Python deps (transformers, torchmetrics, albumentations, timm, etc.). Installed on top of `MISC/requirements.txt` on the training host. |
+| `MLTableDetection/setup_label_studio.sh` | Convenience script for spinning up Label Studio for annotation work. |
+| `OcrLibrary/BreakerTableParserAPIv11.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import.** Exports `API_VERSION = "API_11"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser10`. (v8/v9/v10 kept for comparison.) |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV9.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR |
+| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv11). V8/V9/V10 kept for comparison. |
 | `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
 | `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
-| `RulesEngine/RulesEngine4.py` | Rules engine -- `process_job()` selects part numbers from component dicts |
+| `RulesEngine/RulesEngine6.py` | Rules engine -- `process_job()` selects part numbers from component dicts. **Current production import** (as `RE2`). Adds MMS/ERMS handling on top of RE5/RE4. RE2-RE5 kept for comparison. |
 | `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
+| `Spec_Sheet_Analysis/Specs_AnalyzerV5.py` | Specification-PDF analyzer -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Text-based (pypdfium2) section finding + panelboard requirement classification + evidence images. **Current production version** (loaded dynamically; V6 exists but is NOT the active version). |
+| `WorkerSetup/worker_init.py` | `cap_thread_pools()` (env thread caps, set before heavy imports) and `set_runtime_determinism()` (torch/cv2 thread counts + cuDNN determinism, set inside spawned workers). |
 | `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
 | `OcrLibrary/breaker_labels_config.jsonc` | Breaker label configuration |
 | `MISC/requirements.txt` | Main project Python dependencies |
@@ -60,28 +71,31 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary, RulesEngine
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv11), RulesEngine (RulesEngine6), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Backup snapshots**: dated `uplink_server_*bkup*.py` / `uplink_server_<date>.py` files live alongside the active server -- they are historical snapshots, NOT importable runtime modules.
 
 ### PageFilter
 - **Path**: `PageFilter/`
 - **Purpose**: Filters PDF pages to keep only electrical/panel content
-- **Heuristic**: `PageFilterV4.PageFilter` class, `.readPdf()` method (OCR + regex + footprints)
-- **ML classifier**: `PageClassifierML.PageClassifierML` class, `.readPdf()` method (MobileNetV2 binary classifier, ~250 ms/page)
-- **Production import**: `uplink_server.py` currently imports `PageFilterV3` (not yet updated to V4 or ML)
-- **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
-- **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision (no EasyOCR needed)
+- **Heuristic (older version)**: `PageFilterV2.PageFilter` -- kept for reference; not imported by production.
+- **Heuristic (last version)**: `PageFilterV3.PageFilter` class, `.readPdf()` method (OCR + regex + footprints). V3 is the final heuristic version; no V4 heuristic exists.
+- **ML classifier**: `PageClassifierML.PageClassifierML` class, `.readPdf()` method (MobileNetV2 binary classifier, ~250 ms/page).
+- **ML wrapper**: `PageFilterV4.PageFilter` class -- wraps `PageClassifierML` behind the legacy `readPdf()` API so callers can swap V3 → V4 transparently.
+- **Production import**: `uplink_server.py` (line 92) currently imports `PageFilterV3` (not yet updated to V4).
+- **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV.
+- **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision (no EasyOCR needed).
 
 ### MLTableDetection
 - **Path**: `MLTableDetection/`
-- **Purpose**: ML-based detection and classification for panel schedule pages
-- **Table detection**: `TableDetectorML` class -- DETR-based bounding box detection (Table Transformer or Detectron2 backends)
-- **Page classification**: Trained via `train_page_classifier.py`, used via `PageFilter/PageClassifierML.py`
-- **Training scripts**: `train_table_transformer.py` (detection), `train_page_classifier.py` (classification)
-- **Evaluation**: `evaluate_model.py` -- mAP computation, inference, heuristic comparison
-- **Data prep**: `render_pdfs_for_annotation.py` -- renders PDFs to PNGs for Label Studio
-- **Dependencies**: PyTorch, torchvision, transformers (for TATR), torchmetrics
-- **Licenses**: All MIT/BSD-3/Apache 2.0 (commercial-friendly)
-- **Training data**: `~/Documents/TableAnnotations/` (images, COCO annotations, model checkpoints)
+- **Purpose**: ML-based panel-schedule table detection (DETR via Table Transformer) plus the data-prep, evaluation, and training infrastructure that supports it.
+- **Production model**: v7 fine-tuned Table Transformer at `~/Documents/TableAnnotations/models_v7/best/` (mAP@0.5 = 0.83 on 5 held-out PDFs; see `known-issues.mdc` entry "v7 retrain -- DONE 2026-05-15"). `TableDetectorML` resolves this checkpoint as the default via `_resolve_default_tatr_model_path()` and falls back to `microsoft/table-transformer-detection` if no local checkpoint is present on the host. The Detectron2 backend (`backend="detectron2"`) is also available but unused in production.
+- **Page classifier (lives in PageFilter)**: `PageFilter/PageClassifierML.py` is used through the `PageFilterV4` wrapper. Its training script is **not** checked in (the MobileNetV2 classifier was a one-shot training on Marco's laptop). The checkpoint is at `~/Documents/TableAnnotations/models_classifier/best/model.pt` on Marco's laptop only.
+- **Training script (in-repo)**: `train_table_transformer.py` (TATR fine-tuning, COCO format).
+- **Evaluation**: `evaluate_model.py` -- mAP computation, inference, heuristic comparison.
+- **Data prep**: `render_pdfs_for_annotation.py` (Label Studio renderer), `pseudo_label.py` (TATR-based pre-labeling router), `synthesize_panels.py` (cut-and-paste augmentation), `merge_annotations.py` (multi-source COCO merger).
+- **Dependencies**: PyTorch, torchvision, transformers (`<5`, see `known-issues.mdc`), torchmetrics, albumentations, timm, accelerate. See `MLTableDetection/requirements.txt`.
+- **Licenses**: All MIT / BSD-3 / Apache 2.0 (commercial-friendly).
+- **Training data (Paperspace)**: `~/Documents/TableAnnotations/` contains `v6/` (298-image dataset), `models_v7/` (production weights + train log + TensorBoard runs), `models_v6/` (historical), `baselines/` (held-out PDF evaluation outputs for v4 / v6 / v7). `models_v4/` and `models_classifier/` are **not** on the Paperspace VM -- they live on Marco's laptop only.
 
 ### VisualDetectionToolLibrary
 - **Path**: `VisualDetectionToolLibrary/`
@@ -92,7 +106,7 @@ ElectricalDiagramAnalyzer/
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
 - **Purpose**: Three-stage OCR pipeline for breaker table extraction
-- **Entry point**: `BreakerTableParserAPIv9.BreakerTablePipeline` class, `.run()` method
+- **Entry point**: `BreakerTableParserAPIv11.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v10 kept for comparison)
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
 
 ### AnchoringClasses
@@ -104,7 +118,7 @@ ElectricalDiagramAnalyzer/
 ### RulesEngine
 - **Path**: `RulesEngine/`
 - **Purpose**: Maps OCR-extracted component attributes to equipment part numbers
-- **Entry point**: `RulesEngine4.process_job(payload)` function
+- **Entry point**: `RulesEngine6.process_job(payload)` function (active version, imported as `RE2`; RE2-RE5 kept for comparison). RE6 adds MMS/ERMS handling (e.g. ERMS on I-Line panels with ≥1200A mains).
 - **Dependencies**: PartNumberSelector
 
 ### PartNumberSelector
@@ -113,12 +127,24 @@ ElectricalDiagramAnalyzer/
 - **Entry point**: `PartNumberBuilder` module (exports: mccb, nqPanelboard, nfPanelboard, iLinePanelboard, breakerSelector, blanks, eFrameBreaker, Disconnect, transformer, loadcenter)
 - **Dependencies**: None (pure logic)
 
+### Spec_Sheet_Analysis
+- **Path**: `Spec_Sheet_Analysis/`
+- **Purpose**: Analyzes specification PDFs (not drawings) to find the panelboard spec section and classify requirements. Text-extraction based (pypdfium2), no OCR/GPU.
+- **Entry point**: `Specs_AnalyzerV5.analyze_specs_pdf_for_ui(pdf_path, job_dir)` (active version; V1-V4 and V6 also present, but `uplink_server.py` loads **V5** dynamically via `importlib`)
+- **Dependencies**: pypdfium2, Pillow
+
+### WorkerSetup
+- **Path**: `WorkerSetup/`
+- **Purpose**: Centralized thread-pool caps and runtime determinism for spawned multiprocessing workers
+- **Entry point**: `worker_init.py` -- `cap_thread_pools()` and `set_runtime_determinism()`
+- **Dependencies**: None at import (lazily uses torch/cv2 if present)
+
 ## Conventions
 
-- **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is the current active version. Lower versions are kept for comparison in DevEnv scripts.
+- **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is normally the current active version, with lower versions kept for comparison in DevEnv scripts. Exception: `PageFilter/` -- V3 is the last heuristic and remains in production; V4 is an ML-based wrapper around `PageClassifierML`. Always confirm the active version by checking the import in `AnvilUplinkCode/uplink_server.py`.
 - **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
 - **Backups**: `Backups/` contains Anvil form exports and server snapshots. Not part of the runtime.
 - **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.
 - **New pipeline module**: Create a new directory at the repo root with a versioned Python file (e.g., `NewModule/NewModuleV1.py`).
-- **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in `RulesEngine4.py`.
+- **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in the active rules engine (`RulesEngine6.py`).
 - **New RPC endpoint**: Add an `@anvil.server.callable` function in `uplink_server.py`.

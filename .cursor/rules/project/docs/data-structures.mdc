@@ -10,10 +10,10 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Pipeline Payloads
 
 ### BreakerTablePipeline Output
-- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv9.BreakerTablePipeline.run()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv11.BreakerTablePipeline.run()`
 - **Used by**: `_merge_component_from_btp()` in uplink_server.py
 - **Fields**:
-  - `apiVersion` -- str, pipeline API version (currently `"API_9"`)
+  - `apiVersion` -- str, pipeline API version (currently `"API_11"`)
   - `origin` -- str, source image path
   - `panelStatus` -- None if OK, str error message otherwise
   - `stages` -- dict of stage metadata (analyzer, parser, header)
@@ -23,7 +23,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
     - `results.parser` -- dict: `parserVersion`, `name`, `spaces`, `detected_breakers`, `breakerCounts`, `gfiBreakerCounts`, `headerScan`, `separatedScan`, `combinedScan`, `reviewOverlayPath`
 
 ### Header Parser Output (results.header)
-- **Location**: Returned by `OcrLibrary/PanelHeaderParserV9.PanelParser.parse_panel()`
+- **Location**: Returned by `OcrLibrary/PanelHeaderParserV11.PanelParser.parse_panel()`
 - **Fields**:
   - `type` -- str, always "panelboard"
   - `name` -- str, detected panel name
@@ -65,7 +65,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Component Dict (OCR to RulesEngine)
 
 - **Location**: Built by `_merge_component_from_btp()` in `uplink_server.py`
-- **Used by**: `RulesEngine4.process_job()`
+- **Used by**: `RulesEngine6.process_job()`
 - **Fields**:
   - `type` -- str, always "panelboard"
   - `name` -- str, panel name from header parser
@@ -81,7 +81,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 
 ## RulesEngine Payload
 
-- **Location**: Built in `_process_job()`, consumed by `RulesEngine4.process_job()`
+- **Location**: Built in `_process_job()`, consumed by `RulesEngine6.process_job()`
 - **Structure**: `{"defaults": {...}, "items": [component_dict, ...]}`
   - `defaults` -- dict from `_DEFAULT_OVERRIDES` or `ui_overrides`
   - `items` -- list of component dicts (one per detected panel)
@@ -89,10 +89,18 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 
 ## Job Disk Structure
 
-Each job lives at `~/jobs/{job_id}/`:
+Jobs are stored in a grouped, per-user layout. Detection jobs:
+`~/jobs/groups/<group>/users/<owner>/<job_id>/` and specs jobs:
+`~/jobs/specs/groups/<group>/users/<owner>/specs_<id>/`. The `<group>` segment
+comes from the `group_folder` RPC parameter (default `"personal"`), `<owner>` is
+the sanitized owner email (`@` → `_at_`). A legacy flat layout (`~/jobs/{job_id}/`)
+is still resolved as a fallback for old jobs. `job_id` is `<slug>__<stamp>__<8hexsuffix>`
+(detection) or `specs_<slug>__<stamp>__<8hexsuffix>` (specs).
+
+Detection `<job_id>/`:
 
 ```
-{job_id}/
+<job_id>/
 ├── status.json          # Job state and metadata
 ├── result.json          # Full processing result (written on completion)
 ├── *.pdf                # Uploaded PDF
@@ -100,7 +108,17 @@ Each job lives at `~/jobs/{job_id}/`:
 │   ├── *.png            # Cropped panel PNGs
 │   └── review_overlays/ # OCR debug overlay PNGs
 ├── magenta_overlays/    # Full-page detection visualization PNGs
+├── ARGUS_EXCLUDED_FROM_IMPROVEMENT_REVIEW_README.txt  # Marker for exclude-from-improvement jobs
 └── .cancel              # Sentinel file (created when job is canceled)
+```
+
+Specs `specs_<id>/`:
+
+```
+specs_<id>/
+├── status.json          # Specs job state (state, step, progress, retention_mode, ...)
+├── result.json          # Specs analysis result (written on completion)
+└── uploaded_pdfs/       # Saved spec PDF (deleted after analysis if excluded_from_improvement)
 ```
 
 ### status.json
@@ -124,7 +142,7 @@ Each job lives at `~/jobs/{job_id}/`:
   - `saved_pdf` -- str, path to saved PDF
   - `image_count` -- int, number of panel PNGs processed
   - `components` -- list of component dicts
-  - `rules_result` -- dict from RulesEngine4
+  - `rules_result` -- dict from RulesEngine6
   - `ui_overrides` -- dict, effective overrides used
   - `cycle_time_ms` -- int, total processing time in ms
   - `cycle_time_str` -- str, human-readable cycle time
@@ -153,7 +171,9 @@ Each job lives at `~/jobs/{job_id}/`:
 | `WATCHDOG_KILL_GRACE_SEC` | uplink_server.py (env) | 3 |
 | `QUEUE_TIMEOUT_MIN` | uplink_server.py (env) | 25 |
 
-Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine4 and PartNumberBuilder.
+Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine6 and PartNumberBuilder.
+
+Specs retention constants (in `uplink_server.py`): `EXCLUDED_JOB_RETENTION_HOURS` (default 24) and `EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES` (env-overridable, default 10).
 
 ## Serialization
 
@@ -176,16 +196,40 @@ Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage
     - `decision` -- str, "KEEP" or "DROP"
 
 ### readPdf() Return (Pipeline-compatible)
-- **Returns**: `(kept_pages, dropped_pages, output_pdf_path, log_json_path)` -- same signature as PageFilterV4
+- **Returns**: `(kept_pages, dropped_pages, output_pdf_path, log_json_path)` -- same signature as the heuristic `PageFilterV3.readPdf()` (and the `PageFilterV4` wrapper, which delegates here)
 
 ### Model Checkpoint (model.pt)
-- **Location**: Saved by `MLTableDetection/train_page_classifier.py`
+- **Location**: PyTorch state-dict checkpoint produced by the one-shot MobileNetV2 training run (training script not in-repo).
 - **Format**: PyTorch checkpoint dict with keys:
   - `model_state_dict` -- MobileNetV2 weights
   - `config` -- dict: `architecture`, `num_classes`, `input_size`, `class_names`
   - `metrics` -- dict: `val_accuracy`, `val_tp`, `val_fp`, `val_tn`, `val_fn`, `epoch`
   - `training_info` -- dict: `data_dir`, `total_images`, `positive_count`, `negative_count`, `epochs`, `learning_rate`, `weight_decay`, `freeze_backbone`
-- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt`
+- **Current best**: `~/Documents/TableAnnotations/models_classifier/best/model.pt` on Marco's laptop. **Not present on the Paperspace VM** -- the V4 ML page-filter path is therefore not usable on Paperspace until the checkpoint is synced over.
+
+## TableDetectorML Output and Checkpoint
+
+### readPdf() Return
+- **Location**: `MLTableDetection/TableDetectorML.py`
+- **Returns**: `list[str]` -- absolute paths to the panel PNGs the detector produced (same signature as the heuristic `PanelBoardSearch.readPdf()`).
+- **Side effects**: Populates `self.last_detection_boxes` (per-page list of `(x0, y0, x1, y1)` tuples in PDF points) and `self.last_detection_confidences` (parallel per-page list of floats).
+- **API alias**: `PanelBoardSearch = TableDetectorML` at the bottom of the module so callers that import the heuristic class name can swap to the ML implementation without other code changes.
+
+### TATR Fine-Tuned Checkpoint
+- **Location**: Saved by `MLTableDetection/train_table_transformer.py` via HuggingFace `Trainer`.
+- **Format**: HuggingFace model directory (not a single `.pt` file). The production v7 checkpoint at `~/Documents/TableAnnotations/models_v7/best/` contains:
+  - `model.safetensors` -- ~110 MB, fine-tuned `TableTransformerForObjectDetection` weights.
+  - `config.json` -- model config (includes `num_queries`, `id2label`, etc.).
+  - `preprocessor_config.json` -- image preprocessor (`AutoImageProcessor`) config; required to load via `AutoImageProcessor.from_pretrained()`.
+  - `training_args.bin` -- pickled `TrainingArguments` (recipe forensics).
+  - `trainer_state.json` -- 40 KB, full per-epoch `log_history` including 15 `eval_loss` / `eval_map_50` entries and `best_global_step` / `best_metric` (preserved from `checkpoint-2010/` before the intermediate checkpoints were deleted; see `known-issues.mdc` entry "v7 retrain -- DONE 2026-05-15").
+- **Current best (Paperspace)**: `~/Documents/TableAnnotations/models_v7/best/` -- mAP@0.5 = 0.8297 across 5 held-out PDFs. The same checkpoint (sha256-verified byte-identical) is also present on the AWS dev box at `/home/ubuntu/Documents/TableAnnotations/models_v7/best/` as of 2026-05-20 (path migrated from `/home/paperspace/...` on 2026-05-23).
+- **Resolution order** (in `TableDetectorML._resolve_default_tatr_model_path()`):
+  1. `~/Documents/TableAnnotations/models_v7/best` (resolves correctly on any host via the current user's home)
+  2. `/home/paperspace/Documents/TableAnnotations/models_v7/best` (Paperspace VM)
+  3. `/home/ubuntu/Documents/TableAnnotations/models_v7/best` (AWS dev box)
+  4. `/home/marco/Documents/TableAnnotations/models_v7/best` (Marco's laptop)
+  5. Fallback: `microsoft/table-transformer-detection` (HuggingFace pretrained, zero-shot quality).
 
 ## Data Flow
 
@@ -207,8 +251,8 @@ BreakerTablePipeline.run() → dict  (results with analyzer/header/parser)
 _merge_component_from_btp() → component dict  (type, name, attrs, notes)
     │
     ▼  (all components collected)
-RulesEngine4.process_job({"defaults": ..., "items": [...]}) → dict  (part numbers per component)
+RulesEngine6.process_job({"defaults": ..., "items": [...]}) → dict  (part numbers per component)
     │
     ▼
-result.json + status.json written to ~/jobs/{job_id}/
+result.json + status.json written to ~/jobs/groups/<group>/users/<owner>/<job_id>/
 ```
