@@ -25,22 +25,38 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
     ├─► PanelBoardSearch (PanelSearchToolV25)
     │       │  detects panel regions, crops to PNGs
     │       ▼
-    ├─► BreakerTablePipeline (BreakerTableParserAPIv9)
+    ├─► BreakerTablePipeline (BreakerTableParserAPIv11)
     │       ├─► BreakerTableAnalyzer (Analyzer12)
     │       │       ├── BreakerHeaderFinder
     │       │       └── BreakerFooterFinder
-    │       ├─► PanelHeaderParser (PanelHeaderParserV9)
+    │       ├─► PanelHeaderParser (PanelHeaderParserV11)
     │       └─► BreakerTableParser (BreakerTableParser10)
     │       │  extracts structured OCR data per panel
     │       ▼
     ├─► _merge_component_from_btp()
     │       │  maps OCR results to component dicts
     │       ▼
-    └─► RulesEngine4.process_job()
+    └─► RulesEngine6.process_job()
             └── PartNumberBuilder (mccb, nqPanelboard, Disconnect, ...)
                 │  selects equipment part numbers
                 ▼
             result.json + status.json on disk
+```
+
+### Spec Sheet Analysis Pipeline (separate from detection)
+
+```
+Specs PDF Upload (Anvil UI) ── vm_upload_specs_pdf()
+    │  saved under ~/jobs/specs/groups/<group>/users/<owner>/specs_<id>/
+    ▼
+vm_start_specs_analysis() ── background thread ── _run_specs_analysis_job()
+    │
+    ▼
+Spec_Sheet_Analysis/Specs_AnalyzerV5.analyze_specs_pdf_for_ui(pdf_path, job_dir)
+    │  text-based section finding, panelboard requirement classification,
+    │  evidence-image generation (pypdfium2 text extraction; no OCR/GPU)
+    ▼
+result.json + status.json on disk; polled via vm_get_specs_status()
 ```
 
 ## Key Components
@@ -48,8 +64,9 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 ### AnvilUplinkCode (Orchestrator)
 - **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, worker pool, and watchdog
 - **Location**: `AnvilUplinkCode/uplink_server.py`
-- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline, RulesEngine4
+- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv11), RulesEngine6, Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Consumers**: Anvil web frontend via Uplink RPC
+- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV25`, `BreakerTableParserAPIv11`, `RulesEngine6`, and `Specs_AnalyzerV5` loaded dynamically).
 
 ### PageFilter
 - **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages
@@ -82,7 +99,8 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 
 ### OcrLibrary (OCR Pipeline)
 - **Purpose**: Three-stage OCR pipeline -- layout analysis, header parsing, breaker table parsing
-- **Location**: `OcrLibrary/` (BreakerTableParserAPIv9, BreakerTableAnalyzer12, PanelHeaderParserV9, BreakerTableParser10)
+- **Location**: `OcrLibrary/` (BreakerTableParserAPIv11, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser10)
+- **API version string**: `API_VERSION = "API_11"` (exported by `BreakerTableParserAPIv11`)
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses
 - **Consumers**: uplink_server via BreakerTablePipeline
 
@@ -94,15 +112,27 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 
 ### RulesEngine
 - **Purpose**: Processes component dicts from OCR to select equipment part numbers
-- **Location**: `RulesEngine/RulesEngine4.py`
+- **Location**: `RulesEngine/RulesEngine6.py` (imported in `uplink_server.py` as `RE2`; exposes `process_job(payload)`). RulesEngine6 adds MMS/ERMS handling (e.g. ERMS on I-Line panels with a main breaker 1200A and larger) on top of RulesEngine5/4.
 - **Dependencies**: PartNumberSelector
 - **Consumers**: uplink_server (final pipeline step)
+
+### Spec_Sheet_Analysis (Specs Pipeline)
+- **Purpose**: Analyzes uploaded specification PDFs (not drawings) to locate the panelboard spec section and classify requirements. Text-extraction based (pypdfium2), not OCR/GPU based, so it runs in a lightweight background thread rather than the GPU worker pool.
+- **Location**: `Spec_Sheet_Analysis/Specs_AnalyzerV5.py` -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Loaded dynamically by `uplink_server.py` via `importlib` from the repo path.
+- **Dependencies**: pypdfium2, Pillow
+- **Consumers**: uplink_server (`_run_specs_analysis_job`, the `vm_*_specs_*` callables)
+
+### WorkerSetup (Runtime Determinism)
+- **Purpose**: Centralizes thread-pool caps and determinism settings for spawned workers
+- **Location**: `WorkerSetup/worker_init.py` -- `cap_thread_pools()` (sets `OMP_NUM_THREADS`, `MKL_NUM_THREADS`, etc. **before** heavy imports) and `set_runtime_determinism()` (sets torch/OpenCV thread counts and cuDNN determinism **inside** each spawned worker)
+- **Dependencies**: None at import (lazily touches torch/cv2 if installed)
+- **Consumers**: uplink_server (startup and worker process init)
 
 ### PartNumberSelector
 - **Purpose**: Part number lookup and selection logic for panelboards, breakers, disconnects, transformers
 - **Location**: `PartNumberSelector/PartNumberBuilder.py`
 - **Dependencies**: None (pure logic)
-- **Consumers**: RulesEngine4
+- **Consumers**: RulesEngine6
 
 ## Data Pipelines
 
@@ -116,11 +146,18 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
   5. `PanelBoardSearch.readPdf()` detects and crops panels to PNGs
   6. For each PNG (sequential): `BreakerTablePipeline.run()` extracts OCR data
   7. `_merge_component_from_btp()` maps each OCR result to a component dict
-  8. `RulesEngine4.process_job()` selects part numbers for all components
+  8. `RulesEngine6.process_job()` selects part numbers for all components
   9. Write `result.json` and update `status.json` (state=done)
   10. Cleanup temporary files
 - **Output**: `result.json` with components, part numbers, and cycle time
 - **Error handling**: Exceptions write state=error to `status.json`; watchdog kills jobs exceeding timeout
+- **Post-run edits**: After a job completes, the UI can re-run only the rules step without re-doing OCR via `vm_rerun_rules_with_panel_edit()` (edit one component) or `vm_rerun_rules_with_global_defaults()` (re-apply default overrides to all components). Both read `result.json`, re-run RulesEngine, and rewrite `result.json`.
+
+### Spec Sheet Analysis Pipeline
+- **Trigger**: `vm_upload_specs_pdf()` saves the spec PDF, then `vm_start_specs_analysis()` launches a background `threading.Thread` (not the GPU worker pool)
+- **Steps**: extract per-page text (pypdfium2) → score/find the panelboard spec section → classify requirement strength → generate evidence images → write `result.json` / `status.json`
+- **Polling**: `vm_get_specs_status()` returns state and (when done) the result
+- **Storage**: under `~/jobs/specs/groups/<group>/users/<owner>/specs_<id>/`; excluded-from-improvement jobs have their raw PDF deleted post-analysis and artifacts retained only for a short window (`EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES`, default 10)
 
 ## Deployment Topology
 
@@ -130,7 +167,8 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Per-user limit**: 1 concurrent job per user (`MAX_INFLIGHT_PER_USER`)
 - **Watchdog**: Kills child processes exceeding `WATCHDOG_TIMEOUT_MIN` (default 10 minutes)
 - **Queue timeout**: Jobs waiting longer than `QUEUE_TIMEOUT_MIN` (default 25 minutes) are expired
-- **Job storage**: `~/jobs/{job_id}/` with status.json, result.json, PDF, and PNG files
+- **Job storage (grouped)**: Detection jobs live at `~/jobs/groups/<group>/users/<owner>/<job_id>/`; specs jobs at `~/jobs/specs/groups/<group>/users/<owner>/specs_<id>/`. The `group_folder` parameter (default `"personal"`) namespaces a user's jobs. A legacy flat layout (`~/jobs/{job_id}/`) is still resolved as a fallback for old jobs. All client-supplied `job_id` / `group_folder` / `owner_email` values are sanitized and path-traversal-checked before use.
+- **Retention/cleanup**: A rolling background cleanup deletes expired excluded jobs (`EXCLUDED_JOB_RETENTION_HOURS`, default 24) and excluded-specs artifacts (`EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES`, default 10). Status/result reads opportunistically purge expired excluded jobs.
 - **No containerization**: Runs directly on the VM with system Python
 
 ## Key Design Decisions
@@ -142,10 +180,10 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
 - **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
 
 ### Versioned Module Files
-- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV25, BreakerTableAnalyzer12)
-- **Context**: Enables side-by-side comparison during development; highest number is normally the current active version (PageFilter is an exception -- V3 is the last heuristic and remains in production; V4 is the ML wrapper)
+- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV25, BreakerTableAnalyzer12, BreakerTableParserAPIv11)
+- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper) and `Spec_Sheet_Analysis` (V6 exists but `uplink_server.py` loads **V5**). Active OCR/rules versions as of this writing: `BreakerTableParserAPIv11`, `PanelHeaderParserV11`, `BreakerTableParser10`, `RulesEngine6`.
 - **Alternatives considered**: Git branching only (harder to compare in dev scripts)
-- **Consequences**: Multiple version files in each directory; the highest version is usually imported by uplink_server, but check the import in `uplink_server.py` to confirm the active version
+- **Consequences**: Multiple version files in each directory; **always check the import in `uplink_server.py` to confirm the active version** rather than assuming the highest number wins
 
 ### Dual Page Filtering Paths (Heuristic vs ML)
 - **Decision**: ML page classifier (`PageClassifierML`, wrapped by `PageFilterV4`) exists alongside the last heuristic (`PageFilterV3`) as a drop-in replacement

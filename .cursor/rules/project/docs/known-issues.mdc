@@ -756,19 +756,29 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     "Operational notes" subsection already flagged these as
     benign; the 2026-05-23 verification confirms it rigorously
     rather than just by analogy to Paperspace.
-  - **Doc drift discovered during verification (not fixed in
-    this session)**: `architecture.mdc` and `file-locations.mdc`
-    reference `OcrLibrary.BreakerTableParserAPIv9` and
-    `RulesEngine.RulesEngine4`, but the actual production imports
-    in `AnvilUplinkCode/uplink_server.py` are now
-    `BreakerTableParserAPIv11` and `RulesEngine5`. Also, the
-    `WorkerSetup` module that `uplink_server.py` imports isn't
-    mentioned in either doc. This is consistent with the
-    file-locations.mdc convention that says "Always confirm the
-    active version by checking the import in
-    `AnvilUplinkCode/uplink_server.py`", so the doc isn't a
-    correctness hazard, but a small future PR to update the
-    `.mdc` files would be helpful.
+  - **Doc drift discovered during verification -- RESOLVED 2026-06-29**:
+    the 2026-05-23 session noted that `architecture.mdc` and
+    `file-locations.mdc` referenced `OcrLibrary.BreakerTableParserAPIv9`
+    and `RulesEngine.RulesEngine4` while production had already moved on,
+    and that `WorkerSetup` was undocumented. All four `project/docs/*.mdc`
+    files (architecture, file-locations, data-structures, api-patterns)
+    were synced on 2026-06-29 to the then-current production imports:
+    `BreakerTableParserAPIv11` (`API_VERSION = "API_11"`),
+    `PanelHeaderParserV11`, `BreakerTableParser10`, `RulesEngine6`
+    (imported as `RE2`, adds MMS/ERMS handling), and the dynamically
+    loaded `Spec_Sheet_Analysis/Specs_AnalyzerV5`. The `WorkerSetup`
+    and `Spec_Sheet_Analysis` modules, the grouped per-user job storage
+    (`~/jobs/groups/<group>/users/<owner>/...` and the `specs/` variant),
+    and the new RPC callables (specs upload/start/status/delete,
+    `vm_rerun_rules_with_panel_edit`, `vm_rerun_rules_with_global_defaults`,
+    `vm_get_job_result`, `vm_delete_job`, `vm_ping`,
+    `vm_get_active_job_for_user`) are now documented; the removed
+    `vm_set_queue_timeout` / `vm_get_queue_timeout` callables were dropped
+    from `api-patterns.mdc`. **Standing reminder**: per the
+    versioned-module convention, always re-confirm the active version
+    against the imports at the top of `AnvilUplinkCode/uplink_server.py`
+    (the highest-numbered file is NOT always active -- e.g. `Specs_AnalyzerV6`
+    exists but V5 is the production import).
   - **Cost / lifecycle status unchanged**: instance is still
     expected to be stopped between sessions; EIP `52.21.216.68`
     still associated; SSH alias `argus-prod-aws` still canonical
