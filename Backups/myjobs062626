@@ -1,0 +1,576 @@
+from ._anvil_designer import myjobsTemplate
+from anvil import *
+from routing import router
+import anvil.server
+import anvil.users
+from anvil import js
+from datetime import datetime
+from .. import router_state
+
+JOBS_FONT_SIZE = 18
+
+class myjobs(myjobsTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+    
+    if hasattr(self, "logout_btn"):
+      self.logout_btn.set_event_handler("click", self.logout_btn_click)
+    
+    if hasattr(self, "jobs_btn"):
+      self.jobs_btn.set_event_handler("click", self.jobs_btn_click)
+
+    if not anvil.users.get_user():
+      js.window.location.hash = "landing"
+      return
+
+    try:
+      ent = anvil.server.call("is_current_user_entitled") or {}
+      if not ent.get("ok"):
+        js.window.location.hash = "upload"
+        return
+    except Exception:
+      js.window.location.hash = "landing"
+      return
+      
+    if hasattr(self, "new_job_btn"):
+      self.new_job_btn.set_event_handler('click', self.new_job_btn_click)
+
+    # FULL WIDTH
+    self.set_event_handler("show", self._force_full_width_everywhere)
+
+    # Render
+    self._render_jobs_table()
+
+  def _clear_router_handoff(self):
+    try:
+      router_state.processing_args = None
+    except Exception:
+      pass
+    try:
+      router_state.output_args = None
+    except Exception:
+      pass
+
+  def _is_cancelable_state(self, status_text: str, state_text: str = "") -> bool:
+    s = str(status_text or "").strip().lower()
+    state = str(state_text or "").strip().lower()
+
+    if state in ("queued", "running", "unknown"):
+      return True
+
+    if state in ("done", "error", "canceled", "cancelled", "not_found"):
+      return False
+
+    done_words = (
+      "done",
+      "complete",
+      "completed",
+      "complete/edited",
+      "error",
+      "failed",
+      "canceled",
+      "cancelled",
+      "not_found",
+    )
+
+    if s in done_words:
+      return False
+
+    active_words = (
+      "queued",
+      "running",
+      "processing",
+      "uploading",
+      "analyzing",
+      "finding",
+      "parsing",
+      "rendering",
+      "rules",
+      "working",
+      "unknown",
+    )
+
+    return any(w in s for w in active_words)
+      
+  def _render_jobs_table(self):
+  
+    # Prefer a design-time DataGrid named data_grid_1; otherwise create it
+    dg = getattr(self, "data_grid_1", None)
+    if not isinstance(dg, DataGrid):
+      self.data_grid_1 = dg = DataGrid()
+      try:
+        self.add_component(dg)
+      except Exception:
+        pass
+  
+    # ----- Wrap grid in a dark "card" -----
+    host = getattr(self, "jobs_card", None)
+    if not isinstance(host, ColumnPanel):
+      self.jobs_card = host = ColumnPanel()
+      host.width = "100%"
+      host.padding = "18px"
+      host.spacing = "medium"
+      host.role = "elevated-card"
+      host.background = "theme:Text Primary"
+      host.foreground = "theme:Background"
+      try:
+        self.add_component(host)
+      except Exception:
+        pass
+  
+    # Ensure dg is inside the card
+    try:
+      dg.remove_from_parent()
+    except Exception:
+      pass
+  
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+  
+    host.add_component(dg)
+  
+    dg.width = "100%"
+    dg.show_header = True
+    dg.show_page_controls = False
+    dg.rows_per_page = 1000
+    dg.role = "bom-grid"
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+  
+    # ---- Pull current user's jobs only ----
+    try:
+      # True means "include metadata wrapper", not "team view".
+      # The backend now always returns personal scope anyway.
+      payload = anvil.server.call("list_jobs_for_user", 100, True) or {}
+    
+      jobs = payload.get("jobs") or []
+      jobs = [j for j in jobs if not str(j.get("job_id") or "").startswith("specs_")]
+    
+      scope = (payload.get("scope") or "personal").strip().lower()
+    
+    except Exception as e:
+      dg.add_component(DataRowPanel())
+      alert(f"Could not load jobs:\n{e}")
+      return
+  
+    # ---- Columns ----
+    cols = [
+      {"id": "job_name", "title": "Job Name", "data_key": "job_name"},
+      {"id": "created",  "title": "Date",     "data_key": "created", "width": 180},
+    ]
+  
+    if scope == "team":
+      cols.append({"id": "uploaded_by", "title": "Uploaded By", "data_key": "uploaded_by", "width": 260})
+  
+    cols += [
+      {"id": "status",   "title": "Status",   "data_key": "status", "width": 140},
+      {"id": "open",     "title": "Open Job", "data_key": "open", "width": 160},
+      {"id": "delete",   "title": "Delete",   "data_key": "delete", "width": 150},
+    ]
+  
+    dg.columns = cols
+  
+    # Clear components
+    for c in list(dg.get_components()):
+      try: c.remove_from_parent()
+      except Exception: pass
+  
+    def H(text, align=None):
+      lab = Label(text=text, bold=True, align=align)
+      lab.font_size = JOBS_FONT_SIZE
+      lab.foreground = "theme:Background"
+      return lab
+  
+    def C(text, align="left", bold=False):
+      lab = Label(text=text, align=align, bold=bold)
+      lab.font_size = JOBS_FONT_SIZE
+      lab.foreground = "theme:Background"
+      return lab
+  
+    # Header row
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.width = "100%"
+    hdr.add_component(H("Job Name"), column="job_name")
+    hdr.add_component(H("Date", align="center"), column="created")
+  
+    if scope == "team":
+      hdr.add_component(H("Uploaded By", align="center"), column="uploaded_by")
+  
+    hdr.add_component(H("Status", align="center"), column="status")
+    hdr.add_component(H("Open Job", align="center"), column="open")
+    hdr.add_component(H("Delete", align="center"), column="delete")
+    dg.add_component(hdr, slot="header")
+  
+    # Empty state
+    if not jobs:
+      msg = Label(
+        text="NO JOBS TO DISPLAY",
+        bold=True,
+        align="center",
+        foreground="theme:Accent"
+      )
+      msg.font_size = 42
+  
+      dr = DataRowPanel(role="zebra-even")
+      dr.add_component(msg, column="job_name")
+      dr.add_component(Label(text=""), column="created")
+      if scope == "team":
+        dr.add_component(Label(text=""), column="uploaded_by")
+      dr.add_component(Label(text=""), column="status")
+      dr.add_component(Label(text=""), column="open")
+      dr.add_component(Label(text=""), column="delete")
+      dg.add_component(dr)
+      return
+  
+    def _fmt_dt(dt):
+      """
+      Always display in the browser's local timezone.
+      Accepts:
+        - datetime
+        - ISO string (with or without Z)
+      """
+      if not dt:
+        return "-"
+    
+      try:
+        # If it's a Python datetime, convert to ISO for JS.
+        if isinstance(dt, datetime):
+          iso = dt.isoformat()
+          # If it's naive (no tzinfo), assume it's UTC
+          if dt.tzinfo is None:
+            iso += "Z"
+        else:
+          iso = str(dt).strip()
+          # If it looks like an ISO timestamp but missing timezone, assume UTC
+          if iso and ("T" in iso) and (not iso.endswith("Z")) and ("+" not in iso) and ("-" not in iso[10:]):
+            iso += "Z"
+    
+        # Let the browser convert to local time automatically
+        return js.window.Date(iso).toLocaleString()
+      except Exception:
+        # Fallback to previous behavior
+        try:
+          return dt.strftime("%b %d, %Y %I:%M %p")
+        except Exception:
+          return str(dt)
+  
+    # Rows
+    for i, j in enumerate(jobs):
+      role = "zebra-even" if (i % 2 == 0) else "zebra-odd"
+      dr = DataRowPanel(role=role)
+  
+      job_id = (j.get("job_id") or "").strip()
+      job_name = (j.get("job_name") or "").strip() or "(untitled)"
+      created = j.get("created")
+      status = (j.get("status") or "").strip() or "-"
+      
+      manually_edited = bool(
+        j.get("manually_edited")
+        or j.get("manual_edit")
+        or j.get("edited")
+      )
+      
+      if manually_edited and status.strip().lower() in ("completed", "complete", "done"):
+        status = "Complete/Edited"
+  
+      dr.add_component(C(job_name), column="job_name")
+      dr.add_component(C(_fmt_dt(created), align="center"), column="created")
+  
+      if scope == "team":
+        up = (j.get("uploaded_by") or "").strip() or "-"
+        dr.add_component(C(up, align="center"), column="uploaded_by")
+  
+      dr.add_component(C(status, align="center"), column="status")
+  
+      state = (j.get("state") or "").strip().lower()
+      is_cancelable = self._is_cancelable_state(status, state)
+
+      if is_cancelable:
+        open_btn = Button(
+          text="Cancel",
+          foreground="#FFFFFF",
+          background="#B00020",
+          bold=True
+        )
+        open_btn.font_size = JOBS_FONT_SIZE
+        open_btn.enabled = bool(job_id)
+        open_btn.tag = {"job_id": job_id, "job_name": job_name}
+        open_btn.set_event_handler("click", self._cancel_job_click)
+      else:
+        open_btn = Button(
+          text="Open Job",
+          foreground="#117BC3",
+          background="transparent",
+          bold=True,
+          underline=True
+        )
+        open_btn.font_size = JOBS_FONT_SIZE
+        open_btn.enabled = bool(job_id)
+        open_btn.tag = {"job_id": job_id, "job_name": job_name}
+        open_btn.set_event_handler("click", self._open_job_click)
+
+      delete_btn = Button(
+        text="Delete",
+        foreground="#B00020",
+        background="transparent",
+        bold=True,
+        underline=True
+      )
+      delete_btn.font_size = JOBS_FONT_SIZE
+      delete_btn.enabled = bool(job_id) and not is_cancelable
+      delete_btn.tag = {"job_id": job_id, "job_name": job_name}
+
+      if is_cancelable:
+        delete_btn.text = ""
+        delete_btn.enabled = False
+      else:
+        delete_btn.set_event_handler("click", self._delete_job_click)
+
+      dr.add_component(open_btn, column="open")
+      dr.add_component(delete_btn, column="delete")
+      dg.add_component(dr)
+
+  def _cancel_job_click(self, sender, **e):
+    try:
+      ent = anvil.server.call("is_current_user_entitled") or {}
+      if not ent.get("ok"):
+        alert("Your access is no longer active. Please contact your admin.")
+        js.window.location.hash = "upload"
+        return
+    except Exception:
+      js.window.location.hash = "landing"
+      return
+
+    tag = getattr(sender, "tag", {}) or {}
+    job_id = (tag.get("job_id") or "").strip()
+    job_name = (tag.get("job_name") or "").strip() or "(untitled)"
+
+    if not job_id:
+      alert("Missing job id.")
+      return
+
+    confirmed = alert(
+      content=(
+        f"Cancel this processing job?\n\n"
+        f"{job_name}\n\n"
+        "This will stop the job if it is still queued or processing and remove its job files."
+      ),
+      title="Cancel job",
+      buttons=[
+        ("No", False),
+        ("Cancel Job", True),
+      ],
+      large=False,
+      dismissible=True
+    )
+
+    if not confirmed:
+      return
+
+    try:
+      sender.enabled = False
+      sender.text = "Canceling..."
+
+      resp = anvil.server.call("cancel_job_for_user", job_id) or {}
+      if not resp.get("ok"):
+        alert(resp.get("error") or "Could not cancel job.")
+        sender.enabled = True
+        sender.text = "Cancel"
+        return
+
+      Notification("Job canceled.", style="success", timeout=2).show()
+      self._render_jobs_table()
+
+    except Exception as ex:
+      alert(f"Could not cancel job:\n{ex}")
+      try:
+        sender.enabled = True
+        sender.text = "Cancel"
+      except Exception:
+        pass
+
+  def _delete_job_click(self, sender, **e):
+    try:
+      ent = anvil.server.call("is_current_user_entitled") or {}
+      if not ent.get("ok"):
+        alert("Your access is no longer active. Please contact your admin.")
+        js.window.location.hash = "upload"
+        return
+    except Exception:
+      js.window.location.hash = "landing"
+      return
+
+    tag = getattr(sender, "tag", {}) or {}
+    job_id = (tag.get("job_id") or "").strip()
+    job_name = (tag.get("job_name") or "").strip() or "(untitled)"
+
+    if not job_id:
+      alert("Missing job id.")
+      return
+
+    confirmed = alert(
+      content=(
+        f"Delete this job permanently?\n\n"
+        f"{job_name}\n\n"
+        "This will remove the job, uploaded files, generated images, overlays, results, "
+        "and edit history from Argus. This cannot be undone."
+      ),
+      title="Delete job",
+      buttons=[
+        ("No", False),
+        ("Delete", True),
+      ],
+      large=False,
+      dismissible=True
+    )
+
+    if not confirmed:
+      return
+
+    try:
+      sender.enabled = False
+      sender.text = "Deleting..."
+
+      resp = anvil.server.call("delete_job_for_user", job_id) or {}
+      if not resp.get("ok"):
+        alert(resp.get("error") or "Could not delete job.")
+        sender.enabled = True
+        sender.text = "Delete"
+        return
+
+      Notification("Job deleted.", style="success", timeout=2).show()
+      self._render_jobs_table()
+
+    except Exception as ex:
+      alert(f"Could not delete job:\n{ex}")
+      try:
+        sender.enabled = True
+        sender.text = "Delete"
+      except Exception:
+        pass
+  
+  def _open_job_click(self, sender, **e):
+    # Re-check entitlement before fetching anything
+    try:
+      ent = anvil.server.call("is_current_user_entitled") or {}
+      if not ent.get("ok"):
+        alert("Your access is no longer active. Please contact your admin.")
+        js.window.location.hash = "upload"
+        return
+    except Exception:
+      js.window.location.hash = "landing"
+      return
+  
+    try:
+      tag = getattr(sender, "tag", {}) or {}
+      job_id = (tag.get("job_id") or "").strip()
+      job_name = (tag.get("job_name") or "").strip() or "(untitled)"
+      if not job_id:
+        alert("Missing job id.")
+        return
+  
+      payload = anvil.server.call("get_job_result_for_user", job_id) or {}
+      state = (payload.get("state") or "").strip().lower()
+  
+      if state in ("not_found", "unauthorized"):
+        alert("Job not found.")
+        return
+  
+      if state == "error":
+        st = payload.get("status") or {}
+        err = (st.get("error") or "").strip() or "Unknown error"
+        alert(f"Job failed:\n\n{err}")
+        return
+  
+      if state != "done":
+        st = payload.get("status") or {}
+        prog = st.get("progress", None)
+        step = (st.get("step") or "").strip()
+        elapsed = (st.get("elapsed_str") or "").strip()
+  
+        msg = f"Job is not ready yet.\n\nState: {state}"
+        if step: msg += f"\nStep: {step}"
+        if prog is not None:
+          try: msg += f"\nProgress: {float(prog):.1f}%"
+          except: pass
+        if elapsed: msg += f"\nElapsed: {elapsed}"
+        alert(msg)
+        return
+  
+      result = payload.get("result") or {}
+      self._clear_router_handoff()
+      router_state.output_args = {"result": result, "job_name": job_name}
+      js.window.location.hash = "output2"
+      return
+  
+    except Exception as ex:
+      alert(f"Could not open job:\n{ex}")
+
+  # ---- your existing full-width helpers ----
+  def _force_full_width_everywhere(self, **e):
+    try:
+      js.window.setTimeout(self._force_full_width_now, 0)
+    except Exception:
+      self._force_full_width_now()
+
+  def _force_full_width_now(self):
+    try:
+      node = js.get_dom_node(self)
+      el = node
+      hops = 0
+      while el is not None and hops < 50:
+        try:
+          s = el.style
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("width", "100%", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+        except Exception:
+          pass
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+        hops += 1
+
+      for root in [js.document.documentElement, js.document.body]:
+        try:
+          root.style.setProperty("max-width", "none", "important")
+          root.style.setProperty("width", "100%", "important")
+          root.style.setProperty("margin", "0", "important")
+        except Exception:
+          pass
+
+      try:
+        agh = js.document.getElementById("appGoesHere")
+        if agh:
+          agh.style.setProperty("max-width", "none", "important")
+          agh.style.setProperty("width", "100%", "important")
+      except Exception:
+        pass
+
+    except Exception:
+      pass
+
+  def logout_btn_click(self, **event_args):
+    try:
+      js.window.sessionStorage.removeItem("upsell_jobs_shown")
+    except Exception:
+      pass
+    
+    anvil.users.logout()
+    Notification("Logged out", timeout=1.5).show()
+    js.window.location.hash = "landing"
+    return
+
+  def new_job_btn_click(self, **event_args):
+    self._clear_router_handoff()
+    js.window.location.hash = "upload"
+    return
+
+  def jobs_btn_click(self, **event_args):
+    js.window.location.hash = "myjobs"

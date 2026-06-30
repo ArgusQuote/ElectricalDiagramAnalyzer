@@ -1,0 +1,392 @@
+from ._anvil_designer import accountmanagementTemplate
+from anvil import *
+from routing import router
+import anvil.server
+import anvil.users
+from anvil import js
+
+GRID_FONT_SIZE = 20
+
+class accountmanagement(accountmanagementTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+
+    self._loading_exclude_team = False
+
+    if hasattr(self, "logout_btn"):
+      self.logout_btn.set_event_handler("click", self.logout_btn_click)
+
+    if hasattr(self, "btn_billing"):
+      self.btn_billing.set_event_handler("click", self.btn_billing_click)
+
+    if hasattr(self, "exclude_team_btn"):
+      self.exclude_team_btn.set_event_handler("change", self.exclude_team_btn_change)
+
+    if not anvil.users.get_user():
+      js.window.location.hash = "landing"
+      return
+
+    self.set_event_handler("show", self._force_full_width_everywhere)
+
+    self._render_users_table()
+
+  def _render_users_table(self):
+    # --- Get context ---
+    try:
+      ctx = anvil.server.call("get_account_management_context") or {}
+    except Exception as e:
+      alert(f"Could not load account context:\n{e}")
+      return
+
+    # Top labels you added
+    code = (ctx.get("code") or "").strip()
+    plan_key = (ctx.get("plan_key") or "").strip()
+    seat_limit = ctx.get("seat_limit")
+    user_ct = ctx.get("user_count", 0)
+
+    if hasattr(self, "lbl_code"):
+      self.lbl_code.text = f"Group Code: {code}"
+
+    if hasattr(self, "plan_lbl"):
+      self.plan_lbl.text = f"Plan: {plan_key}"
+
+    if hasattr(self, "user_count"):
+      self.user_count.text = f"Users: {user_ct} / {seat_limit}"
+
+    users = ctx.get("users") or []
+
+    exclude_default = bool(ctx.get("exclude_from_improvement_default", False))
+
+    if hasattr(self, "exclude_team_btn"):
+      self._loading_exclude_team = True
+      try:
+        self.exclude_team_btn.checked = exclude_default
+        self.exclude_team_btn.enabled = True
+
+        if exclude_default:
+          self.exclude_team_btn.text = "Team exclusion required"
+          self.exclude_team_btn.tooltip = (
+            "All uploads under this group code are excluded from Argus improvement review."
+          )
+        else:
+          self.exclude_team_btn.text = "Exclude team from improvement review"
+          self.exclude_team_btn.tooltip = (
+            "When enabled, all uploads under this group code will be excluded from Argus improvement review."
+          )
+      finally:
+        self._loading_exclude_team = False
+    
+    # Current logged-in email (for allowing admin to remove their own seat)
+    try:
+      me = ((anvil.users.get_user() or {})["email"] or "").strip().lower()
+    except Exception:
+      me = ""
+
+    # --- Create / reuse a DataGrid like myjobs ---
+    dg = getattr(self, "data_grid_1", None)
+    if not isinstance(dg, DataGrid):
+      self.data_grid_1 = dg = DataGrid()
+
+    # Wrap in a dark “card” like myjobs (so header text is visible)
+    host = getattr(self, "users_card", None)
+    if not isinstance(host, ColumnPanel):
+      self.users_card = host = ColumnPanel()
+      host.width = "100%"
+      host.padding = "18px"
+      host.spacing = "medium"
+      host.role = "elevated-card"
+      host.background = "theme:Text Primary"
+      host.foreground = "theme:Background"
+
+    # Mount inside grid_panel_2
+    container = getattr(self, "grid_panel_2", None)
+    if not isinstance(container, GridPanel):
+      raise Exception("grid_panel_2 not found on this form.")
+    
+    # Clear existing contents of grid_panel_2 (so rerenders don't stack)
+    try:
+      container.clear()
+    except Exception:
+      for c in list(container.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+    
+    container.add_component(host)
+
+    # Ensure dg is inside the card
+    try:
+      dg.remove_from_parent()
+    except Exception:
+      pass
+
+    try:
+      host.clear()
+    except Exception:
+      for c in list(host.get_components()):
+        try: c.remove_from_parent()
+        except Exception: pass
+
+    host.add_component(dg)
+
+    dg.width = "100%"
+    dg.show_header = True
+    dg.show_page_controls = False
+    dg.rows_per_page = 1000
+    dg.role = "bom-grid"
+    dg.background = "transparent"
+    dg.foreground = "theme:Background"
+
+    dg.columns = [
+      {"id": "email",  "title": "Email",  "data_key": "email"},
+      {"id": "role",   "title": "Role",   "data_key": "role", "width": 160},
+      {"id": "remove", "title": "Remove", "data_key": "remove", "width": 160},
+    ]
+
+    # Clear existing components from dg
+    for c in list(dg.get_components()):
+      try: c.remove_from_parent()
+      except Exception: pass
+
+    def H(text, align=None):
+      lab = Label(text=text, bold=True, align=align)
+      lab.font_size = GRID_FONT_SIZE
+      lab.foreground = "theme:Background"
+      return lab
+
+    def C(text, align="left", bold=False):
+      lab = Label(text=text, align=align, bold=bold)
+      lab.font_size = GRID_FONT_SIZE
+      lab.foreground = "theme:Background"
+      return lab
+
+    # Header row
+    hdr = DataRowPanel(role="custom-grid-header")
+    hdr.width = "100%"
+    hdr.add_component(H("Email"), column="email")
+    hdr.add_component(H("Role", align="center"), column="role")
+    hdr.add_component(H("Remove", align="center"), column="remove")
+    dg.add_component(hdr, slot="header")
+
+    if not users:
+      msg = Label(
+        text="NO USERS TO DISPLAY",
+        bold=True,
+        align="center",
+        foreground="theme:Accent"
+      )
+      msg.font_size = 42
+
+      dr = DataRowPanel(role="zebra-even")
+      dr.add_component(msg, column="email")
+      dr.add_component(Label(text=""), column="role")
+      dr.add_component(Label(text=""), column="remove")
+      dg.add_component(dr)
+      return
+
+    # Rows
+    for i, u in enumerate(users):
+      role = "zebra-even" if (i % 2 == 0) else "zebra-odd"
+      dr = DataRowPanel(role=role)
+
+      email = (u.get("email") or "").strip()
+      is_admin = bool(u.get("is_billing_admin"))
+
+      dr.add_component(C(email), column="email")
+      dr.add_component(C("Admin" if is_admin else "User", align="center", bold=is_admin), column="role")
+
+      btn = Button(
+        text="Remove",
+        foreground="#117BC3",
+        background="transparent",
+        bold=True,
+        underline=True
+      )
+      btn.font_size = GRID_FONT_SIZE
+      btn.tag = {"email": email, "is_admin": is_admin}
+
+      # Admin row: allow ONLY the current logged-in admin to remove THEIR OWN seat
+      if is_admin:
+        if email.strip().lower() == me:
+          btn.enabled = True
+          btn.text = "Remove Seat"
+          btn.tooltip = "Releases your user seat but keeps you as billing admin."
+          btn.tag = {"email": email, "is_admin": True, "action": "release_my_seat"}
+        else:
+          btn.enabled = False
+          btn.tooltip = "Billing admin cannot be removed here."
+
+      btn.set_event_handler("click", self._remove_user_click)
+      dr.add_component(btn, column="remove")
+
+      dg.add_component(dr)
+
+  def _remove_user_click(self, sender, **e):
+    tag = getattr(sender, "tag", {}) or {}
+    email = (tag.get("email") or "").strip()
+    is_admin = bool(tag.get("is_admin"))
+    
+    action = (tag.get("action") or "").strip()
+
+    # Special case: billing admin removing their own SEAT (not removing admin rights)
+    if action == "release_my_seat":
+      ok = confirm(
+        "Remove your user seat? You will still be the billing admin.\n\n"
+        "After this, you will NOT have access to Upload/Jobs unless you re-join using the code.",
+        buttons=[("Cancel", False), ("Remove Seat", True)]
+      )
+      if not ok:
+        return
+
+      try:
+        anvil.server.call("release_my_admin_seat")
+      except Exception as ex:
+        alert(str(ex))
+        return
+
+      self._render_users_table()
+      return
+
+    if not email:
+      alert("Missing email.")
+      return
+    if is_admin:
+      alert("You can't remove the billing admin.")
+      return
+
+    ok = confirm(
+      f"Remove {email} from this code?",
+      buttons=[("Cancel", False), ("Remove", True)]
+    )
+    if not ok:
+      return
+
+    try:
+      anvil.server.call("remove_user_from_code", email)
+    except Exception as ex:
+      alert(str(ex))
+      return
+
+    # Re-render
+    self._render_users_table()
+
+  def btn_billing_click(self, **event_args):
+    try:
+      url = anvil.server.call("create_portal_session_for_current_admin")
+      js.window.location.href = url
+    except Exception as e:
+      alert(str(e))
+
+  # ---- full width helpers (same as myjobs) ----
+  def _force_full_width_everywhere(self, **e):
+    try:
+      js.window.setTimeout(self._force_full_width_now, 0)
+    except Exception:
+      self._force_full_width_now()
+
+  def _force_full_width_now(self):
+    try:
+      node = js.get_dom_node(self)
+      el = node
+      hops = 0
+      while el is not None and hops < 50:
+        try:
+          s = el.style
+          s.setProperty("max-width", "none", "important")
+          s.setProperty("width", "100%", "important")
+          s.setProperty("margin-left", "0", "important")
+          s.setProperty("margin-right", "0", "important")
+        except Exception:
+          pass
+        try:
+          el = el.parentElement
+        except Exception:
+          el = None
+        hops += 1
+
+      for root in [js.document.documentElement, js.document.body]:
+        try:
+          root.style.setProperty("max-width", "none", "important")
+          root.style.setProperty("width", "100%", "important")
+          root.style.setProperty("margin", "0", "important")
+        except Exception:
+          pass
+
+      try:
+        agh = js.document.getElementById("appGoesHere")
+        if agh:
+          agh.style.setProperty("max-width", "none", "important")
+          agh.style.setProperty("width", "100%", "important")
+      except Exception:
+        pass
+    except Exception:
+      pass
+
+  def logout_btn_click(self, **event_args):
+    anvil.users.logout()
+    Notification("Logged out", timeout=1.5).show()
+    js.window.location.hash = "landing"
+    return
+
+  def exclude_team_btn_change(self, **event_args):
+    if getattr(self, "_loading_exclude_team", False):
+      return
+
+    box = getattr(self, "exclude_team_btn", None)
+    if not box:
+      return
+
+    new_value = bool(box.checked)
+    old_value = not new_value
+
+    if new_value:
+      ok = confirm(
+        "Require excluded-job retention for this entire team?\n\n"
+        "All future uploads under this group code will be excluded from Argus improvement review.\n\n"
+        "For those jobs, the raw uploaded PDF will be deleted after processing and remaining job artifacts will be retained for up to 24 hours.\n\n"
+        "This does not change already-submitted jobs.",
+        title="Require team exclusion?",
+        buttons=[("Cancel", False), ("Require Exclusion", True)]
+      )
+    else:
+      ok = confirm(
+        "Turn off required team exclusion?\n\n"
+        "Future uploads under this group code will no longer be automatically excluded from Argus improvement review, unless the user manually checks the exclusion option.\n\n"
+        "This does not change already-submitted jobs.",
+        title="Disable team exclusion?",
+        buttons=[("Cancel", False), ("Disable Exclusion", True)]
+      )
+
+    if not ok:
+      self._loading_exclude_team = True
+      try:
+        box.checked = old_value
+      finally:
+        self._loading_exclude_team = False
+      return
+
+    try:
+      res = anvil.server.call(
+        "set_account_exclude_from_improvement_default",
+        new_value
+      ) or {}
+
+      if not res.get("ok"):
+        raise Exception(res.get("message") or "Could not update team exclusion setting.")
+
+      Notification(
+        "Team exclusion policy updated.",
+        style="success",
+        timeout=2
+      ).show()
+
+    except Exception as ex:
+      self._loading_exclude_team = True
+      try:
+        box.checked = old_value
+      finally:
+        self._loading_exclude_team = False
+
+      alert(f"Could not update team exclusion setting:\n{ex}")
+      return
+
+    self._render_users_table()

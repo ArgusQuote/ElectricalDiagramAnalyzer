@@ -25,11 +25,9 @@ if project_root not in sys.path:
 
 # ---------- IO PATHS ----------
 INPUT_PDF = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/S18.pdf").expanduser()
-SPEC_OUTPUT_ROOT = Path("~/Spec_Sheet_Analysis/Results").expanduser()
-SPEC_DATA_ROOT = Path("~/Spec_Sheet_Analysis/data").expanduser()
 
-SPEC_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-SPEC_DATA_ROOT.mkdir(parents=True, exist_ok=True)
+SPEC_OUTPUT_ROOT = None
+SPEC_DATA_ROOT = None
 
 
 # ---------- DEFAULT OVERRIDES ----------
@@ -2186,23 +2184,12 @@ def build_detected_overrides_payload(spec_result: SpecAnalysisResult) -> dict:
 
 
 def _copy_specs_pdf_to_data(pdf_path: Path) -> Path:
-    """
-    Save a copy of the uploaded specs PDF into:
-    ~/Spec_Sheet_Analysis/data/
-    """
-    import shutil
-
     pdf_path = Path(pdf_path).expanduser().resolve()
+
     if not pdf_path.exists():
         raise FileNotFoundError(f"Specs PDF not found: {pdf_path}")
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", pdf_path.name)
-    saved_name = f"{stamp}__{safe_name}"
-    saved_path = SPEC_DATA_ROOT / saved_name
-
-    shutil.copy2(str(pdf_path), str(saved_path))
-    return saved_path
+    return pdf_path
 
 # ============================================================
 # Output Helpers
@@ -2399,7 +2386,7 @@ def analyze_specs_pdf_for_ui(pdf_path: str, job_dir: str) -> dict:
     ui_result = {
         "ok": True,
         "saved_pdf": str(pdf_path),
-        "data_saved_pdf": str(data_pdf_path),
+        "data_saved_pdf": "",
         "job_dir": str(job_dir),
         "cycle_time_ms": cycle_time_ms,
         "cycle_time_str": ms_to_readable(cycle_time_ms),
@@ -2421,7 +2408,7 @@ def analyze_specs_pdf_for_ui(pdf_path: str, job_dir: str) -> dict:
                 "merged_ui_overrides": ui_result["merged_ui_overrides"],
                 "evidence_images": ui_result["evidence_images"],
                 "saved_pdf": ui_result["saved_pdf"],
-                "data_saved_pdf": ui_result["data_saved_pdf"],
+                "data_saved_pdf": "",
                 "cycle_time_ms": ui_result["cycle_time_ms"],
                 "cycle_time_str": ui_result["cycle_time_str"],
             }, f, indent=2, ensure_ascii=False, default=str)

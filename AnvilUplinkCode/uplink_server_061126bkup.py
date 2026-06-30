@@ -1983,41 +1983,20 @@ def vm_start_specs_analysis(job_id: str, owner_email: str):
     """
     Start analysis only after the PDF has already been uploaded/saved.
     """
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-
     if not job_id or not owner_email:
-        return {
-            "ok": False,
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
+        raise RuntimeError("job_id and owner_email required")
 
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
-        return {
-            "ok": False,
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
-
+    owner_email = str(owner_email).strip().lower()
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
     st = _json_read_or_none(sp["status"]) or {}
 
     if not st:
-        return {
-            "ok": False,
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
+        raise RuntimeError(f"Unknown specs job_id: {job_id}")
 
     job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-    if not job_owner or job_owner != owner_email:
-        return {
-            "ok": False,
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
+    if job_owner != owner_email:
+        raise RuntimeError("Owner mismatch")
 
     with _SPECS_LOCK:
         if _SPECS_RUNNING.get(job_id):
@@ -2030,63 +2009,61 @@ def vm_start_specs_analysis(job_id: str, owner_email: str):
 
     return {"ok": True, "job_id": job_id, "state": "running"}
 
+
 @anvil.server.callable
 def vm_get_specs_status(job_id: str, owner_email: str) -> dict:
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-
-    if not job_id or not owner_email:
-        return {
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
-
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
-        return {
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
-        }
-
     job_dir = BASE_JOBS_DIR / job_id
     sp = _status_paths(job_dir)
 
     st = _json_read_or_none(sp["status"])
-    if not isinstance(st, dict) or not st:
+    if not st:
         return {
-            "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
+            "state": "error",
+            "error": f"Unknown job_id {job_id}",
+            "debug_job_dir": str(job_dir),
+            "debug_status_path": str(sp["status"]),
+            "debug_result_path": str(sp["result"]),
         }
 
-    req_email = owner_email
+    req_email = str(owner_email or "").strip().lower()
     job_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
 
     if not req_email or not job_email or req_email != job_email:
         return {
             "state": "not_found",
-            "error": "Job not found. Please resubmit your PDF."
+            "debug_req_email": req_email,
+            "debug_job_email": job_email,
+            "debug_raw_state": st.get("state"),
+            "debug_job_dir": str(job_dir),
         }
 
-    state = str(st.get("state") or "unknown").strip().lower()
+    state = (st.get("state") or "unknown").lower()
 
     if state == "done":
         res = _json_read_or_none(sp["result"]) or {}
         return {
             "state": "done",
-            "result": res
+            "result": res,
+            "debug_raw_state": st.get("state"),
+            "debug_job_dir": str(job_dir),
         }
 
     if state == "error":
         return {
             "state": "error",
-            "error": st.get("error") or "Specs analysis failed. Please try again."
+            "error": st.get("error") or "Unknown error",
+            "debug_raw_state": st.get("state"),
+            "debug_job_dir": str(job_dir),
         }
 
-    out = {"state": state}
-
+    out = {
+        "state": state,
+        "debug_raw_state": st.get("state"),
+        "debug_job_dir": str(job_dir),
+    }
     for k in ("step", "progress"):
         if k in st:
             out[k] = st[k]
-
     return out
 
 @anvil.server.callable
@@ -2127,32 +2104,21 @@ def _natural_key(p: Path):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 @anvil.server.callable
-def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
+def vm_list_magenta_overlay_images(job_id: str) -> list[str]:
     """
     Returns job-relative PNG paths for FULL-PAGE magenta overlays.
-    Enforces ownership.
+    Looks in common directories first, then falls back to any PNG containing 'magenta'
+    (excluding pdf_images/review_overlays).
     """
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-
-    if not job_id or not owner_email:
-        return []
-
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
+    if not job_id:
         return []
 
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    sp = _status_paths(job_root)
-    st = _json_read_or_none(sp["status"]) or {}
-
-    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-    if not job_owner or job_owner != owner_email:
-        return []
-
-    pdf_images = job_root / "pdf_images"
+    pdf_images = (job_root / "pdf_images")
     if not pdf_images.is_dir():
         return []
 
+    # 1) Preferred / common directories
     candidate_dirs = [
         pdf_images / "magenta_overlays",
         pdf_images / "magenta_overlay",
@@ -2161,11 +2127,13 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
         pdf_images / "overlays",
     ]
 
-    found = []
+    found: list[Path] = []
     for d in candidate_dirs:
         if d.is_dir():
             found.extend(list(d.glob("*.png")))
 
+    # 2) Fallback: search for filenames containing "magenta" anywhere under pdf_images,
+    # but EXCLUDE review_overlays 
     if not found:
         for p in pdf_images.rglob("*.png"):
             if "review_overlays" in p.parts:
@@ -2173,10 +2141,11 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
             if "magenta" in p.name.lower():
                 found.append(p)
 
+    # Deduplicate + sort
     uniq = {}
     for p in found:
         try:
-            rp = p.resolve().relative_to(job_root)
+            rp = p.relative_to(job_root)
         except Exception:
             continue
         uniq[str(rp).replace("\\", "/")] = p
@@ -2186,60 +2155,27 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str) -> list[str]:
     return rel_paths
 
 @anvil.server.callable
-def vm_list_overlay_images(job_id: str, owner_email: str) -> list[str]:
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-
-    if not job_id or not owner_email:
+def vm_list_overlay_images(job_id: str) -> list[str]:
+    if not job_id:
         return []
-
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
-        return []
-
     job_root = (BASE_JOBS_DIR / job_id).resolve()
-    sp = _status_paths(job_root)
-    st = _json_read_or_none(sp["status"]) or {}
-
-    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-    if not job_owner or job_owner != owner_email:
-        return []
-
-    overlay_dir = job_root / "pdf_images" / "review_overlays"
+    overlay_dir = (job_root / "pdf_images" / "review_overlays")
     if not overlay_dir.is_dir():
         return []
-
-    out = []
-    for p in sorted(overlay_dir.glob("*.png")):
-        try:
-            out.append(str(p.resolve().relative_to(job_root)).replace("\\", "/"))
-        except Exception:
-            pass
-
-    return out
+    return [str(p.relative_to(job_root)) for p in sorted(overlay_dir.glob("*.png"))]
 
 @anvil.server.callable
 def vm_fetch_image(job_id: str, owner_email: str, source_path: str):
     """
     Return an image as BlobMedia.
-    Accepts only job-relative paths inside this job folder.
+    Accepts either:
+      - absolute paths inside this job folder, OR
+      - job-relative paths like: 'pdf_images/review_overlays/foo.png'
     """
-    job_id = str(job_id or "").strip()
-    owner_email = str(owner_email or "").strip().lower()
-    raw = str(source_path or "").strip().replace("\\", "/")
+    if not job_id or not owner_email or not source_path:
+        raise RuntimeError("job_id, owner_email, and source_path are required")
 
-    if not job_id or not owner_email or not raw:
-        raise RuntimeError("Image unavailable.")
-
-    if "/" in job_id or "\\" in job_id or ".." in job_id:
-        raise RuntimeError("Image unavailable.")
-
-    # Do not accept absolute paths from the client.
-    p_in = Path(raw)
-    if p_in.is_absolute():
-        raise RuntimeError("Image unavailable.")
-
-    if ".." in p_in.parts:
-        raise RuntimeError("Image unavailable.")
+    owner_email = str(owner_email).strip().lower()
 
     job_root = (BASE_JOBS_DIR / job_id).resolve()
     sp = _status_paths(job_root)
@@ -2247,29 +2183,25 @@ def vm_fetch_image(job_id: str, owner_email: str, source_path: str):
 
     job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
     if not job_owner or job_owner != owner_email:
-        raise RuntimeError("Image unavailable.")
+        raise RuntimeError("Owner mismatch")
 
-    p = (job_root / p_in).resolve()
+    raw = str(source_path).strip().replace("\\", "/")
+    p_in = Path(raw)
+
+    if not p_in.is_absolute():
+        p = (job_root / p_in).resolve()
+    else:
+        p = p_in.resolve()
 
     try:
         p.relative_to(job_root)
     except ValueError:
-        raise RuntimeError("Image unavailable.")
+        raise RuntimeError(f"Invalid image path for this job: {raw}")
 
     if not p.is_file():
-        raise RuntimeError("Image unavailable.")
+        raise RuntimeError(f"Image not found: {p}")
 
-    if p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
-        raise RuntimeError("Image unavailable.")
-
-    ctype_map = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-    }
-
-    ctype = ctype_map.get(p.suffix.lower(), "application/octet-stream")
+    ctype = "image/png" if p.suffix.lower() == ".png" else "application/octet-stream"
     return BlobMedia(ctype, p.read_bytes(), name=p.name)
 
 @anvil.server.callable
@@ -2383,7 +2315,11 @@ def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
         if not isinstance(status, dict) or not status:
             return {
                 "ok": False,
-                "error": "Job not found. Please resubmit your PDF."
+                "error": "Job not found. Please resubmit your PDF.",
+                "debug_job_id": job_id,
+                "debug_job_dir": str(job_dir),
+                "debug_status_path": str(sp["status"]),
+                "debug_status_exists": sp["status"].exists(),
             }
 
         job_email = str(
@@ -2392,10 +2328,12 @@ def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
             or ""
         ).strip().lower()
 
-        if not req_email or not job_email or req_email != job_email:
+        if req_email and job_email and req_email != job_email:
             return {
                 "ok": False,
-                "error": "Job not found. Please resubmit your PDF."
+                "error": "Job not found. Please resubmit your PDF.",
+                "debug_req_email": req_email,
+                "debug_job_email": job_email,
             }
 
         # Prefer explicit result_path from status.json if present.
@@ -2410,7 +2348,13 @@ def vm_get_job_result(job_id: str, owner_email: str = None) -> dict:
         if not isinstance(result, dict) or not result:
             return {
                 "ok": False,
-                "error": "Could not load saved result."
+                "error": "Could not load saved result.json.",
+                "debug_job_id": job_id,
+                "debug_job_dir": str(job_dir),
+                "debug_result_path": str(result_path),
+                "debug_result_exists": result_path.exists(),
+                "debug_status_result_path": result_path_raw,
+                "debug_status_state": status.get("state"),
             }
 
         # Always wrap result for Anvil client.

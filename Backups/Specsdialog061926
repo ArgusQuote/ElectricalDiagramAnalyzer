@@ -1,0 +1,67 @@
+from ._anvil_designer import SpecsUploadDialogTemplate
+from anvil import *
+import anvil.server
+from routing import router
+import stripe.checkout
+import anvil.users
+import anvil.js
+import anvil.tables as tables
+import anvil.tables.query as q
+from anvil.tables import app_tables
+
+
+class SpecsUploadDialog(SpecsUploadDialogTemplate):
+  def __init__(self, **properties):
+    self.init_components(**properties)
+
+    self.spacing = "medium"
+
+    intro_label = Label(
+      text="Upload the specs PDF. After clicking submit, Argus will analyze the spec requirements and suggest defaults to be automatically applied.",
+      foreground="white"
+    )
+    self.add_component(intro_label)
+
+    self.file_loader = FileLoader(text="Choose Specs PDF")
+    self.file_loader.accept = "application/pdf,.pdf"
+    self.file_loader.role = "outlined-button"
+    self.add_component(self.file_loader)
+
+    btn_row = FlowPanel(align="center")
+    self.cancel_btn = Button(text="Cancel", role="secondary-color")
+    self.submit_btn = Button(text="Submit")
+
+    self.submit_btn.background = "#117bc3"
+    self.submit_btn.foreground = "white"
+
+    self.cancel_btn.set_event_handler("click", self.cancel_btn_click)
+    self.submit_btn.set_event_handler("click", self.submit_btn_click)
+
+    btn_row.add_component(self.cancel_btn)
+    btn_row.add_component(self.submit_btn)
+    self.add_component(btn_row)
+
+  def cancel_btn_click(self, **event_args):
+    self.raise_event("x-close-alert", value=None)
+
+  def submit_btn_click(self, **event_args):
+    f = getattr(self.file_loader, "file", None)
+    if not f:
+      Notification("Please choose a specs PDF first.", style="warning").show()
+      return
+
+    ct = (getattr(f, "content_type", "") or "").lower()
+    name = (getattr(f, "name", "") or "").lower()
+    if ("pdf" not in ct) and (not name.endswith(".pdf")):
+      Notification("PDFs only (.pdf).", style="warning").show()
+      return
+
+    self.submit_btn.enabled = False
+    self.cancel_btn.enabled = False
+    self.file_loader.enabled = False
+    self.submit_btn.text = "Uploading..."
+
+    anvil.js.window.setTimeout(
+      lambda: self.raise_event("x-close-alert", value={"file": f}),
+      50
+    )

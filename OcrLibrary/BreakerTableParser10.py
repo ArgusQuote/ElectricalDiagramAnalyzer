@@ -1048,7 +1048,7 @@ class HeaderBandScanner:
                 or int(info.get("hero_poles_rank", 0)) > 0
             )
         ]
-
+ 
         if not hero_candidates:
             role_to_index: Dict[str, int] = {}
             summaries: List[Dict] = []
@@ -1550,6 +1550,14 @@ class SeparatedLayoutParser:
             return None
 
         if val <= 0:
+            return None
+
+        # Match combined-mode amp validation:
+        # reject row numbers / OCR junk like 1, 2, 3, 22, 27, etc.
+        if val < 10:
+            return None
+
+        if val % 5 != 0:
             return None
 
         return val
