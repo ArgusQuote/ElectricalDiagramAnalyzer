@@ -1142,6 +1142,8 @@ class PanelParser:
             if not c:
                 return False
             t = _norm_txt(c)
+            if self._looks_like_aic_or_ka_text(t) or self._looks_like_non_amp_context_text(t):
+                return False
             if self._snap_voltage_text(self._normalize_voltage_text(t)) is not None:
                 return False
             return bool(
@@ -1269,6 +1271,10 @@ class PanelParser:
                 def _amps_from_text(t: str) -> Optional[int]:
                     u = self._normalize_digits(str(t).upper())
 
+                    # reject AIC/kA-looking or non-rating context text before extracting bare numbers
+                    if self._looks_like_aic_or_ka_text(u) or self._looks_like_non_amp_context_text(u):
+                        return None
+
                     # reject voltage-looking text
                     uN = self._normalize_voltage_text(u)
                     if (
@@ -1321,8 +1327,13 @@ class PanelParser:
                     raw = (it.get("text","") or "")
                     up = raw.upper()
 
-                    # ---- Guard: don't treat voltage-looking tokens like "120/208 Wye" as BUS ----
+                    # ---- Guard: don't treat AIC/kA-looking tokens like "65k" as BUS ----
+                    # ---- Guard: don't treat location/source text like "Location: ELECTRICAL 123" as BUS ----
                     txtD = self._normalize_digits(up)
+                    if self._looks_like_aic_or_ka_text(txtD) or self._looks_like_non_amp_context_text(txtD):
+                        continue
+
+                    # ---- Guard: don't treat voltage-looking tokens like "120/208 Wye" as BUS ----
                     txtN = self._normalize_voltage_text(txtD)
 
                     pair = re.search(
@@ -1442,7 +1453,7 @@ class PanelParser:
                     # Existing behavior
                     voltage_val = max(lone_hits)
 
-        # BUS (accept with or without unit, but never from voltage-looking text)
+        # BUS (accept with or without unit, but never from voltage-looking or AIC/kA-looking text)
         bus_amp = None
         if chosen_map["BUS"]:
             tU = self._normalize_digits(chosen_map["BUS"]["text"].upper())
@@ -1455,7 +1466,10 @@ class PanelParser:
                 or bool(re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', tN))
             )
 
-            if not looks_like_voltage:
+            looks_like_aic_or_ka = self._looks_like_aic_or_ka_text(tU)
+            looks_like_non_amp_context = self._looks_like_non_amp_context_text(tU)
+
+            if not looks_like_voltage and not looks_like_aic_or_ka and not looks_like_non_amp_context:
                 m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS)\b", tU)
                 if m:
                     bus_amp = _to_int(m.group(1))
@@ -1479,7 +1493,10 @@ class PanelParser:
                 or bool(re.search(r'(?<!\d)[1-6]\d{2,3}\s*V\b', txtN))
             )
 
-            if not looks_like_voltage:
+            looks_like_aic_or_ka = self._looks_like_aic_or_ka_text(txtU)
+            looks_like_non_amp_context = self._looks_like_non_amp_context_text(txtU)
+
+            if not looks_like_voltage and not looks_like_aic_or_ka and not looks_like_non_amp_context:
                 m = re.search(r"\b([1-9]\d{1,3})\s*(?:A|AMP|AMPS|MAP)\b", txtU)
                 if m:
                     main_amp = _to_int(m.group(1))
@@ -2858,10 +2875,20 @@ class PanelParser:
             #   480Y/277V
             #   Volts: 208/120V
             #   480V
+            #
+            # Also NEVER allow AIC/kA-looking strings like:
+            #   65k
+            #   65KAIC
+            #   AIC: 65
+            #   Available Fault Current (A): 65k
             # -----------------------------------------------------------
 
-            m_with_unit = re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMP\.?|AMPS?\.?)\b", txtD)
-            m_bare_num  = re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)
+            reject_as_amp_aic_like = self._looks_like_aic_or_ka_text(txtD)
+            reject_as_amp_non_amp_context = self._looks_like_non_amp_context_text(txtD)
+            reject_as_amp = reject_as_amp_aic_like or reject_as_amp_non_amp_context
+
+            m_with_unit = None if reject_as_amp else re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMP\.?|AMPS?\.?)\b", txtD)
+            m_bare_num  = None if reject_as_amp else re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)
 
             # strong voltage guards
             has_slash_voltage = "/" in txtN
@@ -3530,6 +3557,100 @@ class PanelParser:
         u = re.sub(r'(?<=\d)[Oo]+(?=\s*(?:A|AMPS?)\b)', _oo_to_zeros, u, flags=re.I)
 
         return u
+
+    def _looks_like_aic_or_ka_text(self, s: str) -> bool:
+        """
+        True when text should NEVER be used as BUS/MAIN amps.
+
+        Blocks OCR junk like:
+          65k
+          65 k
+          65KA
+          65KAIC
+          AIC: 65
+          KAIC 65
+          65,000 A
+          Available Fault Current (A): 65000
+
+        This is intentionally for amp rejection only.
+        """
+        if not s:
+            return False
+
+        t = self._normalize_digits(str(s).upper())
+        t_spaced = re.sub(r"\s+", " ", t).strip()
+        t_nos = re.sub(r"[\s\.\-_:()/]+", "", t_spaced)
+
+        # Explicit AIC/fault-current language
+        if re.search(r"\b(AIC|KAIC|SCCR|INTERRUPTING|FAULT\s*CURRENT|AVAILABLE\s*FAULT)\b", t_spaced):
+            return True
+
+        # OCR variants like A.I.C. / A L C / ALC can be ugly, so the unit suffix matters most.
+        # 65K, 65KA, 65KAIC, 65AIC, 65KAMP
+        if re.search(r"(?<!\d)(\d{1,4})(KAMP|KAIC|AIC|KA|K)(?![A-Z0-9])", t_nos):
+            return True
+
+        # Large interrupt-rating amps: 10,000 A / 65000 A / 65,000
+        if re.search(r"(?<!\d)(\d{2,3}[,]?\d{3})\s*(A|KA)?\b", t_spaced):
+            try:
+                val = int(re.search(r"(?<!\d)(\d{2,3}[,]?\d{3})", t_spaced).group(1).replace(",", ""))
+                if 10000 <= val <= 200000 and val % 1000 == 0:
+                    return True
+            except Exception:
+                pass
+
+        return False
+
+    def _looks_like_non_amp_context_text(self, s: str) -> bool:
+        """
+        True only when text has a number and is clearly a non-rating context field.
+
+        This is intentionally narrow. It should block obvious metadata/source/location
+        strings from becoming BUS/MAIN amps, but it should NOT make normal amp parsing
+        more strict.
+
+        Blocks:
+          Location: ELECTRICAL 123
+          LOC: 123
+          Room 123
+          Source: MDP-1
+          Supply From: MDP-1
+          Fed From: SWBD-1
+          Fed By: TX-2
+          Serving RTU-3
+
+        Does NOT block just because text contains:
+          ELECTRICAL
+          ELEC
+          AREA
+          PANEL
+          POWER
+        """
+        if not s:
+            return False
+
+        t = self._normalize_digits(str(s).upper())
+        t = re.sub(r"\s+", " ", t).strip()
+
+        # Only care if there is actually a numeric value to steal.
+        if not re.search(r"(?<!\d)\d{1,4}(?!\d)", t):
+            return False
+
+        # If the same text explicitly says BUS/MAIN/MCB/PANEL RATING, do not block it.
+        if re.search(
+            r"\b(BUS|BUSS|MAIN|MAINS|MCB|M\W*C\W*B|MAIN\s*BREAKER|MAIN\s*DEVICE|PANEL\s*RATING|AMPACITY)\b",
+            t
+        ):
+            return False
+
+        # Explicit non-rating context labels only.
+        if re.search(
+            r"\b(LOCATION|LOC\.?|ROOM|SOURCE|SUPPLY\s+FROM|SUPPLIED\s+FROM|FED\s+FROM|FED\s+BY|SERVING)\b",
+            t
+        ):
+            return True
+
+        return False
 
     def _strip_quotes(self, s: str) -> str:
         if not s:
