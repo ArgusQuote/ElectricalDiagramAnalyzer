@@ -115,7 +115,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv11 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+from OcrLibrary.BreakerTableParserAPIv12 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine6 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
@@ -1248,6 +1248,234 @@ def _deep_copy_jsonable(obj):
     except Exception:
         return obj
 
+def _is_problem_component_for_rules(comp: dict) -> bool:
+    if not isinstance(comp, dict):
+        return False
+
+    if bool(comp.get("_skipped")):
+        return True
+
+    if str(comp.get("panelStatus") or "").strip():
+        return True
+
+    return False
+
+
+def _rules_safe_components(components: list[dict]) -> list[dict]:
+    """
+    Build a RulesEngine-safe copy of components.
+
+    Saved result components still keep raw/editable data.
+    RulesEngine input gets sanitized so invalid/junk OCR cannot
+    manufacture quoteable BOMs.
+    """
+
+    VALID_VOLTAGES = {120, 208, 240, 480, 600}
+    VALID_INT_RATINGS = {10, 18, 22, 25, 35, 42, 65, 100, 150, 200}
+    VALID_TRIMS = {"SURFACE", "FLUSH"}
+    VALID_ENCLOSURES = {"NEMA1", "NEMA3R"}
+
+    SNAP_SPACES = {
+        16: 18, 20: 18,
+        28: 30, 32: 30,
+        40: 42, 44: 42,
+        52: 54, 56: 54,
+        64: 66, 68: 66,
+        70: 72, 74: 72,
+        82: 84, 86: 84,
+    }
+
+    def _int_or_none(v):
+        try:
+            if v in (None, "", "NONE", "-", "X"):
+                return None
+            return int(float(str(v).replace(",", "").strip()))
+        except Exception:
+            return None
+
+    def _panel_amp_or_none(v):
+        n = _int_or_none(v)
+        if n is None:
+            return None
+        if n < 100 or n > 1200:
+            return None
+        if n % 10 not in (0, 5):
+            return None
+        return n
+
+    def _main_amp_or_none(v):
+        # Main breaker is optional, but if present it must be sane.
+        return _panel_amp_or_none(v)
+
+    def _voltage_or_none(v):
+        n = _int_or_none(v)
+        if n in VALID_VOLTAGES:
+            return n
+        return None
+
+    def _int_rating_or_none(v):
+        n = _int_or_none(v)
+        if n in VALID_INT_RATINGS:
+            return n
+        return None
+
+    def _spaces_or_none(v):
+        n = _int_or_none(v)
+        if n is None:
+            return None
+
+        n = SNAP_SPACES.get(n, n)
+
+        # Hard sanity range. Prevents things like 123 spaces from becoming
+        # a valid-looking panel selection input.
+        if n <= 0 or n > 84:
+            return None
+
+        # Most panel spaces are even. If this ever blocks a real case,
+        # relax this, but it is a good junk filter.
+        if n % 2 != 0:
+            return None
+
+        return n
+
+    def _norm_choice(v, allowed: set[str]):
+        s = str(v or "").strip().upper().replace(" ", "")
+        if s in ("", "NONE", "-", "X"):
+            return None
+        if s in allowed:
+            return s
+        return None
+
+    def _clean_breakers(breakers, panel_limit: int | None):
+        clean = []
+
+        if not isinstance(breakers, list):
+            return clean
+
+        for b in breakers:
+            if not isinstance(b, dict):
+                continue
+
+            amps = _int_or_none(b.get("amperage"))
+            poles = _int_or_none(b.get("poles"))
+
+            if amps is None or poles is None:
+                continue
+
+            if amps < 15 or amps > 1200:
+                continue
+
+            if poles not in (1, 2, 3):
+                continue
+
+            if isinstance(panel_limit, int) and panel_limit > 0 and amps > panel_limit:
+                continue
+
+            try:
+                count = int(b.get("count", 1) or 1)
+            except Exception:
+                count = 1
+
+            if count <= 0:
+                continue
+
+            nb = dict(b)
+            nb["amperage"] = amps
+            nb["poles"] = poles
+
+            if count != 1:
+                nb["count"] = count
+
+            clean.append(nb)
+
+        return clean
+
+    safe = []
+
+    for comp in components or []:
+        if not isinstance(comp, dict):
+            safe.append(comp)
+            continue
+
+        c = _deep_copy_jsonable(comp)
+
+        if str(c.get("type") or "").strip().lower() != "panelboard":
+            safe.append(c)
+            continue
+
+        attrs = c.get("attrs") or {}
+        if not isinstance(attrs, dict):
+            attrs = {}
+
+        attrs = dict(attrs)
+
+        # Problem panels: suppress completely for RulesEngine.
+        # UI/result.json still keeps the original raw evidence.
+        if _is_problem_component_for_rules(c):
+            reason = (
+                str(c.get("reason") or "").strip()
+                or str(c.get("panelNote") or "").strip()
+                or str(c.get("panelStatus") or "").strip()
+                or "User review required."
+            )
+
+            attrs["amperage"] = None
+            attrs["voltage"] = None
+            attrs["spaces"] = None
+            attrs["mainBreakerAmperage"] = None
+            attrs["detected_breakers"] = []
+            attrs["breaker_data_suppressed"] = True
+            attrs["breaker_suppression_reason"] = reason
+
+            c["attrs"] = attrs
+            c["_skipped"] = True
+            c["reason"] = reason
+
+            safe.append(c)
+            continue
+
+        # Clean/usable panels: sanitize quote-driving values before rules.
+        bus_amp = _panel_amp_or_none(attrs.get("amperage"))
+        main_amp = _main_amp_or_none(attrs.get("mainBreakerAmperage"))
+        voltage = _voltage_or_none(attrs.get("voltage"))
+        spaces = _spaces_or_none(attrs.get("spaces"))
+        int_rating = _int_rating_or_none(attrs.get("intRating"))
+
+        panel_limit = next(
+            (v for v in (main_amp, bus_amp) if isinstance(v, int) and v > 0),
+            None
+        )
+
+        attrs["amperage"] = bus_amp
+        attrs["mainBreakerAmperage"] = main_amp
+        attrs["voltage"] = voltage
+        attrs["spaces"] = spaces
+        attrs["intRating"] = int_rating
+        attrs["detected_breakers"] = _clean_breakers(
+            attrs.get("detected_breakers") or [],
+            panel_limit
+        )
+
+        trim = _norm_choice(
+            attrs.get("trimStyle") or attrs.get("trim_style"),
+            VALID_TRIMS
+        )
+
+        enclosure = _norm_choice(
+            attrs.get("enclosure"),
+            VALID_ENCLOSURES
+        )
+
+        if enclosure == "NEMA3R":
+            trim = None
+
+        attrs["trimStyle"] = trim
+        attrs["enclosure"] = enclosure
+
+        c["attrs"] = attrs
+        safe.append(c)
+
+    return safe
 
 def _fmt_edit_value(value, suffix=""):
     if value in (None, "", "NONE", "-", "X"):
@@ -1545,11 +1773,27 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
     attrs = cleaned.get("attrs") or {}
     if not isinstance(attrs, dict):
         attrs = {}
-    cleaned["attrs"] = attrs
 
-    # User manually fixed the panel, so parser skip flags should not survive.
-    cleaned.pop("_skipped", None)
-    cleaned.pop("reason", None)
+    # Manual edit means stale parser/problem status should not survive.
+    # The regenerated result should be judged from the edited attrs + rerun rules.
+    for key in (
+        "panelStatus",
+        "panelNote",
+        "specialHeaderType",
+        "_skipped",
+        "reason",
+    ):
+        cleaned.pop(key, None)
+
+    for key in (
+        "breaker_data_suppressed",
+        "breaker_suppression_reason",
+        "headerValidationStatus",
+        "headerValidationMissing",
+    ):
+        attrs.pop(key, None)
+
+    cleaned["attrs"] = attrs
 
     replaced = False
     old_component_for_edit_log = None
@@ -1583,7 +1827,8 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
     def _replace_component_at(idx: int, comp: dict):
         nonlocal replaced, old_component_for_edit_log
 
-        # Preserve visual/source/status metadata unless the edited component explicitly supplied it.
+        # Preserve visual/source metadata only.
+        # Do NOT preserve old parser/problem status after manual edit.
         for key in (
             "source",
             "overlay_source",
@@ -1592,9 +1837,6 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
             "previewSource",
             "reviewOverlayPath",
             "review_overlay_path",
-            "panelStatus",
-            "panelNote",
-            "specialHeaderType",
         ):
             if key not in cleaned and key in comp:
                 cleaned[key] = comp.get(key)
@@ -1650,7 +1892,7 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
     )
 
     # Mirror the normal final processing step, but only for rules.
-    rules_payload = _build_rules_payload(ui_overrides, components)
+    rules_payload = _build_rules_payload(ui_overrides, _rules_safe_components(components))
 
     try:
         new_rules_result = RE2.process_job(rules_payload) or {}
@@ -1830,7 +2072,7 @@ def vm_rerun_rules_with_global_defaults(job_id: str, owner_email: str, group_fol
 
         comp["attrs"] = attrs
 
-    rules_payload = _build_rules_payload(ui_overrides, components)
+    rules_payload = _build_rules_payload(ui_overrides, _rules_safe_components(components))
 
     try:
         new_rules_result = RE2.process_job(rules_payload) or {}
@@ -2002,6 +2244,14 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     name   = hdr.get("name") or ""
     h_attrs = hdr.get("attrs") or {}
 
+    header_missing = set()
+
+    if isinstance(hdr.get("headerValidationMissing"), list):
+        header_missing.update(str(x).strip().lower() for x in hdr.get("headerValidationMissing") or [])
+
+    if isinstance(h_attrs.get("headerValidationMissing"), list):
+        header_missing.update(str(x).strip().lower() for x in h_attrs.get("headerValidationMissing") or [])
+
     def _get_int_from_header(*keys):
         for k in keys:
             v = h_attrs.get(k)
@@ -2028,6 +2278,22 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     main_amp   = _get_int_from_header("mainBreakerAmperage", "main_breaker_amperage", "main_breaker", "mainBreaker")
     trim_style = _get_text_from_header("trimStyle", "trim_style")
     enclosure  = _get_text_from_header("enclosure")
+
+    def _valid_panel_amp_for_rules(v):
+        return isinstance(v, int) and 100 <= v <= 1200 and (v % 10 in (0, 5))
+
+    # Do not let invalid OCR values like "Location: ELECTRICAL 123"
+    # become real rule-engine amperage inputs.
+    if "bus amps" in header_missing or not _valid_panel_amp_for_rules(amperage):
+        amperage = None
+
+    if "voltage" in header_missing or voltage not in (120, 208, 240, 480, 600):
+        voltage = None
+
+    if "main amps" in header_missing:
+        main_amp = None
+    elif main_amp is not None and not _valid_panel_amp_for_rules(main_amp):
+        main_amp = None
     if trim_style and not enclosure:
         enclosure = "Nema1"
     if str(enclosure or "").strip().upper() == "NEMA3R":
@@ -2072,6 +2338,12 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
             "detected_breakers": det_brkrs,
         },
     }
+
+    # If the parser flagged this panel, keep it available for review/edit,
+    # but do not treat it as clean input for generated BOM logic.
+    if panel_status:
+        comp["_skipped"] = True
+        comp["reason"] = panel_note or panel_status
 
     if notes:
         comp["notes"] = notes
@@ -2317,7 +2589,7 @@ def _process_job(job_id: str, pipeline: "BreakerTablePipeline | None" = None):
 
             comp["attrs"] = attrs
 
-        rules_payload = _build_rules_payload(ui_defaults, components)
+        rules_payload = _build_rules_payload(ui_defaults, _rules_safe_components(components))
         try:
             rules_result = RE2.process_job(rules_payload) or {}
 
