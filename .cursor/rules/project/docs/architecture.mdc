@@ -25,7 +25,7 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
     ├─► PanelBoardSearch (PanelSearchToolV25)
     │       │  detects panel regions, crops to PNGs
     │       ▼
-    ├─► BreakerTablePipeline (BreakerTableParserAPIv11)
+    ├─► BreakerTablePipeline (BreakerTableParserAPIv12)
     │       ├─► BreakerTableAnalyzer (Analyzer12)
     │       │       ├── BreakerHeaderFinder
     │       │       └── BreakerFooterFinder
@@ -64,9 +64,9 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 ### AnvilUplinkCode (Orchestrator)
 - **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, worker pool, and watchdog
 - **Location**: `AnvilUplinkCode/uplink_server.py`
-- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv11), RulesEngine6, Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv12), RulesEngine6, Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Consumers**: Anvil web frontend via Uplink RPC
-- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV25`, `BreakerTableParserAPIv11`, `RulesEngine6`, and `Specs_AnalyzerV5` loaded dynamically).
+- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV25`, `BreakerTableParserAPIv12`, `RulesEngine6`, and `Specs_AnalyzerV5` loaded dynamically).
 
 ### PageFilter
 - **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages
@@ -99,8 +99,8 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 
 ### OcrLibrary (OCR Pipeline)
 - **Purpose**: Three-stage OCR pipeline -- layout analysis, header parsing, breaker table parsing
-- **Location**: `OcrLibrary/` (BreakerTableParserAPIv11, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser10)
-- **API version string**: `API_VERSION = "API_11"` (exported by `BreakerTableParserAPIv11`)
+- **Location**: `OcrLibrary/` (BreakerTableParserAPIv12, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser10)
+- **API version string**: `API_VERSION = "API_12"` (exported by `BreakerTableParserAPIv12`)
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses
 - **Consumers**: uplink_server via BreakerTablePipeline
 
@@ -145,8 +145,8 @@ result.json + status.json on disk; polled via vm_get_specs_status()
   4. Worker spawns subprocess: `PageFilter.readPdf()` filters pages
   5. `PanelBoardSearch.readPdf()` detects and crops panels to PNGs
   6. For each PNG (sequential): `BreakerTablePipeline.run()` extracts OCR data
-  7. `_merge_component_from_btp()` maps each OCR result to a component dict
-  8. `RulesEngine6.process_job()` selects part numbers for all components
+  7. `_merge_component_from_btp()` maps each OCR result to a component dict (invalidates amperage/voltage/main when the header parser flagged the field missing or the value is out of range; flags parser-problem panels with `_skipped`)
+  8. `_rules_safe_components()` sanitizes the component list (see below), then `RulesEngine6.process_job()` selects part numbers for the sanitized components
   9. Write `result.json` and update `status.json` (state=done)
   10. Cleanup temporary files
 - **Output**: `result.json` with components, part numbers, and cycle time
@@ -180,8 +180,8 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
 
 ### Versioned Module Files
-- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV25, BreakerTableAnalyzer12, BreakerTableParserAPIv11)
-- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper) and `Spec_Sheet_Analysis` (V6 exists but `uplink_server.py` loads **V5**). Active OCR/rules versions as of this writing: `BreakerTableParserAPIv11`, `PanelHeaderParserV11`, `BreakerTableParser10`, `RulesEngine6`.
+- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV25, BreakerTableAnalyzer12, BreakerTableParserAPIv12)
+- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper) and `Spec_Sheet_Analysis` (V6 exists but `uplink_server.py` loads **V5**). Active OCR/rules versions as of this writing (2026-07-03): `BreakerTableParserAPIv12`, `PanelHeaderParserV11`, `BreakerTableParser10`, `RulesEngine6`.
 - **Alternatives considered**: Git branching only (harder to compare in dev scripts)
 - **Consequences**: Multiple version files in each directory; **always check the import in `uplink_server.py` to confirm the active version** rather than assuming the highest number wins
 
@@ -196,3 +196,9 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Context**: The fine-tuned v7 weights live outside the repo at `~/Documents/TableAnnotations/models_v7/best/`. We want production hosts that have the checkpoint to use it as the default, but we also don't want imports to break on hosts that haven't received the weights yet (CI, fresh clones, etc.).
 - **Alternatives considered**: (a) Hardcode the local path -- breaks portability; (b) Require an explicit `model_path` argument -- adds friction at every call site; (c) Bake the weights into the repo -- exceeds reasonable repo-size limits (~110 MB per checkpoint).
 - **Consequences**: Callers who pass `model_path=None` get the best available model for their host. The fallback to the upstream pretrained model means imports never fail on the resolver step, only the final detection quality degrades to "zero-shot TATR" if no local checkpoint is present. The same pattern can be applied to future ML modules with out-of-repo weights.
+
+### RulesEngine Input Sanitization (Separate from Saved Result)
+- **Decision** (added 2026-07-03, merge `04a2361`): every component list is passed through `_rules_safe_components()` in `uplink_server.py` immediately before `RulesEngine6.process_job()`, on all three rules entry points (`_process_job`, `vm_rerun_rules_with_panel_edit`, `vm_rerun_rules_with_global_defaults`). The sanitizer returns a rules-only copy; the persisted `result.json` components still carry the original raw/editable OCR evidence.
+- **Context**: Junk or ambiguous OCR (e.g. a "Location: ELECTRICAL 123" string mis-read as bus amps, or a `65k` AIC value read as a breaker amperage) could otherwise flow into the rules engine and manufacture a plausible-looking but wrong quoteable BOM. The fix is defense-in-depth: `PanelHeaderParserV11` now rejects such text at parse time, `_merge_component_from_btp()` invalidates out-of-range/missing header fields, and `_rules_safe_components()` is the final gate right before rules run.
+- **Behavior**: problem panels (`_skipped` true or non-empty `panelStatus`) are fully suppressed for rules (all quote-driving attrs nulled, `breaker_data_suppressed`/`breaker_suppression_reason` set) but stay visible/editable in the UI. Clean panels have their values validated/snapped: amps 100-1200 ending in 0/5, voltage in {120,208,240,480,600}, intRating in the standard AIC set, spaces snapped to standard even counts and capped at 84, trim in {SURFACE,FLUSH} (None for NEMA3R), breakers filtered to amps 15-1200 / poles 1-3 / not exceeding the panel limit. Manual edits via `vm_rerun_rules_with_panel_edit` clear stale status flags (`panelStatus`, `panelNote`, `specialHeaderType`, `_skipped`, `reason`, `headerValidation*`) so a user-corrected panel is re-judged purely from the edited attrs.
+- **Consequences**: the UI keeps full raw evidence for review/editing, but the BOM logic only ever sees sane inputs. When adding a new quote-driving attribute, extend `_rules_safe_components()` (not just the parser) so it can't leak unvalidated into the rules engine.

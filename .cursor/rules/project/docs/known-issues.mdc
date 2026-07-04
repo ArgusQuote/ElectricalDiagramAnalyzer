@@ -18,6 +18,60 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **OCR pipeline advanced to APIv12 + RulesEngine input hardening -- LANDED 2026-07-03 (merge `04a2361`)** --
+  A `TOOL_Debug_MaxUserTesting` -> `TOOL_DEVELOPMENT_V3_MS` merge advanced
+  the production OCR pipeline and added a defense-in-depth layer so junk/
+  ambiguous OCR can no longer manufacture a wrong-but-plausible quoteable
+  BOM. This is committed and on `origin/TOOL_DEVELOPMENT_V3_MS`; the docs
+  (`architecture.mdc`, `file-locations.mdc`, `data-structures.mdc`) were
+  synced in the same session. What changed:
+  - **`uplink_server.py` now imports `OcrLibrary.BreakerTableParserAPIv12`**
+    (was APIv11); `API_VERSION = "API_12"`. New file
+    `OcrLibrary/BreakerTableParserAPIv12.py` (746 lines). APIv11 is retained
+    for comparison. Per the versioned-module convention, always confirm the
+    active version from the imports at the top of `uplink_server.py`.
+  - **New RulesEngine input sanitizer** `_rules_safe_components()` (plus
+    helper `_is_problem_component_for_rules()`) in `uplink_server.py`. It is
+    applied on **all three** rules entry points -- `_process_job()`,
+    `vm_rerun_rules_with_panel_edit()`, and
+    `vm_rerun_rules_with_global_defaults()` -- and returns a RulesEngine-only
+    copy. The saved `result.json` components still keep the raw/editable OCR
+    evidence; only the rules input is sanitized. Problem panels (`_skipped`
+    or non-empty `panelStatus`) are fully suppressed for rules (quote-driving
+    attrs nulled, `attrs.breaker_data_suppressed` +
+    `attrs.breaker_suppression_reason` set). Clean panels are validated/
+    snapped: bus & main amps 100-1200 ending in 0/5; voltage in
+    {120,208,240,480,600}; intRating in the standard AIC set; spaces snapped
+    to standard even counts (16->18, 40->42, ...) and capped at 84; trim in
+    {SURFACE,FLUSH} (forced None for NEMA3R); breakers filtered to amps
+    15-1200, poles 1/2/3, not exceeding the panel's main/bus limit.
+  - **`PanelHeaderParserV11` gained two guards**:
+    `_looks_like_aic_or_ka_text()` (blocks `65k`, `65KA`, `65KAIC`, `AIC: 65`,
+    `65,000 A`, "Available Fault Current", etc.) and
+    `_looks_like_non_amp_context_text()` (blocks numeric location/source
+    metadata like `Location: ELECTRICAL 123`, `Fed From: MDP-1`,
+    `Serving RTU-3`, while deliberately NOT blocking legit BUS/MAIN/MCB
+    rating text). These are wired into every BUS/MAIN amp extraction path so
+    such text is never read as amps.
+  - **`_merge_component_from_btp()` hardening**: it now reads the header
+    parser's `headerValidationMissing` list and nulls `amperage`/`voltage`/
+    `mainBreakerAmperage` when the field was flagged missing or is out of the
+    valid range; parser-flagged panels (`panelStatus`) get `_skipped=True`
+    and a `reason`.
+  - **Manual-edit flow (`vm_rerun_rules_with_panel_edit`)** now clears more
+    stale status on edit: `panelStatus`, `panelNote`, `specialHeaderType`,
+    `_skipped`, `reason`, and the `attrs` keys `breaker_data_suppressed`,
+    `breaker_suppression_reason`, `headerValidationStatus`,
+    `headerValidationMissing`. A user-corrected panel is therefore re-judged
+    purely from the edited attrs + a fresh rules rerun, instead of inheriting
+    the original parser's problem flags.
+  - **Guidance for future work**: when adding a new quote-driving attribute,
+    extend `_rules_safe_components()` (not just the parser) so an unvalidated
+    value can't leak into the rules engine. The commit message on `6847d9c`
+    also references a `BreakerTableParserAPIv12` switch tied to
+    "preserve breakers so only panel attrs need editing to save a panel";
+    the amps-hardening is `944ca14`.
+
 - **AWS third-party Marketplace AMI billing trap + new server rebuild -- MOSTLY RESOLVED 2026-06-04 (1 item deferred: Anvil key)** --
   **Status rollup**: the $162 Marketplace billing leak is stopped
   (subscription cancelled 2026-06-03); the transient `InsufficientInstanceCapacity`

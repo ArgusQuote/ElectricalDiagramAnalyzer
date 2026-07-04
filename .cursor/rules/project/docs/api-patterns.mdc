@@ -71,11 +71,13 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 - **Purpose**: Re-run only the rules engine after the user edits one component (no re-OCR)
 - **Parameters**: `job_id` (str), `owner_email` (str), `group_folder` (str), `original_panel_name` (str), `edited_component` (dict), `original_source_path=None` (str)
 - **Returns**: Updated result dict; reads `result.json`, swaps the one component, reruns RulesEngine, rewrites `result.json`
+- **Note (2026-07-03, merge `04a2361`)**: on edit it clears stale parser/problem status (`panelStatus`, `panelNote`, `specialHeaderType`, `_skipped`, `reason`, and the `attrs` keys `breaker_data_suppressed`, `breaker_suppression_reason`, `headerValidation*`) so the corrected panel is judged only from the edited attrs. The rules input is passed through `_rules_safe_components()` (validates/snaps quote-driving values, suppresses problem panels) before `RulesEngine6.process_job()`.
 
 ### vm_rerun_rules_with_global_defaults
 - **Purpose**: Re-run the rules engine for all components after a global defaults change (no re-OCR)
 - **Parameters**: `job_id` (str), `owner_email` (str), `group_folder` (str), `clean_defaults` (dict)
 - **Returns**: Updated result dict; rewrites `result.json`
+- **Note (2026-07-03, merge `04a2361`)**: like the main job path and the per-panel edit path, the rules input is passed through `_rules_safe_components()` before `RulesEngine6.process_job()`.
 
 ### vm_upload_specs_pdf
 - **Purpose**: Upload a specification PDF for spec-sheet analysis (separate from detection)
