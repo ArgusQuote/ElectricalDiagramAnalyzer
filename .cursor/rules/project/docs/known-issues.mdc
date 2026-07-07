@@ -18,6 +18,55 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **STANDING DECISION: the heuristic `PanelSearchToolV25` is ground truth for panel/table detection -- confirmed by Marco 2026-07-06** --
+  For all panel-detection / table-detection ML work (TATR v7 and any
+  future v8+), the heuristic `PanelSearchToolV25` boxes are treated as
+  **ground truth** on the documents currently in hand. This is Marco's
+  explicit, standing instruction -- do NOT re-ask it each session.
+  Practical implications for the agent:
+  - When the ML model disagrees with the heuristic on these PDFs, the
+    **ML is wrong** (a false negative / false positive / loose box),
+    not the heuristic. "Improving the model" means converging ML
+    output toward the heuristic, and mAP is scored with the heuristic
+    as GT (as `evaluate_model.py --pdf` already does).
+  - Scope caveat recorded deliberately: this holds "at least on the
+    documents I have." If a genuinely new document class appears where
+    the heuristic is suspected wrong, flag it to Marco rather than
+    silently assuming ML is the reference -- but the default, and the
+    training/eval target, is heuristic-as-GT.
+
+- **ML Table Detection -- v7 MILESTONE LOCKED 2026-07-06 (baseline for v8 work)** --
+  v7 (Phase 2 result, mAP@0.5 = 0.8297 across the 5 held-out PDFs) is
+  the accepted production milestone and its artifacts are now
+  **preserved read-only** so future v8 experiments cannot overwrite or
+  mutate them. Locked artifacts on Marco's laptop:
+  - Model weights: `~/Documents/TableAnnotations/models_v7/` (chmod
+    read-only; also sha256-verified copy on AWS + Paperspace).
+  - Held-out eval baseline: `~/Documents/TableAnnotations/baselines/v7_2026-05-15/`
+    (chmod read-only; contains `SUMMARY.md`, the 5 `box_comparison.json`
+    files, and the ml/heuristic `magenta_overlays` PNGs).
+  Rule for future work: **v8+ retrains and evals must write to NEW
+  paths** (`models_v8/`, `baselines/v8_<date>/`, ...) and be compared
+  head-to-head against this locked v7 baseline. Never re-run an eval
+  into the `v7_2026-05-15/` folder. The known divergences v8 must
+  improve without regressing v7's wins (verified from the
+  `box_comparison.json` files + overlays on 2026-07-06):
+  - **False negatives dominate.** v7 misses 5 heuristic panels across
+    3 PDFs: `generic3` misses both middle-column panels (LED, L1E --
+    an entire vertical column skipped), `makayla1` misses 2 panels in
+    a dense multi-column grid, `K` misses 1 small top-row panel. The
+    pattern is small panels and panels packed into dense multi-column /
+    multi-row grids.
+  - **Occasional false positives.** `K` and `makayla1` each emit 1
+    extra box not matching a heuristic panel.
+  - **Loose box fit.** avg mAP@0.5:0.95 = 0.63 vs mAP@0.5 = 0.83;
+    worst is `D` panel03 (IoU 0.60, box cut ~200px short vertically).
+    `eval_loss` was still declining at v7's epoch 15, so a longer
+    (25-30 epoch) v8 retrain on the same v4/v7 recipe is the leading
+    low-risk lever for box tightness.
+  - `Electrical_Takeoff_page7` (4/4, tight) and `D` (3/3) are v7's
+    perfect-recall PDFs -- v8 must not regress these.
+
 - **OCR pipeline advanced to APIv12 + RulesEngine input hardening -- LANDED 2026-07-03 (merge `04a2361`)** --
   A `TOOL_Debug_MaxUserTesting` -> `TOOL_DEVELOPMENT_V3_MS` merge advanced
   the production OCR pipeline and added a defense-in-depth layer so junk/
