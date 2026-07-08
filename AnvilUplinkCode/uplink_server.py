@@ -2195,6 +2195,27 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
     cleaned = dict(edited_component)
     cleaned["type"] = "panelboard"
 
+    # Keep the stable/original panel name as the real rules/lookup key.
+    # User-facing renames belong in display_name only.
+    stable_name = str(
+        cleaned.get("original_name")
+        or original_panel_name
+        or cleaned.get("name")
+        or ""
+    ).strip()
+
+    display_name = str(cleaned.get("display_name") or "").strip()
+
+    cleaned["name"] = stable_name
+    cleaned["original_name"] = stable_name
+
+    if display_name and _norm_name(display_name) != _norm_name(stable_name):
+        cleaned["display_name"] = display_name
+        cleaned["name_was_edited"] = True
+    else:
+        cleaned.pop("display_name", None)
+        cleaned.pop("name_was_edited", None)
+
     attrs = cleaned.get("attrs") or {}
     if not isinstance(attrs, dict):
         attrs = {}
