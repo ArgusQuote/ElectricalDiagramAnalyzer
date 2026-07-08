@@ -1,6 +1,6 @@
 # Anvil Uplink VM (disk only) + Rules Engine defaults + cycle-time
 # -------------------------------
-import os, re, json, sys, threading, traceback, uuid, time
+import os, re, json, sys, threading, traceback, uuid
 import contextlib
 import shutil
 from multiprocessing import get_context
@@ -70,19 +70,12 @@ WORKER_RECYCLE_AFTER_JOBS = int(os.environ.get("WORKER_RECYCLE_JOBS", "25"))
 from WorkerSetup import cap_thread_pools, set_runtime_determinism
 cap_thread_pools()
 
-# ---------- WATCHDOG / PROGRESS CONFIG ----------
-# Hard cap: protects the worker pool from one monster job holding a worker forever.
-WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "20"))
-
-# Soft cap: if there is no status movement AND no new image files for this long,
-# assume the worker is wedged and requeue the job.
-NO_SIGNAL_TIMEOUT_SEC = int(os.environ.get("NO_SIGNAL_TIMEOUT_SEC", "180"))
-
+# ---------- WATCHDOG CONFIG ----------
+WATCHDOG_TIMEOUT_MIN = int(os.environ.get("WATCHDOG_TIMEOUT_MIN", "10"))  # dial in prod
 WATCHDOG_KILL_GRACE_SEC = int(os.environ.get("WATCHDOG_KILL_GRACE_SEC", "3"))
-
 WATCHDOG_ERROR_MSG = (
   "This job took over {mins} minutes to process. "
-  "Try trimming the document or splitting it into 2 documents and running them separately."
+  "Please trim the PDF to only relevant pages and try again."
 )
 
 # ---------- QUEUE TIMEOUT CONFIG ----------
@@ -90,28 +83,6 @@ QUEUE_TIMEOUT_MIN = int(os.environ.get("QUEUE_TIMEOUT_MIN", "25"))
 QUEUE_TIMEOUT_ERROR_MSG = (
   "This job waited in the processing queue too long due to current demand. "
   "Please try again in a few minutes."
-)
-
-# ---------- STALE / ORPHANED JOB RECOVERY CONFIG ----------
-# Protects against the exact bad case:
-# status.json says queued/running, but the in-memory queue/worker was lost
-# because the uplink/VM process restarted or disconnected.
-
-STALE_QUEUED_REQUEUE_SEC = int(os.environ.get("STALE_QUEUED_REQUEUE_SEC", "120"))
-
-# On startup, a previous "running" job cannot still belong to this new uplink process.
-# Give it a small grace window, then requeue it if the uploaded PDF still exists.
-STARTUP_RUNNING_REQUEUE_SEC = int(os.environ.get("STARTUP_RUNNING_REQUEUE_SEC", "0"))
-
-# Status polling fallback. Keep this longer than NO_SIGNAL_TIMEOUT_SEC because
-# the dequeue loop should handle current-process no-signal recovery first.
-STATUS_RUNNING_STALE_SEC = int(os.environ.get("STATUS_RUNNING_STALE_SEC", "300"))
-
-RECOVERY_MAX_REQUEUE_ATTEMPTS = int(os.environ.get("RECOVERY_MAX_REQUEUE_ATTEMPTS", "3"))
-
-INTERRUPTED_JOB_MSG = (
-    "Processing was interrupted before completion. "
-    "Please retry the job."
 )
 
 def _set_runtime_determinism():
@@ -585,9 +556,6 @@ def _status_write(dir_path: Path, state: str, **extras):
     """
     Write status.json while preserving existing fields unless explicitly overwritten.
     This prevents losing owner_id/owner_email on error/timeouts.
-
-    Also writes heartbeat_ts so we can detect stale queued/running jobs and avoid
-    the customer-facing "stuck forever" failure mode.
     """
     paths = _status_paths(dir_path)
 
@@ -597,18 +565,11 @@ def _status_write(dir_path: Path, state: str, **extras):
     except Exception:
         prev = {}
 
-    now = datetime.now(timezone.utc).isoformat()
-
     # Merge: previous -> extras -> required fields
     payload = dict(prev)
     payload.update(extras or {})
     payload["state"] = state
-    payload["ts"] = now
-    payload["heartbeat_ts"] = now
-
-    # Keep node_id refreshed on every write from the active uplink process.
-    if NODE_ID:
-        payload["node_id"] = NODE_ID
+    payload["ts"] = datetime.now(timezone.utc).isoformat()
 
     with open(paths["status"], "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
@@ -618,421 +579,10 @@ def _result_write(dir_path: Path, result: dict):
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
 
-# ---------- Stale / orphaned job recovery helpers ----------
-
-def _status_dt(value):
-    """
-    Best-effort parser for status timestamps.
-    Returns timezone-aware UTC datetime or None.
-    """
-    s = str(value or "").strip()
-    if not s:
-        return None
-
-    try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-def _status_age_sec(st: dict) -> int:
-    """
-    Age in seconds since the last status heartbeat/write.
-    If missing/bad, return a huge value so it is treated as stale.
-    """
-    if not isinstance(st, dict):
-        return 999999
-
-    dt = _status_dt(st.get("heartbeat_ts") or st.get("ts") or st.get("created_at"))
-    if not dt:
-        return 999999
-
-    return max(0, int((_now_utc() - dt).total_seconds()))
-
-def _safe_float(value, default=0.0):
-    try:
-        return float(value)
-    except Exception:
-        return default
-
-
-def _job_png_activity(job_dir: Path) -> tuple[int, int]:
-    """
-    Returns:
-      (png_count, latest_png_mtime_ns)
-
-    Any new/modified PNG under pdf_images counts as real activity.
-    This catches long 'finding components' stages where PanelBoardSearch is
-    slowly writing crops but has not returned yet.
-    """
-    count = 0
-    latest = 0
-
-    try:
-        img_dir = Path(job_dir) / "pdf_images"
-        if not img_dir.is_dir():
-            return 0, 0
-
-        for p in img_dir.rglob("*.png"):
-            try:
-                if not p.is_file():
-                    continue
-                count += 1
-                latest = max(latest, int(p.stat().st_mtime_ns))
-            except Exception:
-                pass
-
-    except Exception:
-        pass
-
-    return count, latest
-
-
-def _job_activity_signature(job_dir: Path) -> tuple:
-    """
-    Meaningful activity signature.
-
-    Deliberately excludes heartbeat_ts/ts so our own heartbeat writes do not
-    fake progress. This changes only when real status fields or artifacts change.
-    """
-    st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
-    png_count, latest_png_mtime_ns = _job_png_activity(job_dir)
-
-    return (
-        str(st.get("state") or ""),
-        str(st.get("step") or ""),
-        str(st.get("progress") or ""),
-        str(st.get("image_count") or ""),
-        str(st.get("component_count") or ""),
-        str(st.get("kept_pages") or ""),
-        str(st.get("dropped_pages") or ""),
-        str(st.get("parse_done_ts_ms") or ""),
-        png_count,
-        latest_png_mtime_ns,
-    )
-
-
-def _write_live_finding_components_heartbeat(job_dir: Path, owner_id: str, png_count: int):
-    """
-    While PanelBoardSearch is finding components, it may write image files before
-    returning to Python. This turns those files into visible status movement.
-    """
-    if png_count <= 0:
-        return
-
-    st = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
-    state = str(st.get("state") or "").strip().lower()
-
-    if state != "running":
-        return
-
-    step = str(st.get("step") or "").strip().lower()
-
-    # Only interfere during the image/component-finding stage.
-    if step not in (
-        "finding_components",
-        "finding_panels",
-        "detecting_panels",
-        "worker_dispatch",
-        "finding_relevant_pages",
-    ):
-        return
-
-    current_progress = _safe_float(st.get("progress"), 8.0)
-
-    # Keep this phase capped before removing_false_positives/rendered/parsing.
-    live_progress = max(current_progress, min(18.0, 8.0 + (png_count * 0.20)))
-
-    _status_write(
-        job_dir,
-        "running",
-        step="finding_components",
-        progress=live_progress,
-        image_count=png_count,
-        live_image_count=png_count,
-        owner_email=owner_id,
-        owner_id=owner_id,
-    )
-
-def _job_has_uploaded_pdf(job_dir: Path, st: dict | None = None) -> bool:
-    """
-    True if the original PDF is still available, so the job can be safely re-run.
-    """
-    st = st or {}
-
-    # Prefer status.file_path if present.
-    try:
-        fp = str(st.get("file_path") or "").strip()
-        if fp and Path(fp).exists() and Path(fp).is_file():
-            return True
-    except Exception:
-        pass
-
-    # Fallback to uploaded_pdfs folder.
-    try:
-        up = Path(job_dir) / "uploaded_pdfs"
-        if up.is_dir():
-            for p in up.glob("*.pdf"):
-                if p.is_file():
-                    return True
-    except Exception:
-        pass
-
-    return False
-
-def _iter_detection_job_dirs_all():
-    """
-    Yield drawing/detection job folders only.
-    Handles:
-      - legacy flat jobs: ~/jobs/<job_id>
-      - grouped jobs: ~/jobs/groups/<group>/users/<owner>/<job_id>
-
-    Skips specs jobs.
-    """
-    seen = set()
-
-    # Legacy flat jobs
-    try:
-        for d in BASE_JOBS_DIR.iterdir():
-            if not d.is_dir():
-                continue
-            if d.name in ("groups", "specs"):
-                continue
-            if d.name.startswith("specs_"):
-                continue
-
-            sp = _status_paths(d)
-            if sp["status"].exists():
-                key = str(d.resolve())
-                if key not in seen:
-                    seen.add(key)
-                    yield d
-    except Exception:
-        pass
-
-    # Grouped detection jobs
-    try:
-        groups_root = BASE_JOBS_DIR / "groups"
-        if groups_root.is_dir():
-            for status_path in groups_root.rglob("status.json"):
-                job_dir = status_path.parent
-
-                # Defensive skip if anything specs-like ever lands under groups.
-                parts_lower = {str(x).lower() for x in job_dir.parts}
-                if "specs" in parts_lower or job_dir.name.startswith("specs_"):
-                    continue
-
-                key = str(job_dir.resolve())
-                if key not in seen:
-                    seen.add(key)
-                    yield job_dir
-    except Exception:
-        pass
-
-def _mark_job_interrupted(job_dir: Path, st: dict, reason: str = ""):
-    """
-    Mark an unrecoverable stale job as error so the UI/customer is not stuck forever.
-    """
-    owner_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-    group_folder = _safe_folder_key(st.get("group_folder") or "personal", "personal")
-
-    _status_write(
-        job_dir,
-        "error",
-        step="interrupted",
-        progress=float(st.get("progress") or 0.0),
-        error=INTERRUPTED_JOB_MSG,
-        interrupted=True,
-        interrupted_reason=reason or "stale_job",
-        owner_email=owner_email,
-        owner_id=owner_email,
-        group_folder=group_folder,
-        previous_state=st.get("state"),
-    )
-
-def _requeue_existing_job(job_dir: Path, st: dict, reason: str) -> bool:
-    """
-    Requeue an existing disk job into the in-memory queue.
-
-    Returns True if requeued.
-    Returns False if marked as error or skipped.
-    """
-    try:
-        job_id = Path(job_dir).name
-        owner_email = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
-        group_folder = _safe_folder_key(st.get("group_folder") or "personal", "personal")
-
-        if not job_id or not owner_email:
-            _mark_job_interrupted(job_dir, st, reason=f"{reason}: missing_owner_or_job_id")
-            return False
-
-        if _is_canceled(job_dir) or bool(st.get("canceled")):
-            return False
-
-        if not _job_has_uploaded_pdf(job_dir, st):
-            _mark_job_interrupted(job_dir, st, reason=f"{reason}: missing_uploaded_pdf")
-            return False
-
-        attempts = int(st.get("recovery_requeue_attempts") or 0)
-        if attempts >= RECOVERY_MAX_REQUEUE_ATTEMPTS:
-            _mark_job_interrupted(job_dir, st, reason=f"{reason}: too_many_requeue_attempts")
-            return False
-
-        _status_write(
-            job_dir,
-            "queued",
-            step="requeued_after_interruption",
-            progress=0.0,
-            owner_email=owner_email,
-            owner_id=owner_email,
-            group_folder=group_folder,
-            recovered_after_interruption=True,
-            recovery_reason=reason,
-            recovery_requeue_attempts=attempts + 1,
-            previous_state=st.get("state"),
-            queue_reentered_at_utc=_now_utc().isoformat(),
-        )
-
-        _enqueue_job(job_id, owner_email)
-
-        print(
-            f">>> requeued stale/orphaned job: {job_id} | "
-            f"owner={owner_email} | reason={reason} | attempt={attempts + 1}"
-        )
-
-        return True
-
-    except Exception as e:
-        print(f">>> failed to requeue stale job {job_dir}: {type(e).__name__}: {e}")
-        print(traceback.format_exc())
-        return False
-
-def _recover_orphaned_detection_jobs_on_startup():
-    """
-    Called once when the uplink process starts.
-
-    Fixes the dangerous case:
-      - status.json survived
-      - _JOB_Q did not survive
-      - customer would otherwise see queued/running forever
-    """
-    recovered = 0
-    marked_error = 0
-    skipped = 0
-
-    try:
-        for job_dir in list(_iter_detection_job_dirs_all()):
-            sp = _status_paths(job_dir)
-            st = _json_read_or_none(sp["status"]) or {}
-
-            if not isinstance(st, dict) or not st:
-                skipped += 1
-                continue
-
-            state = str(st.get("state") or "").strip().lower()
-
-            if state in ("done", "error", "canceled", "cancelled"):
-                skipped += 1
-                continue
-
-            if bool(st.get("canceled")) or _is_canceled(job_dir):
-                skipped += 1
-                continue
-
-            if state not in ("queued", "running", "unknown"):
-                skipped += 1
-                continue
-
-            age = _status_age_sec(st)
-
-            # Queued jobs are always safe to requeue on startup because the
-            # in-memory queue was lost during restart.
-            if state == "queued":
-                if _requeue_existing_job(job_dir, st, "startup_recovery_queued"):
-                    recovered += 1
-                else:
-                    marked_error += 1
-                continue
-
-            # Running/unknown jobs from a previous uplink process are orphaned after restart.
-            # The old worker/queue died, even if the heartbeat is only a few seconds old.
-            if state in ("running", "unknown"):
-                old_node = str(st.get("node_id") or "").strip()
-                new_node = str(NODE_ID or "").strip()
-
-                old_process = bool(old_node and new_node and old_node != new_node)
-
-                if old_process or age >= STARTUP_RUNNING_REQUEUE_SEC:
-                    if _requeue_existing_job(job_dir, st, f"startup_recovery_{state}_old_process"):
-                        recovered += 1
-                    else:
-                        marked_error += 1
-                    continue
-
-            skipped += 1
-
-        print(
-            f">>> startup orphan recovery complete | "
-            f"recovered={recovered} marked_error={marked_error} skipped={skipped}"
-        )
-
-    except Exception as e:
-        print(f">>> startup orphan recovery failed: {type(e).__name__}: {e}")
-        print(traceback.format_exc())
-
-def _repair_stale_active_job_from_status_poll(job_dir: Path, st: dict) -> dict:
-    """
-    Called from vm_get_job_status and _active_job_for_owner.
-
-    For queued jobs:
-      - if stale, requeue into _JOB_Q
-
-    For running/unknown jobs:
-      - do NOT quickly requeue while the process is alive, because some legit
-        jobs can run for minutes.
-      - if stale beyond watchdog+grace, mark error so the customer is not stuck forever.
-    """
-    if not isinstance(st, dict) or not st:
-        return st or {}
-
-    state = str(st.get("state") or "").strip().lower()
-
-    if state not in ("queued", "running", "unknown"):
-        return st
-
-    if bool(st.get("canceled")) or _is_canceled(job_dir):
-        return st
-
-    age = _status_age_sec(st)
-
-    if state == "queued" and age >= STALE_QUEUED_REQUEUE_SEC:
-        _requeue_existing_job(job_dir, st, "status_poll_stale_queued")
-        return _json_read_or_none(_status_paths(job_dir)["status"]) or st
-
-    if state in ("running", "unknown"):
-        old_node = str(st.get("node_id") or "").strip()
-        new_node = str(NODE_ID or "").strip()
-        old_process = bool(old_node and new_node and old_node != new_node)
-
-        # If this status belongs to a previous uplink process, requeue it now.
-        # This catches cases where startup recovery missed it.
-        if old_process:
-            _requeue_existing_job(job_dir, st, f"status_poll_{state}_old_process")
-            return _json_read_or_none(_status_paths(job_dir)["status"]) or st
-
-        # If it belongs to the current process but has gone stale, mark interrupted.
-        # Don't requeue current-process running jobs automatically or you can duplicate work.
-        if age >= STATUS_RUNNING_STALE_SEC:
-            _mark_job_interrupted(job_dir, st, reason=f"status_poll_stale_{state}")
-            return _json_read_or_none(_status_paths(job_dir)["status"]) or st
-
-    return st
-
 def _utc_iso_z(dt=None) -> str:
     dt = dt or datetime.now(timezone.utc)
     return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
 
 def _excluded_delete_after_utc() -> str:
     return _utc_iso_z(datetime.now(timezone.utc) + timedelta(hours=EXCLUDED_JOB_RETENTION_HOURS))
@@ -3256,7 +2806,7 @@ def _dequeue_loop(idx: int):
     """Each dequeue thread ``idx`` owns worker slot ``idx``.
 
     Pulls jobs from the shared ``_JOB_Q``, dispatches to its own slot's
-    ``job_q``, and waits on its own slot's ``done_q``. No cross-slot
+    ``job_q``, and waits on its own slot's ``done_q``.  No cross-slot
     queue access, no race conditions.
     """
     threading.current_thread().name = f"pool-worker-{idx}"
@@ -3288,16 +2838,10 @@ def _dequeue_loop(idx: int):
         if current_state == "queued" and timed_out:
             msg = QUEUE_TIMEOUT_ERROR_MSG
             age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
             _status_write(
-                job_dir,
-                "error",
-                error=msg,
-                queue_timeout=True,
-                queue_timeout_min=QUEUE_TIMEOUT_MIN,
-                queue_age_ms=age_ms,
-                queue_age_str=age_str,
-                progress=0.0,
+                job_dir, "error", error=msg,
+                queue_timeout=True, queue_timeout_min=QUEUE_TIMEOUT_MIN,
+                queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
             )
 
             if bool(st.get("exclude_from_improvement")):
@@ -3322,21 +2866,13 @@ def _dequeue_loop(idx: int):
             st = _json_read_or_none(sp["status"]) or {}
             current_state = str(st.get("state") or "").lower()
             timed_out, age_ms = _is_queue_timed_out(job_dir)
-
             if current_state == "queued" and timed_out:
                 msg = QUEUE_TIMEOUT_ERROR_MSG
                 age_str = _fmt_cycle_time(age_ms if age_ms is not None else 0)
-
                 _status_write(
-                    job_dir,
-                    "error",
-                    error=msg,
-                    step="queue_timeout",
-                    queue_timeout=True,
-                    queue_timeout_min=QUEUE_TIMEOUT_MIN,
-                    queue_age_ms=age_ms,
-                    queue_age_str=age_str,
-                    progress=0.0,
+                    job_dir, "error", error=msg, step="queue_timeout",
+                    queue_timeout=True, queue_timeout_min=QUEUE_TIMEOUT_MIN,
+                    queue_age_ms=age_ms, queue_age_str=age_str, progress=0.0,
                 )
 
                 if bool(st.get("exclude_from_improvement")):
@@ -3353,136 +2889,31 @@ def _dequeue_loop(idx: int):
             with slot.lock:
                 _ensure_worker_alive(idx)
 
-            _status_write(
-                job_dir,
-                "running",
-                step="worker_dispatch",
-                progress=float(st.get("progress") or 0.0),
-                owner_email=owner_id,
-                owner_id=owner_id,
-                worker_slot=idx,
-                dispatched_at_utc=_now_utc().isoformat(),
-            )
-
             slot.job_q.put(job_id)
 
-            # Wait for completion, but watch for real activity every second.
-            # Real activity means:
-            #   - meaningful status fields changed, OR
-            #   - new/modified PNG files appeared in pdf_images.
+            # Wait for completion with watchdog timeout
             timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
-            started_wait = time.time()
-            last_signal_at = time.time()
-            last_sig = _job_activity_signature(job_dir)
-
             worker_ok = True
-            worker_crashed = False
-            status = None
-            done_job_id = job_id
-            err_msg = None
+            try:
+                status, done_job_id, err_msg = slot.done_q.get(timeout=timeout_sec)
+            except Empty:
+                worker_ok = False
 
-            while True:
-                try:
-                    status, done_job_id, err_msg = slot.done_q.get(timeout=1.0)
-                    break
-
-                except Empty:
-                    now = time.time()
-
-                    # Worker process died/crashed.
-                    if slot.proc is not None and not slot.proc.is_alive():
-                        worker_ok = False
-                        worker_crashed = True
-                        err_msg = "Worker process crashed during this job. Please try again."
-                        break
-
-                    # Hard cap: job is still moving maybe, but it is too large/slow overall.
-                    if now - started_wait >= timeout_sec:
-                        worker_ok = False
-                        worker_crashed = False
-                        err_msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
-                        break
-
-                    # External cancel.
-                    if _is_canceled(job_dir):
-                        worker_ok = False
-                        worker_crashed = False
-                        err_msg = "Job was canceled."
-                        break
-
-                    # Activity check.
-                    cur_sig = _job_activity_signature(job_dir)
-
-                    if cur_sig != last_sig:
-                        last_sig = cur_sig
-                        last_signal_at = now
-
-                        # If image files are appearing, expose that as live progress.
-                        try:
-                            png_count = int(cur_sig[-2] or 0)
-                            _write_live_finding_components_heartbeat(job_dir, owner_id, png_count)
-                        except Exception:
-                            pass
-
-                        continue
-
-                    # Soft cap: no status movement and no new image files.
-                    if now - last_signal_at >= NO_SIGNAL_TIMEOUT_SEC:
-                        worker_ok = False
-                        worker_crashed = False
-                        err_msg = (
-                            f"No processing activity for {NO_SIGNAL_TIMEOUT_SEC} seconds. "
-                            "Restarting this job."
-                        )
-                        break
-
-            if not worker_ok:
-                # If the job merely stopped showing activity, kill/requeue once instead
-                # of making the customer manually retry.
-                no_signal = str(err_msg or "").startswith("No processing activity")
-
-                if no_signal:
-                    print(f">>> no-signal timeout [{tag}]: {job_id} | {err_msg}")
-
-                    with slot.lock:
-                        _kill_persistent_worker(idx)
-                        _spawn_persistent_worker(idx)
-
-                    st_latest = _json_read_or_none(_status_paths(job_dir)["status"]) or st
-
-                    if _requeue_existing_job(job_dir, st_latest, "worker_no_signal_timeout"):
-                        continue
-
-                    # If requeue was blocked by max attempts or missing PDF,
-                    # _requeue_existing_job/_mark_job_interrupted already wrote status.
-                    continue
-
-                # Hard timeout / crash / cancel path.
+            if not worker_ok or (slot.proc is not None and not slot.proc.is_alive()):
                 try:
                     with open(_cancel_path(job_dir), "w") as f:
                         f.write("1")
                 except Exception:
                     pass
 
-                if worker_crashed:
+                if not worker_ok:
+                    msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
+                    print(f">>> watchdog timeout [{tag}]: {job_id}")
+                else:
                     msg = "Worker process crashed during this job. Please try again."
                     print(f">>> worker crash [{tag}] during: {job_id}")
-                else:
-                    msg = err_msg or WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
-                    print(f">>> watchdog/cancel [{tag}]: {job_id} | {msg}")
 
-                latest_status = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
-
-                _status_write(
-                    job_dir,
-                    "error",
-                    step="timeout_or_worker_error",
-                    error=msg,
-                    progress=_safe_float(latest_status.get("progress"), 0.0),
-                    owner_email=owner_id,
-                    owner_id=owner_id,
-                )
-
+                _status_write(job_dir, "error", error=msg)
                 try:
                     st_after_error = _json_read_or_none(_status_paths(job_dir)["status"]) or {}
                     if bool(st_after_error.get("exclude_from_improvement")):
@@ -3491,7 +2922,6 @@ def _dequeue_loop(idx: int):
                         _cleanup_job_dir(job_dir, {"status.json"})
                 except Exception:
                     pass
-
                 _jobs_upsert(job_id, state="error", updated_at=_now_utc(), error=msg)
 
                 with slot.lock:
@@ -3651,29 +3081,34 @@ if not _IS_WORKER_SUBPROCESS:
     try:
         for i in range(MAX_WORKERS):
             _spawn_persistent_worker(i)
-
         for i in range(MAX_WORKERS):
             t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
             t.start()
             _WORKERS.append(t)
-
         print(
             f">>> Worker pool started: {MAX_WORKERS} slots, "
             f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
         )
-
-        # Important:
-        # If the uplink process restarted, status.json files survived but _JOB_Q did not.
-        # This requeues stranded queued/running jobs so customers do not get stuck forever.
-        _recover_orphaned_detection_jobs_on_startup()
-
     except Exception as e:
         print(f">>> Worker pool startup failed: {e}")
         print(traceback.format_exc())
 
-        # If workers cannot start, make sure stale active jobs do not sit forever.
-        # This does not mark brand-new queued jobs error immediately; it only lets
-        # status polling/queue timeout handle them.
+    try:
+        cleanup_thread = threading.Thread(
+            target=_excluded_cleanup_loop,
+            daemon=True,
+            name="job-retention-cleanup",
+        )
+        cleanup_thread.start()
+        print(
+            f">>> job retention cleanup loop started | "
+            f"interval={CLEANUP_SWEEP_INTERVAL_SEC}s | "
+            f"standard_days={STANDARD_JOB_RETENTION_DAYS} | "
+            f"standard_limit={STANDARD_JOB_HISTORY_LIMIT}"
+        )
+    except Exception as e:
+        print(f">>> job retention cleanup loop startup failed: {e}")
+        print(traceback.format_exc())
 
 def _active_job_for_owner(owner_email: str, group_folder: str = "personal") -> dict | None:
     """
@@ -3718,12 +3153,6 @@ def _active_job_for_owner(owner_email: str, group_folder: str = "personal") -> d
 
             if canceled:
                 continue
-
-            # Repair stale active jobs before letting them block a new submission.
-            # This prevents "active_job_exists" from being caused by a dead queued/running status.
-            if state in ("queued", "running", "unknown"):
-                st = _repair_stale_active_job_from_status_poll(job_dir, st) or st
-                state = str(st.get("state") or "").strip().lower()
 
             if state in ("queued", "running", "unknown"):
                 meta = _parse_job_note(st.get("job_note") or "")
@@ -4591,15 +4020,13 @@ def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "person
             **node_hint
         }
 
-    state = (st.get("state") or "unknown").lower()
-    if st.get("canceled") is True and state != "done":
-        return {"state": "canceled", **node_hint}
+    state = str(st.get("state") or "unknown").strip().lower()
 
-    # Repair stale queued/running jobs before returning status to the client.
-    # This prevents the UI from politely polling a dead status forever.
-    if state in ("queued", "running", "unknown"):
-        st = _repair_stale_active_job_from_status_poll(job_dir, st) or st
-        state = (st.get("state") or "unknown").lower()
+    if st.get("canceled") is True and state != "done":
+        return {
+            "state": "canceled",
+            **node_hint
+        }
 
     # Build one status object for ALL states so fields do not disappear.
     out = {
