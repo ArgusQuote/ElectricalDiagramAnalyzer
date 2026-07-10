@@ -3175,6 +3175,7 @@ class PanelboardEngine(BaseEngine):
                 needs_extension = False
 
                 capacity_blocked_this_spec = False  # reset per attempt
+                attempt_errors = []
 
                 order = [f for f in ["Q","H","J","LL","L","M","P","R"] if f in frame_rules]
                 d("frame search order:", order)
@@ -3220,7 +3221,7 @@ class PanelboardEngine(BaseEngine):
                         ir = snap_int_rating(frame, rating_voltage, panel_k)
 
                     if ir is None:
-                        summary.setdefault("Errors", []).append(
+                        attempt_errors.append(
                             f"Frame {frame} cannot satisfy requested {panel_k}kAIC at {rating_voltage}V."
                         )
                         continue
@@ -3361,11 +3362,17 @@ class PanelboardEngine(BaseEngine):
                             if capacity_blocked_this_spec else
                             "No compatible frame/IR/voltage combo for this breaker spec")
 
-                    summary.setdefault("Errors", []).append(
-                        (f"{reason}: {poles}P @ {raw_amps}A "
+                    msg = (
+                        f"{reason}: {poles}P @ {raw_amps}A "
                         f"(series={series}, voltage={rating_voltage}V, IR target≈{panel_k}k). "
-                        f"Placed {placed_units}/{count} for this spec.")
+                        f"Placed {placed_units}/{count} for this spec."
                     )
+
+                    if attempt_errors:
+                        unique_attempt_errors = list(dict.fromkeys(attempt_errors))
+                        msg += " " + " ".join(unique_attempt_errors[:3])
+
+                    summary.setdefault("Errors", []).append(msg)
                     break
 
                 # hard guard
@@ -3435,9 +3442,13 @@ class PanelboardEngine(BaseEngine):
         panel_result["Branch Breakers (I-LINE)"] = list(summary.values())
 
         if errors:
+            errors = list(dict.fromkeys(errors))
             panel_result["Branch Breaker Errors"] = errors
+
+            notes = panel_result.setdefault("Notes", [])
             for err in errors:
-                panel_result.setdefault("Notes", []).append(err)
+                if err not in notes:
+                    notes.append(err)
 
         total_rem_inches = side_remaining["left"] + side_remaining["right"]
         panel_result["Spaces Remaining"] = max(0, int(round(float(total_rem_inches) / 1.5)))
