@@ -294,9 +294,12 @@ def register_engine(item_type):
         ENGINE_REGISTRY[item_type] = cls
         return cls
     return decorator
-import faulthandler, signal, time
-faulthandler.enable()
-faulthandler.dump_traceback_later(30, repeat=True)
+DEBUG_TRACEBACKS = False
+
+if DEBUG_TRACEBACKS:
+    import faulthandler
+    faulthandler.enable()
+    faulthandler.dump_traceback_later(30, repeat=True)
 
 def process_job(payload) -> dict:
     job_defaults = {}
@@ -562,7 +565,7 @@ class PanelboardEngine(BaseEngine):
         # --- sanitize & coalesce detected breakers (fix double-count) ---
         if isinstance(raw.get("detected_breakers"), list):
             validated = []
-            for i, b in enumerate(raw["detected_breakers"]):
+            for b in raw["detected_breakers"]:
                 if not isinstance(b, dict):
                     notes.append("A breaker was skipped: not a valid data structure.")
                     continue
@@ -679,7 +682,7 @@ class PanelboardEngine(BaseEngine):
         if limit_amps > 0 and isinstance(raw.get("detected_breakers"), list):
             kept = []
             over_limit_found = False
-            for i, br in enumerate(raw["detected_breakers"]):
+            for br in raw["detected_breakers"]:
                 b_amps = _safe_int(br.get("amperage"), 0)
                 if b_amps > limit_amps:
                     notes.append(
@@ -751,13 +754,35 @@ class PanelboardEngine(BaseEngine):
                 continue
             det.append({"poles": poles, "amperage": amps, "count": cnt, "specialFeatures": "GFI"})
 
-    def _nearest_iline_bucket(self, il, mode: str, amps: int, spaces: int, enclosure: str, material: str, trim: str):
+    def _nearest_iline_bucket(
+        self,
+        il,
+        mode: str,
+        amps: int,
+        spaces: int,
+        enclosure: str,
+        material: str,
+        trim: str,
+        min_series: str | None = None,
+    ):
         if amps <= 250:
             series_order = ["HCJ", "HCP", "HCR-U"]
         elif amps <= 800:
             series_order = ["HCP", "HCR-U"]
         else:
             series_order = ["HCR-U"]
+
+        series_rank = {"HCJ": 0, "HCP": 1, "HCR-U": 2}
+
+        if min_series in series_rank:
+            min_rank = series_rank[min_series]
+            series_order = [
+                s for s in series_order
+                if series_rank[s] >= min_rank
+            ]
+
+            if not series_order:
+                series_order = [min_series]
 
         def scan_cfg(cfg, series_name):
             best = None
@@ -857,23 +882,59 @@ class PanelboardEngine(BaseEngine):
     def _safe_generate_iline(self, panelAttrs):
         il = iLinePanelboard()
         out = il.generateILinePanelboardPartNumber(panelAttrs)
+
         if isinstance(out, str) and out.startswith("Invalid I-Line configuration"):
             series, bestA, bestS, bestMat = self._nearest_iline_bucket(
                 il,
                 mode=panelAttrs.get("typeOfMain", "MAIN LUG"),
                 amps=_safe_int(panelAttrs.get("amperage"), 0),
                 spaces=_safe_int(panelAttrs.get("spaces"), 0),
-                enclosure=str(panelAttrs.get("enclosure","")).upper(),
-                material=str(panelAttrs.get("material","")).upper(),
-                trim=str(panelAttrs.get("trimStyle","")).upper()
+                enclosure=str(panelAttrs.get("enclosure", "")).upper(),
+                material=str(panelAttrs.get("material", "")).upper(),
+                trim=str(panelAttrs.get("trimStyle", "")).upper(),
+                min_series=panelAttrs.get("_minimumILineSeries"),
             )
+
             panelAttrs["panelType"] = series
             panelAttrs["ilinePanelType"] = series
             panelAttrs["amperage"] = bestA
-            panelAttrs["spaces"]   = bestS
+            panelAttrs["spaces"] = bestS
             panelAttrs["material"] = bestMat
+
             out = il.generateILinePanelboardPartNumber(panelAttrs)
+
+        if isinstance(out, dict):
+            selected_series = (
+                panelAttrs.get("ilinePanelType")
+                or panelAttrs.get("panelType")
+            )
+
+            if selected_series:
+                out["ilinePanelType"] = selected_series
+                out["panelType"] = selected_series
+
         return out
+
+    def _minimum_iline_series_for_branches(self, raw: dict) -> str:
+        """
+        Decide the minimum I-LINE series needed based on detected branch breakers.
+
+        HCJ supports narrow-side Q/H/J style work.
+        HCP supports wider L/M/P work.
+        HCR-U supports the largest R-frame work.
+
+        This prevents routing a job with a 400A branch into HCJ,
+        where the branch builder later cannot place the breaker.
+        """
+        max_branch = self._largest_required_branch(raw)
+
+        if max_branch >= 1000:
+            return "HCR-U"
+
+        if max_branch > 250:
+            return "HCP"
+
+        return "HCJ"
 
     def _largest_required_branch(self, raw: dict) -> int:
         brs = raw.get("detected_breakers", [])
@@ -907,7 +968,6 @@ class PanelboardEngine(BaseEngine):
             "R":  {"3": 15,            "amps":[1000,1200]},
         }
 
-        electronic_only = {"M","P","R"}
         threepole_only  = {"P","R"}
 
         def first_fit_frame(poles: int, amps: int, rating_voltage: int) -> tuple[str, float]:
@@ -1468,6 +1528,18 @@ class PanelboardEngine(BaseEngine):
                 else:
                     series_order = ["HCR-U"]
 
+                branch_series = self._minimum_iline_series_for_branches(raw)
+                min_branch_rank = series_rank[branch_series]
+
+                # Do not allow a lower I-LINE series than the branch breakers require.
+                series_order = [
+                    s for s in series_order
+                    if series_rank[s] >= min_branch_rank
+                ]
+
+                if not series_order:
+                    series_order = [branch_series]
+
                 for series in series_order:
                     if series == "HCJ":
                         cfg = builder.HCJ_configs
@@ -1520,7 +1592,7 @@ class PanelboardEngine(BaseEngine):
                         break
 
         print("[DBG][LUG] candidates=",
-            [(c[4], c[6], c[7]) for c in candidates])  # (family, matched_amps, matched_spaces)
+            [(c[4], c[5], c[6], c[7]) for c in candidates])
 
         # --- Last-chance NQ for 208V & big interiors (84+ circuits) ---
         if not candidates:
@@ -1559,8 +1631,11 @@ class PanelboardEngine(BaseEngine):
                 matched_material = panelAttrs["material"]
 
         if family == "I-LINE":
+            branch_series = self._minimum_iline_series_for_branches(raw)
+
+            panelAttrs["_minimumILineSeries"] = branch_series
             panelAttrs["ilinePanelType"] = chosen_series
-            panelAttrs["panelType"] = "I-LINE"
+            panelAttrs["panelType"] = chosen_series
             panelAttrs["material"]  = matched_material
 
             # Convert classic pole spaces → I-LINE spaces: ×1.5 then cap
@@ -1680,12 +1755,22 @@ class PanelboardEngine(BaseEngine):
 
             print("[DBG][LUG] NQ/NF attempts failed → falling to I-LINE")
 
-            chosen_series = "HCR-U" if (amps > 800 or spaces > 99) else ("HCP" if amps > 250 else "HCJ")
+            branch_series = self._minimum_iline_series_for_branches(raw)
+
+            panel_series = "HCR-U" if (amps > 800 or spaces > 99) else ("HCP" if amps > 250 else "HCJ")
+
+            series_rank = {"HCJ": 0, "HCP": 1, "HCR-U": 2}
+            chosen_series = max(
+                [branch_series, panel_series],
+                key=lambda s: series_rank[s]
+            )
+
             matched_material = "COPPER" if chosen_series == "HCR-U" else panelAttrs["material"]
 
             panelAttrs["amperage"] = amps
+            panelAttrs["_minimumILineSeries"] = branch_series
             panelAttrs["ilinePanelType"] = chosen_series
-            panelAttrs["panelType"] = "I-LINE"
+            panelAttrs["panelType"] = chosen_series
             panelAttrs["material"] = matched_material
 
             # Convert classic pole spaces → I-LINE spaces: ×1.5 then cap
@@ -1847,16 +1932,19 @@ class PanelboardEngine(BaseEngine):
                     "trimStyle": panelAttrs.get("trimStyle")})
                 _amps = _safe_int(panelAttrs.get("amperage"), 0)
                 _spaces = _safe_int(panelAttrs.get("spaces"), 0)
-                chosen_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+                branch_series = self._minimum_iline_series_for_branches(raw)
 
-                probe = {
-                    "panelType": "I-LINE",
-                    "ilinePanelType": chosen_series,
-                    "spaces": _spaces,
-                    "Interrupting Rating": f"{_safe_int(raw.get('intRating'), 0)}k",
-                }
-                probe_out = self._build_iline_branch_breakers(dict(probe), raw, raw.get("detected_breakers", []))
+                panel_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+
+                series_rank = {"HCJ": 0, "HCP": 1, "HCR-U": 2}
+                chosen_series = max(
+                    [branch_series, panel_series],
+                    key=lambda s: series_rank[s]
+                )
+
                 raw2 = dict(raw)
+                raw2["panelType"] = chosen_series
+                raw2["ilinePanelType"] = chosen_series
 
                 # Convert classic pole spaces → I-LINE spaces: ×1.5 then cap
                 requested = _safe_int(raw.get("spaces"), 0)
@@ -2020,9 +2108,19 @@ class PanelboardEngine(BaseEngine):
 
             _amps = _safe_int(raw.get("amperage"), 0)
             _spaces = _safe_int(raw.get("spaces"), 0)
-            chosen_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+            branch_series = self._minimum_iline_series_for_branches(raw)
+
+            panel_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+
+            series_rank = {"HCJ": 0, "HCP": 1, "HCR-U": 2}
+            chosen_series = max(
+                [branch_series, panel_series],
+                key=lambda s: series_rank[s]
+            )
 
             raw2 = dict(raw)
+            raw2["panelType"] = chosen_series
+            raw2["ilinePanelType"] = chosen_series
 
             # Convert classic pole spaces → I-LINE spaces: ×1.5 then cap
             requested = _safe_int(raw.get("spaces"), 0)
@@ -3332,7 +3430,14 @@ class PanelboardEngine(BaseEngine):
         d("BLANKS pieces:", blanks_pieces, "| spaces_remaining (calc):",
         max(0, int(round((side_remaining['left'] + side_remaining['right']) / 1.5))))
 
+        errors = summary.pop("Errors", None)
+
         panel_result["Branch Breakers (I-LINE)"] = list(summary.values())
+
+        if errors:
+            panel_result["Branch Breaker Errors"] = errors
+            for err in errors:
+                panel_result.setdefault("Notes", []).append(err)
 
         total_rem_inches = side_remaining["left"] + side_remaining["right"]
         panel_result["Spaces Remaining"] = max(0, int(round(float(total_rem_inches) / 1.5)))
@@ -3763,3 +3868,213 @@ class TransformerEngine(BaseEngine):
             "error": "Invalid transformer configuration.",
             "_debug": {"attempts": attempts_meta[:10]}
         }
+
+
+
+# ============================================================
+# QUICK MANUAL TEST PAYLOADS
+# Paste at bottom of this file and run directly.
+# ============================================================
+
+if __name__ == "__main__":
+    import json
+
+    def show(title, payload):
+        print("\n" + "=" * 90)
+        print(title)
+        print("=" * 90)
+        try:
+            out = process_job(payload)
+            print(json.dumps(out, indent=2, default=str))
+        except Exception as e:
+            print("TEST CRASHED:", type(e).__name__, e)
+
+    # ------------------------------------------------------------
+    # TEST 1:
+    # Normal NQ-ish main breaker panel.
+    # Expected:
+    # - Should build a panel.
+    # - Should build Main Breaker if the builder accepts the selected frame.
+    # - Should build Branch Breakers (NQ).
+    # - Should show filler plates / spaces remaining.
+    # ------------------------------------------------------------
+    test_1_normal_nq_main_breaker = {
+        "type": "panelboard",
+        "name": "TEST-1 NORMAL NQ MAIN BREAKER",
+        "attrs": {
+            "amperage": 225,
+            "mainBreakerAmperage": 225,
+            "voltage": 208,
+            "spaces": 42,
+            "intRating": 65,
+            "material": "ALUMINUM",
+            "trimStyle": "FLUSH",
+            "enclosure": "NEMA1",
+            "panelRatingType": "FULLY_RATED",
+            "allowPlugOn": True,
+            "detected_breakers": [
+                {"poles": 1, "amperage": 20, "count": 12},
+                {"poles": 2, "amperage": 30, "count": 2},
+                {"poles": 3, "amperage": 60, "count": 1},
+            ],
+        },
+    }
+
+    # ------------------------------------------------------------
+    # TEST 2:
+    # Main breaker AIC failure but branch breakers should still build.
+    #
+    # This is the important one for the change we just made.
+    #
+    # Expected:
+    # - Should return a panel.
+    # - Should include "Main Breaker Error".
+    # - Should STILL include "Branch Breakers (NF)" or branch breaker output.
+    # - Should include note saying branch breakers were still generated.
+    #
+    # Why this should work:
+    # - 480V forces away from NQ.
+    # - 400A NF-style main breaker often lands on L/LL style frame logic.
+    # - 65kAIC at 480V is too high for LL magnetic ladder in your INTERRUPTING_RATINGS.
+    # ------------------------------------------------------------
+    test_2_main_breaker_aic_error_but_branches_continue = {
+        "type": "panelboard",
+        "name": "TEST-2 MB AIC ERROR BUT BRANCHES CONTINUE",
+        "attrs": {
+            "amperage": 400,
+            "mainBreakerAmperage": 400,
+            "voltage": 480,
+            "spaces": 42,
+            "intRating": 65,
+            "material": "ALUMINUM",
+            "trimStyle": "FLUSH",
+            "enclosure": "NEMA1",
+            "panelRatingType": "FULLY_RATED",
+            "allowPlugOn": False,
+            "detected_breakers": [
+                {"poles": 1, "amperage": 20, "count": 10},
+                {"poles": 2, "amperage": 30, "count": 3},
+                {"poles": 3, "amperage": 60, "count": 2},
+            ],
+        },
+    }
+
+    # ------------------------------------------------------------
+    # TEST 3:
+    # Forced I-LINE path from a branch breaker too large for NQ/NF.
+    #
+    # Expected:
+    # - Should bump/route to I-LINE.
+    # - Should include Branch Breakers (I-LINE).
+    # - Should include I-LINE blanks/extensions if there is remaining space.
+    # - Should include a routing note explaining why it went I-LINE.
+    # ------------------------------------------------------------
+    test_3_forced_iline_from_large_branch = {
+        "type": "panelboard",
+        "name": "TEST-3 FORCED I-LINE LARGE BRANCH",
+        "attrs": {
+            "amperage": 600,
+            "voltage": 480,
+            "spaces": 84,
+            "intRating": 65,
+            "material": "ALUMINUM",
+            "trimStyle": "FLUSH",
+            "enclosure": "NEMA1",
+            "panelRatingType": "FULLY_RATED",
+            "allowPlugOn": False,
+            "detected_breakers": [
+                {"poles": 3, "amperage": 400, "count": 1},
+                {"poles": 3, "amperage": 150, "count": 2},
+                {"poles": 2, "amperage": 100, "count": 2},
+            ],
+        },
+    }
+
+    # ------------------------------------------------------------
+    # TEST 4:
+    # Oversized branch breaker should be rejected before branch building.
+    #
+    # Expected:
+    # - Should build panel if possible.
+    # - Should NOT include the 400A branch breaker.
+    # - Notes should say breaker was rejected because it exceeds panel/main limit.
+    # ------------------------------------------------------------
+    test_4_branch_exceeds_panel_main_limit = {
+        "type": "panelboard",
+        "name": "TEST-4 BRANCH EXCEEDS PANEL LIMIT",
+        "attrs": {
+            "amperage": 225,
+            "mainBreakerAmperage": 225,
+            "voltage": 208,
+            "spaces": 42,
+            "intRating": 65,
+            "material": "ALUMINUM",
+            "trimStyle": "FLUSH",
+            "enclosure": "NEMA1",
+            "panelRatingType": "FULLY_RATED",
+            "allowPlugOn": True,
+            "detected_breakers": [
+                {"poles": 3, "amperage": 400, "count": 1},
+                {"poles": 1, "amperage": 20, "count": 8},
+            ],
+        },
+    }
+
+    # ------------------------------------------------------------
+    # TEST 5:
+    # Missing interrupting rating default.
+    #
+    # Expected:
+    # - intRating should default to 22.
+    # - Notes should include:
+    #   "No interrupting rating detected - system defaulted to 22kAIC"
+    # ------------------------------------------------------------
+    test_5_missing_int_rating_defaults_to_22 = {
+        "type": "panelboard",
+        "name": "TEST-5 DEFAULT INT RATING",
+        "attrs": {
+            "amperage": 225,
+            "mainBreakerAmperage": 225,
+            "voltage": 208,
+            "spaces": 42,
+            "material": "ALUMINUM",
+            "trimStyle": "FLUSH",
+            "enclosure": "NEMA1",
+            "panelRatingType": "FULLY_RATED",
+            "allowPlugOn": True,
+            "detected_breakers": [
+                {"poles": 1, "amperage": 20, "count": 6},
+                {"poles": 2, "amperage": 30, "count": 2},
+            ],
+        },
+    }
+
+    # ------------------------------------------------------------
+    # TEST 6:
+    # Transformer kVA behavior.
+    #
+    # Expected right now:
+    # - If your transformer code still has downsize fallback, check whether
+    #   this ever snaps DOWN.
+    # - Long term, you do NOT want kVA snapping downward.
+    # ------------------------------------------------------------
+    test_6_transformer_kva_edge = {
+        "type": "transformer",
+        "name": "TEST-6 TRANSFORMER KVA EDGE",
+        "attrs": {
+            "kva": 334,
+            "primaryVolts": 480,
+            "secondaryVolts": 208,
+            "coreMaterial": "ALUMINUM",
+            "temperature": 150,
+            "weathershield": False,
+            "mounting": "FLOOR",
+        },
+    }
+
+    show("TEST 1 - NORMAL NQ MAIN BREAKER", test_1_normal_nq_main_breaker)
+    show("TEST 2 - MAIN BREAKER AIC ERROR BUT BRANCHES CONTINUE", test_2_main_breaker_aic_error_but_branches_continue)
+    show("TEST 3 - FORCED I-LINE FROM LARGE BRANCH", test_3_forced_iline_from_large_branch)
+    show("TEST 4 - BRANCH EXCEEDS PANEL/MAIN LIMIT", test_4_branch_exceeds_panel_main_limit)
+    show("TEST 5 - MISSING INT RATING DEFAULTS TO 22", test_5_missing_int_rating_defaults_to_22)
+    show("TEST 6 - TRANSFORMER KVA EDGE", test_6_transformer_kva_edge)

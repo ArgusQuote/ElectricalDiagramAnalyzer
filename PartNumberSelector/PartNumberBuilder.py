@@ -2168,14 +2168,36 @@ class iLinePanelboard():
             },
         }
 
-        # build list of dicts to search, in series priority order
+        # build list of dicts to search
+        # IMPORTANT:
+        # For MAIN LUG I-Line panels, many HCJ/HCP/HCR-U configs overlap by:
+        # (typeOfMain, amperage, spaces, enclosure, material, trimStyle).
+        #
+        # So if the rules engine requested a specific I-Line family, respect it.
+        # Otherwise the builder will find HCJ first and incorrectly return HCJ
+        # even when the branch breakers require HCP or HCR-U.
+        requested_panel_type = str(
+            attributes.get("ilinePanelType")
+            or attributes.get("panelType")
+            or ""
+        ).upper()
+
         if typeOfMain == 'MAIN LUG':
-            config_sources = [
-                self.HCJ_configs,
-                self.HCPSU_configs,
-                self.HCP_configs,
-                self.HCRU_configs,
-            ]
+            if requested_panel_type == "HCJ":
+                config_sources = [self.HCJ_configs]
+            elif requested_panel_type == "HCP-SU":
+                config_sources = [self.HCPSU_configs]
+            elif requested_panel_type == "HCP":
+                config_sources = [self.HCP_configs]
+            elif requested_panel_type in ("HCR-U", "HCRU", "HCR"):
+                config_sources = [self.HCRU_configs]
+            else:
+                config_sources = [
+                    self.HCJ_configs,
+                    self.HCPSU_configs,
+                    self.HCP_configs,
+                    self.HCRU_configs,
+                ]
         else:
             config_sources = [self.allowedConfigurationsBreaker]
 
