@@ -1730,6 +1730,7 @@ class PanelParser:
  
     # --------- Helpers ---------
     def _scan_main_mode(self, items: List[dict]) -> Optional[str]:
+        """Scan all OCR items for MLO or MCB keywords; return 'MLO', 'MCB', or None."""
         txt = " ".join(str(it.get("text","")) for it in items).upper()
         has_mlo = bool(re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txt))
         has_mcb = bool(re.search(r"\b(MCB|M\W*C\W*B)\b", txt))
@@ -1742,6 +1743,7 @@ class PanelParser:
         return None
 
     def _normalize_name_output(self, s: str) -> str:
+        """Remove a leading 'Panel' or 'Panelboard' prefix from the detected name string."""
         import re
         u = (s or "").strip()
         u = self._strip_quotes(u)
@@ -2305,6 +2307,7 @@ class PanelParser:
         return None
 
     def _label_affinity(self, role: str, it: dict, labels_map: dict) -> float:
+        """Compute Gaussian distance-based affinity between an item and the nearest label of *role*; returns 0..1."""
         import math
 
         Ls = labels_map.get(role, [])
@@ -2323,6 +2326,7 @@ class PanelParser:
         return math.exp(-dmin / self._SIGMA_PX)
 
     def _collect_label_candidates(self, items: list) -> dict:
+        """Group OCR items by label role (VOLTAGE, BUS, MAIN, AIC, NAME, WRONG) using regex matching."""
         import re
         role_map = {k: [] for k in ("VOLTAGE","BUS","MAIN","MOUNTING","ENCLOSURE","RATING","AIC","NAME","WRONG")}
         comp = {role: [re.compile(rx, re.I) for rx in rxs] for role, rxs in self._LABELS.items()}
@@ -2337,6 +2341,7 @@ class PanelParser:
         return role_map
 
     def _collect_value_candidates(self, items: list) -> dict:
+        """Classify OCR items as value candidates for each role (NAME, VOLTAGE, BUS, MAIN, AIC) based on shape/context scores."""
         import re
         out = {k: [] for k in ("NAME","VOLTAGE","BUS","MAIN","AIC","MOUNTING","ENCLOSURE")}
         heights = [abs(it2["y2"] - it2["y1"]) for it2 in items] or [1]
@@ -2795,6 +2800,7 @@ class PanelParser:
         return out
 
     def _score_candidates(self, role: str, cands: list, labels_map: dict, band_top: int, main_mode: Optional[str] = None) -> list:
+        """Score and rank candidates for a role using a weighted blend of shape, confidence, label-affinity, side, context, and wrong-label penalty."""
         import math
         baseW = dict(self._WEIGHTS[role])
 
@@ -2904,6 +2910,7 @@ class PanelParser:
         return ranked
 
     def _pick_role(self, role: str, ranked: list) -> dict | None:
+        """Return the top-ranked candidate for *role* if its rank meets the threshold; else None."""
         thr = self._THRESH.get(role, 0.5)
         return ranked[0] if ranked and ranked[0]["rank"] >= thr else None
 
@@ -3131,6 +3138,7 @@ class PanelParser:
         return u
 
     def _normalize_digits(self, s: str) -> str:
+        """Fix common OCR digit confusions: O/o between digits becomes '0', trailing O before 'A'/'AMPS' becomes '0'."""
         u = s or ""
         # O/o between digits → 0  (e.g., 2O8 → 208, 6o0 → 600)
         u = re.sub(r'(?<=\d)[Oo](?=\d)', '0', u)
@@ -3259,6 +3267,7 @@ class PanelParser:
             print(f"[HEADER] Failed to write overlay: {e}")
 
     def _prep_for_ocr(self, img: np.ndarray) -> np.ndarray:
+        """Prepare an image for OCR: grayscale, CLAHE, bilateral filter, upscale if small."""
         g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         g = clahe.apply(g)
@@ -3271,6 +3280,7 @@ class PanelParser:
 
     @staticmethod
     def _to_int_or_none(s: str):
+        """Parse *s* as an integer (stripping commas); return None on failure."""
         if s is None: return None
         try:
             return int(str(s).replace(",", "").strip())
@@ -3278,6 +3288,7 @@ class PanelParser:
             return None
 
     def _voltage_to_int(self, s: str):
+        """Extract the dominant voltage integer from a string like '120/240' or '480V'; special-cases 120/240 -> 120."""
         if not s:
             return None
         nums = [int(n) for n in re.findall(r'(?<!\d)(\d{2,4})(?!\d)', str(s))]
@@ -3289,6 +3300,7 @@ class PanelParser:
 
     @staticmethod
     def _aic_to_ka(s: str):
+        """Convert an AIC string (e.g., '65000', '65,000A') to kilo-ampere int (e.g., 65)."""
         if not s:
             return None
         try:
@@ -3300,11 +3312,13 @@ class PanelParser:
 
     @staticmethod
     def _bbox_to_rect(bbox) -> Tuple[int, int, int, int]:
+        """Convert an EasyOCR bbox (list of corner points) to a (x1, y1, x2, y2) rectangle."""
         xs = [p[0] for p in bbox]
         ys = [p[1] for p in bbox]
         return min(xs), min(ys), max(xs), max(ys)
 
     def _group_into_lines(self, tokens: List[Tuple[Tuple[int, int, int, int], str, float]]):
+        """Group OCR tokens into horizontal text lines by vertical center proximity (y-bin clustering)."""
         if not tokens:
             return []
         toks = sorted(tokens, key=lambda t: (((t[0][1] + t[0][3]) / 2.0), t[0][0]))

@@ -1,0 +1,404 @@
+================================================================================
+          CURSOR DOCUMENTATION SYSTEM SETUP GUIDE
+          Prompts to Recreate .cursor/rules/ on a New Project
+================================================================================
+
+This guide provides AI prompts to generate a complete .cursor/rules/ 
+documentation system for any codebase. Run these prompts in sequence 
+with Cursor in AGENT MODE.
+
+================================================================================
+                         PHASE 1: INITIAL SETUP
+================================================================================
+
+------------------------------------------------------------------------------
+PROMPT 1.1 — Create Directory Structure
+------------------------------------------------------------------------------
+
+Create the following directory structure in my project:
+
+.cursor/
+└── rules/
+    ├── core/
+    ├── docs/
+    ├── common-errors/
+    └── reference/
+
+Don't create any files yet, just the folders.
+
+------------------------------------------------------------------------------
+PROMPT 1.2 — Create the Meta Rules
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/cursor-rules.mdc` that explains how to create and format 
+Cursor rules.
+
+Include:
+- The required metadata format (description, globs, alwaysApply)
+- File naming conventions (kebab-case, .mdc extension)
+- Where rules must be placed
+- How to write effective rules with code examples
+- The difference between alwaysApply: true vs false
+
+------------------------------------------------------------------------------
+PROMPT 1.3 — Create Self-Improvement Rule
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/self-improve.mdc` with guidelines for the AI to improve 
+rules over time.
+
+Include:
+- When to add new rules (patterns seen 3+ times)
+- When to modify existing rules
+- Rule quality checks
+- When NOT to create rules
+
+================================================================================
+                    PHASE 2: CORE RULES (ALWAYS APPLIED)
+================================================================================
+
+------------------------------------------------------------------------------
+PROMPT 2.1 — Development Environment Rule
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/core/dev-environment.mdc` with alwaysApply: true
+
+This should document:
+- How to activate my virtual environment: [YOUR VENV PATH]
+- When activation is required (running Python, pytest, pip, etc.)
+- Quick reference commands
+
+This rule must be injected into every AI conversation.
+
+------------------------------------------------------------------------------
+PROMPT 2.2 — Documentation Standards Rule
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/core/documentation-standards.mdc` with alwaysApply: true
+
+Include:
+- Post-implementation checklist (what docs to update after code changes)
+- Auto-update triggers (new function → update router, bug fix → update common-errors)
+- How to write class and function documentation
+- What NOT to document
+- Cross-reference format for linking between .mdc files
+- End-of-task reflection checklist for AI
+
+------------------------------------------------------------------------------
+PROMPT 2.3 — Code Reusability Rule
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/core/code-reusability.mdc` with alwaysApply: true
+
+Cover:
+- DRY principle - search for existing code before writing new
+- When to extract shared utilities (2+ places consider, 3+ must extract)
+- Refactoring patterns: Extract Method, Extract Base Class, Parameterize
+- Configuration-driven behavior examples
+- When NOT to deduplicate (tests, version-specific code)
+- List of existing reusable components in this project: [LIST YOUR UTILITIES]
+
+------------------------------------------------------------------------------
+PROMPT 2.4 — Proactive Suggestions Rule
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/core/proactive-suggestions.mdc` with alwaysApply: true
+
+Define when and how AI should suggest alternatives:
+- Trigger conditions (architectural concerns, performance, maintainability)
+- Format template for presenting alternatives (Your Approach vs Suggested Alternative)
+- Example scenarios with sample responses
+- When NOT to suggest (user insists, trivial changes, emergencies)
+- Behavior after user decides
+
+================================================================================
+                      PHASE 3: PROJECT DOCUMENTATION
+================================================================================
+
+------------------------------------------------------------------------------
+PROMPT 3.1 — Application Overview
+------------------------------------------------------------------------------
+
+Analyze my entire codebase and create `.cursor/rules/docs/application-overview.mdc`
+
+Include:
+- ASCII architecture diagram showing how modules connect
+- Processing pipeline with numbered steps
+- Key data structures with example JSON schemas
+- Directory structure per job/output
+- Error handling approach
+- Performance considerations
+
+Make it comprehensive enough that someone new can understand the system.
+
+------------------------------------------------------------------------------
+PROMPT 3.2 — Documentation Router
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/docs/documentation-router.mdc`
+
+Build lookup tables for:
+- Class Quick Reference: | Class | File Location | Documentation Link | Purpose |
+- Function Quick Reference: | Function | File Location | Documentation Link | Purpose |
+- Pattern Quick Reference: | Pattern | Documentation | Example Location | Description |
+- Pipeline flow diagram showing the call sequence
+
+This is the "index" for finding where anything is documented.
+
+------------------------------------------------------------------------------
+PROMPT 3.3 — Module Documentation (Repeat for each major module)
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/docs/[module-name].mdc` for [MODULE DESCRIPTION]
+
+Include:
+- Overview and purpose
+- Key classes with responsibilities
+- Public API (main entry points)
+- Important methods with signatures and descriptions
+- Configuration options
+- Debug features
+- Common patterns and examples
+- Cross-references to related documentation
+
+Module to document: [YOUR MODULE PATH AND DESCRIPTION]
+
+================================================================================
+                      PHASE 4: REFERENCE DOCUMENTATION
+================================================================================
+
+------------------------------------------------------------------------------
+PROMPT 4.1 — Project Structure
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/reference/project-structure.mdc`
+
+Generate:
+- Complete directory tree with comments explaining each file
+- File naming conventions
+- Current active versions (check imports in main entry point)
+- Module dependency graph
+- Key entry points table
+- Configuration files table
+
+Mark currently-used files with ★ symbols.
+
+------------------------------------------------------------------------------
+PROMPT 4.2 — Potential Problems
+------------------------------------------------------------------------------
+
+Analyze my codebase and create `.cursor/rules/potential-problems.mdc`
+
+Find and document:
+- 🔴 Critical issues (missing files, broken imports, version mismatches)
+- 🟠 Moderate issues (hardcoded paths, inconsistent settings)
+- 🟡 Low priority issues (broad exception handling, print-based logging)
+
+For each issue include:
+- Status and severity
+- Location (file and line numbers)
+- Description with code snippets
+- Impact
+- Fix required
+- Summary table at the end
+
+------------------------------------------------------------------------------
+PROMPT 4.3 — Code Quality Standards
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/python-code-quality.mdc` (or appropriate language)
+
+Document:
+- Coding standards (PEP 8, naming conventions, etc.)
+- Import organization
+- Type hints requirements
+- Docstring format
+- Error handling patterns
+- Testing requirements
+
+================================================================================
+                         PHASE 5: COMMON ERRORS
+================================================================================
+
+------------------------------------------------------------------------------
+PROMPT 5.1 — Error Template
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/common-errors/_template.mdc`
+
+Include template sections:
+- Error Name
+- Summary (one sentence)
+- Root Cause
+- Symptoms (list)
+- Prevention (list)
+- Fix (steps)
+- Example (before/after code)
+- Related links
+
+Add guidelines for when and how to document errors.
+
+------------------------------------------------------------------------------
+PROMPT 5.2 — Error Categories
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/common-errors/[category]-errors.mdc` for [ERROR CATEGORY]
+
+Document known errors in this category:
+- [List any errors you've encountered]
+
+Use the template format for each error.
+
+Categories to create: [e.g., ocr-errors, image-processing-errors, api-errors, 
+                       database-errors]
+
+================================================================================
+                          PHASE 6: MASTER INDEX
+================================================================================
+
+------------------------------------------------------------------------------
+PROMPT 6.1 — Rules Index
+------------------------------------------------------------------------------
+
+Create `.cursor/rules/rules-index.mdc` as the master table of contents.
+
+Include tables for:
+- Core Rules (always applied)
+- Documentation Rules (feature docs)
+- Common Errors (debugging help)
+- Reference Documents
+
+Add:
+- Project structure overview
+- Common tasks quick reference (which file to edit for which task)
+- Key dependencies list
+- Version naming convention explanation
+
+================================================================================
+                       CUSTOMIZATION VARIABLES
+================================================================================
+
+Replace these placeholders in the prompts above:
+
++------------------------------------------+----------------------------------+
+| Placeholder                              | Your Value                       |
++------------------------------------------+----------------------------------+
+| [YOUR VENV PATH]                         | e.g., /home/user/venv/bin/activate |
+| [YOUR MODULE PATH AND DESCRIPTION]       | e.g., OcrLibrary/ - OCR pipeline |
+| [LIST YOUR UTILITIES]                    | Your existing reusable components|
+| [ERROR CATEGORY]                         | e.g., ocr, api, database         |
++------------------------------------------+----------------------------------+
+
+================================================================================
+                        VERIFICATION CHECKLIST
+================================================================================
+
+After running all prompts, verify:
+
+[ ] .cursor/rules/ directory exists
+[ ] All alwaysApply: true rules have proper metadata
+[ ] documentation-router.mdc has entries for all major classes
+[ ] project-structure.mdc reflects actual file structure
+[ ] potential-problems.mdc identifies real issues
+[ ] Cross-references between files use [name](mdc:path) format
+[ ] All .mdc files have valid YAML frontmatter
+
+================================================================================
+              QUICK START — SINGLE COMPREHENSIVE PROMPT
+================================================================================
+
+If you want to generate everything in one go, use this prompt:
+
+------------------------------------------------------------------------------
+
+Analyze my entire codebase and create a complete .cursor/rules/ documentation 
+system.
+
+Create these directories: core/, docs/, common-errors/, reference/
+
+Create these files with appropriate content:
+
+ALWAYS APPLIED (alwaysApply: true):
+1. core/dev-environment.mdc - Virtual env activation
+2. core/documentation-standards.mdc - Doc update requirements
+3. core/code-reusability.mdc - DRY principles
+4. core/proactive-suggestions.mdc - When to suggest alternatives
+
+DOCUMENTATION:
+5. docs/application-overview.mdc - Architecture diagram and pipeline
+6. docs/documentation-router.mdc - Class/function lookup tables
+7. docs/[module-name].mdc - One per major module
+
+REFERENCE:
+8. reference/project-structure.mdc - Full directory tree
+9. potential-problems.mdc - Known issues and tech debt
+10. python-code-quality.mdc - Coding standards
+
+COMMON ERRORS:
+11. common-errors/_template.mdc - Error documentation template
+12. common-errors/[type]-errors.mdc - Known error patterns
+
+META:
+13. cursor-rules.mdc - How to create rules
+14. rules-index.mdc - Master index
+15. self-improve.mdc - Rule improvement guidelines
+
+Use cross-references between files. Include code examples where helpful.
+Virtual environment path: [YOUR VENV PATH]
+
+------------------------------------------------------------------------------
+
+================================================================================
+                         FILE FORMAT REFERENCE
+================================================================================
+
+Every .mdc file must start with YAML frontmatter:
+
+---
+description: Short description shown in Cursor's rule picker
+globs: optional/path/pattern/**/*
+alwaysApply: false
+---
+
+# Title
+
+Content with markdown formatting...
+
+KEY METADATA FIELDS:
+- description: Shows up when Cursor lists available rules
+- globs: If set, rule only applies when editing files matching pattern
+- alwaysApply: true = ALWAYS injected, false = AI-requested when relevant
+
+================================================================================
+                     DIRECTORY STRUCTURE SUMMARY
+================================================================================
+
+.cursor/
+└── rules/
+    ├── core/                         <- Always-applied rules
+    │   ├── dev-environment.mdc       <- Activate venv before Python
+    │   ├── documentation-standards.mdc <- Doc update requirements
+    │   ├── code-reusability.mdc      <- DRY principles
+    │   └── proactive-suggestions.mdc <- AI suggests alternatives
+    │
+    ├── docs/                         <- Feature/module documentation
+    │   ├── application-overview.mdc  <- Architecture diagram
+    │   ├── documentation-router.mdc  <- Class/function lookup
+    │   └── [module-name].mdc         <- One per major module
+    │
+    ├── common-errors/                <- Bug documentation
+    │   ├── _template.mdc             <- Template for new errors
+    │   └── [type]-errors.mdc         <- Known error patterns
+    │
+    ├── reference/                    <- Reference material
+    │   └── project-structure.mdc     <- Complete file listing
+    │
+    ├── rules-index.mdc               <- Master index
+    ├── cursor-rules.mdc              <- How to create rules
+    ├── potential-problems.mdc        <- Known bugs & tech debt
+    ├── python-code-quality.mdc       <- Coding standards
+    └── self-improve.mdc              <- AI rule improvement
+
+================================================================================
+                              END OF GUIDE
+================================================================================

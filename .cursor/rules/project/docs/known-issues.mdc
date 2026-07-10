@@ -18,6 +18,221 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **STANDING DECISION: the heuristic `PanelSearchToolV25` is ground truth for panel/table detection -- confirmed by Marco 2026-07-06** --
+  For all panel-detection / table-detection ML work (TATR v7 and any
+  future v8+), the heuristic `PanelSearchToolV25` boxes are treated as
+  **ground truth** on the documents currently in hand. This is Marco's
+  explicit, standing instruction -- do NOT re-ask it each session.
+  Practical implications for the agent:
+  - When the ML model disagrees with the heuristic on these PDFs, the
+    **ML is wrong** (a false negative / false positive / loose box),
+    not the heuristic. "Improving the model" means converging ML
+    output toward the heuristic, and mAP is scored with the heuristic
+    as GT (as `evaluate_model.py --pdf` already does).
+  - Scope caveat recorded deliberately: this holds "at least on the
+    documents I have." If a genuinely new document class appears where
+    the heuristic is suspected wrong, flag it to Marco rather than
+    silently assuming ML is the reference -- but the default, and the
+    training/eval target, is heuristic-as-GT.
+
+- **ML Table Detection -- v7 MILESTONE LOCKED 2026-07-06 (baseline for v8 work)** --
+  **IMPORTANT CAVEAT ADDED 2026-07-07: the "0.8297 across the 5 held-out
+  PDFs" number below is NOT a clean generalization score -- it is a
+  TRAINING-SET score.** The 2026-07-07 session discovered that all 5 of
+  those "held-out" PDFs (and all 22 pdfToScan PDFs) actually have pages
+  in v7's training data. See the dedicated entry
+  "ML eval-set contamination discovered + v7 real-world recall problem
+  -- 2026-07-07" below for the evidence and implications. v7 is still the locked, preserved milestone
+  artifact (the read-only lock and the "v8 writes to new paths" rule
+  still stand), but treat every mAP/recall number in this entry as
+  measured on training-adjacent data, not as evidence of generalization.
+  v7 (Phase 2 result, mAP@0.5 = 0.8297 across the 5 nominally-held-out
+  PDFs -- see caveat above) is
+  the accepted production milestone and its artifacts are now
+  **preserved read-only** so future v8 experiments cannot overwrite or
+  mutate them. Locked artifacts on Marco's laptop:
+  - Model weights: `~/Documents/TableAnnotations/models_v7/` (chmod
+    read-only; also sha256-verified copy on AWS + Paperspace).
+  - Held-out eval baseline: `~/Documents/TableAnnotations/baselines/v7_2026-05-15/`
+    (chmod read-only; contains `SUMMARY.md`, the 5 `box_comparison.json`
+    files, and the ml/heuristic `magenta_overlays` PNGs).
+  Rule for future work: **v8+ retrains and evals must write to NEW
+  paths** (`models_v8/`, `baselines/v8_<date>/`, ...) and be compared
+  head-to-head against this locked v7 baseline. Never re-run an eval
+  into the `v7_2026-05-15/` folder. The known divergences v8 must
+  improve without regressing v7's wins (verified from the
+  `box_comparison.json` files + overlays on 2026-07-06):
+  - **False negatives dominate.** v7 misses 5 heuristic panels across
+    3 PDFs: `generic3` misses both middle-column panels (LED, L1E --
+    an entire vertical column skipped), `makayla1` misses 2 panels in
+    a dense multi-column grid, `K` misses 1 small top-row panel. The
+    pattern is small panels and panels packed into dense multi-column /
+    multi-row grids.
+  - **Occasional false positives.** `K` and `makayla1` each emit 1
+    extra box not matching a heuristic panel.
+  - **Loose box fit.** avg mAP@0.5:0.95 = 0.63 vs mAP@0.5 = 0.83;
+    worst is `D` panel03 (IoU 0.60, box cut ~200px short vertically).
+    `eval_loss` was still declining at v7's epoch 15, so a longer
+    (25-30 epoch) v8 retrain on the same v4/v7 recipe is the leading
+    low-risk lever for box tightness.
+  - `Electrical_Takeoff_page7` (4/4, tight) and `D` (3/3) are v7's
+    perfect-recall PDFs -- v8 must not regress these.
+
+- **ML eval-set contamination discovered + v7 real-world recall problem -- 2026-07-07 (BLOCKS valid v8 measurement; resume here)** --
+  Working session toward a v8 detector retrain. The headline discovery
+  is a **data-leakage / evaluation-contamination bug** that invalidates
+  the v7 mAP numbers as generalization evidence, plus solid evidence
+  that v7 has a real **recall** problem that a threshold change will not
+  fix. Nothing was retrained or committed; this is a findings + next-steps
+  log so the next session can resume without re-deriving all of it.
+
+  **1. Eval-set contamination (the blocker).**
+  - Every PDF v7 has ever been scored on -- the 5 "held-out"
+    (`generic3`, `K`, `makayla1`, `D`, `Electrical_Takeoff_page7`) AND
+    the other 17 in `~/Documents/pdfToScan/` -- has pages in v7's
+    training set. Verified directly: the v6 training images
+    (`~/Documents/TableAnnotations/v6/images/real__*`) were built from
+    `~/Documents/TableAnnotations/images/` (48 annotated source PNGs),
+    and that source folder contains pages from all 22 pdfToScan PDFs
+    (e.g. `...-generic3_page001.png`, `...-K_page001.png`,
+    `...-D_page001.png`, 10x `derek2_page*`, 9-10x `derekfirst_page*`).
+    For the single-page PDFs the exact trained page IS the page the
+    eval renders.
+  - Therefore the v7 SUMMARY's claim ("All five PDFs are NOT in
+    `images/`, so this is a clean held-out evaluation") is **false**,
+    and both v7's 0.83 (5-PDF) and tonight's 0.74 (22-PDF) are
+    training-set scores. **True held-out generalization is currently
+    unknown.**
+  - Consequence for v8: a retrain cannot be validly measured against
+    these PDFs. A clean train/test split must be established FIRST.
+
+  **2. v7 under-detects badly even on trained data (recall problem).**
+  Ran v7 (`models_v7/best`, conf 0.5, IoU 0.5) vs the heuristic
+  (ground truth) on all 22 pdfToScan PDFs; results in
+  `~/Documents/TableAnnotations/baselines/v7_expanded_2026-07-07/`
+  (NOT locked -- contaminated, keep for reference only). Full-set
+  avg mAP@0.5 ~= 0.74. The error mode is unambiguous and consistent:
+  **false negatives dominate; precision is near-perfect** (exactly ONE
+  false positive across all 22 PDFs, on `H`). Worst cases are dense /
+  specific-style sheets: `derek2` 40 GT -> 13 pred (recall 0.25),
+  `derekfirst` 23 -> 9 (0.35), `generic2` 5 -> 4 (0.40 -> mAP 0.20),
+  `A` 7 -> 4 (0.43). Note recall does NOT track raw panel count:
+  `O` (29 panels) scored recall 0.97 and `L` (12) 1.00, while
+  `derek2` (40) cratered -- so the misses concentrate on a *style*
+  of sheet (the "derek"-style drawings, `generic2`, `A`), likely
+  small / unusually-formatted panels, not density per se.
+
+  **3. Threshold tuning does NOT fix it (structural, needs retrain).**
+  Confidence sweep on Paperspace GPU (partial -- timed out at 900s
+  after `generic2` all + `A` at 0.5/0.3/0.2; `C`/`derek2` sweep points
+  did not run), results in
+  `~/Documents/TableAnnotations/baselines/v7_confsweep_2026-07-07/`:
+  - `generic2`: recall **flat at 0.40** across conf 0.5 -> 0.3 -> 0.2
+    -> 0.1; lowering conf only added false positives (precision
+    0.50 -> 0.40), recovered zero missed panels.
+  - `A`: recall 0.43 (c0.5) -> 0.57 (c0.3, c0.2) then plateaus; one
+    extra true panel recovered but still far short of the 7 GT.
+  Conclusion: the missed panels are not low-confidence proposals being
+  thresholded out -- the model isn't proposing them at all. A v8
+  **retrain targeting recall** is required; a conf change is not a fix.
+
+  **4. Clean (not-in-training) PDFs available for a real held-out set.**
+  `~/Documents/Diagrams/` contains PDFs NOT in the training set:
+  `chucksmall.pdf`, `ELECTRICAL SET (Mark Up).pdf` (+ its
+  `..._electrical_filtered.pdf` variant), and `Panels_Example.pdf`.
+  The rest of that folder (`generic2/3`, `good_tester_combo`,
+  `makayla1/2`, `NoAmps`) ARE in training. Since the heuristic is
+  ground truth (see STANDING DECISION entry above), any new PDF can be
+  auto-labeled for both training and eval without manual annotation --
+  so building a bigger clean test set is cheap.
+
+  **5. Recommended plan for the next session (NOT yet approved by
+  Marco -- he skipped the direction question and said "log these
+  issues, continue tomorrow"):**
+  1. **Establish a clean train/test split.** Reserve a set of PDFs
+     (start with the `Diagrams/` clean ones + collect more real
+     sheets, especially "derek"-style / small-panel / dense grids)
+     used ONLY for eval, never for training.
+  2. **Re-baseline v7 honestly** on that clean set to get a real
+     generalization number (expect it below 0.74).
+  3. **Then** plan/run the v8 recall retrain (heuristic-auto-labeled
+     training data biased toward the failing sheet styles), measured
+     only on the clean held-out set, compared head-to-head vs the
+     locked v7.
+  - Open decision Marco still needs to make: clean-split-first
+    (recommended) vs gather-more-data-first vs retrain-now-accept-caveat.
+
+  **6. Environment notes for resuming.**
+  - Laptop GPU driver was down this session (`nvidia-smi` failed), so
+    all laptop eval ran on CPU (~18 s/PDF small, several min for big
+    multi-page like `derek2`/`derekfirst`). Training needs a GPU host.
+  - Paperspace (A5000) was used for GPU eval this session with customer
+    traffic idle (Marco confirmed no customer jobs running). By end of
+    session Paperspace was **unreachable (`No route to host`)** --
+    apparently powered down -- so a lingering `evaluate_model.py` from
+    the timed-out sweep could not be explicitly killed, but it dies with
+    the box. `anvil-uplink.service` must remain the untouched production
+    server; never enable/leave a training run competing with it.
+  - The `v7_expanded_2026-07-07` and `v7_confsweep_2026-07-07` baseline
+    dirs are contaminated-eval artifacts kept for reference; they are
+    NOT a valid v7 baseline. The only valid locked v7 artifact remains
+    `baselines/v7_2026-05-15/` (read-only), with the training-set caveat
+    now noted in the milestone entry above.
+
+- **OCR pipeline advanced to APIv12 + RulesEngine input hardening -- LANDED 2026-07-03 (merge `04a2361`)** --
+  A `TOOL_Debug_MaxUserTesting` -> `TOOL_DEVELOPMENT_V3_MS` merge advanced
+  the production OCR pipeline and added a defense-in-depth layer so junk/
+  ambiguous OCR can no longer manufacture a wrong-but-plausible quoteable
+  BOM. This is committed and on `origin/TOOL_DEVELOPMENT_V3_MS`; the docs
+  (`architecture.mdc`, `file-locations.mdc`, `data-structures.mdc`) were
+  synced in the same session. What changed:
+  - **`uplink_server.py` now imports `OcrLibrary.BreakerTableParserAPIv12`**
+    (was APIv11); `API_VERSION = "API_12"`. New file
+    `OcrLibrary/BreakerTableParserAPIv12.py` (746 lines). APIv11 is retained
+    for comparison. Per the versioned-module convention, always confirm the
+    active version from the imports at the top of `uplink_server.py`.
+  - **New RulesEngine input sanitizer** `_rules_safe_components()` (plus
+    helper `_is_problem_component_for_rules()`) in `uplink_server.py`. It is
+    applied on **all three** rules entry points -- `_process_job()`,
+    `vm_rerun_rules_with_panel_edit()`, and
+    `vm_rerun_rules_with_global_defaults()` -- and returns a RulesEngine-only
+    copy. The saved `result.json` components still keep the raw/editable OCR
+    evidence; only the rules input is sanitized. Problem panels (`_skipped`
+    or non-empty `panelStatus`) are fully suppressed for rules (quote-driving
+    attrs nulled, `attrs.breaker_data_suppressed` +
+    `attrs.breaker_suppression_reason` set). Clean panels are validated/
+    snapped: bus & main amps 100-1200 ending in 0/5; voltage in
+    {120,208,240,480,600}; intRating in the standard AIC set; spaces snapped
+    to standard even counts (16->18, 40->42, ...) and capped at 84; trim in
+    {SURFACE,FLUSH} (forced None for NEMA3R); breakers filtered to amps
+    15-1200, poles 1/2/3, not exceeding the panel's main/bus limit.
+  - **`PanelHeaderParserV11` gained two guards**:
+    `_looks_like_aic_or_ka_text()` (blocks `65k`, `65KA`, `65KAIC`, `AIC: 65`,
+    `65,000 A`, "Available Fault Current", etc.) and
+    `_looks_like_non_amp_context_text()` (blocks numeric location/source
+    metadata like `Location: ELECTRICAL 123`, `Fed From: MDP-1`,
+    `Serving RTU-3`, while deliberately NOT blocking legit BUS/MAIN/MCB
+    rating text). These are wired into every BUS/MAIN amp extraction path so
+    such text is never read as amps.
+  - **`_merge_component_from_btp()` hardening**: it now reads the header
+    parser's `headerValidationMissing` list and nulls `amperage`/`voltage`/
+    `mainBreakerAmperage` when the field was flagged missing or is out of the
+    valid range; parser-flagged panels (`panelStatus`) get `_skipped=True`
+    and a `reason`.
+  - **Manual-edit flow (`vm_rerun_rules_with_panel_edit`)** now clears more
+    stale status on edit: `panelStatus`, `panelNote`, `specialHeaderType`,
+    `_skipped`, `reason`, and the `attrs` keys `breaker_data_suppressed`,
+    `breaker_suppression_reason`, `headerValidationStatus`,
+    `headerValidationMissing`. A user-corrected panel is therefore re-judged
+    purely from the edited attrs + a fresh rules rerun, instead of inheriting
+    the original parser's problem flags.
+  - **Guidance for future work**: when adding a new quote-driving attribute,
+    extend `_rules_safe_components()` (not just the parser) so an unvalidated
+    value can't leak into the rules engine. The commit message on `6847d9c`
+    also references a `BreakerTableParserAPIv12` switch tied to
+    "preserve breakers so only panel attrs need editing to save a panel";
+    the amps-hardening is `944ca14`.
+
 - **AWS third-party Marketplace AMI billing trap + new server rebuild -- MOSTLY RESOLVED 2026-06-04 (1 item deferred: Anvil key)** --
   **Status rollup**: the $162 Marketplace billing leak is stopped
   (subscription cancelled 2026-06-03); the transient `InsufficientInstanceCapacity`

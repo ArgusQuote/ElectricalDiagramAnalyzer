@@ -1,0 +1,522 @@
+# AWS Dev-Box Setup -- Agent Handoff
+
+> **STATUS: PROVISIONING COMPLETE 2026-05-20 PM. PATHS MIGRATED 2026-05-23.**
+> The AWS dev box is fully provisioned, paths have been migrated from
+> the original `paperspace` user layout to the AMI's default `ubuntu`
+> user, and the box is in the "ready but not running" steady state.
+> Do not re-run any of the steps below unless Marco asks for a fresh
+> rebuild (e.g. a new EC2 instance). For the canonical current state,
+> read `.cursor/rules/project/docs/known-issues.mdc` under "AWS dev-box
+> provisioning" first -- that file is the system of record. The
+> "Status (current)" and "What remains for the next agent" sections
+> below tell you what's left to do, if anything.
+
+> **Path migration 2026-05-23**: The original 2026-05-20 PM
+> provisioning created a separate `paperspace` user on the AWS box at
+> `/home/paperspace/...` to mirror the Paperspace VM exactly. On
+> 2026-05-23 that layout was retired in favor of the AMI's default
+> `ubuntu` user at `/home/ubuntu/...`. The `paperspace` user no
+> longer exists on the AWS box. Every executable recipe in this
+> document (the "Recipe (for future EC2 rebuilds)" blocks and the
+> day-to-day usage sections at the bottom) targets the **current
+> ubuntu layout**. The "(DONE 2026-05-20 PM)" prose narratives are
+> preserved verbatim as historical record; they describe the
+> original `/home/paperspace/...` layout that existed at the time
+> of the May 20 session.
+
+This document is the historical execution plan from the 2026-05-20
+session, updated 2026-05-23 to reflect the ubuntu-layout migration.
+Every step has a **(DONE 2026-05-20 PM)** marker followed by what
+actually happened. The original recipes have been retargeted to
+the current ubuntu layout so a future agent can spin up another
+EC2 instance from scratch by re-running them.
+
+The upstream context (history, decisions, deferred items, and the
+full operational record) is in `.cursor/rules/project/docs/known-issues.mdc`
+under the "AWS dev-box provisioning" entry.
+
+## Status (current; last verified 2026-05-23)
+
+- **AWS box `i-0ecb7e8fabdb8548e` (`g5.2xlarge`, `us-east-1`)** is
+  fully provisioned. Lifecycle: Marco starts it from the AWS
+  Console when he wants to test, stops it between sessions to
+  save the ~$1.21/hr compute charge (~$15.60/mo accrues while
+  stopped: ~$12/mo gp3 root volume + ~$3.60/mo EIP).
+  - Public IP: **Elastic IP `52.21.216.68`** (allocated and
+    associated 2026-05-21 AM; Name tag `argus-prod-aws-eip`).
+    Permanent across stop/start cycles. The original dynamic IP
+    `3.89.204.0` was released back to the AWS pool at EIP-
+    association time.
+  - SSH (laptop): `ssh argus-prod-aws` -- alias added to
+    `~/.ssh/config` pointing at `52.21.216.68`, user `ubuntu`,
+    key `~/.ssh/argus-prod-key.pem`, `IdentitiesOnly yes`.
+    The bare `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68`
+    form also still works.
+  - Internal hostname: `ip-172-31-45-45`.
+  - Service user: **`ubuntu`** (the AMI default, migrated to on
+    2026-05-23 -- the original `paperspace` user no longer exists
+    on this box).
+  - Python venv: `/home/ubuntu/venv` (Python 3.10.20).
+  - Repo: `/home/ubuntu/ElectricalDiagramAnalyzer` on branch
+    `TOOL_DEVELOPMENT_V3_MS`.
+  - v7 TATR weights: `/home/ubuntu/Documents/TableAnnotations/models_v7/best/`
+    (111 MB; was sha256-verified byte-identical to Paperspace at
+    `47401faaf34ee8a797801aca5c510e1d845cf2343260b0761d9260d08c4d9ede`
+    in the 2026-05-20 PM transfer).
+  - Env file: `/home/ubuntu/.anvil_env` (66 bytes, mode 600,
+    `ubuntu:ubuntu`; same byte content as Paperspace's
+    `/home/paperspace/.anvil_env` -- shared Anvil app, shared key).
+  - GitHub deploy key: `/home/ubuntu/.ssh/id_ed25519`, registered
+    in the repo's Deploy Keys as `argus-prod-aws-ubuntu (2026-05-23)`
+    with **write access enabled**, so the AWS box can both
+    `git pull` and `git push`.
+  - Kernel: `6.17.0-1013-aws` (post-2026-05-23 reboot, from
+    `6.14.0-1016-aws`); NVIDIA driver: 535.309.01.
+  - `argus-uplink.service`: installed at `User=ubuntu` /
+    `WorkingDirectory=/home/ubuntu/ElectricalDiagramAnalyzer` /
+    `ExecStart=/home/ubuntu/venv/bin/python ...`, **`disabled`**,
+    **`inactive (dead)`** (guardrail held through the
+    2026-05-23 reboot).
+- **Paperspace** is on branch `TOOL_DEVELOPMENT_V3_MS` (HEAD
+  `f7e53bf "Merge branch 'TOOL_Debug_MaxUserTesting' into TOOL_DEVELOPMENT_V3_MS"`
+  before any local commits Marco may have made since), serving 100%
+  of customer traffic. `anvil-uplink.service` is `enabled` + `active`
+  and was never touched during provisioning or path migration. The
+  Paperspace VM continues to use the `paperspace` user at
+  `/home/paperspace/...` -- only the AWS box migrated to `ubuntu`.
+- **The Anvil uplink key was not regenerated** -- the same key is
+  shared between Paperspace and AWS. Running `uplink_server.py` on
+  AWS will cause Anvil to round-robin jobs between the two hosts.
+
+## What remains for the next agent
+
+All AWS provisioning work is committed on `origin/TOOL_DEVELOPMENT_V3_MS`,
+including the pip-install permission fix (`1e51cab "MS: Fixed
+provision-aws-uplink.sh"`). The instance has been stopped from the
+AWS Console (started by Marco 2026-05-21 AM after the EIP rollout)
+and there is no required follow-up. The only remaining optional
+item is below.
+
+- **(Optional)** Do a controlled foreground manual run of
+  `uplink_server.py` on AWS as a capability test. This makes Anvil
+  round-robin jobs between AWS and Paperspace until Ctrl-C, so it
+  must NOT be run during a customer meeting or with live jobs in
+  flight. Recipe is in "Step F continued -- Manual development
+  run" below and in `AWSMigration/README.md` Section 6. Procedure:
+  start the instance from the AWS Console, wait ~2 min for the
+  `2/2 status checks`, then `ssh argus-prod-aws` and follow the
+  recipe.
+
+DO NOT under any circumstance:
+
+- `systemctl enable argus-uplink` on AWS
+- `systemctl start argus-uplink` on AWS
+- Regenerate the `ANVIL_UPLINK_KEY` (would invalidate Paperspace's
+  connection)
+- Print the `ANVIL_UPLINK_KEY` value to chat or write it to the
+  laptop's disk (sha256-only verification is the established pattern)
+- Touch Paperspace's `anvil-uplink.service` (it's serving customers)
+
+## Goal (achieved 2026-05-20 PM)
+
+Provisioned the AWS EC2 instance as a **manual-run-only development /
+capability-testing environment**. Paperspace remains production. AWS
+does NOT auto-start the Anvil uplink under any circumstance.
+
+Specifically:
+
+- AWS box: fully provisioned (deps installed, repo cloned, venv built,
+  weights synced, env key set, systemd unit file installed). ✓
+- AWS `argus-uplink.service`: present but never `systemctl enable`d. ✓
+- No EventBridge schedule. ✓
+- No parallel cutover. ✓
+- Paperspace's existing `anvil-uplink.service` autostart NOT touched. ✓
+- Marco runs `python AnvilUplinkCode/uplink_server.py` manually on
+  AWS only when actively testing. (Has not yet been done; optional.)
+
+## Initial baseline (as of 2026-05-20 AM, pre-provisioning)
+
+1. EC2 launched: instance ID `i-0ecb7e8fabdb8548e`, Name tag
+   `argus-production-server` (the name predates the dev-only
+   reclassification; do not rename), `g5.2xlarge`, `us-east-1`,
+   public IP `3.89.204.0` (dynamic; later replaced by Elastic IP
+   `52.21.216.68` on 2026-05-21 AM).
+2. AMI: "Deep Learning Base GPU AMI" Marketplace listing labeled
+   Ubuntu 20.04 but actual OS is **Ubuntu 24.04.3 LTS (Noble Numbat)**
+   -- AWS-side packaging quirk, not a bug.
+3. Hardware verified on EC2: NVIDIA A10G, 23,028 MiB VRAM, driver
+   535.274.02, CUDA-driver 12.2, `nvcc` 12.0, 30 GiB RAM, 145 GiB free
+   on root, no swap.
+4. SSH access: `ssh argus-prod-aws` (laptop alias) or
+   `ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68`. Key
+   backed up by Marco (cloud + multiple copies).
+5. Security group `argus-uplink-sg`: SSH inbound from Marco's IP only.
+   Partner's IP deferred.
+6. Local files created at `AWSMigration/` (now committed on
+   `TOOL_DEVELOPMENT_V3_MS` per Step B):
+   - `provision-aws-uplink.sh` -- idempotent bootstrap script.
+   - `paperspace-freeze.txt` -- 149-package canonical install spec
+     captured from production Paperspace venv.
+   - `README.md` -- workflow doc.
+   - `HANDOFF.md` -- this file.
+
+## Key decisions already made (do not re-litigate)
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Branch to clone on AWS | `TOOL_DEVELOPMENT_V3_MS` | Was `TOOL_Debug_MaxUserTesting` until 2026-05-20 PM; Paperspace was migrated to V3_MS (which already contained all of LW's production fixes plus the v7 ML work and the `AWSMigration/` folder) to unify Paperspace and AWS on a single branch and avoid maintaining two production trees |
+| Python version | 3.10 (via deadsnakes PPA) | Match Paperspace; avoids detectron2/layoutparser 3.12 risks per the v6/v7 entries in `known-issues.mdc` |
+| Install spec | `AWSMigration/paperspace-freeze.txt`, NOT `MISC/requirements.txt` | Repo `MISC/requirements.txt` is stale (pins `numpy<2` but Paperspace runs 2.1.2; transformers isn't listed) |
+| `detectron2` | **Excluded** from install | Unused by `uplink_server.py` (only lazy-imported in `MLTableDetection/TableDetectorML.py:236`); fragile git-source build with CUDA-version risk |
+| Code transfer to AWS | GitHub deploy key (read by default; write enabled on 2026-05-23 redeploy so AWS box can `git push`) | Cleanest long-term; future `git pull` works without ferry |
+| Service user on AWS | **`ubuntu`** (the AMI default), as of 2026-05-23 path migration | Original plan was a dedicated `paperspace` user to mirror Paperspace; that turned out to be unnecessary indirection. Using `ubuntu` directly is simpler and is what the box actually runs as today |
+| Env file path on AWS | `/home/ubuntu/.anvil_env` (was `/home/paperspace/.anvil_env` until 2026-05-23) | Follows the service user; the original plan mirrored Paperspace exactly (NOT `/etc/` as the earliest migration plan assumed) |
+| Systemd unit name | `argus-uplink.service` (AWS) vs `anvil-uplink.service` (Paperspace) | Distinguishable in logs/`journalctl` |
+| EventBridge schedule | **Skip entirely** | Marco changed plan: AWS is dev, not scheduled-prod |
+| `systemctl enable --now` on AWS | **Never** | Per Marco's latest direction |
+
+## Steps remaining (in order)
+
+### Step A -- (DONE 2026-05-20 PM)
+
+Provisioning script footer and README rewritten to remove residual
+parallel-cutover language. The script no longer ends with a
+`systemctl enable` instruction; instead it has a prominent
+do-not-enable warning and a manual-run command block. README
+Section 5 was rewritten as "Verify ready but not running" and Section
+6 as "Manual development run" (with the same warning).
+
+### Step B -- (DONE 2026-05-20 PM)
+
+The `AWSMigration/` folder was committed to `TOOL_DEVELOPMENT_V3_MS`
+(commits `386954b`, `60cb6f7`, `c321cf5`) and pushed to origin.
+Paperspace was then migrated from `TOOL_Debug_MaxUserTesting` to
+`TOOL_DEVELOPMENT_V3_MS` (merge commit `f7e53bf` on origin), which
+unifies Paperspace and the AWS dev box on a single production
+branch. `TOOL_Debug_MaxUserTesting` is now effectively retired
+(its only commits beyond the merge base were two `__pycache__/*.pyc`
+binary-only bumps containing no source change, so nothing was lost
+by switching).
+
+### Step C -- (DONE 2026-05-20 PM) Run the provisioning script on AWS
+
+**What happened**: `scp`'d the script to `/tmp/`, ran `sudo bash` on
+AWS. First run exited at the deploy-key step (exit 10). Marco added
+the generated ed25519 public key
+(`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIP/uHadXeMKlGyxqdBI8N8Uc2zvNupl/5OD6dwZ3idp9 argus-prod-aws-ip-172-31-45-45@20260520`)
+to the repo's Deploy Keys with title `argus-prod-aws (2026-05-20)`,
+write access UNCHECKED. Re-run completed Steps 4-9 (clone, venv,
+pip install, weights placeholder, env placeholder, systemd unit)
+in ~3 minutes. One bug encountered: the original script's pip-install
+step failed with EACCES because the `mktemp` temp-freeze was
+root-owned mode-600 but pip ran as `paperspace`. Fix applied
+locally (added a `chown` line) and re-run succeeded.
+
+**Recipe (for future EC2 rebuilds)**:
+
+```bash
+scp -i ~/.ssh/argus-prod-key.pem \
+    AWSMigration/provision-aws-uplink.sh \
+    ubuntu@<aws-host>:/tmp/
+
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host>
+sudo bash /tmp/provision-aws-uplink.sh
+```
+
+First run will exit at Step 3 of the script (deploy-key generation)
+with the public key printed. Have Marco paste it into
+`https://github.com/ArgusQuote/ElectricalDiagramAnalyzer/settings/keys`:
+
+- Title: `argus-prod-aws (<YYYY-MM-DD>)`
+- Allow write access: **leave UNCHECKED** (read-only is enough)
+
+Re-run `sudo bash /tmp/provision-aws-uplink.sh` after the deploy key
+is added. The script will continue through Steps 4-9 and exit. The
+pip-install permission fix is now in the committed script (or should
+be -- see "What remains for the next agent" loose end #1).
+
+### Step D -- (DONE 2026-05-20 PM) Ferry the v7 TATR weights
+
+**What happened**: Two-step rsync ran cleanly. Paperspace -> laptop
+took ~5 s at ~22 MB/s (LAN-ish via SSH); laptop -> AWS took ~4 s at
+~32 MB/s. AWS-side `cp -r /tmp/v7-weights/. .../best/ && chown -R
+paperspace:paperspace` succeeded. Verified by **sha256 match** on
+`model.safetensors`:
+`47401faaf34ee8a797801aca5c510e1d845cf2343260b0761d9260d08c4d9ede`
+on both Paperspace and AWS. Local `/tmp/v7-weights-cache/` was
+deleted post-transfer. One small gotcha (no longer applicable after
+the 2026-05-23 path migration): post-`chown` to `paperspace`, the
+`ubuntu` SSH user couldn't read into `/home/paperspace/Documents`
+without `sudo`. With the AWS layout now under `/home/ubuntu/...`
+owned by the `ubuntu` user itself, the SSH user has direct read
+access and no extra `sudo` is needed for verification.
+
+**Recipe (for future EC2 rebuilds)** -- targets the current
+`/home/ubuntu/...` AWS layout. From Marco's laptop:
+
+```bash
+rsync -avhP \
+    paperspace-vm:/home/paperspace/Documents/TableAnnotations/models_v7/best/ \
+    /tmp/v7-weights-cache/
+
+rsync -avhP -e "ssh -i ~/.ssh/argus-prod-key.pem" \
+    /tmp/v7-weights-cache/ \
+    ubuntu@<aws-host>:/tmp/v7-weights/
+
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host> '
+    sudo mkdir -p /home/ubuntu/Documents/TableAnnotations/models_v7/best &&
+    sudo cp -r /tmp/v7-weights/. /home/ubuntu/Documents/TableAnnotations/models_v7/best/ &&
+    sudo chown -R ubuntu:ubuntu /home/ubuntu/Documents &&
+    rm -rf /tmp/v7-weights
+'
+
+rm -rf /tmp/v7-weights-cache
+```
+
+Expected size: ~111 MB total (1.4K `config.json` + 110M
+`model.safetensors` + 454 `preprocessor_config.json` + 40K
+`trainer_state.json` + 5.4K `training_args.bin`). Verify on AWS via
+**sha256 match against Paperspace** (preferred over `du`, since size
+alone doesn't catch silent corruption):
+
+```bash
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host> \
+    'sha256sum /home/ubuntu/Documents/TableAnnotations/models_v7/best/model.safetensors'
+ssh paperspace-vm \
+    'sha256sum /home/paperspace/Documents/TableAnnotations/models_v7/best/model.safetensors'
+# expect identical hashes (47401faa...4d9ede as of 2026-05-20).
+```
+
+### Step E -- (DONE 2026-05-20 PM) Ferry the ANVIL_UPLINK_KEY without printing it
+
+**What happened**: Pipe-only transfer ran cleanly. The key never
+appeared in chat, never landed on the laptop's disk, never printed
+to stdout (`tee` was redirected to `/dev/null`). Verified by
+**sha256 match**:
+`da78f3f9fdb43a0f1641eb7d4aedd842e7bc3118f1bd661c17d043e24a13a39b`
+on both Paperspace and AWS (66 bytes, 1 line, starts with
+`ANVIL_UPLINK_KEY=`, mode 600). The AWS-side file was originally
+owned by `paperspace:paperspace` at `/home/paperspace/.anvil_env`;
+2026-05-23 path migration moved it to `/home/ubuntu/.anvil_env`
+owned by `ubuntu:ubuntu` with the same byte content (and therefore
+the same sha256).
+
+**Recipe (for future EC2 rebuilds)** -- targets the current
+`/home/ubuntu/.anvil_env` AWS layout:
+
+```bash
+ssh paperspace-vm 'cat /home/paperspace/.anvil_env' | \
+    ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host> \
+        'sudo tee /home/ubuntu/.anvil_env >/dev/null && \
+         sudo chown ubuntu:ubuntu /home/ubuntu/.anvil_env && \
+         sudo chmod 600 /home/ubuntu/.anvil_env'
+```
+
+Verify by sha256 (preferred -- proves byte-equality without revealing
+the value):
+
+```bash
+ssh paperspace-vm 'sha256sum /home/paperspace/.anvil_env'
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host> \
+    'sha256sum /home/ubuntu/.anvil_env'
+# expect identical hashes (da78f3f9...43a39b as of 2026-05-20).
+```
+
+Backup verification with file metadata (no value print):
+
+```bash
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host> \
+    'ls -la /home/ubuntu/.anvil_env'
+# expect: -rw------- 1 ubuntu ubuntu 66 ... .anvil_env
+```
+
+The byte count `66` matches Paperspace's file exactly.
+
+### Step F -- (DONE 2026-05-20 PM) Verify the AWS box is "ready but not running"
+
+**What happened**: All five smoke checks passed.
+
+| Check | Result |
+|---|---|
+| Python version | `Python 3.10.20` ✓ |
+| CUDA visible to PyTorch | `cuda.is_available=True`, `device=NVIDIA A10G` ✓ |
+| `anvil.server` + `easyocr` + `transformers` import | clean (`transformers 4.55.4`) ✓ |
+| v7 model load | OK, `num_queries=15` (correct v7 signature) ✓ |
+| `argus-uplink.service` status | `disabled` + `inactive (dead)` ✓ |
+
+Note: the v7 model load produces a stack of "for X.weight: copying
+from a non-meta parameter in the checkpoint to a meta parameter in
+the current model, which is a no-op" warnings from PyTorch 2.4's
+safetensors loader. These are **benign noise** -- the model loaded
+successfully and the same warnings appear on Paperspace + the laptop
+dev RTX 500 Ada. Real load failures would raise an exception, not a
+warning.
+
+A quoting gotcha was hit on the first attempt: trying to wrap the
+smoke checks in `sudo -iu paperspace bash -c "..."` over SSH with
+nested escapes mangled newlines (the first line came out as
+`activatecd /home/paperspace/...`). The 2026-05-23 path migration
+also removed the need for `sudo -iu <service-user>` here -- the
+service user IS the SSH user (`ubuntu`) now, so commands can run
+directly. If a future rebuild reintroduces a separate service
+user, fall back to the heredoc-piped-into-`bash -s` pattern (it
+avoids nested-quoting hazards).
+
+**Recipe (for future EC2 rebuilds)** -- targets the current
+`/home/ubuntu/...` AWS layout. Runs as the SSH `ubuntu` user
+directly, no `sudo -iu` needed:
+
+```bash
+ssh -i ~/.ssh/argus-prod-key.pem ubuntu@<aws-host> 'bash -s' <<'REMOTE'
+set -u
+VENV=/home/ubuntu/venv
+V7=/home/ubuntu/Documents/TableAnnotations/models_v7/best
+
+echo "=== Python ==="
+"$VENV/bin/python" --version
+
+echo "=== CUDA ==="
+"$VENV/bin/python" -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+
+echo "=== imports ==="
+"$VENV/bin/python" -c "import anvil.server, easyocr, transformers; print('imports ok', transformers.__version__)"
+
+echo "=== v7 model load ==="
+"$VENV/bin/python" -c "
+from transformers import TableTransformerForObjectDetection
+m = TableTransformerForObjectDetection.from_pretrained('$V7')
+print('v7 model loads OK; num_queries=', m.config.num_queries)
+"
+
+echo "=== systemd ==="
+systemctl status argus-uplink --no-pager
+echo "is-enabled: $(systemctl is-enabled argus-uplink)"
+echo "is-active:  $(systemctl is-active argus-uplink)"
+REMOTE
+```
+
+If all five checks pass, **the AWS box is in the desired state**:
+ready to manually run `python AnvilUplinkCode/uplink_server.py`
+whenever Marco wants to test, but does nothing at boot.
+
+### Step F continued -- Manual development run (optional, only when Marco asks)
+
+This is NOT a provisioning step -- it's the day-to-day use mode.
+Running this makes Anvil round-robin jobs between AWS and Paperspace
+until Ctrl-C, so it MUST NOT be run during a customer meeting or
+with live jobs in flight.
+
+```bash
+ssh argus-prod-aws
+source /home/ubuntu/venv/bin/activate
+cd /home/ubuntu/ElectricalDiagramAnalyzer
+export $(cat /home/ubuntu/.anvil_env | xargs)
+python AnvilUplinkCode/uplink_server.py
+# ... test, then Ctrl-C to stop and disconnect from Anvil.
+```
+
+Expect ~30 s startup before the 4 workers report ready. Watch for
+`Connected to "Argus Automated BOM" as SERVER` to confirm Anvil
+attach succeeded.
+
+### Step G -- (DONE 2026-05-20 PM) Stopped at the right place
+
+**What happened**: Did NOT run `python AnvilUplinkCode/uplink_server.py`.
+Did NOT run `systemctl enable --now argus-uplink`. The box was left
+in the "ready but not running" steady state and the session ended.
+Marco was asked whether he wanted to do an immediate manual
+foreground test or leave the box dormant; the answer (implicitly,
+by not running it) was "leave it dormant for now."
+
+**Guardrails for the next agent (carry forward, non-negotiable)**:
+
+- Do NOT run `python AnvilUplinkCode/uplink_server.py` on AWS unless
+  Marco explicitly requests it -- running it makes Anvil round-robin
+  between AWS and Paperspace for as long as the process is up.
+- Do NOT run `systemctl enable --now argus-uplink`. The systemd unit
+  is present for symmetry but must never be activated under the
+  current plan.
+
+## Critical guardrails (carry forward, non-negotiable)
+
+1. **Paperspace's `anvil-uplink.service` is untouchable.** Marco
+   explicitly does not want it disabled, stopped, or modified.
+   Read-only access to its config and env file is fine.
+2. **Never run `systemctl enable --now argus-uplink` on AWS.** Even
+   after Step F passes. Marco must explicitly request it as a
+   separate decision later, and the current plan is for him never
+   to make that request.
+3. **Never regenerate the `ANVIL_UPLINK_KEY`** in the Anvil
+   dashboard. Doing so invalidates Paperspace's connection. Copying
+   the existing key (Step E) is the only correct path.
+4. **Never print the `ANVIL_UPLINK_KEY` to chat or stdout.** Use the
+   pipe-only transfer in Step E.
+5. **Customer meetings are happening.** Do not run
+   `python AnvilUplinkCode/uplink_server.py` on AWS during business
+   hours unless Marco explicitly says so -- running it makes Anvil
+   round-robin between AWS and Paperspace.
+6. **Do not commit anything without Marco's confirmation.** Per the
+   workspace's `git-conventions` rule and Cursor's default policy.
+
+## Open items for Marco's future decisions (not blockers)
+
+These should land as deferred items in `known-issues.mdc`'s
+"AWS dev-box provisioning" entry, not as automatic next actions:
+
+- Add Marco's business partner's IP to the `argus-uplink-sg` security
+  group when the partner's IP is known.
+- Decide if/when AWS should be promoted to production. (Currently no
+  plan.)
+- Decide if/when Paperspace's autostart should be disabled.
+  (Currently keep it on.)
+- Decide if/when EventBridge scheduling is wanted. (Currently not
+  wanted.)
+- Decide if a separate Anvil app for staging is worth setting up.
+  (Currently AWS and Paperspace share the same uplink key.)
+- Fix the long-standing `MISC/requirements.txt` drift vs production.
+  (Not part of this migration; tracked separately.)
+
+## What Marco does day-to-day after Step F passes
+
+```bash
+# To test changes on AWS dev:
+ssh argus-prod-aws
+source /home/ubuntu/venv/bin/activate
+cd /home/ubuntu/ElectricalDiagramAnalyzer
+export $(cat /home/ubuntu/.anvil_env | xargs)
+python AnvilUplinkCode/uplink_server.py
+# ... test, Ctrl-C when done
+```
+
+If Marco stops the EC2 instance to save money, the next session is:
+
+1. Start the instance from the AWS Console.
+2. Wait ~2 min for `2/2 status checks` to pass.
+3. `ssh argus-prod-aws` -- the Elastic IP `52.21.216.68` is
+   permanent across stop/start cycles, so no IP lookup needed.
+
+## Useful host aliases on Marco's laptop
+
+The laptop has these SSH config entries (as of 2026-05-21):
+
+```
+Host paperspace-vm
+    HostName 184.105.3.207
+    User paperspace
+    # (uses ~/.ssh/id_ed25519)
+
+Host argus-prod-aws
+    HostName 52.21.216.68
+    User ubuntu
+    IdentityFile ~/.ssh/argus-prod-key.pem
+    IdentitiesOnly yes
+```
+
+Both are configured in `~/.ssh/config`. The earlier note in this
+doc about "no alias yet for AWS" is no longer accurate. The bare
+`ssh -i ~/.ssh/argus-prod-key.pem ubuntu@52.21.216.68` form also
+works if needed (e.g. running ssh commands from a host that
+doesn't have the laptop's `~/.ssh/config`). `IdentitiesOnly yes`
+prevents SSH from offering the laptop's other keys (`id_ed25519`)
+to AWS before trying the right one, which keeps `journalctl -u
+ssh` on AWS clean.

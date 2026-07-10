@@ -5,6 +5,10 @@ opencv-python
 matplotlib
 tqdm
 
+# PDF Processing (commercial-friendly - Apache 2.0 / MPL 2.0)
+pypdfium2>=4.0        # PDF rendering (replaces PyMuPDF for new code)
+pikepdf>=8.0          # PDF manipulation (cropping, merging)
+
 # OCR
 easyocr
 

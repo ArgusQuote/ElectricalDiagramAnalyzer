@@ -1,0 +1,150 @@
+{
+  "simultaneous_jobs": 6,
+  "api_version": "API_11",
+  "input_pdf": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf",
+  "batch_elapsed_sec": 51.13,
+  "success_count": 6,
+  "failure_count": 0,
+  "avg_job_elapsed_sec": 48.1,
+  "min_job_elapsed_sec": 42.56,
+  "max_job_elapsed_sec": 51.05,
+  "avg_worker_warmup_sec": 2.84,
+  "max_worker_warmup_sec": 3.11,
+  "slowdown_vs_1x": 1.58,
+  "ready_results": [
+    {
+      "worker_idx": 0,
+      "ok": true,
+      "warmup_sec": 3.09,
+      "vram": {
+        "free_gib": 20.36,
+        "total_gib": 21.99
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 1,
+      "ok": true,
+      "warmup_sec": 3.07,
+      "vram": {
+        "free_gib": 19.48,
+        "total_gib": 21.99
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 2,
+      "ok": true,
+      "warmup_sec": 2.48,
+      "vram": {
+        "free_gib": 21.22,
+        "total_gib": 21.99
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 3,
+      "ok": true,
+      "warmup_sec": 2.95,
+      "vram": {
+        "free_gib": 20.29,
+        "total_gib": 21.99
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 4,
+      "ok": true,
+      "warmup_sec": 3.11,
+      "vram": {
+        "free_gib": 19.54,
+        "total_gib": 21.99
+      },
+      "error": null
+    },
+    {
+      "worker_idx": 5,
+      "ok": true,
+      "warmup_sec": 2.36,
+      "vram": {
+        "free_gib": 21.15,
+        "total_gib": 21.99
+      },
+      "error": null
+    }
+  ],
+  "results": [
+    {
+      "job_name": "job_0",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 50.89,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_6/job_0"
+    },
+    {
+      "job_name": "job_1",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 51.02,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_6/job_1"
+    },
+    {
+      "job_name": "job_2",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 42.56,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_6/job_2"
+    },
+    {
+      "job_name": "job_3",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 48.53,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_6/job_3"
+    },
+    {
+      "job_name": "job_4",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 44.54,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_6/job_4"
+    },
+    {
+      "job_name": "job_5",
+      "ok": true,
+      "error": null,
+      "crop_count": 2,
+      "component_count": 2,
+      "header_breakers": 0,
+      "table_breakers": 79,
+      "rules_error": null,
+      "elapsed_sec": 51.05,
+      "job_root": "/home/ubuntu/ElectricalDiagramAnalyzer/DevEnv/CapacityTestOutput/server_like_simul_6/job_5"
+    }
+  ]
+}

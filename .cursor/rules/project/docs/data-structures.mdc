@@ -10,10 +10,10 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Pipeline Payloads
 
 ### BreakerTablePipeline Output
-- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv11.BreakerTablePipeline.run()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv12.BreakerTablePipeline.run()`
 - **Used by**: `_merge_component_from_btp()` in uplink_server.py
 - **Fields**:
-  - `apiVersion` -- str, pipeline API version (currently `"API_11"`)
+  - `apiVersion` -- str, pipeline API version (currently `"API_12"`)
   - `origin` -- str, source image path
   - `panelStatus` -- None if OK, str error message otherwise
   - `stages` -- dict of stage metadata (analyzer, parser, header)
@@ -86,6 +86,23 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `defaults` -- dict from `_DEFAULT_OVERRIDES` or `ui_overrides`
   - `items` -- list of component dicts (one per detected panel)
 - **Returns**: dict keyed by component name, each value containing part number selections, BOM items, and optional error/skip info
+- **Sanitization before rules (added 2026-07-03, merge `04a2361`)**: the
+  `items` are always passed through `_rules_safe_components()` before being
+  handed to `RulesEngine6.process_job()`. This runs on all three rules
+  entry points -- `_process_job()`, `vm_rerun_rules_with_panel_edit()`, and
+  `vm_rerun_rules_with_global_defaults()`. It produces a RulesEngine-only
+  copy (the saved `result.json` components still keep the raw/editable
+  evidence) that:
+  - Fully suppresses "problem" panels (`_skipped` true or a non-empty
+    `panelStatus`) -- amperage/voltage/spaces/main/breakers are nulled and
+    `attrs.breaker_data_suppressed` + `attrs.breaker_suppression_reason`
+    are set, so junk OCR cannot manufacture a quoteable BOM.
+  - Snaps/validates clean-panel values: bus & main amps must be 100-1200
+    and end in 0/5; voltage in {120,208,240,480,600}; intRating in the
+    standard AIC set; spaces snapped to the nearest standard even count
+    (16→18, 40→42, ...) and range-capped at 84; trim in {SURFACE,FLUSH}
+    (forced None for NEMA3R enclosures); breakers filtered to amps 15-1200,
+    poles 1/2/3, and not exceeding the panel's main/bus limit.
 
 ## Job Disk Structure
 

@@ -16,3 +16,6 @@ Thumbs.db
 *.tiff
 *.ico
 *.webp
+# Confidential annotation data - stored in ~/Documents/TableAnnotations/
+MLTableDetection/data/images_for_annotation/
+MLTableDetection/data/annotations/*.json

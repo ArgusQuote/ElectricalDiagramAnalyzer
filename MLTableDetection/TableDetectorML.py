@@ -1,0 +1,693 @@
+#!/usr/bin/env python3
+"""
+ML-based table detector using Table Transformer (TATR) or Detectron2.
+
+Table Transformer is MIT licensed and pretrained on 1M+ table images,
+making it ideal for table detection with minimal or no fine-tuning.
+
+Detectron2 (Apache 2.0) is available as a fallback for custom training.
+
+Usage:
+    from MLTableDetection.TableDetectorML import TableDetectorML
+
+    # Default: uses the local fine-tuned v7 checkpoint if available,
+    # else falls back to the HuggingFace pretrained TATR. See
+    # `_resolve_default_tatr_model_path()` for the search order.
+    detector = TableDetectorML(output_dir="/path/to/output")
+
+    # Explicit override
+    detector = TableDetectorML(
+        output_dir="/path/to/output",
+        model_path="/path/to/fine-tuned/model"
+    )
+
+    panel_images = detector.readPdf("/path/to/electrical.pdf")
+"""
+
+import os
+from pathlib import Path
+from typing import Optional, Literal
+
+import numpy as np
+import cv2
+import pypdfium2 as pdfium
+import pikepdf
+from PIL import Image
+
+
+class TableDetectorML:
+    """
+    ML-based table detector using Table Transformer (TATR).
+    
+    Table Transformer is pretrained on PubTables-1M dataset (1M+ table images)
+    and works well zero-shot or with minimal fine-tuning.
+    
+    License: MIT (commercial-friendly)
+    
+    Provides the same `readPdf()` API as PanelBoardSearch for compatibility
+    with the existing pipeline.
+    """
+    
+    # Available backends
+    BACKEND_TATR = "table-transformer"
+    BACKEND_DETECTRON2 = "detectron2"
+
+    # Hugging Face fallback (used when no local fine-tuned model is found)
+    PRETRAINED_TATR_MODEL = "microsoft/table-transformer-detection"
+
+    # Local fine-tuned checkpoints, tried in order. v7 is the current
+    # production model (Phase 2 winner -- mAP@0.5 = 0.83 across 5 held-out
+    # PDFs; see .cursor/rules/project/docs/known-issues.mdc entry
+    # "v7 retrain -- DONE 2026-05-15"). Paths cover all three deployment
+    # hosts (Paperspace production VM, AWS dev box, Marco's laptop).
+    # The leading "~/..." entry resolves correctly on any of them via
+    # the current user's home directory; the absolute entries are
+    # belt-and-suspenders for the case where ~ resolution isn't usable
+    # (e.g. running under a different service user).
+    DEFAULT_TATR_LOCAL_PATHS = (
+        "~/Documents/TableAnnotations/models_v7/best",
+        "/home/paperspace/Documents/TableAnnotations/models_v7/best",
+        "/home/ubuntu/Documents/TableAnnotations/models_v7/best",
+        "/home/marco/Documents/TableAnnotations/models_v7/best",
+    )
+
+    # Back-compat alias. The "default" used to be the HF pretrained model;
+    # we keep the old name so external callers that reference it still work,
+    # but the runtime resolution below prefers the local v7 checkpoint.
+    DEFAULT_TATR_MODEL = PRETRAINED_TATR_MODEL
+
+    @classmethod
+    def _resolve_default_tatr_model_path(cls) -> str:
+        """
+        Pick the default TATR model path, preferring a local fine-tuned
+        checkpoint over the upstream HF pretrained model.
+
+        Tries `DEFAULT_TATR_LOCAL_PATHS` in order and returns the first one
+        whose ``config.json`` exists. Falls back to `PRETRAINED_TATR_MODEL`
+        if no local checkpoint is found.
+        """
+        for candidate in cls.DEFAULT_TATR_LOCAL_PATHS:
+            expanded = Path(os.path.expanduser(candidate))
+            if (expanded / "config.json").is_file():
+                return str(expanded)
+        return cls.PRETRAINED_TATR_MODEL
+    
+    def __init__(
+        self,
+        output_dir: str,
+        model_path: Optional[str] = None,
+        backend: Literal["table-transformer", "detectron2"] = "table-transformer",
+        # Detection settings
+        dpi: int = 400,
+        render_dpi: int = 1200,
+        render_colorspace: str = "gray",
+        downsample_max_w: Optional[int] = None,
+        # ML model settings
+        conf_threshold: float = 0.5,  # TATR is more confident, use higher threshold
+        # Post-processing
+        pad: int = 6,
+        enforce_one_box: bool = True,
+        min_area_fraction: float = 0.004,
+        max_area_fraction: float = 0.30,
+        # Behavior
+        device: Optional[str] = None,  # "cuda", "cpu", or None for auto
+        debug: bool = False,
+        verbose: bool = True,
+        # API compatibility - accept but ignore legacy params
+        **kwargs,
+    ):
+        """
+        Initialize the ML table detector.
+        
+        Args:
+            output_dir: Directory to save output files.
+            model_path: Path to model. For TATR, can be a HuggingFace model
+                        ID or a local path. If None, prefers the local
+                        fine-tuned v7 checkpoint and falls back to the HF
+                        pretrained TATR (`microsoft/table-transformer-detection`)
+                        if no local checkpoint is present. See
+                        `DEFAULT_TATR_LOCAL_PATHS` and
+                        `_resolve_default_tatr_model_path()`.
+            backend: Detection backend ("table-transformer" or "detectron2").
+            dpi: Detection DPI (for rendering PDF pages).
+            render_dpi: Output PNG DPI (higher quality for OCR).
+            render_colorspace: Output colorspace ("gray" or "rgb").
+            downsample_max_w: Max width for output PNGs (None for no limit).
+            conf_threshold: Minimum confidence for detections.
+            pad: Padding around detected regions (pixels at detection DPI).
+            enforce_one_box: Split crops containing multiple tables.
+            min_area_fraction: Minimum detection area as fraction of page.
+            max_area_fraction: Maximum detection area as fraction of page.
+            device: Device for inference ("cuda", "cpu", or None for auto).
+            debug: Save debug visualizations.
+            verbose: Print progress information.
+        """
+        self.output_dir = os.path.expanduser(output_dir)
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
+        
+        # Output subdirectories (matching PanelBoardSearch structure)
+        self.magenta_dir = Path(self.output_dir) / "magenta_overlays"
+        self.magenta_dir.mkdir(parents=True, exist_ok=True)
+        self.vec_dir = Path(self.output_dir) / "cropped_tables_pdf"
+        self.vec_dir.mkdir(parents=True, exist_ok=True)
+        self.raster_dir = Path(self.output_dir) / "raster_images"
+        self.raster_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Settings
+        self.backend = backend
+        self.dpi = dpi
+        self.render_dpi = render_dpi
+        self.render_colorspace = render_colorspace.lower().strip()
+        self.downsample_max_w = downsample_max_w
+        self.conf_threshold = conf_threshold
+        self.pad = pad
+        self.enforce_one_box = enforce_one_box
+        self.min_area_fraction = min_area_fraction
+        self.max_area_fraction = max_area_fraction
+        self.debug = debug
+        self.verbose = verbose
+        
+        # Device selection
+        if device is None:
+            import torch
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
+        
+        # Model path. For TATR with no explicit override, prefer the local
+        # fine-tuned v7 checkpoint and fall back to the HF pretrained model
+        # if v7 is not present on this host.
+        self.model_path = model_path
+        if model_path is None and backend == self.BACKEND_TATR:
+            self.model_path = self._resolve_default_tatr_model_path()
+            if self.verbose:
+                using_pretrained = (
+                    self.model_path == self.PRETRAINED_TATR_MODEL)
+                source = (
+                    "HuggingFace pretrained (no local v7 checkpoint found)"
+                    if using_pretrained else "local fine-tuned (v7)")
+                print(f"[INFO] Default TATR model: {self.model_path} "
+                      f"({source})")
+        
+        # Per-page detection boxes in PDF points, populated by readPdf().
+        # Maps page index (0-based) -> list of (x0, y0, x1, y1) tuples.
+        self.last_detection_boxes: dict[int, list[tuple[float, float, float, float]]] = {}
+        # Per-page confidence scores, parallel to last_detection_boxes.
+        self.last_detection_confidences: dict[int, list[float]] = {}
+
+        # Load model based on backend
+        self.model = None
+        self.processor = None
+        self._load_model()
+    
+    def _load_model(self):
+        """Load the detection model based on selected backend."""
+        if self.backend == self.BACKEND_TATR:
+            self._load_tatr_model()
+        elif self.backend == self.BACKEND_DETECTRON2:
+            self._load_detectron2_model()
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}")
+    
+    def _load_tatr_model(self):
+        """Load Table Transformer model from Hugging Face."""
+        try:
+            from transformers import TableTransformerForObjectDetection, AutoImageProcessor
+            import torch
+            
+            if self.verbose:
+                print(f"[INFO] Loading Table Transformer: {self.model_path}")
+                print(f"[INFO] Device: {self.device}")
+            
+            # Load processor and model
+            self.processor = AutoImageProcessor.from_pretrained(self.model_path)
+            self.model = TableTransformerForObjectDetection.from_pretrained(self.model_path)
+            self.model.to(self.device)
+            self.model.eval()
+            
+            if self.verbose:
+                print(f"[INFO] Model loaded successfully (MIT License)")
+                
+        except ImportError:
+            print("[ERROR] transformers not installed. Run: pip install transformers")
+            raise
+        except Exception as e:
+            print(f"[ERROR] Failed to load Table Transformer: {e}")
+            raise
+    
+    def _load_detectron2_model(self):
+        """Load Detectron2 model (Apache 2.0 license)."""
+        try:
+            from detectron2.config import get_cfg
+            from detectron2.engine import DefaultPredictor
+            from detectron2 import model_zoo
+            
+            if self.verbose:
+                print(f"[INFO] Loading Detectron2 model")
+            
+            cfg = get_cfg()
+            
+            if self.model_path and Path(self.model_path).exists():
+                # Load custom config/weights
+                cfg.merge_from_file(self.model_path)
+            else:
+                # Use pretrained Faster R-CNN
+                cfg.merge_from_file(model_zoo.get_config_file(
+                    "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"
+                ))
+                cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+                    "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"
+                )
+            
+            cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = self.conf_threshold
+            cfg.MODEL.DEVICE = self.device
+            
+            self.model = DefaultPredictor(cfg)
+            
+            if self.verbose:
+                print(f"[INFO] Detectron2 model loaded (Apache 2.0 License)")
+                
+        except ImportError:
+            print("[ERROR] detectron2 not installed. See: https://detectron2.readthedocs.io/")
+            raise
+        except Exception as e:
+            print(f"[ERROR] Failed to load Detectron2: {e}")
+            raise
+    
+    def _detect_tables_tatr(self, image: Image.Image) -> list[dict]:
+        """
+        Run Table Transformer detection on an image.
+        
+        Args:
+            image: PIL Image to detect tables in.
+        
+        Returns:
+            List of detection dicts with 'bbox', 'confidence', 'label'.
+        """
+        import torch
+        
+        # Preprocess image
+        inputs = self.processor(images=image, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
+        # Run inference
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+        # Post-process results
+        target_sizes = torch.tensor([image.size[::-1]]).to(self.device)
+        results = self.processor.post_process_object_detection(
+            outputs, 
+            threshold=self.conf_threshold,
+            target_sizes=target_sizes
+        )[0]
+        
+        detections = []
+        for score, label, box in zip(
+            results["scores"].cpu().numpy(),
+            results["labels"].cpu().numpy(),
+            results["boxes"].cpu().numpy()
+        ):
+            # TATR labels: 0=table, 1=table rotated
+            # We want both
+            detections.append({
+                "bbox": box.tolist(),  # [x1, y1, x2, y2]
+                "confidence": float(score),
+                "label": self.model.config.id2label.get(int(label), "table"),
+            })
+        
+        return detections
+    
+    def _detect_tables_detectron2(self, image: np.ndarray) -> list[dict]:
+        """
+        Run Detectron2 detection on an image.
+        
+        Args:
+            image: BGR numpy array.
+        
+        Returns:
+            List of detection dicts with 'bbox', 'confidence', 'label'.
+        """
+        outputs = self.model(image)
+        instances = outputs["instances"].to("cpu")
+        
+        detections = []
+        for i in range(len(instances)):
+            box = instances.pred_boxes[i].tensor.numpy()[0]
+            score = float(instances.scores[i])
+            label = int(instances.pred_classes[i])
+            
+            detections.append({
+                "bbox": box.tolist(),  # [x1, y1, x2, y2]
+                "confidence": score,
+                "label": f"class_{label}",
+            })
+        
+        return detections
+    
+    def readPdf(self, pdf_path: str) -> list[str]:
+        """
+        Detect tables in a PDF and extract high-quality image crops.
+        
+        This is the main entry point, matching the PanelBoardSearch API.
+        
+        Args:
+            pdf_path: Path to the PDF file.
+        
+        Returns:
+            List of paths to the generated PNG files.
+        """
+        if self.model is None:
+            raise RuntimeError("No model loaded.")
+        
+        pdf_path_str = os.path.expanduser(pdf_path)
+        if not Path(pdf_path_str).is_file():
+            raise FileNotFoundError(pdf_path_str)
+        
+        doc = pdfium.PdfDocument(pdf_path_str)
+        base = Path(pdf_path_str).stem
+        all_pngs: list[str] = []
+        self.last_detection_boxes = {}
+        self.last_detection_confidences = {}
+
+        if self.verbose:
+            backend_name = "Table Transformer" if self.backend == self.BACKEND_TATR else "Detectron2"
+            print(f"[INFO] ML Detection with {backend_name} @ {self.dpi} DPI")
+            print(f"[INFO] Pages: {len(doc)}")
+        
+        det_scale = self.dpi / 72.0
+        rend_scale = self.render_dpi / 72.0
+        
+        for pidx in range(len(doc)):
+            page = doc[pidx]
+            page_width_pt = page.get_width()
+            page_height_pt = page.get_height()
+            
+            # Render page at detection DPI
+            bitmap = page.render(scale=det_scale)
+            det_pil = bitmap.to_pil()
+            
+            # Convert to RGB for detection
+            if det_pil.mode == 'RGBA':
+                background = Image.new('RGB', det_pil.size, (255, 255, 255))
+                background.paste(det_pil, mask=det_pil.split()[3])
+                det_pil = background
+            elif det_pil.mode != 'RGB':
+                det_pil = det_pil.convert('RGB')
+            
+            det_bgr = cv2.cvtColor(np.array(det_pil), cv2.COLOR_RGB2BGR)
+            H, W = det_bgr.shape[:2]
+            page_area = H * W
+            
+            # Run detection based on backend
+            if self.backend == self.BACKEND_TATR:
+                detections = self._detect_tables_tatr(det_pil)
+            else:
+                detections = self._detect_tables_detectron2(det_bgr)
+            
+            # Create overlay image for visualization
+            overlay_img = det_bgr.copy()
+            
+            # Process detections - collect all candidates with pixel coords for overlay
+            candidates = []  # (x0, y0, x1, y1) in PDF points
+            all_pixel_boxes = []  # Store pixel coords for overlay drawing later
+            
+            for det in detections:
+                x1, y1, x2, y2 = det["bbox"]
+                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                conf = det["confidence"]
+                label = det["label"]
+                
+                # Calculate area
+                w, h = x2 - x1, y2 - y1
+                area = w * h
+                
+                # Filter by area
+                area_frac = area / page_area
+                if area_frac < self.min_area_fraction:
+                    if self.verbose:
+                        print(f"  [SKIP] Detection too small: {w}x{h}")
+                    continue
+                if area_frac > self.max_area_fraction:
+                    if self.verbose:
+                        print(f"  [SKIP] Detection too large: {w}x{h}")
+                    continue
+                
+                # Store pixel coordinates for overlay (drawn after NMS)
+                all_pixel_boxes.append((x1, y1, x2, y2, conf, label))
+                
+                # Add padding
+                px0 = max(0, x1 - self.pad)
+                py0 = max(0, y1 - self.pad)
+                px1 = min(W, x2 + self.pad)
+                py1 = min(H, y2 + self.pad)
+                
+                # Convert to PDF coordinates
+                x0f, y0f = px0 / W, py0 / H
+                x1f, y1f = px1 / W, py1 / H
+                clip = (
+                    page_width_pt * x0f,
+                    page_height_pt * y0f,
+                    page_width_pt * x1f,
+                    page_height_pt * y1f,
+                )
+                candidates.append(clip)
+            
+            # Apply Non-Maximum Suppression to remove overlapping detections
+            candidates, kept_indices = self._apply_nms_with_indices(candidates, iou_threshold=0.3)
+            
+            # Draw overlay AFTER NMS - show kept (blue) vs rejected (magenta)
+            for i, (px1, py1, px2, py2, conf, label) in enumerate(all_pixel_boxes):
+                if i in kept_indices:
+                    # KEPT - draw in BLUE (BGR: 255, 0, 0)
+                    color = (255, 0, 0)
+                    thickness = 8
+                    text_prefix = "KEPT"
+                else:
+                    # REJECTED by NMS - draw in MAGENTA (BGR: 255, 0, 255)
+                    color = (255, 0, 255)
+                    thickness = 4
+                    text_prefix = "NMS"
+                
+                cv2.rectangle(overlay_img, (px1, py1), (px2, py2), color, thickness)
+                cv2.putText(
+                    overlay_img,
+                    f"{text_prefix} {label}: {conf:.2f}",
+                    (px1, py1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    color,
+                    2,
+                )
+            
+            # Store final detection boxes and confidences for this page
+            self.last_detection_boxes[pidx] = list(candidates)
+            self.last_detection_confidences[pidx] = [
+                all_pixel_boxes[i][4] for i in sorted(kept_indices)
+            ] if kept_indices else []
+
+            # Export crops
+            saved_idx = 0
+            for clip in candidates:
+                saved_idx += 1
+                clip_x0, clip_y0, clip_x1, clip_y1 = clip
+                
+                # Vector crop PDF using pikepdf
+                pdf_path_out = self.vec_dir / f"{base}_page{pidx+1:03d}_panel{saved_idx:02d}.pdf"
+                try:
+                    with pikepdf.open(pdf_path_str) as src_pdf:
+                        dst_pdf = pikepdf.new()
+                        src_page = src_pdf.pages[pidx]
+                        # PDF coordinates: origin at bottom-left
+                        src_page.mediabox = pikepdf.Array([
+                            clip_x0,
+                            page_height_pt - clip_y1,
+                            clip_x1,
+                            page_height_pt - clip_y0
+                        ])
+                        src_page.cropbox = pikepdf.Array([
+                            clip_x0,
+                            page_height_pt - clip_y1,
+                            clip_x1,
+                            page_height_pt - clip_y0
+                        ])
+                        dst_pdf.pages.append(src_page)
+                        dst_pdf.save(str(pdf_path_out))
+                except Exception as e:
+                    if self.verbose:
+                        print(f"[WARN] Failed to create vector PDF: {e}")
+                
+                # High-DPI PNG from the same clip
+                render_bitmap = page.render(scale=rend_scale)
+                render_pil = render_bitmap.to_pil()
+                if self.render_colorspace == "gray":
+                    render_pil = render_pil.convert("L")
+                
+                # Calculate clip coordinates in render pixels
+                rx0 = int(clip_x0 * rend_scale)
+                ry0 = int(clip_y0 * rend_scale)
+                rx1 = int(clip_x1 * rend_scale)
+                ry1 = int(clip_y1 * rend_scale)
+                
+                # Crop the rendered image
+                cropped_pil = render_pil.crop((rx0, ry0, rx1, ry1))
+                if cropped_pil.mode == "RGB":
+                    png = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_RGB2BGR)
+                else:
+                    png = cv2.cvtColor(np.array(cropped_pil), cv2.COLOR_GRAY2BGR)
+                
+                # Optional downsampling
+                if self.downsample_max_w and png.shape[1] > self.downsample_max_w:
+                    scale_factor = self.downsample_max_w / float(png.shape[1])
+                    new_wh = (
+                        self.downsample_max_w,
+                        max(1, int(round(png.shape[0] * scale_factor)))
+                    )
+                    png = cv2.resize(png, new_wh, interpolation=cv2.INTER_AREA)
+                
+                png_path = Path(self.output_dir) / f"{base}_page{pidx+1:03d}_panel{saved_idx:02d}.png"
+                cv2.imwrite(str(png_path), png)
+                all_pngs.append(str(png_path))
+            
+            # Save overlay image
+            ov_path = self.magenta_dir / f"{base}_page{pidx+1:03d}_void_perimeters.png"
+            cv2.imwrite(str(ov_path), overlay_img)
+            
+            if self.verbose:
+                print(f"[INFO] Page {pidx+1}: saved {saved_idx} crop(s)")
+        
+        doc.close()
+        
+        # Post-processing: enforce one table per PNG
+        if self.enforce_one_box and all_pngs:
+            all_pngs = self._enforce_one_box_on_paths(all_pngs)
+        
+        if self.verbose:
+            print(f"[DONE] Outputs → {self.output_dir}")
+            print(f"      Vector PDFs → {self.vec_dir}")
+            print(f"      Overlays    → {self.magenta_dir}")
+        
+        return all_pngs
+    
+    def _apply_nms(self, candidates: list[tuple], iou_threshold: float = 0.3) -> list[tuple]:
+        """
+        Apply Non-Maximum Suppression to remove overlapping detections.
+        
+        Args:
+            candidates: List of (x0, y0, x1, y1) tuples in PDF coordinates.
+            iou_threshold: IoU threshold above which boxes are considered duplicates.
+        
+        Returns:
+            Filtered list of candidates with overlaps removed.
+        """
+        filtered, _ = self._apply_nms_with_indices(candidates, iou_threshold)
+        return filtered
+    
+    def _apply_nms_with_indices(self, candidates: list[tuple], iou_threshold: float = 0.3) -> tuple[list[tuple], set[int]]:
+        """
+        Apply Non-Maximum Suppression and return kept indices for visualization.
+        
+        Args:
+            candidates: List of (x0, y0, x1, y1) tuples in PDF coordinates.
+            iou_threshold: IoU threshold above which boxes are considered duplicates.
+        
+        Returns:
+            Tuple of (filtered candidates, set of kept indices).
+        """
+        if len(candidates) <= 1:
+            return candidates, set(range(len(candidates)))
+        
+        # Convert to numpy for easier computation
+        boxes = np.array(candidates)
+        
+        # Calculate areas
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        
+        # Sort by area (largest first - keep larger boxes)
+        order = areas.argsort()[::-1]
+        
+        keep = []
+        while len(order) > 0:
+            i = order[0]
+            keep.append(i)
+            
+            if len(order) == 1:
+                break
+            
+            # Calculate IoU with remaining boxes
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            
+            w = np.maximum(0, xx2 - xx1)
+            h = np.maximum(0, yy2 - yy1)
+            intersection = w * h
+            
+            iou = intersection / (areas[i] + areas[order[1:]] - intersection)
+            
+            # Keep boxes with IoU below threshold
+            remaining = np.where(iou <= iou_threshold)[0]
+            order = order[remaining + 1]
+        
+        return [candidates[i] for i in keep], set(keep)
+    
+    def _enforce_one_box_on_paths(self, image_paths: list[str]) -> list[str]:
+        """
+        Ensure each output PNG contains only one table.
+        
+        If a crop contains multiple tables, split it into separate files.
+        """
+        final_paths = []
+        
+        for img_path in image_paths:
+            img = cv2.imread(img_path)
+            if img is None:
+                continue
+            
+            # Convert to PIL for TATR
+            img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            
+            # Run detection on the cropped image
+            if self.backend == self.BACKEND_TATR:
+                detections = self._detect_tables_tatr(img_pil)
+            else:
+                detections = self._detect_tables_detectron2(img)
+            
+            if len(detections) <= 1:
+                # Single or no detection - keep as is
+                final_paths.append(img_path)
+            else:
+                # Multiple detections - split into separate files
+                base_path = Path(img_path)
+                stem = base_path.stem
+                suffix = base_path.suffix
+                parent = base_path.parent
+                
+                if self.verbose:
+                    print(f"[INFO] Splitting {base_path.name}: {len(detections)} tables")
+                
+                for i, det in enumerate(detections):
+                    x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
+                    
+                    # Add padding
+                    h, w = img.shape[:2]
+                    px1 = max(0, x1 - self.pad)
+                    py1 = max(0, y1 - self.pad)
+                    px2 = min(w, x2 + self.pad)
+                    py2 = min(h, y2 + self.pad)
+                    
+                    crop = img[py1:py2, px1:px2]
+                    new_path = parent / f"{stem}_split{i+1:02d}{suffix}"
+                    cv2.imwrite(str(new_path), crop)
+                    final_paths.append(str(new_path))
+                
+                # Remove original multi-table image
+                Path(img_path).unlink(missing_ok=True)
+        
+        return final_paths
+
+
+# Alias for API compatibility with existing code
+PanelBoardSearch = TableDetectorML

@@ -13,7 +13,13 @@ import os as _os
 from anvil import BlobMedia
 
 # ---------- CONFIG ----------
-REPO_ROOT = Path("/home/paperspace/ElectricalDiagramAnalyzer").resolve()
+# Resolve the repo root from this file's location so the server runs
+# unchanged on both production hosts -- Paperspace
+# (/home/paperspace/ElectricalDiagramAnalyzer) and the AWS dev box
+# (/home/ubuntu/ElectricalDiagramAnalyzer) -- as well as on any future
+# host with a different checkout path. uplink_server.py is one level
+# below the repo root at AnvilUplinkCode/uplink_server.py.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -119,6 +125,7 @@ def _set_runtime_determinism():
     set_runtime_determinism()
 
 def _log_run_fingerprint(tag: str = ""):
+    """Log CUDA device names and cuDNN determinism settings for diagnostics."""
     try:
         import torch
         devs = []
@@ -138,7 +145,7 @@ _log_run_fingerprint("init")
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV25 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv12 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine6 as RE2  # must expose process_job(payload)
+import RulesEngine.RulesEngine7 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
@@ -157,6 +164,7 @@ if not _IS_WORKER_SUBPROCESS:
 
 # ---------- OCR warmup (via BreakerTablePipeline) ----------
 def _warmup_ocr_once():
+    """Pre-load EasyOCR models by running BreakerTablePipeline on a dummy 32x32 image."""
     try:
         _log_run_fingerprint("warmup")
         import numpy as np, cv2, tempfile
@@ -190,13 +198,16 @@ if not _IS_WORKER_SUBPROCESS:
 
 # ---------- UTILITIES ----------
 def _now_utc():
+    """Return the current UTC datetime."""
     return datetime.now(timezone.utc)
 
 def _epoch_ms(dt=None) -> int:
+    """Convert a datetime (default: now UTC) to epoch milliseconds."""
     dt = dt or datetime.now(timezone.utc)
     return int(dt.timestamp() * 1000)
 
 def _fmt_cycle_time(ms: int) -> str:
+    """Format milliseconds as HH:MM:SS:mmm for display in status payloads."""
     if ms is None or ms < 0:
         return "00:00:00:000"
     hours = ms // 3_600_000
@@ -208,11 +219,13 @@ def _fmt_cycle_time(ms: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}:{millis:03d}"
 
 def _slugify(s: str) -> str:
+    """Normalize a string to a filesystem-safe slug (alphanumeric, dots, hyphens, underscores)."""
     s = (s or "").strip().replace(" ", "_")
     s = re.sub(r"[^A-Za-z0-9._-]+", "", s)
     return s or "untitled"
 
 def _json_read_or_none(path: Path):
+    """Load JSON from *path*; return None on any read/parse error."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -249,6 +262,7 @@ def _parse_job_note(job_note: str) -> dict:
     return out
 
 def _iso_to_stamp(s: str) -> str:
+    """Parse an ISO-8601 datetime string into a YYYYMMDD_HHMMSS stamp for job directory names."""
     try:
         s2 = s.rstrip("Z")
         dt = datetime.fromisoformat(s2)
@@ -521,6 +535,7 @@ def _resolve_specs_job_dir_any(job_id: str) -> Path | None:
     return None
 
 def _save_media_to_disk(media, dest_dir: Path) -> Path:
+    """Write an Anvil BlobMedia's bytes to *dest_dir* as a PDF file; return the saved path."""
     fname = _slugify(getattr(media, "name", None) or "uploaded.pdf")
     if not fname.lower().endswith(".pdf"):
         fname += ".pdf"
@@ -530,6 +545,7 @@ def _save_media_to_disk(media, dest_dir: Path) -> Path:
     return dst
 
 def _normalize_component_for_none(obj):
+    """Recursively normalize a component dict: convert None to 'NONE', numpy types to Python ints/floats, and numeric strings to numbers."""
     import re
     try:
         import numpy as np
@@ -578,6 +594,7 @@ def _normalize_component_for_none(obj):
 
 # ----- status.json / result.json on disk -----
 def _status_paths(dir_path: Path):
+    """Return a dict with 'status' and 'result' keys pointing to the respective JSON files in *dir_path*."""
     dir_path = Path(dir_path)
     return {"status": dir_path / "status.json", "result": dir_path / "result.json"}
 
@@ -614,6 +631,7 @@ def _status_write(dir_path: Path, state: str, **extras):
         json.dump(payload, f, ensure_ascii=False, default=str, indent=2)
 
 def _result_write(dir_path: Path, result: dict):
+    """Write *result* dict to result.json in the job directory."""
     paths = _status_paths(dir_path)
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
@@ -1376,6 +1394,7 @@ def _excluded_cleanup_loop():
 
 # ----- Data Tables helpers (disabled here; leave no-ops) -----
 def _jobs_upsert(job_id: str, **fields):
+    """No-op placeholder for a Data Tables upsert (disabled in disk-only mode)."""
     return
 
 # ---------- UI OVERRIDES ----------
@@ -1408,6 +1427,7 @@ _DEFAULT_OVERRIDES = {
 }
 
 def _deep_merge(dst: dict, src: dict) -> dict:
+    """Recursively merge *src* into *dst*, returning a new dict (nested dicts are merged, scalars overwritten)."""
     out = dict(dst)
     for k, v in (src or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -1417,6 +1437,7 @@ def _deep_merge(dst: dict, src: dict) -> dict:
     return out
 
 def _coerce_types(overrides: dict) -> dict:
+    """Recursively coerce string values in UI overrides: 'true'/'false' to bool, digit strings to int."""
     def coerce(v):
         if isinstance(v, str):
             s = v.strip().lower()
@@ -1437,10 +1458,12 @@ def _coerce_types(overrides: dict) -> dict:
     return walk(overrides or {})
 
 def _normalize_ui_overrides(overrides: dict | None) -> dict:
+    """Merge coerced user overrides on top of _DEFAULT_OVERRIDES, returning the combined config."""
     return _deep_merge(_DEFAULT_OVERRIDES, _coerce_types(overrides or {}))
 
 # Delete unused images and folders for storage
 def _rel(p: Path, root: Path) -> str:
+    """Return *p* relative to *root* with forward slashes (for portable JSON paths)."""
     return str(p.relative_to(root)).replace("\\", "/")
 
 def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
@@ -1564,6 +1587,7 @@ def _cleanup_job_dir(job_dir: Path, keep_relpaths: set[str]):
 
 @anvil.server.callable
 def vm_get_default_overrides() -> dict:
+    """RPC callable: return a deep copy of the default UI overrides for panelboards/transformers/disconnects."""
     return json.loads(json.dumps(_DEFAULT_OVERRIDES))
 
 # ---------- PDF → images ----------
@@ -1661,6 +1685,7 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
 
 # ---------- Rules payload helper ----------
 def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
+    """Assemble the payload dict expected by RulesEngine4.process_job() from UI defaults and component items."""
     return {"defaults": defaults or {}, "items": items or []}
 
 def _edit_log_path(job_dir: Path) -> Path:
@@ -2581,9 +2606,11 @@ _WORKER_SLOTS: list[_WorkerSlot] = [_WorkerSlot() for _ in range(MAX_WORKERS)]
 _SPAWN_LOCK = threading.Lock()  # serializes env-var set/start/unset across slots
 
 def _enqueue_job(job_id: str, owner_id: str):
+    """Put a (job_id, owner_id) tuple onto the shared job queue for worker threads to dequeue."""
     _JOB_Q.put((job_id, owner_id))
 
 def _enter_inflight(owner_id: str) -> bool:
+    """Try to increment the per-user inflight count; return False if at MAX_INFLIGHT_PER_USER."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         if c >= MAX_INFLIGHT_PER_USER:
@@ -2592,15 +2619,18 @@ def _enter_inflight(owner_id: str) -> bool:
         return True
 
 def _leave_inflight(owner_id: str):
+    """Decrement the per-user inflight count (floor at 0)."""
     with _Q_LOCK:
         c = _INFLIGHT_BY_USER.get(owner_id, 0)
         _INFLIGHT_BY_USER[owner_id] = max(0, c - 1)
 
 # ---------- Cancel helpers ----------
 def _cancel_path(job_dir: Path) -> Path:
+    """Return the path to the .cancel marker file used to signal job cancellation."""
     return job_dir / ".cancel"
 
 def _is_canceled(job_dir: Path) -> bool:
+    """Check whether a job has been marked as canceled by the presence of its .cancel file."""
     return _cancel_path(job_dir).exists()
 
 def _peek_owner_id(job_dir: Path) -> str:
@@ -2627,6 +2657,7 @@ def _is_queue_timed_out(job_dir: Path) -> tuple[bool, int | None]:
 
 # ---------- Shared helpers for component mapping ----------
 def _to_int_or_none(x):
+    """Parse *x* as an integer (stripping commas); return None on failure."""
     try:
         return int(str(x).replace(",", "").strip())
     except Exception:
@@ -4158,7 +4189,7 @@ def vm_delete_specs_job(job_id: str, owner_email: str, group_folder: str = "pers
         return False
 
 def _natural_key(p: Path):
-    # Sort like page2 before page10
+    """Generate a natural sort key so 'page2' sorts before 'page10'."""
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.name)]
 
 @anvil.server.callable
@@ -4361,6 +4392,7 @@ def vm_set_watchdog_timeout(minutes: int) -> dict:
 
 @anvil.server.callable
 def vm_get_watchdog_timeout() -> int:
+  """RPC callable: return the current watchdog timeout in minutes."""
   return int(WATCHDOG_TIMEOUT_MIN)
 
 def _get_queue_position(job_id: str, owner_email: str | None = None) -> tuple[int | None, int]:

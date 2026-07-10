@@ -50,9 +50,10 @@ ElectricalDiagramAnalyzer/
 | `MLTableDetection/README.md` | Module reference doc. Has a 2026-05-08 preamble pointing readers at `known-issues.mdc` and the `training-panel-detector` skill for current state; the rest is original reference material for the "annotate, fine-tune" workflow. |
 | `MLTableDetection/requirements.txt` | ML-specific Python deps (transformers, torchmetrics, albumentations, timm, etc.). Installed on top of `MISC/requirements.txt` on the training host. |
 | `MLTableDetection/setup_label_studio.sh` | Convenience script for spinning up Label Studio for annotation work. |
-| `OcrLibrary/BreakerTableParserAPIv11.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import.** Exports `API_VERSION = "API_11"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser10`. (v8/v9/v10 kept for comparison.) |
+| `OcrLibrary/BreakerTableParserAPIv12.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of 2026-07-03, merge `04a2361`). Exports `API_VERSION = "API_12"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser10`. (v8-v11 kept for comparison.) |
+| `OcrLibrary/BreakerTableParserAPIv11.py` | Prior OCR pipeline orchestrator (`API_VERSION = "API_11"`). Superseded by APIv12; kept for comparison. |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv11). V8/V9/V10 kept for comparison. |
+| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv12). Now includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (added 2026-07-03) so AIC/kA text (e.g. `65k`, `65KAIC`) and location/source text (e.g. `Location: ELECTRICAL 123`, `Fed From: MDP-1`) are never parsed as BUS/MAIN amps. V8/V9/V10 kept for comparison. |
 | `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
 | `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
@@ -71,7 +72,7 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv11), RulesEngine (RulesEngine6), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv12), RulesEngine (RulesEngine6), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Backup snapshots**: dated `uplink_server_*bkup*.py` / `uplink_server_<date>.py` files live alongside the active server -- they are historical snapshots, NOT importable runtime modules.
 
 ### PageFilter
@@ -106,7 +107,7 @@ ElectricalDiagramAnalyzer/
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
 - **Purpose**: Three-stage OCR pipeline for breaker table extraction
-- **Entry point**: `BreakerTableParserAPIv11.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v10 kept for comparison)
+- **Entry point**: `BreakerTableParserAPIv12.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v11 kept for comparison)
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
 
 ### AnchoringClasses

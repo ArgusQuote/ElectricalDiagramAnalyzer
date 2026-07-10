@@ -201,7 +201,7 @@ def main():
         longest_cap_px=9000,
         proc_scale=0.5,
         use_ocr=True,
-        ocr_gpu=False,
+        ocr_gpu=True,
         verbose=True,
         debug=False,
         rect_w_fr_range=(0.10, 0.55),
