@@ -35,6 +35,98 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     silently assuming ML is the reference -- but the default, and the
     training/eval target, is heuristic-as-GT.
 
+- **ML Table Detection -- v8 held-out result DONE 2026-07-10 (label-under-coverage fix VALIDATED; v8 beats v7 on true held-out; NOT yet production default)** --
+  Resolves the "true held-out generalization is currently unknown" blocker from
+  the 2026-07-07 contamination entry below. A clean held-out protocol was
+  established and v8 was trained and measured against the locked v7. **Result:
+  v8 wins.** The v7 "whole-page blindness" was confirmed to be a **training-label
+  under-coverage bug**, not a model-capacity limit, and fixing the labels both
+  lifts recall and generalizes to unseen docs.
+  - **Root cause (confirmed):** in the v6 dataset (`v6/annotations_v6.json`)
+    multi-page docs were barely labeled -- `derek2` had only 1 of 11 pages
+    labeled, `derekfirst` only 1 of 10; the remaining ~19 pages were included
+    with 0 annotations = **trained as negatives**, so v7 was explicitly taught
+    "derek-style page = empty." Fix = **relabel ALL pages from the heuristic
+    ground truth** (per the standing `PanelSearchToolV25`-is-GT decision).
+  - **v8 training (Paperspace, finished clean 2026-07-10):** v4/v7 stable recipe
+    at 28 epochs (`--batch-size 2 --learning-rate 1e-5 --warmup-steps 50
+    --weight-decay 0.01 --val-split 0.1 --num-queries 15
+    --freeze-backbone-epochs 0`), dataset `v8_holdout/` (428 imgs / 1839 anns:
+    28 real pages heuristic-relabeled across ALL pages from 20 docs with
+    derek2/derekfirst deliberately held OUT, + 400 dense synthetic).
+    `train_runtime` 2691 s, `train_loss` 5.5 -> 0.674, exit 0. Internal
+    (10%-mostly-synth) `eval_map_50` rose monotonically 0.266 (ep1, already >
+    v7's best-ever 0.2555) -> peak **0.3999 @ epoch 25**, eval_loss 1.37 ->
+    ~0.50. No v6-style mode collapse. Production weights = `models_v8/best/`
+    (the epoch-25 checkpoint; HF `best_model_checkpoint = checkpoint-4825`).
+    **`model.safetensors` sha256 =
+    `074a2b0e5cff2e9928c289becf2124aebba15693f55bdb1d76a73d3324711e07`**,
+    verified identical on Paperspace and Marco's laptop.
+  - **Held-out eval (heuristic = GT, conf 0.5, IoU 0.5), v7 vs v8:**
+    - **Set A = `derek2`, `derekfirst`** (v7 TRAINED on these; v8 NEVER saw them
+      -- so any v8 win here is despite v7's data advantage): mAP@0.5 avg
+      0.295 -> **0.367**; recall 0.281 -> **0.484** (18/64 -> 31/64); FN 46 -> 33.
+    - **Set B = 3 `~/Documents/Diagrams/` PDFs** (`chucksmall`,
+      `ELECTRICAL SET (Mark Up)`, `Panels_Example`; fully independent, neither
+      model trained on): mAP@0.5 avg 0.759 -> **0.817**; recall 0.520 ->
+      **0.720** (26/50 -> 36/50); FN 24 -> 14.
+    - **All 5 PDFs:** mAP@0.5 avg 0.573 -> **0.637**; recall **0.386 -> 0.588**
+      (+52% relative; 44/114 -> 67/114); FN 70 -> 47.
+    - **Tradeoff (expected + acceptable):** precision 0.88 -> 0.63 -- v8
+      over-predicts and picks up some FPs. Recall (the documented v7 failure
+      mode) is what moved most. The one soft regression is `derekfirst`
+      (mAP@0.5 0.332 -> 0.281: v8 emits 22 boxes vs 9, precision 0.89 -> 0.41)
+      though its recall still rose 0.333 -> 0.375. Per-PDF wins: `derek2`
+      recall 0.25 -> 0.55, `ELECTRICAL_SET` recall 0.38 -> 0.62,
+      `Panels_Example` recall 0.91 -> 1.0, `chucksmall` tie at 1.0 with tighter
+      boxes (mAP@0.5:0.95 0.70 -> 0.85).
+  - **Artifacts (both hosts):** `baselines/v8_2026-07-10/{v7,v8}/<pdf_stem>/`
+    -- `SUMMARY.md`, the 10 `box_comparison.json` files, and ml/heuristic
+    `magenta_overlays` PNGs (2.9 GB total). Present on Paperspace AND ferried to
+    Marco's laptop (`~/Documents/TableAnnotations/baselines/v8_2026-07-10/`,
+    925/925 files verified matching). `models_v8/best/` weights + logs +
+    `checkpoint-5404/trainer_state.json` (full 28-epoch history) also on both
+    hosts. The 3 intermediate checkpoints (`checkpoint-4825/5211/5404`, 329 MB
+    each) were NOT copied to the laptop (reproducible; prunable).
+  - **Status vs v7 lock:** the v7 read-only lock and the "v8 writes to NEW
+    paths" rule were both honored -- `baselines/v7_2026-05-15/` was never
+    touched. **v8 is a validated candidate, NOT yet the shipped milestone:**
+    it is NOT locked read-only, and `MLTableDetection/TableDetectorML.py` STILL
+    defaults to the v7 checkpoint (v8 is not wired as the default). Do not
+    promote v8 to production default until the retrain decision below is made.
+  - **Deferred decisions (Marco's call -- NOT started; report before acting):**
+    (1) **k-fold expansion** -- rotate which docs are held out to confirm the
+    recall lift is not fold-specific; (2) **v8-production retrain on all 22
+    heuristic-relabeled docs** (including derek2/derekfirst) once a fold or two
+    validate -- this becomes the shippable, lockable milestone; (3) **v9
+    precision/FP lever** -- trim v8's false positives without giving back recall
+    (`derekfirst` is the worst FP case to target). All future GPU work needs
+    Paperspace or the AWS dev box (laptop GPU is inadequate + currently down --
+    see the Secure Boot note below).
+  - **Eval-cost note:** `derek2` pages are ARCH-E (~14400 px at 400 DPI); v7/v8
+    eval renders them live, so those PDFs take several minutes each -- expected,
+    not a hang.
+
+- **Laptop GPU driver down -- Secure Boot MOK not enrolled (diagnosed 2026-07-10)** --
+  On Marco's ThinkPad P16s Gen 3, `nvidia-smi` fails ("couldn't communicate with
+  the NVIDIA driver") and no nvidia kernel module is loaded. Root cause is NOT a
+  DKMS/kernel mismatch: the module is built and matches the running kernel
+  (`6.8.0-124-generic`, module version 580.159.03). The kernel log shows
+  `Loading of module with unavailable key is rejected` under
+  `Kernel is locked down from EFI Secure Boot mode`. History: the driver was
+  originally installed via Canonical-signed prebuilt `linux-modules-nvidia-*`
+  packages (Canonical's key is trusted by Secure Boot out of the box, so the GPU
+  worked in the v7 era), but a kernel bump to 6.8.0-124 outran the prebuilt
+  signed module, so the module is now **DKMS-built and signed with the machine's
+  own MOK** (`CN = marco-ThinkPad-P16s-Gen-3 Secure Boot Module Signature key`,
+  key on disk at `/var/lib/shim-signed/mok/MOK.der`) -- and that MOK is **not
+  enrolled** in the firmware (`mokutil --list-enrolled` shows only the Canonical
+  CA). Fix (permanent, makes all future DKMS builds trusted):
+  `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der` -> reboot -> enroll at
+  the blue MOK Manager screen. Quick alternative: disable Secure Boot in BIOS.
+  Either needs a reboot. Not required for CPU-only work. As of 2026-07-10 this is
+  UNRESOLVED (pending Marco's reboot); v8 laptop GPU testing is blocked on it.
+
 - **ML Table Detection -- v7 MILESTONE LOCKED 2026-07-06 (baseline for v8 work)** --
   **IMPORTANT CAVEAT ADDED 2026-07-07: the "0.8297 across the 5 held-out
   PDFs" number below is NOT a clean generalization score -- it is a
@@ -78,7 +170,7 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   - `Electrical_Takeoff_page7` (4/4, tight) and `D` (3/3) are v7's
     perfect-recall PDFs -- v8 must not regress these.
 
-- **ML eval-set contamination discovered + v7 real-world recall problem -- 2026-07-07 (BLOCKS valid v8 measurement; resume here)** --
+- **ML eval-set contamination discovered + v7 real-world recall problem -- 2026-07-07 (ADVANCED 2026-07-10: the "clean split first" plan was executed and v8 measured -- see the "v8 held-out result DONE 2026-07-10" entry above)** --
   Working session toward a v8 detector retrain. The headline discovery
   is a **data-leakage / evaluation-contamination bug** that invalidates
   the v7 mAP numbers as generalization evidence, plus solid evidence

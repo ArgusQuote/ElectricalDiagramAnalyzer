@@ -65,25 +65,25 @@ v7's best-ever 0.2555) → peak **0.3999 @ epoch 25**, eval_loss 1.37→~0.50.
 - NOTE: 0.3999 is the internal 10%-mostly-synth val split — the REAL number
   is the held-out PDF eval in step 2, which is **not yet run** (see below).
 
-## SESSION-2 STOP STATE (2026-07-10 ~02:36 laptop time — resume here)
+## SESSION-2 STATUS (steps 1–4 DONE 2026-07-10)
 
-- Step 1 DONE (training finished, `best/` verified as above).
-- Step 2 (held-out eval) NOT done. It was launched then deliberately killed at
-  a clean stopping point: it had only reached v7/derek2 (still in the CPU
-  heuristic-render phase, no `box_comparison.json` written), so **zero eval
-  results exist yet** — `baselines/v8_2026-07-10/` is empty. It was stopped to
-  avoid an orphaned eval competing overnight with production anvil for the GPU.
-- Verified at stop: no `evaluate_model.py`/`run_v8_eval.sh` procs left, GPU
-  idle (1494 MiB = the 4 dormant anvil workers, 0% util), `anvil-uplink.service`
-  **active**.
-- **A ready-to-run eval runner is saved on Paperspace at
-  `~/Documents/TableAnnotations/run_v8_eval.sh`** — it loops all 5 held-out
-  PDFs × {v7,v8} into `baselines/v8_2026-07-10/{v7,v8}/<stem>/` at conf 0.5 /
-  IoU 0.5 (verbose, logs to `~/Documents/TableAnnotations/v8_eval.log`).
-  Tomorrow: confirm no customer job is running (`nvidia-smi`), then
-  `cd ~/Documents/TableAnnotations && nohup bash run_v8_eval.sh > v8_eval.log 2>&1 &`
-  and monitor. Set A = derek2, derekfirst (pdfToScan); Set B = chucksmall,
-  ELECTRICAL_SET_MarkUp, Panels_Example (Diagrams). Then continue at step 3.
+- Step 1 DONE (training finished, `best/` = epoch-25 / checkpoint-4825).
+- Steps 2 & 3 DONE. Held-out eval (both models, all 5 PDFs, conf 0.5 / IoU 0.5)
+  completed; results + `SUMMARY.md` written under
+  `~/Documents/TableAnnotations/baselines/v8_2026-07-10/{v7,v8}/<stem>/`.
+  **v8 wins**: on Set A (derek2/derekfirst, v7-trained/v8-unseen) mAP@0.5 avg
+  0.295 → 0.367, recall 0.281 → 0.484; on Set B (3 independent Diagrams) mAP@0.5
+  0.759 → 0.817, recall 0.520 → 0.720; all-5 recall 0.386 → 0.588 (+52% rel,
+  FN 70 → 47). Tradeoff = precision 0.88 → 0.63 (v8 over-predicts; derekfirst is
+  the one soft mAP regression). Label-under-coverage fix + generalization proven.
+  See `baselines/v8_2026-07-10/SUMMARY.md` for the full table.
+- Step 4 DONE: `anvil-uplink.service` **active + enabled** (never touched), GPU
+  idle (0% util), no stray eval procs. Eval runner preserved at
+  `~/Documents/TableAnnotations/run_v8_eval.sh`; log at `v8_eval.log`.
+- Step 5 (Marco's decision, NOT started): k-fold expansion vs v8-production
+  retrain on all 22 heuristic-relabeled docs vs a v9 precision (FP) lever.
+  Leftover `models_v8/checkpoint-{4825,5211,5404}/` + `runs/` can be pruned
+  (keep `best/`; copy checkpoint-5404's trainer_state.json into best/ first).
 
 ## REMAINING STEPS (in order)
 
