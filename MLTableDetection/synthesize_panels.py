@@ -250,6 +250,16 @@ def main() -> int:
                         help="Probability of using a natural blank-page "
                              "background vs a masked panel-page background "
                              "(default 0.7 -- prefer natural).")
+    parser.add_argument("--rotate-deg", type=float, default=2.0,
+                        help="Max abs rotation in degrees; each panel is "
+                             "rotated uniform(-r, r) (default 2.0).")
+    parser.add_argument("--scale-min", type=float, default=0.9,
+                        help="Min panel rescale factor (default 0.9).")
+    parser.add_argument("--scale-max", type=float, default=1.1,
+                        help="Max panel rescale factor (default 1.1).")
+    parser.add_argument("--brightness", type=float, default=0.15,
+                        help="Max brightness jitter; each panel is scaled by "
+                             "uniform(1-b, 1+b) (default 0.15).")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility.")
     args = parser.parse_args()
@@ -318,9 +328,10 @@ def main() -> int:
 
             crop = transform_panel(
                 crop,
-                rotate_deg=rng.uniform(-2.0, 2.0),
-                scale=rng.uniform(0.9, 1.1),
-                brightness=rng.uniform(0.85, 1.15),
+                rotate_deg=rng.uniform(-args.rotate_deg, args.rotate_deg),
+                scale=rng.uniform(args.scale_min, args.scale_max),
+                brightness=rng.uniform(1.0 - args.brightness,
+                                       1.0 + args.brightness),
             )
 
             placement = find_placement(
