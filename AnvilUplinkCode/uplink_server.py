@@ -67,6 +67,21 @@ COMPATIBILITY_MAX_PANEL_ATTEMPTS = int(
     os.environ.get("COMPATIBILITY_MAX_PANEL_ATTEMPTS", "3")
 )
 
+# Quick compatibility tests should never occupy a worker for
+# as long as a full detection job.
+COMPATIBILITY_TIMEOUT_SEC = int(
+    os.environ.get(
+        "COMPATIBILITY_TIMEOUT_SEC",
+        "60",
+    )
+)
+
+COMPATIBILITY_TIMEOUT_ERROR_MSG = (
+    "The quick compatibility test took too long to process. "
+    "Run the drawings as a normal job instead. The full run "
+    "can handle larger and more complex or unusual drawing sets."
+)
+
 # Fallback cleanup for abandoned compatibility tests.
 COMPATIBILITY_TEMP_RETENTION_MINUTES = int(
     os.environ.get(
@@ -3906,6 +3921,35 @@ def _process_compatibility_job(
             selection
         )
 
+        # Preserve the exact panel image/overlay used by
+        # the quick compatibility analysis.
+        selected_component = (
+            selection.get("component")
+            or selection.get("selected_component")
+            or {}
+        )
+
+        if not isinstance(
+            selected_component,
+            dict
+        ):
+            selected_component = {}
+
+        compatibility_image_path = str(
+            selected_component.get("overlay_source")
+            or selected_component.get("overlaySource")
+            or selected_component.get("reviewOverlayPath")
+            or selected_component.get("review_overlay_path")
+            or selected_component.get("preview_source")
+            or selected_component.get("previewSource")
+            or selected_component.get("source")
+            or selection.get("overlay_source")
+            or selection.get("overlay_path")
+            or selection.get("candidate_path")
+            or selection.get("source")
+            or ""
+        ).strip()
+
         finished_ts_ms = _epoch_ms()
 
         cycle_time_ms = (
@@ -3919,6 +3963,14 @@ def _process_compatibility_job(
             "job_id": job_id,
             "job_type": "compatibility",
             "report": report,
+
+            # Stored as a path in result.json.
+            # The status callable converts it to BlobMedia
+            # before sending it to the Anvil client.
+            "compatibility_image_path": (
+                compatibility_image_path
+            ),
+
             "cycle_time_ms": cycle_time_ms,
             "cycle_time_str": _fmt_cycle_time(
                 cycle_time_ms or 0
@@ -4588,10 +4640,31 @@ def _dequeue_loop(idx: int):
             slot.job_q.put(job_id)
 
             # Wait for completion, but watch for real activity every second.
-            # Real activity means:
-            #   - meaningful status fields changed, OR
-            #   - new/modified PNG files appeared in pdf_images.
-            timeout_sec = max(1, int(WATCHDOG_TIMEOUT_MIN) * 60)
+            # Compatibility tests use a much shorter hard timeout
+            # than full processing jobs.
+            job_type = str(
+                st.get("job_type")
+                or "detection"
+            ).strip().lower()
+
+            is_compatibility_job = (
+                job_type == "compatibility"
+                or job_id.startswith(
+                    "compatibility__"
+                )
+            )
+
+            if is_compatibility_job:
+                timeout_sec = max(
+                    1,
+                    int(COMPATIBILITY_TIMEOUT_SEC)
+                )
+            else:
+                timeout_sec = max(
+                    1,
+                    int(WATCHDOG_TIMEOUT_MIN) * 60
+                )
+
             started_wait = time.time()
             last_signal_at = time.time()
             last_sig = _job_activity_signature(job_dir)
@@ -4617,11 +4690,23 @@ def _dequeue_loop(idx: int):
                         err_msg = "Worker process crashed during this job. Please try again."
                         break
 
-                    # Hard cap: job is still moving maybe, but it is too large/slow overall.
+                    # Hard cap: compatibility tests stop after
+                    # 60 seconds; full jobs retain their normal watchdog.
                     if now - started_wait >= timeout_sec:
                         worker_ok = False
                         worker_crashed = False
-                        err_msg = WATCHDOG_ERROR_MSG.format(mins=WATCHDOG_TIMEOUT_MIN)
+
+                        if is_compatibility_job:
+                            err_msg = (
+                                COMPATIBILITY_TIMEOUT_ERROR_MSG
+                            )
+                        else:
+                            err_msg = (
+                                WATCHDOG_ERROR_MSG.format(
+                                    mins=WATCHDOG_TIMEOUT_MIN
+                                )
+                            )
+
                         break
 
                     # External cancel.
@@ -4660,9 +4745,19 @@ def _dequeue_loop(idx: int):
             if not worker_ok:
                 # If the job merely stopped showing activity, kill/requeue once instead
                 # of making the customer manually retry.
-                no_signal = str(err_msg or "").startswith("No processing activity")
+                no_signal = str(
+                    err_msg or ""
+                ).startswith(
+                    "No processing activity"
+                )
 
-                if no_signal:
+                # Full jobs may be retried after a no-signal
+                # worker restart. Quick compatibility tests
+                # should stop instead of starting over.
+                if (
+                    no_signal
+                    and not is_compatibility_job
+                ):
                     print(f">>> no-signal timeout [{tag}]: {job_id} | {err_msg}")
 
                     with slot.lock:
@@ -5507,6 +5602,60 @@ def vm_get_compatibility_status(
             }
 
         output["progress"] = 100.0
+        image_path_text = str(
+            result.get(
+                "compatibility_image_path"
+            )
+            or ""
+        ).strip()
+
+        if image_path_text:
+            try:
+                image_path = Path(
+                    image_path_text
+                ).resolve()
+
+                # Security check: only return an image
+                # that belongs to this temporary job.
+                resolved_job_dir = Path(
+                    job_dir
+                ).resolve()
+
+                if (
+                    image_path.is_file()
+                    and resolved_job_dir
+                    in image_path.parents
+                ):
+                    suffix = (
+                        image_path.suffix.lower()
+                    )
+
+                    if suffix in {
+                        ".jpg",
+                        ".jpeg"
+                    }:
+                        content_type = "image/jpeg"
+                    else:
+                        content_type = "image/png"
+
+                    result[
+                        "compatibility_image"
+                    ] = BlobMedia(
+                        content_type,
+                        image_path.read_bytes(),
+                        name=(
+                            "compatibility-panel"
+                            + suffix
+                        )
+                    )
+
+            except Exception as image_error:
+                print(
+                    ">>> compatibility preview "
+                    "could not be loaded: "
+                    f"{type(image_error).__name__}: "
+                    f"{image_error}"
+                )
         output["result"] = result
 
         return output
