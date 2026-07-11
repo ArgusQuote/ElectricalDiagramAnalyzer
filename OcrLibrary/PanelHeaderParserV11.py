@@ -1864,45 +1864,140 @@ class PanelParser:
         return u
 
 
-    def _special_header_word_family(self, word: str) -> str:
+    def _special_header_word_family(
+        self,
+        word: str
+    ) -> str:
         """
-        Normalize obvious word variants/plurals into one family token.
-        This avoids hardcoding every exact phrase combination.
+        Normalize common singular, plural, and abbreviated
+        schedule-title words into stable family tokens.
         """
-        w = str(word or "").upper().strip()
-        if not w: 
+        w = str(
+            word or ""
+        ).upper().strip()
+
+        if not w:
             return ""
 
-        # switchboard family
-        if w in {"SWITCHBOARD", "SWITCHBOARDS", "SWBD", "SWBDS"}:
+        if w in {
+            "SWITCHBOARD",
+            "SWITCHBOARDS",
+            "SWBD",
+            "SWBDS",
+        }:
             return "SWITCHBOARD"
 
-        # light family
-        if w in {"LIGHT", "LIGHTS", "LIGHTING"}:
+        if w in {
+            "LIGHT",
+            "LIGHTS",
+            "LIGHTING",
+        }:
             return "LIGHT"
 
-        # fixture family
-        if w in {"FIXTURE", "FIXTURES"}:
+        if w in {
+            "FIXTURE",
+            "FIXTURES",
+        }:
             return "FIXTURE"
 
-        # schedule family
-        if w in {"SCHEDULE", "SCHEDULES"}:
+        if w in {
+            "SCHEDULE",
+            "SCHEDULES",
+        }:
             return "SCHEDULE"
 
-        # conduit family
-        if w in {"CONDUIT", "CONDUITS"}:
+        if w in {
+            "CONDUIT",
+            "CONDUITS",
+        }:
             return "CONDUIT"
 
-        # wireway family
-        if w in {"WIREWAY", "WIREWAYS", "WWA", "WWB", "WWC"}:
+        if w in {
+            "EQUIPMENT",
+            "EQUIPMENTS",
+            "EQUIP",
+            "EQPT",
+        }:
+            return "EQUIPMENT"
+
+        if w in {
+            "MECHANICAL",
+            "MECH",
+        }:
+            return "MECHANICAL"
+
+        if w in {
+            "HVAC",
+        }:
+            return "HVAC"
+
+        if w in {
+            "DISCONNECT",
+            "DISCONNECTS",
+            "DISC",
+            "DISCS",
+        }:
+            return "DISCONNECT"
+
+        if w in {
+            "SAFETY",
+        }:
+            return "SAFETY"
+
+        if w in {
+            "SWITCH",
+            "SWITCHES",
+        }:
+            return "SWITCH"
+
+        if w in {
+            "LABOR",
+            "LABOUR",
+        }:
+            return "LABOR"
+
+        if w in {
+            "MOTOR",
+            "MOTORS",
+        }:
+            return "MOTOR"
+
+        if w in {
+            "TRANSFORMER",
+            "TRANSFORMERS",
+            "XFMR",
+            "XFMRS",
+        }:
+            return "TRANSFORMER"
+
+        if w in {
+            "GENERATOR",
+            "GENERATORS",
+            "GEN",
+            "GENS",
+        }:
+            return "GENERATOR"
+
+        if w in {
+            "WIREWAY",
+            "WIREWAYS",
+            "WWA",
+            "WWB",
+            "WWC",
+        }:
             return "WIREWAY"
 
-        # inverter family
-        if w in {"INVERTER", "INVERTERS", "INV"}:
+        if w in {
+            "INVERTER",
+            "INVERTERS",
+            "INV",
+        }:
             return "INVERTER"
 
-        # interior / exterior stay as-is
-        if w in {"INTERIOR", "EXTERIOR"}:
+        if w in {
+            "INTERIOR",
+            "EXTERIOR",
+        }:
             return w
 
         return w
@@ -1930,7 +2025,7 @@ class PanelParser:
         - SOURCE: INVERTER INV-1
         """
         import re
-
+ 
         FAMILY_RULES = [
             {
                 "kind": "switchboard",
@@ -1939,14 +2034,21 @@ class PanelParser:
                     {"SWITCHBOARD"},
                 ],
             },
+
             {
                 "kind": "lighting_schedule",
                 "note": "Lighting schedule detected",
                 "required_any": [
                     {"LIGHT", "SCHEDULE"},
-                    {"LIGHT", "FIXTURE", "SCHEDULE"},
+                    {"FIXTURE", "SCHEDULE"},
+                    {
+                        "LIGHT",
+                        "FIXTURE",
+                        "SCHEDULE",
+                    },
                 ],
             },
+
             {
                 "kind": "conduit_schedule",
                 "note": "Conduit schedule detected",
@@ -1954,6 +2056,116 @@ class PanelParser:
                     {"CONDUIT", "SCHEDULE"},
                 ],
             },
+
+            # More-specific schedule rules must stay
+            # above the generic equipment rule.
+            {
+                "kind": "mechanical_schedule",
+                "note": "Mechanical schedule detected",
+                "required_any": [
+                    {
+                        "MECHANICAL",
+                        "SCHEDULE",
+                    },
+                    {
+                        "HVAC",
+                        "SCHEDULE",
+                    },
+                    {
+                        "MECHANICAL",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                    {
+                        "HVAC",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "disconnect_schedule",
+                "note": "Disconnect schedule detected",
+                "required_any": [
+                    {
+                        "DISCONNECT",
+                        "SCHEDULE",
+                    },
+                    {
+                        "SAFETY",
+                        "SWITCH",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "motor_schedule",
+                "note": "Motor schedule detected",
+                "required_any": [
+                    {"MOTOR", "SCHEDULE"},
+                    {
+                        "MOTOR",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "transformer_schedule",
+                "note": "Transformer schedule detected",
+                "required_any": [
+                    {
+                        "TRANSFORMER",
+                        "SCHEDULE",
+                    },
+                    {
+                        "TRANSFORMER",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "generator_schedule",
+                "note": "Generator schedule detected",
+                "required_any": [
+                    {
+                        "GENERATOR",
+                        "SCHEDULE",
+                    },
+                    {
+                        "GENERATOR",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "labor_schedule",
+                "note": "Labor schedule detected",
+                "required_any": [
+                    {"LABOR", "SCHEDULE"},
+                ],
+            },
+
+            # Keep this after mechanical, motor,
+            # transformer, and generator schedules.
+            {
+                "kind": "equipment_schedule",
+                "note": "Equipment schedule detected",
+                "required_any": [
+                    {
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
             {
                 "kind": "wireway",
                 "note": "Wireway detected",
@@ -1961,12 +2173,16 @@ class PanelParser:
                     {"WIREWAY"},
                 ],
             },
+
             {
                 "kind": "inverter",
                 "note": "Inverter detected",
                 "required_any": [
                     {"INVERTER"},
-                    {"LIGHT", "INVERTER"},
+                    {
+                        "LIGHT",
+                        "INVERTER",
+                    },
                 ],
             },
         ]
@@ -2025,8 +2241,41 @@ class PanelParser:
                     return False
                 return True
 
-            # Lighting/conduit schedules are naturally title phrases.
-            if re.search(r"\b(LIGHT|LIGHTING|FIXTURE|CONDUIT)\s+SCHEDULE\b", text):
+            # Known schedule families are naturally
+            # title phrases, including multi-word titles
+            # such as MECHANICAL EQUIPMENT SCHEDULE.
+            token_set = set(
+                cand.get("token_set") or []
+            )
+
+            if not token_set:
+                token_set = (
+                    self._special_header_token_set(
+                        text
+                    )
+                )
+
+            schedule_title_families = {
+                "LIGHT",
+                "FIXTURE",
+                "CONDUIT",
+                "MECHANICAL",
+                "HVAC",
+                "EQUIPMENT",
+                "DISCONNECT",
+                "SAFETY",
+                "MOTOR",
+                "TRANSFORMER",
+                "GENERATOR",
+                "LABOR",
+            }
+
+            if (
+                "SCHEDULE" in token_set
+                and token_set.intersection(
+                    schedule_title_families
+                )
+            ):
                 return True
 
             return False
@@ -2042,8 +2291,13 @@ class PanelParser:
             """
             up = self._normalize_special_header_text(text)
 
-            # lighting schedules are less likely to be source references
-            if kind == "lighting_schedule":
+            # Explicit schedule-title families are not
+            # relational source references.
+            if str(
+                kind or ""
+            ).strip().lower().endswith(
+                "_schedule"
+            ):
                 return False
 
             # 1) direct text match
