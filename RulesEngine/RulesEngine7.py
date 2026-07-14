@@ -28,15 +28,17 @@ def apply_interrupting_rating_defaults(raw: dict) -> dict:
     Returns the modified dictionary with notes about defaults applied.
     """
     raw = raw.copy()
-    notes = raw.setdefault("_notes", [])
     
     # Check if interrupting rating is missing, None, or "NONE"
     int_rating = raw.get("intRating")
     
     if int_rating is None or _is_none_token(str(int_rating)) or int_rating == "":
         raw["intRating"] = DEFAULT_INTERRUPTING_RATING
-        notes.append(f"No interrupting rating detected - system defaulted to {DEFAULT_INTERRUPTING_RATING}kAIC")
-    
+
+        # Hidden metadata used later to create one combined user-facing note.
+        raw["_intRatingWasDefaulted"] = True
+        raw["_defaultedIntRating"] = DEFAULT_INTERRUPTING_RATING
+
     return raw
 
 HJ_2P_ALLOWED = {
@@ -1734,7 +1736,15 @@ class PanelboardEngine(BaseEngine):
                     panel["_finalPanelAmperage"] = panelAttrs.get("amperage")
                     panel["_finalPanelSpaces"] = panelAttrs.get("spaces")
                     panel["_finalPanelVoltage"] = voltage
-                    panel["_finalPanelIntRating"] = raw.get("intRating")
+                    panel["_requestedPanelIntRating"] = _safe_int(
+                        raw.get("intRating"),
+                        0
+                    )
+
+                    panel.pop(
+                        "_finalPanelIntRating",
+                        None
+                    )
                     panel["_finalMainBreakerAmperage"] = None
 
                     return self._build_nq_branch_breakers(panel, raw, raw.get("detected_breakers", []))
@@ -1744,7 +1754,15 @@ class PanelboardEngine(BaseEngine):
                     panel["_finalPanelAmperage"] = panelAttrs.get("amperage")
                     panel["_finalPanelSpaces"] = panelAttrs.get("spaces")
                     panel["_finalPanelVoltage"] = voltage
-                    panel["_finalPanelIntRating"] = raw.get("intRating")
+                    panel["_requestedPanelIntRating"] = _safe_int(
+                        raw.get("intRating"),
+                        0
+                    )
+
+                    panel.pop(
+                        "_finalPanelIntRating",
+                        None
+                    )
                     panel["_finalMainBreakerAmperage"] = None
 
                     return self._build_nf_branch_breakers(
@@ -2164,11 +2182,26 @@ class PanelboardEngine(BaseEngine):
         best_fam = selected_family
         best_params = selected_params
 
-        panel_output["_finalPanelAmperage"] = panelAttrs.get("amperage")
-        panel_output["_finalPanelSpaces"] = panelAttrs.get("spaces")
+        panel_output["_finalPanelAmperage"] = panelAttrs.get(
+            "amperage"
+        )
+        panel_output["_finalPanelSpaces"] = panelAttrs.get(
+            "spaces"
+        )
         panel_output["_finalPanelVoltage"] = voltage
-        panel_output["_finalPanelIntRating"] = raw.get("intRating")
-        panel_output["_finalMainBreakerAmperage"] = breaker_amps
+
+        # Keep the drawing requirement separate from the generated BOM rating.
+        panel_output["_requestedPanelIntRating"] = raw_ir
+
+        # This is set later by the selected branch-breaker builder.
+        panel_output.pop(
+            "_finalPanelIntRating",
+            None
+        )
+
+        panel_output["_finalMainBreakerAmperage"] = (
+            breaker_amps
+        )
 
         if set(best_params[2]) == {"LA","LH"} or full_frame_code == "LL":
             rating_key = "LL"
@@ -2302,10 +2335,21 @@ class PanelboardEngine(BaseEngine):
         else:
             panel_output["Main Breaker Kit"] = all_kits[0]
 
-        if isinstance(breaker_part, str) and breaker_part.startswith("Invalid"):
-            panel_output["Main Breaker Error"] = breaker_part
+        if (
+            isinstance(breaker_part, str)
+            and breaker_part.startswith("Invalid")
+        ):
+            panel_output["Main Breaker Error"] = (
+                breaker_part
+            )
         else:
-            panel_output["Main Breaker"]     = breaker_part 
+            panel_output["Main Breaker"] = breaker_part
+
+            # Record the interrupting rating actually used to build
+            # the selected main-breaker part number.
+            panel_output[
+                "_finalMainBreakerIntRating"
+            ] = breaker_attrs.get("intRating")
         if panelAttrs.get("_resize_note"):
             panel_output.setdefault("Notes", []).append(panelAttrs["_resize_note"])
 
@@ -2518,11 +2562,18 @@ class PanelboardEngine(BaseEngine):
         if raw.get("_notes"):
             panel_result.setdefault("Notes", []).extend(raw["_notes"])
 
-        pr_ir = panel_result.get("Interrupting Rating", "") or raw.get("intRating", "")
-        try:
-            panel_k = int(str(pr_ir).rstrip("k"))
-        except:
-            panel_k = 0
+        # Rating stated on the drawing.
+        # Do not read a generated panel component value here.
+        requested_ir = _safe_int(
+            raw.get("intRating"),
+            0
+        )
+
+        panel_k = requested_ir
+
+        panel_result["_requestedPanelIntRating"] = (
+            requested_ir
+        )
 
         allow_plug  = raw["allowPlugOn"]
         rating_type = raw["panelRatingType"].upper()
@@ -2539,6 +2590,10 @@ class PanelboardEngine(BaseEngine):
         summary = {}
         requested_used_spaces = 0
         built_used_spaces = 0
+
+        # Store the actual interrupting ratings returned by every
+        # successfully generated NQ branch breaker.
+        built_branch_ir_values = []
 
         def _base_to_frame_and_ir(base: str, rating_voltage: int):
             v = 240 if rating_voltage in (208, 240) else rating_voltage
@@ -2732,11 +2787,26 @@ class PanelboardEngine(BaseEngine):
             pn = out["Part Number"]
             built_used_spaces += needed_spaces
 
-            entry = summary.setdefault(pn, {
-                "Part Number":         pn,
-                "Interrupting Rating": out["Interrupting Rating"],
-                "count":               0,
-            })
+            actual_branch_ir = _safe_int(
+                out.get("Interrupting Rating"),
+                0
+            )
+
+            if actual_branch_ir > 0:
+                built_branch_ir_values.append(
+                    actual_branch_ir
+                )
+
+            entry = summary.setdefault(
+                pn,
+                {
+                    "Part Number": pn,
+                    "Interrupting Rating": out[
+                        "Interrupting Rating"
+                    ],
+                    "count": 0,
+                }
+            )
             entry["count"] += count
 
             for k, v in out.items():
@@ -2746,8 +2816,110 @@ class PanelboardEngine(BaseEngine):
         total_spaces = _safe_int(panel_result.get("spaces"), 0)
         remaining_spaces = max(0, total_spaces - built_used_spaces)
 
-        panel_result["Branch Breakers (NQ)"] = list(summary.values())
-        panel_result["Spaces Remaining"] = remaining_spaces
+        panel_result["Branch Breakers (NQ)"] = list(
+            summary.values()
+        )
+
+        panel_result["Spaces Remaining"] = (
+            remaining_spaces
+        )
+
+        rating_type = str(
+            raw.get("panelRatingType")
+            or "FULLY_RATED"
+        ).upper()
+
+        # The generated branch rating is the lowest actual rating
+        # among the successfully built NQ branch breakers.
+        final_branch_ir = (
+            min(built_branch_ir_values)
+            if built_branch_ir_values
+            else requested_ir
+        )
+
+        panel_result["_finalBranchIntRating"] = (
+            final_branch_ir
+        )
+
+        panel_result["_finalPanelIntRating"] = (
+            final_branch_ir
+        )
+
+        # Fully rated: explain defaulting and any upward
+        # product-rating bump in one note.
+        if rating_type == "FULLY_RATED":
+            was_defaulted = bool(
+                raw.get("_intRatingWasDefaulted", False)
+            )
+
+            if (
+                final_branch_ir is not None
+                and final_branch_ir > requested_ir
+            ):
+                if was_defaulted:
+                    note = (
+                        f"No interrupting rating was detected. "
+                        f"The system defaulted to "
+                        f"{requested_ir}kAIC, then increased the "
+                        f"generated NQ branch-breaker rating to "
+                        f"{final_branch_ir}kAIC because "
+                        f"{requested_ir}kAIC is not an available "
+                        f"NQ branch-breaker rating."
+                    )
+                else:
+                    note = (
+                        f"Interrupting rating increased from "
+                        f"{requested_ir}kAIC to "
+                        f"{final_branch_ir}kAIC because "
+                        f"{requested_ir}kAIC is not an available "
+                        f"NQ branch-breaker rating. The next "
+                        f"supported rating was selected."
+                    )
+
+                notes = panel_result.setdefault(
+                    "Notes",
+                    []
+                )
+
+                if note not in notes:
+                    notes.append(note)
+
+            elif was_defaulted:
+                note = (
+                    f"No interrupting rating was detected. "
+                    f"The system defaulted the generated NQ "
+                    f"branch-breaker rating to "
+                    f"{requested_ir}kAIC."
+                )
+
+                notes = panel_result.setdefault(
+                    "Notes",
+                    []
+                )
+
+                if note not in notes:
+                    notes.append(note)
+
+        # Series rated: the branch rating may intentionally be below
+        # the drawing/system rating.
+        if (
+            rating_type == "SERIES_RATED"
+            and final_branch_ir is not None
+            and final_branch_ir != requested_ir
+        ):
+            note = (
+                f"Series-rated configuration selected "
+                f"{final_branch_ir}kAIC NQ branch breakers "
+                f"for a {requested_ir}kAIC system requirement."
+            )
+
+            notes = panel_result.setdefault(
+                "Notes",
+                []
+            )
+
+            if note not in notes:
+                notes.append(note)
 
         # Only add filler plates when there are blank spaces
         if remaining_spaces > 0:
@@ -2787,13 +2959,99 @@ class PanelboardEngine(BaseEngine):
 
         valid_ir_options = [18, 35, 65]
 
-        pr_ir = panel_result.get("Interrupting Rating", "") or raw.get("intRating", 0)
-        try:
-            panel_k = int(str(pr_ir).rstrip("k"))
-        except:
-            panel_k = 0
+        # Rating required by the drawing.
+        requested_ir = _safe_int(
+            raw.get("intRating"),
+            0
+        )
 
-        rating_type = raw["panelRatingType"].upper()
+        rating_type = str(
+            raw.get("panelRatingType")
+            or "FULLY_RATED"
+        ).upper()
+
+        # Series-rated panels use the lower series-rated branch value.
+        # Fully-rated panels must meet or exceed the drawing requirement.
+        desired_ir = (
+            18
+            if rating_type == "SERIES_RATED"
+            else requested_ir
+        )
+
+        final_branch_ir = bump_to_next(
+            valid_ir_options,
+            desired_ir
+        )
+
+        # Paper trail for the generated BOM.
+        panel_result["_requestedPanelIntRating"] = (
+            requested_ir
+        )
+
+        displayed_final_ir = (
+            final_branch_ir
+            if final_branch_ir is not None
+            else requested_ir
+        )
+
+        panel_result["_finalBranchIntRating"] = (
+            displayed_final_ir
+        )
+
+        panel_result["_finalPanelIntRating"] = (
+            displayed_final_ir
+        )
+
+        was_defaulted = bool(
+            raw.get("_intRatingWasDefaulted", False)
+        )
+
+        if (
+            final_branch_ir is not None
+            and final_branch_ir > requested_ir
+        ):
+            if was_defaulted:
+                note = (
+                    f"No interrupting rating was detected. "
+                    f"The system defaulted to "
+                    f"{requested_ir}kAIC, then increased the "
+                    f"generated NF breaker rating to "
+                    f"{final_branch_ir}kAIC because "
+                    f"{requested_ir}kAIC is not an available "
+                    f"NF breaker rating."
+                )
+            else:
+                note = (
+                    f"Interrupting rating increased from "
+                    f"{requested_ir}kAIC to "
+                    f"{final_branch_ir}kAIC because "
+                    f"{requested_ir}kAIC is not an available "
+                    f"NF breaker rating. The next supported "
+                    f"rating was selected."
+                )
+
+            notes = panel_result.setdefault(
+                "Notes",
+                []
+            )
+
+            if note not in notes:
+                notes.append(note)
+
+        elif was_defaulted:
+            note = (
+                f"No interrupting rating was detected. "
+                f"The system defaulted the generated NF "
+                f"breaker rating to {requested_ir}kAIC."
+            )
+
+            notes = panel_result.setdefault(
+                "Notes",
+                []
+            )
+
+            if note not in notes:
+                notes.append(note)
 
         total_spaces = _safe_int(panel_result.get("spaces"), 0)
         used_spaces  = 0
@@ -2829,9 +3087,7 @@ class PanelboardEngine(BaseEngine):
                 continue
             amps = bumped_amps
 
-            # Force 18kA for SERIES_RATED; otherwise use the panel_k target
-            desired_ir = 18 if rating_type == "SERIES_RATED" else panel_k
-            ir = bump_to_next(valid_ir_options, desired_ir)
+            ir = final_branch_ir
 
             selector = eFrameBreaker()
 
@@ -2883,7 +3139,33 @@ class PanelboardEngine(BaseEngine):
                 print("[ILINE]", *args, **kwargs)        
         
         if raw.get("_notes"):
-            panel_result.setdefault("Notes", []).extend(raw["_notes"])
+            notes = panel_result.setdefault(
+                "Notes",
+                []
+            )
+
+            for note in raw["_notes"]:
+                if note not in notes:
+                    notes.append(note)
+
+        # Rating stated on the drawing.
+        requested_ir = _safe_int(
+            raw.get("intRating"),
+            0
+        )
+
+        rating_type = str(
+            raw.get("panelRatingType")
+            or "FULLY_RATED"
+        ).upper()
+
+        panel_result["_requestedPanelIntRating"] = (
+            requested_ir
+        )
+
+        # Track the actual rating used by every successfully
+        # generated I-LINE branch breaker.
+        built_branch_ir_values = []
         
         def side_profiles_for(series: str):
             if series == "HCJ":
@@ -3344,11 +3626,29 @@ class PanelboardEngine(BaseEngine):
                         phase_load[a] += float(chosen_amperage)
                         phase_load[b] += float(chosen_amperage)
                     pn = final_part["Part Number"]
-                    entry = summary.setdefault(pn, {
-                        "Part Number": pn,
-                        "Interrupting Rating": final_part["Interrupting Rating"],
-                        "count": 0
-                    })
+
+                    actual_branch_ir = _safe_int(
+                        final_part.get(
+                            "Interrupting Rating"
+                        ),
+                        0
+                    )
+
+                    if actual_branch_ir > 0:
+                        built_branch_ir_values.append(
+                            actual_branch_ir
+                        )
+
+                    entry = summary.setdefault(
+                        pn,
+                        {
+                            "Part Number": pn,
+                            "Interrupting Rating": final_part[
+                                "Interrupting Rating"
+                            ],
+                            "count": 0,
+                        }
+                    )
                     entry["count"] += 1
                     for k, v in final_part.items():
                         if k not in ("Part Number", "Interrupting Rating"):
@@ -3439,7 +3739,103 @@ class PanelboardEngine(BaseEngine):
 
         errors = summary.pop("Errors", None)
 
-        panel_result["Branch Breakers (I-LINE)"] = list(summary.values())
+        panel_result["Branch Breakers (I-LINE)"] = list(
+            summary.values()
+        )
+
+        # The generated branch rating is the lowest actual rating
+        # among the successfully built I-LINE branch breakers.
+        final_branch_ir = (
+            min(built_branch_ir_values)
+            if built_branch_ir_values
+            else requested_ir
+        )
+
+        panel_result["_finalBranchIntRating"] = (
+            final_branch_ir
+        )
+
+        panel_result["_finalPanelIntRating"] = (
+            final_branch_ir
+        )
+
+        # Fully rated: explain defaulting and any upward
+        # product-rating bump in one note.
+        if rating_type == "FULLY_RATED":
+            was_defaulted = bool(
+                raw.get("_intRatingWasDefaulted", False)
+            )
+
+            if (
+                final_branch_ir is not None
+                and final_branch_ir > requested_ir
+            ):
+                if was_defaulted:
+                    note = (
+                        f"No interrupting rating was detected. "
+                        f"The system defaulted to {requested_ir}kAIC, "
+                        f"then increased the generated I-LINE "
+                        f"branch-breaker rating to "
+                        f"{final_branch_ir}kAIC because "
+                        f"{requested_ir}kAIC is not available for "
+                        f"the selected breaker frames."
+                    )
+                else:
+                    note = (
+                        f"Interrupting rating increased from "
+                        f"{requested_ir}kAIC to "
+                        f"{final_branch_ir}kAIC because "
+                        f"{requested_ir}kAIC is not an available "
+                        f"I-LINE branch-breaker rating for the "
+                        f"selected breaker frames. The next "
+                        f"supported rating was selected."
+                    )
+
+                notes = panel_result.setdefault(
+                    "Notes",
+                    []
+                )
+
+                if note not in notes:
+                    notes.append(note)
+
+            elif was_defaulted:
+                note = (
+                    f"No interrupting rating was detected. "
+                    f"The system defaulted the generated I-LINE "
+                    f"branch-breaker rating to "
+                    f"{requested_ir}kAIC."
+                )
+
+                notes = panel_result.setdefault(
+                    "Notes",
+                    []
+                )
+
+                if note not in notes:
+                    notes.append(note)
+
+        # Series-rated I-LINE branches may intentionally have a
+        # lower individual breaker rating than the system rating.
+        if (
+            rating_type == "SERIES_RATED"
+            and final_branch_ir is not None
+            and final_branch_ir != requested_ir
+        ):
+            note = (
+                f"Series-rated configuration selected "
+                f"I-LINE branch breakers with a minimum "
+                f"rating of {final_branch_ir}kAIC for a "
+                f"{requested_ir}kAIC system requirement."
+            )
+
+            notes = panel_result.setdefault(
+                "Notes",
+                []
+            )
+
+            if note not in notes:
+                notes.append(note)
 
         if errors:
             errors = list(dict.fromkeys(errors))

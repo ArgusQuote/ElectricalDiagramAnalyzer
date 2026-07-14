@@ -1832,7 +1832,7 @@ def _rules_safe_components(components: list[dict]) -> list[dict]:
     """
 
     VALID_VOLTAGES = {120, 208, 240, 480, 600}
-    VALID_INT_RATINGS = {10, 18, 22, 25, 35, 42, 65, 100, 150, 200}
+    VALID_INT_RATINGS = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 150, 200}
     VALID_TRIMS = {"SURFACE", "FLUSH"}
     VALID_ENCLOSURES = {"NEMA1", "NEMA3R"}
 
