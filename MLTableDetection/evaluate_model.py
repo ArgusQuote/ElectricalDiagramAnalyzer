@@ -37,6 +37,40 @@ from PIL import Image
 # trusted local files, so disable the limit for the duration of this script.
 Image.MAX_IMAGE_PIXELS = None
 
+# The detectors render overlay PNGs at the detection DPI (400), so large-format
+# sheets (e.g. ARCH-E, ~14400x9600 px) produce 100+ MP / 50+ MB files that most
+# desktop image viewers refuse to open. Cap the long side of saved overlays so
+# they stay viewable. This only affects the human-facing overlay images -- the
+# metrics are computed from detection boxes, never from these PNGs.
+OVERLAY_MAX_LONG_SIDE = 6000
+
+
+def _cap_overlay_images(overlays_dir, max_long_side: int = OVERLAY_MAX_LONG_SIDE):
+    """Downscale any overlay PNG whose long side exceeds *max_long_side*.
+
+    Oversized overlays are rewritten in place (aspect ratio preserved) so they
+    open in standard image viewers. A missing directory or an unreadable file
+    is non-fatal -- overlays are a debugging aid, not evaluation output.
+    """
+    overlays_dir = Path(overlays_dir)
+    if not overlays_dir.is_dir():
+        return
+    for png in overlays_dir.glob("*.png"):
+        try:
+            with Image.open(png) as im:
+                width, height = im.size
+                long_side = max(width, height)
+                if long_side <= max_long_side:
+                    continue
+                scale = max_long_side / long_side
+                resized = im.convert("RGB").resize(
+                    (int(round(width * scale)), int(round(height * scale))),
+                    Image.LANCZOS,
+                )
+            resized.save(png, "PNG", optimize=True)
+        except (OSError, ValueError) as exc:
+            print(f"[WARN] Could not cap oversized overlay {png.name}: {exc}")
+
 
 # ---------------------------------------------------------------------------
 # Ensure project root is importable
@@ -451,6 +485,10 @@ def compare_with_heuristic(
     )
     ml_results = ml_detector.readPdf(str(pdf_path))
 
+    # Keep large-format overlays openable in standard viewers.
+    _cap_overlay_images(heuristic_dir / "magenta_overlays")
+    _cap_overlay_images(ml_dir / "magenta_overlays")
+
     comparison = {
         "pdf": str(pdf_path),
         "conf_threshold": conf_threshold,
@@ -655,6 +693,10 @@ def compare_boxes(
         verbose=False,
     )
     ml_pngs = ml.readPdf(str(pdf_path))
+
+    # Keep large-format overlays openable in standard viewers.
+    _cap_overlay_images(heuristic_dir / "magenta_overlays")
+    _cap_overlay_images(ml_dir / "magenta_overlays")
 
     # --- collect per-page boxes ---
     all_pages = sorted(

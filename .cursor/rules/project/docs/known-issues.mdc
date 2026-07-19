@@ -101,31 +101,148 @@ This file tracks known bugs, limitations, and deferred work items for the projec
     validate -- this becomes the shippable, lockable milestone; (3) **v9
     precision/FP lever** -- trim v8's false positives without giving back recall
     (`derekfirst` is the worst FP case to target). All future GPU work needs
-    Paperspace or the AWS dev box (laptop GPU is inadequate + currently down --
-    see the Secure Boot note below).
+    Paperspace or the AWS dev box (the laptop GPU is back up as of 2026-07-12 --
+    see the "Laptop GPU driver -- RESOLVED" note below -- but its ~4 GB VRAM is
+    inadequate for training regardless).
   - **Eval-cost note:** `derek2` pages are ARCH-E (~14400 px at 400 DPI); v7/v8
     eval renders them live, so those PDFs take several minutes each -- expected,
     not a hang.
 
-- **Laptop GPU driver down -- Secure Boot MOK not enrolled (diagnosed 2026-07-10)** --
-  On Marco's ThinkPad P16s Gen 3, `nvidia-smi` fails ("couldn't communicate with
-  the NVIDIA driver") and no nvidia kernel module is loaded. Root cause is NOT a
-  DKMS/kernel mismatch: the module is built and matches the running kernel
-  (`6.8.0-124-generic`, module version 580.159.03). The kernel log shows
-  `Loading of module with unavailable key is rejected` under
-  `Kernel is locked down from EFI Secure Boot mode`. History: the driver was
-  originally installed via Canonical-signed prebuilt `linux-modules-nvidia-*`
-  packages (Canonical's key is trusted by Secure Boot out of the box, so the GPU
-  worked in the v7 era), but a kernel bump to 6.8.0-124 outran the prebuilt
-  signed module, so the module is now **DKMS-built and signed with the machine's
-  own MOK** (`CN = marco-ThinkPad-P16s-Gen-3 Secure Boot Module Signature key`,
-  key on disk at `/var/lib/shim-signed/mok/MOK.der`) -- and that MOK is **not
-  enrolled** in the firmware (`mokutil --list-enrolled` shows only the Canonical
-  CA). Fix (permanent, makes all future DKMS builds trusted):
-  `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der` -> reboot -> enroll at
-  the blue MOK Manager screen. Quick alternative: disable Secure Boot in BIOS.
-  Either needs a reboot. Not required for CPU-only work. As of 2026-07-10 this is
-  UNRESOLVED (pending Marco's reboot); v8 laptop GPU testing is blocked on it.
+- **ML Table Detection -- v8 is the BEST-PERFORMING model so far (confirmed 2026-07-12)** --
+  As of 2026-07-12, **v8 (`models_v8/best/`) is the best table-detection model
+  produced to date** and beats the locked v7 on every benchmark it has been run
+  against. It is still a validated *candidate*, NOT the production default
+  (`MLTableDetection/TableDetectorML.py` still defaults to v7, and v8 is not yet
+  locked read-only). Evidence, newest first:
+  - **v8 on the v7-milestone benchmark (2026-07-12):** v8 was run through the
+    *identical* eval that produced v7's milestone number -- same 5 PDFs
+    (`generic3`, `K`, `makayla1`, `D`, `Electrical_Takeoff_page7`), same flags
+    (`evaluate_model.py --pdf`, conf 0.5, IoU 0.5, DPI 400, heuristic = GT). v8
+    **swept it: mAP@0.5 = 1.0000 on all 5 (avg 0.8297 -> 1.0000), recall 1.0 on
+    all 5 (avg 0.8548 -> 1.0000), precision 1.0 (0 FP, 0 FN everywhere), and
+    tighter boxes (mAP@0.5:0.95 avg 0.6269 -> 0.8947)**. The 3 PDFs v7
+    under-detected are now complete (`generic3` 4/6->6/6, `K` recall
+    0.857->1.0, `makayla1` 7/8->8/8). **Caveat:** these 5 PDFs are
+    training-adjacent for BOTH models (they have pages in v7's training data,
+    and v8's `v8_holdout/` set held out only derek2/derekfirst), so this is a
+    fit-quality win on v7's own benchmark, NOT independent generalization
+    evidence. Artifacts (locked `v7_2026-05-15/` untouched):
+    `~/Documents/TableAnnotations/baselines/v8_vs_v7milestone_2026-07-12/`
+    (`SUMMARY.md`, 5 `box_comparison.json`, ml/heuristic overlays). Run on
+    Marco's laptop GPU (RTX 500 Ada, CUDA restored 2026-07-12).
+  - **v8 on the true held-out set (2026-07-10):** the independent-generalization
+    result -- v8 lifted recall 0.386 -> 0.588 over v7 across 5 truly-unseen PDFs
+    (see the "v8 held-out result DONE 2026-07-10" entry above), the one
+    tradeoff being some precision loss / false positives (worst on
+    `derekfirst`). Those FPs did NOT appear on the 5 v7-milestone sheets.
+  - **Net:** v8 > v7 on both the true-held-out set and v7's own benchmark. The
+    only known v8 weakness is FP over-prediction on `derekfirst`-style sheets,
+    which the deferred **v9 precision/FP lever** targets. Promotion of v8 to
+    production default remains a deliberate deferred decision (ideally after the
+    k-fold / v8-production-retrain step above) -- do not flip the default
+    without reporting to Marco first.
+
+- **ML Table Detection -- v8 12-PDF `NewTest` eval + FP / grouping / overlay analysis (2026-07-18)** --
+  Ran v8 (`models_v8/best/`) through the standard box-level eval
+  (`evaluate_model.py --pdf`, conf 0.5, IoU 0.5, DPI 400, heuristic
+  `PanelSearchToolV25` = GT) on the 12 PDFs in `/home/marco/Documents/NewTest/`
+  (`A, B, C, D, good_tester_combo, H, I, J, K, L, NoAmps, O`). Run on Marco's
+  laptop GPU (RTX 500 Ada). Artifacts:
+  `~/Documents/TableAnnotations/baselines/v8_NewTest_2026-07-18/` --
+  `SUMMARY.md`, 12 `box_comparison.json`, ml/heuristic overlays, plus
+  `_previews/` (downscaled JPEGs of every overlay) and `_diagnostic/`
+  (combined GT-green vs v8-blue images for A/C/I). Locked `v7_2026-05-15/`
+  untouched.
+  - **Headline:** avg mAP@0.5 = **0.9365**, avg recall **0.946**, avg
+    precision **0.940**, avg mean IoU 0.903, mAP@0.5:0.95 0.778. Totals
+    93 GT / 92 pred / 87 TP / 5 FP / 6 FN -> micro precision 0.946, micro
+    recall 0.936. **8/12 perfect** (B, D, good_tester_combo, H, K, L,
+    NoAmps; O near-perfect at 28/29). The FP/FN and loosest boxes all
+    concentrate on **A, C, I**.
+  - **CAVEAT (training-adjacency):** the single-letter `pdfToScan` PDFs --
+    which include nearly all of this set -- have pages in v7's training data,
+    and v8's `v8_holdout/` excluded only derek2/derekfirst, so most of
+    `NewTest` is **training-adjacent for both models**. Treat these as fit
+    quality on known styles, NOT independent generalization (that remains
+    `baselines/v8_2026-07-10/`).
+  - **"A underperforms" is a per-page metric artifact, NOT a panel-detection
+    failure.** A.pdf's low PDF-level score (mAP@0.5 0.81, mAP@0.5:0.95 0.51,
+    recall 0.857) is dragged down entirely by **page 1, which has no real
+    panels**. Page split (from `box_comparison.json` `per_page`):
+    - **Page 2 (the real panel page):** GT 5, pred 6, TP 5, FP 1, FN 0 ->
+      recall **1.0**, precision 0.83, mean IoU 0.846. v8 finds every panel;
+      the sole FP is the **Motor Schedule**, which the heuristic does not
+      count as a panel.
+    - **Page 1 (no real panels):** GT 2, pred 2, TP 1, FP 1, FN 1. The
+      heuristic flags 2 non-panel regions (riser / feeder-schedule content);
+      v8 matches 1 loosely (IoU 0.81), misses a `1009x196` (~5:1 aspect)
+      band unlike anything in training, and adds 1 FP. With only 2 GT, each
+      error swings the page score 25-50% and contaminates the PDF-level
+      number. Per the heuristic-is-GT standing decision these still count
+      against v8, but they are not representative of panel-detection quality.
+  - **Grouping of adjacent schedules is the MODEL's own behavior, not NMS
+    (traced on A page 2, 2026-07-18).** Where two stacked schedules
+    (Occupancy Sensor + Floor-box) are drawn as one detection, the Table
+    Transformer emits a **single box directly** (traced: conf 0.598 -- its
+    lowest-confidence keep on the page), matching the heuristic GT which also
+    groups them into one box. There is no per-table proposal that gets
+    merged. This is faithful to the heuristic labels v8 trained on, so the
+    grouping is expected, not a bug.
+  - **ML-overlay color semantics** (`ml/magenta_overlays/*_void_perimeters.png`,
+    drawn in `TableDetectorML.readPdf` after NMS -- `TableDetectorML.py`
+    ~lines 459-481): **BLUE** (BGR 255,0,0, thick, labeled `KEPT`) = final
+    kept detection; **MAGENTA** (BGR 255,0,255, thin, labeled `NMS`) = a
+    detection **suppressed by NMS**. NMS (`_apply_nms_with_indices`, IoU
+    threshold **0.3**) sorts by **area descending** and keeps the larger box.
+    Worked example (A page 2): a spurious box straddling the Floor-box
+    schedule and the neighboring LPC panel (conf 0.787) was suppressed
+    because it overlapped the kept LPC box by **IoU 0.421** (> 0.3) and LPC
+    was the larger box. (Heuristic overlays draw GT boxes in GREEN; the
+    `_diagnostic/` images blend green GT + blue v8 for side-by-side reading.)
+  - **Overlay-size tooling limitation + fix:** `evaluate_model.py` overlays
+    are rendered at the detection DPI (400), so large-format sheets (ARCH-E;
+    A/C page = 14400x9600 px = ~138 MP) produce 40-60 MB PNGs that standard
+    Linux image viewers refuse to open. Fix applied in `evaluate_model.py`:
+    an `OVERLAY_MAX_LONG_SIDE = 6000` cap plus a `_cap_overlay_images()`
+    helper, called after each detector `readPdf`, that downscales any overlay
+    whose long side exceeds 6000 px in place (aspect preserved). Metrics are
+    unaffected -- they are computed from detection boxes, never from the
+    overlay PNGs. The already-generated oversized overlays from this run were
+    also capped in place (14400x9600 -> 6000x4000). The production detector
+    classes (`PanelSearchToolV25` / `TableDetectorML`) were deliberately NOT
+    changed -- they render at 400 DPI intentionally for detection -- the cap
+    lives only in the eval script.
+
+- **Laptop GPU driver -- RESOLVED 2026-07-12 (MOK enrolled; Secure Boot left ON)** --
+  The 2026-07-10 "GPU driver down" blocker is fixed. On Marco's ThinkPad P16s
+  Gen 3, `nvidia-smi` now works (driver 580.159.03, CUDA 13.0 runtime, RTX 500
+  Ada Generation Laptop GPU, ~4094 MiB VRAM) and PyTorch confirms usable CUDA
+  (`torch 2.8.0+cu128`, `torch.cuda.is_available()` True, device "NVIDIA RTX 500
+  Ada Generation Laptop GPU"). The **permanent** fix was used, not the Secure
+  Boot workaround: `mokutil --sb-state` still reports **SecureBoot enabled**, and
+  `mokutil --list-enrolled` now shows the machine's own MOK
+  (`CN=marco-ThinkPad-P16s-Gen-3 Secure Boot Module Signature key`) enrolled
+  **alongside** the Canonical CA. So the DKMS-built module is now signed by an
+  enrolled key and the kernel loads it. Practical consequence: future DKMS
+  rebuilds on kernel bumps will be trusted automatically (no repeat of this
+  breakage). **Caveat unchanged:** the RTX 500 Ada has only ~4 GB VRAM, so it is
+  fine for CPU-adjacent dev, inference smoke tests, and short eval runs, but
+  remains inadequate for v8/v9 training -- that still needs Paperspace or the AWS
+  dev box.
+  - **Original diagnosis (2026-07-10, for the record):** `nvidia-smi` failed
+    ("couldn't communicate with the NVIDIA driver") and no nvidia kernel module
+    was loaded. Root cause was NOT a DKMS/kernel mismatch -- the module was built
+    and matched the running kernel (`6.8.0-124-generic`, module 580.159.03). The
+    kernel log showed `Loading of module with unavailable key is rejected` under
+    `Kernel is locked down from EFI Secure Boot mode`. The driver was originally
+    installed via Canonical-signed prebuilt `linux-modules-nvidia-*` packages
+    (Canonical's key is trusted out of the box, so the GPU worked in the v7 era),
+    but a kernel bump to 6.8.0-124 outran the prebuilt signed module, leaving the
+    module DKMS-built and signed with the machine's own MOK
+    (`/var/lib/shim-signed/mok/MOK.der`), which was not yet enrolled. The fix
+    applied was the documented permanent path:
+    `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der` -> reboot -> enroll
+    at the blue MOK Manager screen.
 
 - **ML Table Detection -- v7 MILESTONE LOCKED 2026-07-06 (baseline for v8 work)** --
   **IMPORTANT CAVEAT ADDED 2026-07-07: the "0.8297 across the 5 held-out
