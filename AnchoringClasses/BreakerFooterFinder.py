@@ -79,6 +79,52 @@ class BreakerFooterFinder:
         self.ocr_lock_path = "/tmp/argus_footer_ocr.lock"
         self.ocr_lock_timeout_sec = 180
 
+    def _extract_last_plausible_circuit_number(self, text: str) -> List[int]:
+        """
+        Extract circuit numbers from one OCR token.
+
+        Normal numeric OCR keeps all plausible numbers:
+            "42"       -> [42]
+            "41 42"    -> [41, 42]
+
+        Mixed identifiers or separated codes keep only the last plausible number:
+            "123-45-42"     -> [42]
+            "123-42-30"     -> [30]
+            "123-42-1124"   -> [42]
+            "BGBOI-112-42"  -> [42]
+
+        Large values such as 1124 are rejected as a whole.
+        They are never shortened into 24.
+        """
+        raw = str(text or "").strip()
+
+        if not raw:
+            return []
+
+        all_numbers = [
+            int(match.group())
+            for match in re.finditer(r"\d+", raw)
+        ]
+
+        plausible_numbers = [
+            value
+            for value in all_numbers
+            if 1 <= value <= self.MAX_CONTINUED_SECTION_CKT
+        ]
+
+        if not plausible_numbers:
+            return []
+
+        has_letters = bool(re.search(r"[A-Za-z]", raw))
+        has_identifier_separator = bool(re.search(r"[-_/]", raw))
+
+        # Mixed identifier/code: favor the final plausible numeric group.
+        if has_letters or has_identifier_separator:
+            return [plausible_numbers[-1]]
+
+        # Clean numeric OCR: preserve the existing behavior.
+        return plausible_numbers
+
     def _round_up_to_standard_panel_size(self, raw_size: int) -> Optional[int]:
         """
         Round a raw circuit count up to the next supported standard panel size.
@@ -1648,7 +1694,7 @@ class BreakerFooterFinder:
                 # --- collect numeric footer token candidates (map to PAGE coords) ---
                 for (box, txt, conf) in dets:
                     # pull all integer substrings from the OCR text
-                    nums = [int(m.group()) for m in re.finditer(r"\d+", str(txt) or "")]
+                    nums = self._extract_last_plausible_circuit_number(txt)
                     if not nums:
                         continue
 
@@ -1726,7 +1772,7 @@ class BreakerFooterFinder:
                         y2b = min(y_bot - y_top - 1, max(ys))
 
                         # decide if this token is a footer candidate number
-                        nums_for_overlay = [int(m.group()) for m in re.finditer(r"\d+", str(txt) or "")]
+                        nums_for_overlay = self._extract_last_plausible_circuit_number(txt)
                         is_candidate = (
                             conf_f >= 0.50
                             and any(1 <= val <= self.MAX_CONTINUED_SECTION_CKT for val in nums_for_overlay)
