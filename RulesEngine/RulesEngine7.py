@@ -3758,7 +3758,7 @@ class PanelboardEngine(BaseEngine):
         panel_result["_finalPanelIntRating"] = (
             final_branch_ir
         )
-
+ 
         # Fully rated: explain defaulting and any upward
         # product-rating bump in one note.
         if rating_type == "FULLY_RATED":
