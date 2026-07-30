@@ -799,7 +799,7 @@ class HeaderBandScanner:
                     hero_trip_rank = max(hero_trip_rank, 3)
                 elif _hero_match(w_raw, ["SIZE"]):
                     hero_trip_rank = max(hero_trip_rank, 3)
-                elif _hero_match(w_raw, ["BREAKER", "BKR", "BRKR", "CB"]):
+                elif _hero_match(w_raw, ["BREAKER", "BK", "BRK", "BKR", "BRKR", "CB"]):
                     hero_trip_rank = max(hero_trip_rank, 2)
 
                 # --- Poles hero ranks ---

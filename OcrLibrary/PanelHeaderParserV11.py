@@ -135,11 +135,13 @@ class PanelParser:
         "NAME": [
             r"\bPANEL\s*DESIGNATION\b",
             r"\bDESIGNATION\b",
+            r"\bPANEL\s*MARK\b",
 
             # strong explicit label forms
             r"\bPANEL\s*:\b",
             r"\bPANELBOARD\s*:\b",
             r"\bBOARD\s*:\b",
+            r"\bMARK\s*:\b",
 
             # weaker generic forms
             r"\bDISTRIBUTION\s*PANEL\b",

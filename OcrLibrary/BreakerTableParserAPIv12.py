@@ -208,7 +208,7 @@ class BreakerTablePipeline:
     def _scale_box(self, box, src_w, src_h, dst_w, dst_h):
         # box = [x1,y1,x2,y2]
         if not box or src_w <= 0 or src_h <= 0:
-            return None
+            return None 
         try:
             x1, y1, x2, y2 = [int(v) for v in box]
         except Exception:
@@ -465,9 +465,25 @@ class BreakerTablePipeline:
         skip_bom_due_to_special_header = False
 
         special_kind = self._special_header_kind(header_result)
-        if special_kind in {"switchboard", "wireway", "lighting_schedule", "inverter"}:
+        if special_kind in {
+            "switchboard",
+            "wireway",
+            "lighting_schedule",
+            "conduit_schedule",
+            "mechanical_schedule",
+            "disconnect_schedule",
+            "motor_schedule",
+            "transformer_schedule",
+            "generator_schedule",
+            "labor_schedule",
+            "equipment_schedule",
+            "inverter",
+        }:
             skip_bom_due_to_special_header = True
-            special_note = self._special_header_note(header_result) or f"{special_kind} detected"
+            special_note = (
+                self._special_header_note(header_result)
+                or f"{special_kind.replace('_', ' ')} detected"
+            )
             panel_status = f"detected but skipped ({dedup_name})"
             if isinstance(header_result, dict):
                 header_result["panelNote"] = special_note
