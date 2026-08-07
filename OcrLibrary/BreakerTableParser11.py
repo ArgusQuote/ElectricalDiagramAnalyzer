@@ -270,6 +270,295 @@ def _cell_has_visual_content(
         or ink_ratio >= 0.008
     )
 
+def _detect_visual_blank_placeholder(
+    gray: np.ndarray,
+    x_left: int,
+    x_right: int,
+    row_top: int,
+    row_bottom: int,
+) -> Optional[str]:
+    """
+    Conservatively detect intentional blank-cell placeholder marks when OCR
+    returned no usable text.
+
+    Returns:
+      - "dash" for clean dash / underscore-like placeholders
+      - "dot" for clean dot placeholders
+      - None for anything ambiguous, dense, tall, crossed, obscured, or noisy
+
+    Safety rule:
+      Anything that is not clearly a simple placeholder remains eligible for
+      the existing red review overlay.
+    """
+    if gray is None or not hasattr(gray, "shape"):
+        return None
+
+    H, W = gray.shape[:2]
+
+    x1 = max(0, min(W - 1, int(x_left)))
+    x2 = max(x1 + 1, min(W, int(x_right)))
+    y1 = max(0, min(H - 1, int(row_top)))
+    y2 = max(y1 + 1, min(H, int(row_bottom)))
+
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    crop = gray[y1:y2, x1:x2]
+    if crop is None or crop.size == 0:
+        return None
+
+    h, w = crop.shape[:2]
+    if h < 5 or w < 5:
+        return None
+
+    blur = cv2.GaussianBlur(crop, (3, 3), 0)
+
+    bw = cv2.adaptiveThreshold(
+        blur,
+        255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        15,
+        8,
+    )
+
+    # Remove full-width horizontal table lines.
+    horizontal_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (max(3, int(w * 0.65)), 1),
+    )
+    horizontal_lines = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        horizontal_kernel,
+        iterations=1,
+    )
+
+    # Remove full-height vertical table lines.
+    vertical_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (1, max(3, int(h * 0.70))),
+    )
+    vertical_lines = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        vertical_kernel,
+        iterations=1,
+    )
+
+    cleaned = cv2.subtract(bw, horizontal_lines)
+    cleaned = cv2.subtract(cleaned, vertical_lines)
+
+    # Ignore cell borders and residual grid fragments.
+    edge_x = max(1, int(w * 0.06))
+    edge_y = max(1, int(h * 0.08))
+
+    if w <= edge_x * 2 or h <= edge_y * 2:
+        return None
+
+    cleaned = cleaned[
+        edge_y:h - edge_y,
+        edge_x:w - edge_x,
+    ]
+
+    if cleaned.size == 0:
+        return None
+
+    inner_h, inner_w = cleaned.shape[:2]
+    inner_area = max(1, inner_h * inner_w)
+
+    # Reconnect tiny horizontal gaps inside printed dashes.
+    #
+    # PDF rasterization, CLAHE, resizing, blur, and adaptive thresholding can
+    # split one intentional dash into several nearby fragments. A narrow
+    # horizontal closing kernel reconnects those fragments without broadly
+    # joining tall, crossed, handwritten, or irregular marks.
+    dash_join_width = max(
+        3,
+        min(7, int(round(inner_w * 0.025))),
+    )
+
+    dash_join_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (dash_join_width, 1),
+    )
+
+    cleaned_for_components = cv2.morphologyEx(
+        cleaned,
+        cv2.MORPH_CLOSE,
+        dash_join_kernel,
+        iterations=1,
+    )
+
+    num_labels, _labels, stats, centroids = (
+        cv2.connectedComponentsWithStats(
+            cleaned_for_components,
+            connectivity=8,
+        )
+    )
+
+    components = []
+
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        comp_x = int(stats[i, cv2.CC_STAT_LEFT])
+        comp_y = int(stats[i, cv2.CC_STAT_TOP])
+        comp_w = int(stats[i, cv2.CC_STAT_WIDTH])
+        comp_h = int(stats[i, cv2.CC_STAT_HEIGHT])
+
+        # Ignore isolated threshold noise.
+        if area < 2:
+            continue
+
+        # Ignore obvious remaining full grid fragments.
+        if comp_w <= 1 and comp_h >= max(4, int(inner_h * 0.45)):
+            continue
+
+        if comp_h <= 1 and comp_w >= max(4, int(inner_w * 0.80)):
+            continue
+
+        center_x = float(centroids[i][0])
+        center_y = float(centroids[i][1])
+
+        components.append(
+            {
+                "area": area,
+                "x": comp_x,
+                "y": comp_y,
+                "w": comp_w,
+                "h": comp_h,
+                "cx": center_x,
+                "cy": center_y,
+            }
+        )
+
+    # A placeholder should contain very few simple marks.
+    if not components or len(components) > 3:
+        return None
+
+    total_area = sum(c["area"] for c in components)
+    ink_ratio = float(total_area) / float(inner_area)
+
+    # Anything dense remains a red-review candidate.
+    if ink_ratio > 0.06:
+        return None
+
+    # Reject tall or large components. These are more likely to be numbers,
+    # letters, handwriting, smudges, or an obstruction.
+    max_component_height = max(3, int(inner_h * 0.25))
+    max_component_area = max(8, int(inner_area * 0.035))
+
+    for c in components:
+        if c["h"] > max_component_height:
+            return None
+
+        if c["area"] > max_component_area:
+            return None
+
+    y_centers = [c["cy"] for c in components]
+
+    # Multiple placeholder marks should sit on approximately one baseline.
+    if len(y_centers) > 1:
+        if max(y_centers) - min(y_centers) > max(3.0, inner_h * 0.18):
+            return None
+
+    # ------------------------------------------------------------
+    # DOT PLACEHOLDER
+    # Examples:
+    #   .
+    #   ..
+    #   ...
+    # ------------------------------------------------------------
+    dots_only = True
+
+    for c in components:
+        max_dot_w = max(4, int(inner_w * 0.14))
+        max_dot_h = max(4, int(inner_h * 0.20))
+
+        aspect = float(c["w"]) / float(max(1, c["h"]))
+
+        if c["w"] > max_dot_w:
+            dots_only = False
+            break
+
+        if c["h"] > max_dot_h:
+            dots_only = False
+            break
+
+        if aspect < 0.40 or aspect > 2.50:
+            dots_only = False
+            break
+
+    if dots_only:
+        # Require the marks to remain inside the main body of the cell.
+        for c in components:
+            if c["cx"] < inner_w * 0.08:
+                return None
+
+            if c["cx"] > inner_w * 0.92:
+                return None
+
+            if c["cy"] < inner_h * 0.20:
+                return None
+
+            if c["cy"] > inner_h * 0.90:
+                return None
+
+        return "dot"
+
+    # ------------------------------------------------------------
+    # DASH / UNDERSCORE PLACEHOLDER
+    # Examples:
+    #   -
+    #   --
+    #   ___
+    # ------------------------------------------------------------
+    dashes_only = True
+
+    for c in components:
+        aspect = float(c["w"]) / float(max(1, c["h"]))
+
+        min_dash_width = max(3, int(inner_w * 0.05))
+        max_dash_width = max(min_dash_width, int(inner_w * 0.60))
+        max_dash_height = max(3, int(inner_h * 0.16))
+
+        if c["w"] < min_dash_width:
+            dashes_only = False
+            break
+
+        if c["w"] > max_dash_width:
+            dashes_only = False
+            break
+
+        if c["h"] > max_dash_height:
+            dashes_only = False
+            break
+
+        if aspect < 2.25:
+            dashes_only = False
+            break
+
+    if dashes_only:
+        left_edge = min(c["x"] for c in components)
+        right_edge = max(c["x"] + c["w"] for c in components)
+        total_span = right_edge - left_edge
+
+        # A placeholder should not cover most of the cell.
+        if total_span > inner_w * 0.75:
+            return None
+
+        # Reject marks pressed directly against the cell borders.
+        if left_edge < inner_w * 0.03:
+            return None
+
+        if right_edge > inner_w * 0.97:
+            return None
+
+        return "dash"
+
+    # Ambiguous shapes remain review-worthy.
+    return None
+
 class HeaderBandScanner:
     """
     First-stage helper: given analyzer_result with header_y, crop a tight band
@@ -2125,11 +2414,77 @@ class SeparatedLayoutParser:
                     or "SPACE" in combined_row_text
                 )
 
-                trip_is_placeholder = _is_blank_placeholder_text(trip_text)
-                poles_is_placeholder = _is_blank_placeholder_text(poles_text)
+                # First check placeholders successfully returned by OCR.
+                trip_text_placeholder = _is_blank_placeholder_text(
+                    trip_text
+                )
+                poles_text_placeholder = _is_blank_placeholder_text(
+                    poles_text
+                )
 
-                # Placeholder dashes are intentionally blank, so their OCR text and
-                # visual marks must not make the row appear occupied.
+                # If OCR returned no text but visible marks exist, perform a
+                # very strict visual-placeholder check.
+                trip_visual_placeholder = None
+                if not trip_has_text and trip_has_marks:
+                    trip_visual_placeholder = (
+                        _detect_visual_blank_placeholder(
+                            gray_body,
+                            trip_col["x_left"],
+                            trip_col["x_right"],
+                            row_top,
+                            row_bottom,
+                        )
+                    )
+
+                poles_visual_placeholder = None
+                if not poles_has_text and poles_has_marks:
+                    poles_visual_placeholder = (
+                        _detect_visual_blank_placeholder(
+                            gray_body,
+                            poles_col["x_left"],
+                            poles_col["x_right"],
+                            row_top,
+                            row_bottom,
+                        )
+                    )
+
+                # These variables are effectively the explicit cell tags:
+                #
+                #   text placeholder:
+                #       OCR read "--", "_", "..", etc.
+                #
+                #   visual placeholder:
+                #       OCR returned nothing, but the image contains a clean,
+                #       narrowly defined dash/dot placeholder.
+                trip_is_placeholder = (
+                    trip_text_placeholder
+                    or trip_visual_placeholder is not None
+                )
+
+                poles_is_placeholder = (
+                    poles_text_placeholder
+                    or poles_visual_placeholder is not None
+                )
+
+                if self.debug:
+                    if trip_is_placeholder:
+                        print(
+                            "[SeparatedLayoutParser] "
+                            f"side={side} row={row_idx} trip placeholder "
+                            f"text={trip_text!r} "
+                            f"visual={trip_visual_placeholder!r}"
+                        )
+
+                    if poles_is_placeholder:
+                        print(
+                            "[SeparatedLayoutParser] "
+                            f"side={side} row={row_idx} poles placeholder "
+                            f"text={poles_text!r} "
+                            f"visual={poles_visual_placeholder!r}"
+                        )
+
+                # Placeholder cells may contain visible ink, but that ink is
+                # intentional blank notation and must not make the row occupied.
                 trip_cell_has_content = (
                     not trip_is_placeholder
                     and (trip_has_text or trip_has_marks)
@@ -3191,12 +3546,12 @@ class CombinedLayoutParser:
 
                 combo_pairs = self._parse_combo_cell(combo_text)
 
-                combo_text_normalized = str(combo_text or "").strip().upper()
-                combo_is_placeholder = _is_blank_placeholder_text(
-                    combo_text_normalized
+                combo_text_normalized = (
+                    str(combo_text or "").strip().upper()
                 )
 
                 combo_has_text = bool(combo_text_normalized)
+
                 combo_has_marks = _cell_has_visual_content(
                     gray_body,
                     combo_col["x_left"],
@@ -3204,6 +3559,41 @@ class CombinedLayoutParser:
                     row_top,
                     row_bottom,
                 )
+
+                # Placeholder recognized directly from OCR text.
+                combo_text_placeholder = (
+                    _is_blank_placeholder_text(
+                        combo_text_normalized
+                    )
+                )
+
+                # Placeholder recognized visually only when OCR returned no
+                # usable text but the image still contains visible marks.
+                combo_visual_placeholder = None
+
+                if not combo_has_text and combo_has_marks:
+                    combo_visual_placeholder = (
+                        _detect_visual_blank_placeholder(
+                            gray_body,
+                            combo_col["x_left"],
+                            combo_col["x_right"],
+                            row_top,
+                            row_bottom,
+                        )
+                    )
+
+                combo_is_placeholder = (
+                    combo_text_placeholder
+                    or combo_visual_placeholder is not None
+                )
+
+                if self.debug and combo_is_placeholder:
+                    print(
+                        "[CombinedLayoutParser] "
+                        f"side={side} row={row_idx} combo placeholder "
+                        f"text={combo_text!r} "
+                        f"visual={combo_visual_placeholder!r}"
+                    )
 
                 is_spare_or_space = (
                     "SPARE" in combo_text_normalized
