@@ -104,10 +104,15 @@ class PanelParser:
             r"\bBUS{1,2}\s*RATING\b",
         ],
 
-        # MAIN remains MAIN-specific
-        "MAIN": [r"\bMAIN\s*(RATING|BREAKER|DEVICE|TYPE)\b", r"\bMAIN\s*(TYPE|RATING|BREAKER|DEVICE)\b",
-                 r"\b(?:MCB|M\W*C\W*B)\b",
-                 r"\bMLO\b", r"\bMAIN\s*LUGS?\b", r"\bMAIN\s*TYPE\b", r"\bMAINS?\b", r"\bMAIN\b"
+        "MAIN": [
+            r"\bMAIN\s*(RATING|BREAKER|BKR|BRKR|DEVICE|TYPE)\b",
+            r"\bMAIN\s+CIRCUIT\s*(BREAKER|BKR|BRKR)\b",
+            r"\b(?:MCB|M\W*C\W*B)\b",
+            r"\bMLO\b",
+            r"\bMAIN\s*LUGS?\b",
+            r"\bMAIN\s*TYPE\b",
+            r"\bMAINS?\b",
+            r"\bMAIN\b"
         ],
 
         "MOUNTING": [
@@ -135,11 +140,13 @@ class PanelParser:
         "NAME": [
             r"\bPANEL\s*DESIGNATION\b",
             r"\bDESIGNATION\b",
+            r"\bPANEL\s*MARK\b",
 
             # strong explicit label forms
             r"\bPANEL\s*:\b",
             r"\bPANELBOARD\s*:\b",
             r"\bBOARD\s*:\b",
+            r"\bMARK\s*:\b",
 
             # weaker generic forms
             r"\bDISTRIBUTION\s*PANEL\b",
@@ -563,7 +570,7 @@ class PanelParser:
             if role == "MAIN":
                 return bool(
                     re.search(
-                        rf"\bMAINS?\b(?:\s+(?:BREAKER|BRKR|BKR|DEVICE|AMPS?|AMPERES?|AMPERE|RATING|SIZE|RATED))*\s*:\s*{amp_value}\b",
+                        rf"\bMAINS?\b(?:\s+(?:CIRCUIT|BREAKER|BRKR|BKR|DEVICE|AMPS?|AMPERES?|AMPERE|RATING|SIZE|RATED))*\s*:\s*{amp_value}\b",
                         t
                     )
                     or re.search(
@@ -1136,7 +1143,15 @@ class PanelParser:
 
         def _is_main_device_rating(c):
             t = _norm_txt(c)
-            return bool(re.search(r'\bMCB\b|\bM\W*C\W*B\b|\bMAIN\s*BREAKER\b|\bMAIN\s*DEVICE\b', t))
+            return bool(
+                re.search(
+                    r'\bMCB\b|'
+                    r'\bM\W*C\W*B\b|'
+                    r'\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|'
+                    r'\bMAIN\s*DEVICE\b',
+                    t
+                )
+            )
 
         def _looks_amp_like(c):
             if not c:
@@ -1507,7 +1522,12 @@ class PanelParser:
 
             if re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txtU):
                 self.last_main_type = "MLO"
-            elif re.search(r"\b(MCB|M\W*C\W*B|MAIN\s*BREAKER)\b", txtU):
+            elif re.search(
+                r"\bMCB\b|"
+                r"\bM\W*C\W*B\b|"
+                r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b",
+                txtU
+            ):
                 self.last_main_type = "MCB"
 
         # AIC → kA (65kA, 65 kA, 65,000 A, 65000)
@@ -1789,7 +1809,16 @@ class PanelParser:
     def _scan_main_mode(self, items: List[dict]) -> Optional[str]:
         txt = " ".join(str(it.get("text","")) for it in items).upper()
         has_mlo = bool(re.search(r"\b(MLO|MAIN\s*LUGS?)\b", txt))
-        has_mcb = bool(re.search(r"\b(MCB|M\W*C\W*B)\b", txt))
+        has_mcb = bool(
+            re.search(
+                r"\b("
+                r"MCB|"
+                r"M\W*C\W*B|"
+                r"MAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)"
+                r")\b",
+                txt,
+            )
+        )
 
         # MLO always wins if present anywhere
         if has_mlo:
@@ -1864,45 +1893,140 @@ class PanelParser:
         return u
 
 
-    def _special_header_word_family(self, word: str) -> str:
+    def _special_header_word_family(
+        self,
+        word: str
+    ) -> str:
         """
-        Normalize obvious word variants/plurals into one family token.
-        This avoids hardcoding every exact phrase combination.
+        Normalize common singular, plural, and abbreviated
+        schedule-title words into stable family tokens.
         """
-        w = str(word or "").upper().strip()
-        if not w: 
+        w = str(
+            word or ""
+        ).upper().strip()
+
+        if not w:
             return ""
 
-        # switchboard family
-        if w in {"SWITCHBOARD", "SWITCHBOARDS", "SWBD", "SWBDS"}:
+        if w in {
+            "SWITCHBOARD",
+            "SWITCHBOARDS",
+            "SWBD",
+            "SWBDS",
+        }:
             return "SWITCHBOARD"
 
-        # light family
-        if w in {"LIGHT", "LIGHTS", "LIGHTING"}:
+        if w in {
+            "LIGHT",
+            "LIGHTS",
+            "LIGHTING",
+        }:
             return "LIGHT"
 
-        # fixture family
-        if w in {"FIXTURE", "FIXTURES"}:
+        if w in {
+            "FIXTURE",
+            "FIXTURES",
+        }:
             return "FIXTURE"
 
-        # schedule family
-        if w in {"SCHEDULE", "SCHEDULES"}:
+        if w in {
+            "SCHEDULE",
+            "SCHEDULES",
+        }:
             return "SCHEDULE"
 
-        # conduit family
-        if w in {"CONDUIT", "CONDUITS"}:
+        if w in {
+            "CONDUIT",
+            "CONDUITS",
+        }:
             return "CONDUIT"
 
-        # wireway family
-        if w in {"WIREWAY", "WIREWAYS", "WWA", "WWB", "WWC"}:
+        if w in {
+            "EQUIPMENT",
+            "EQUIPMENTS",
+            "EQUIP",
+            "EQPT",
+        }:
+            return "EQUIPMENT"
+
+        if w in {
+            "MECHANICAL",
+            "MECH",
+        }:
+            return "MECHANICAL"
+
+        if w in {
+            "HVAC",
+        }:
+            return "HVAC"
+
+        if w in {
+            "DISCONNECT",
+            "DISCONNECTS",
+            "DISC",
+            "DISCS",
+        }:
+            return "DISCONNECT"
+
+        if w in {
+            "SAFETY",
+        }:
+            return "SAFETY"
+
+        if w in {
+            "SWITCH",
+            "SWITCHES",
+        }:
+            return "SWITCH"
+
+        if w in {
+            "LABOR",
+            "LABOUR",
+        }:
+            return "LABOR"
+
+        if w in {
+            "MOTOR",
+            "MOTORS",
+        }:
+            return "MOTOR"
+
+        if w in {
+            "TRANSFORMER",
+            "TRANSFORMERS",
+            "XFMR",
+            "XFMRS",
+        }:
+            return "TRANSFORMER"
+
+        if w in {
+            "GENERATOR",
+            "GENERATORS",
+            "GEN",
+            "GENS",
+        }:
+            return "GENERATOR"
+
+        if w in {
+            "WIREWAY",
+            "WIREWAYS",
+            "WWA",
+            "WWB",
+            "WWC",
+        }:
             return "WIREWAY"
 
-        # inverter family
-        if w in {"INVERTER", "INVERTERS", "INV"}:
+        if w in {
+            "INVERTER",
+            "INVERTERS",
+            "INV",
+        }:
             return "INVERTER"
 
-        # interior / exterior stay as-is
-        if w in {"INTERIOR", "EXTERIOR"}:
+        if w in {
+            "INTERIOR",
+            "EXTERIOR",
+        }:
             return w
 
         return w
@@ -1930,7 +2054,7 @@ class PanelParser:
         - SOURCE: INVERTER INV-1
         """
         import re
-
+ 
         FAMILY_RULES = [
             {
                 "kind": "switchboard",
@@ -1939,14 +2063,21 @@ class PanelParser:
                     {"SWITCHBOARD"},
                 ],
             },
+
             {
                 "kind": "lighting_schedule",
                 "note": "Lighting schedule detected",
                 "required_any": [
                     {"LIGHT", "SCHEDULE"},
-                    {"LIGHT", "FIXTURE", "SCHEDULE"},
+                    {"FIXTURE", "SCHEDULE"},
+                    {
+                        "LIGHT",
+                        "FIXTURE",
+                        "SCHEDULE",
+                    },
                 ],
             },
+
             {
                 "kind": "conduit_schedule",
                 "note": "Conduit schedule detected",
@@ -1954,6 +2085,116 @@ class PanelParser:
                     {"CONDUIT", "SCHEDULE"},
                 ],
             },
+
+            # More-specific schedule rules must stay
+            # above the generic equipment rule.
+            {
+                "kind": "mechanical_schedule",
+                "note": "Mechanical schedule detected",
+                "required_any": [
+                    {
+                        "MECHANICAL",
+                        "SCHEDULE",
+                    },
+                    {
+                        "HVAC",
+                        "SCHEDULE",
+                    },
+                    {
+                        "MECHANICAL",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                    {
+                        "HVAC",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "disconnect_schedule",
+                "note": "Disconnect schedule detected",
+                "required_any": [
+                    {
+                        "DISCONNECT",
+                        "SCHEDULE",
+                    },
+                    {
+                        "SAFETY",
+                        "SWITCH",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "motor_schedule",
+                "note": "Motor schedule detected",
+                "required_any": [
+                    {"MOTOR", "SCHEDULE"},
+                    {
+                        "MOTOR",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "transformer_schedule",
+                "note": "Transformer schedule detected",
+                "required_any": [
+                    {
+                        "TRANSFORMER",
+                        "SCHEDULE",
+                    },
+                    {
+                        "TRANSFORMER",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "generator_schedule",
+                "note": "Generator schedule detected",
+                "required_any": [
+                    {
+                        "GENERATOR",
+                        "SCHEDULE",
+                    },
+                    {
+                        "GENERATOR",
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
+            {
+                "kind": "labor_schedule",
+                "note": "Labor schedule detected",
+                "required_any": [
+                    {"LABOR", "SCHEDULE"},
+                ],
+            },
+
+            # Keep this after mechanical, motor,
+            # transformer, and generator schedules.
+            {
+                "kind": "equipment_schedule",
+                "note": "Equipment schedule detected",
+                "required_any": [
+                    {
+                        "EQUIPMENT",
+                        "SCHEDULE",
+                    },
+                ],
+            },
+
             {
                 "kind": "wireway",
                 "note": "Wireway detected",
@@ -1961,12 +2202,16 @@ class PanelParser:
                     {"WIREWAY"},
                 ],
             },
+
             {
                 "kind": "inverter",
                 "note": "Inverter detected",
                 "required_any": [
                     {"INVERTER"},
-                    {"LIGHT", "INVERTER"},
+                    {
+                        "LIGHT",
+                        "INVERTER",
+                    },
                 ],
             },
         ]
@@ -2025,8 +2270,41 @@ class PanelParser:
                     return False
                 return True
 
-            # Lighting/conduit schedules are naturally title phrases.
-            if re.search(r"\b(LIGHT|LIGHTING|FIXTURE|CONDUIT)\s+SCHEDULE\b", text):
+            # Known schedule families are naturally
+            # title phrases, including multi-word titles
+            # such as MECHANICAL EQUIPMENT SCHEDULE.
+            token_set = set(
+                cand.get("token_set") or []
+            )
+
+            if not token_set:
+                token_set = (
+                    self._special_header_token_set(
+                        text
+                    )
+                )
+
+            schedule_title_families = {
+                "LIGHT",
+                "FIXTURE",
+                "CONDUIT",
+                "MECHANICAL",
+                "HVAC",
+                "EQUIPMENT",
+                "DISCONNECT",
+                "SAFETY",
+                "MOTOR",
+                "TRANSFORMER",
+                "GENERATOR",
+                "LABOR",
+            }
+
+            if (
+                "SCHEDULE" in token_set
+                and token_set.intersection(
+                    schedule_title_families
+                )
+            ):
                 return True
 
             return False
@@ -2042,8 +2320,13 @@ class PanelParser:
             """
             up = self._normalize_special_header_text(text)
 
-            # lighting schedules are less likely to be source references
-            if kind == "lighting_schedule":
+            # Explicit schedule-title families are not
+            # relational source references.
+            if str(
+                kind or ""
+            ).strip().lower().endswith(
+                "_schedule"
+            ):
                 return False
 
             # 1) direct text match
@@ -2571,6 +2854,10 @@ class PanelParser:
             if not s:
                 return False
 
+            # MAIN and AIC may legitimately be marked N/A.
+            if role in ("MAIN", "AIC") and self._is_na_placeholder(s):
+                return False
+
             up = self._normalize_digits(str(s).upper()).strip()
             upN = self._normalize_voltage_text(up)
 
@@ -2578,7 +2865,13 @@ class PanelParser:
                 return self._snap_voltage_text(upN) is not None
 
             if role == "BUS":
-                if re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE)\b", up):
+                if re.search(
+                    r"\bMCB\b|"
+                    r"\bM\W*C\W*B\b|"
+                    r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|"
+                    r"\bMAIN\s*DEVICE\b",
+                    up
+                ):
                     return False
 
                 if re.search(r"\b([1-9]\d{1,3})\s*(A|AMPS?)\b", up):
@@ -2592,7 +2885,14 @@ class PanelParser:
                     return True
 
                 # allow explicit main-device phrases only when they also carry a number
-                if re.search(r"\bMAIN\s*(BREAKER|DEVICE|LUGS?)\b", up) and re.search(r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)', up):
+                if re.search(
+                    r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|"
+                    r"\bMAIN\s*(?:DEVICE|LUGS?)\b",
+                    up
+                ) and re.search(
+                    r'(?<!\d)([6-9]\d|[1-9]\d{2,3})(?!\d)',
+                    up
+                ):
                     return True
 
                 return False
@@ -2755,6 +3055,7 @@ class PanelParser:
             txt = raw.upper()
             txtD = self._normalize_digits(txt)
             conf = float(it["conf"])
+            is_na_placeholder = self._is_na_placeholder(raw)
             x1,y1,x2,y2,xc,yc = it["x1"],it["y1"],it["x2"],it["y2"],it["xc"],it["yc"]
 
             # VOLTAGE (pairs or single; tolerate OCR typos and missing slash)
@@ -2887,8 +3188,15 @@ class PanelParser:
             reject_as_amp_non_amp_context = self._looks_like_non_amp_context_text(txtD)
             reject_as_amp = reject_as_amp_aic_like or reject_as_amp_non_amp_context
 
-            m_with_unit = None if reject_as_amp else re.search(r"\b([1-9]\d{1,3})\s*(A\.?|AMP\.?|AMPS?\.?)\b", txtD)
-            m_bare_num  = None if reject_as_amp else re.search(r"(?<!\d)([1-9]\d{1,3})(?!\d)", txtD)
+            m_with_unit = None if reject_as_amp else re.search(
+                r"\b([1-9]\d{1,3})\s*(A\.?|AMP\.?|AMPS?\.?)\b",
+                txtD
+            )
+
+            m_bare_num = None if reject_as_amp else re.search(
+                r"(?<!\d)([1-9]\d{1,3})(?!\d)",
+                txtD
+            )
 
             # strong voltage guards
             has_slash_voltage = "/" in txtN
@@ -2908,8 +3216,24 @@ class PanelParser:
             ])
 
             # Explicit main-breaker context
-            main_ctxt = bool(re.search(r"\b(MCB|MAIN\s*BREAKER|MAIN\s*DEVICE|MAIN\s*RATING|MAINS?\s*RATING)\b", txt))
+            main_ctxt = bool(
+                re.search(
+                    r"\bMCB\b|"
+                    r"\bM\W*C\W*B\b|"
+                    r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|"
+                    r"\bMAIN\s*DEVICE\b|"
+                    r"\bMAINS?\s*RATING\b",
+                    txt
+                )
+            )
             m_main_map = re.search(r"\b([1-9]\d{1,3})\s*MAP\b", txtD)
+
+            # N/A is allowed to mean "no MAIN value", but it should not
+            # interfere with BUS parsing or imply MLO.
+            if is_na_placeholder and main_ctxt:
+                m_with_unit = None
+                m_bare_num = None
+                m_main_map = None
 
             cand = None
             cand_main_only = False
@@ -2961,7 +3285,13 @@ class PanelParser:
 
                 # Explicit main-device wording should stay MAIN-only
                 has_main_device_word = bool(
-                    re.search(r'\bMCB\b|\bM\W*C\W*B\b|\bMAIN\s*BREAKER\b|\bMAIN\s*DEVICE\b', up_full)
+                    re.search(
+                        r'\bMCB\b|'
+                        r'\bM\W*C\W*B\b|'
+                        r'\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|'
+                        r'\bMAIN\s*DEVICE\b',
+                        up_full
+                    )
                 )
 
                 # "Mains Rating" is the one ambiguous case we want to preserve for later logic
@@ -2992,7 +3322,10 @@ class PanelParser:
             # AIC (10k..100k) and KA forms: 65kA, 65 kA
             # Normalize spaces for kA form matching
             t_nos = txtD.replace(" ", "")
-            mk = re.search(r"\b(\d{2,3})(?:KAMP|KAIC|AIC|KA|K)\b", t_nos)
+            mk = None if is_na_placeholder else re.search(
+                r"\b(\d{2,3})(?:KAMP|KAIC|AIC|KA|K)\b",
+                t_nos
+            )
             if mk:
                 val_ka = int(mk.group(1))
                 if 10 <= val_ka <= 100:
@@ -3007,7 +3340,10 @@ class PanelParser:
                         "ctx": ctx,
                     })
             else:
-                AIC = re.search(r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b", txtD)  # e.g. 65000, 65,000A, 29,000A
+                AIC = None if is_na_placeholder else re.search(
+                    r"\b(\d{2,3}[,]?\d{3})\s*(?:A|KA)?\b",
+                    txtD
+                )
                 if AIC:
                     val = int(AIC.group(1).replace(",", ""))
                     if 10000 <= val <= 100000:
@@ -3028,7 +3364,10 @@ class PanelParser:
                 else:
                     SMALL_KA = {10, 14, 18, 22, 25, 30, 35, 42, 50, 65, 100, 125, 200}
                     # Look for a plain 2–3 digit number
-                    m_small = re.search(r'(?<!\d)(\d{2,3})(?!\d)', txtD)
+                    m_small = None if is_na_placeholder else re.search(
+                        r'(?<!\d)(\d{2,3})(?!\d)',
+                        txtD
+                    )
                     if m_small:
                         n = int(m_small.group(1))
                         if n in SMALL_KA and not re.search(r'\bA(MPS?)?\b', txtD):
@@ -3280,10 +3619,24 @@ class PanelParser:
             if role == "BUS":
                 if re.search(r"\bBUS\b|\bBUS\s*RATING\b|\bPANEL\s*RATING\b", tu):
                     hint += 1.0
-                if re.search(r"\bMAIN\b|\bMCB\b|\bMAIN\s*(BREAKER|DEVICE|LUGS?)\b", tu):
+                if re.search(
+                    r"\bMAIN\b|"
+                    r"\bMCB\b|"
+                    r"\bM\W*C\W*B\b|"
+                    r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|"
+                    r"\bMAIN\s*(?:DEVICE|LUGS?)\b",
+                    tu
+                ):
                     hint -= 1.0
             elif role == "MAIN":
-                if re.search(r"\bMAIN\b|\bMCB\b|\bMAIN\s*(BREAKER|DEVICE|LUGS?)\b", tu):
+                if re.search(
+                    r"\bMAIN\b|"
+                    r"\bMCB\b|"
+                    r"\bM\W*C\W*B\b|"
+                    r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|"
+                    r"\bMAIN\s*(?:DEVICE|LUGS?)\b",
+                    tu
+                ):
                     hint += 1.0
                 if re.search(r"\bBUS\b|\bBUS\s*RATING\b|\bPANEL\s*RATING\b", tu):
                     hint -= 1.0
@@ -3558,6 +3911,33 @@ class PanelParser:
 
         return u
 
+    def _is_na_placeholder(self, text: str) -> bool:
+        """
+        Recognize common OCR variants of N/A.
+
+        This helper is only used for fields where N/A is a legitimate
+        "no value" result, currently MAIN and AIC.
+        """
+        if not text:
+            return False
+
+        t = str(text).upper().strip()
+
+        # Normalize likely separator OCR variants.
+        t = t.replace("\\", "/")
+        t = t.replace("|", "/")
+        t = t.replace("!", "/")
+
+        # Remove formatting/separators.
+        compact = re.sub(r"[\s./_\-]+", "", t)
+
+        return compact in {
+            "NA",
+            "NIA",
+            "N1A",
+            "NLA",
+        }
+
     def _looks_like_aic_or_ka_text(self, s: str) -> bool:
         """
         True when text should NEVER be used as BUS/MAIN amps.
@@ -3638,7 +4018,9 @@ class PanelParser:
 
         # If the same text explicitly says BUS/MAIN/MCB/PANEL RATING, do not block it.
         if re.search(
-            r"\b(BUS|BUSS|MAIN|MAINS|MCB|M\W*C\W*B|MAIN\s*BREAKER|MAIN\s*DEVICE|PANEL\s*RATING|AMPACITY)\b",
+            r"\b(BUS|BUSS|MAIN|MAINS|MCB|M\W*C\W*B|PANEL\s*RATING|AMPACITY)\b|"
+            r"\bMAIN\s+(?:CIRCUIT\s+)?(?:BREAKER|BKR|BRKR)\b|"
+            r"\bMAIN\s*DEVICE\b",
             t
         ):
             return False

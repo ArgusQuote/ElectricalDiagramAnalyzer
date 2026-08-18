@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParserAPIv12.py
+# OcrLibrary/BreakerTableParserAPIv13.py
 import sys, os, inspect
 import re
 import cv2
@@ -10,7 +10,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "API_12"
+API_VERSION = "API_13"
 API_ORIGIN  = __file__
 
 SNAP_MAP = {
@@ -44,7 +44,7 @@ def reset_name_deduper():
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV11   import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParser10   import BreakerTableParser, PARSER_VERSION
+from OcrLibrary.BreakerTableParser11   import BreakerTableParser, PARSER_VERSION
  
 class BreakerTablePipeline:
     def __init__(self, *, debug: bool = True, reader=None):
@@ -303,68 +303,76 @@ class BreakerTablePipeline:
             scaled = self._scale_box(box, src_w, src_h, W, H)
             self._draw_box(vis, scaled, MAGENTA, label=k, fill_alpha=0.0, thickness=3)
 
-        # --- Column overlays (from Parser9 normalized columns) ---
+        # --- Breaker cell overlays ---
+        #
+        # Separated layout:
+        #   good trip/amps cell -> GREEN
+        #   good poles cell     -> BLUE
+        #   unreadable/invalid  -> RED
+        #
+        # Combined layout:
+        #   good combo cell     -> GREEN
+        #   unreadable/invalid  -> RED
+        #
+        # Empty cells are intentionally absent from reviewCells and therefore
+        # receive no overlay.
+
         prs = parser_result if isinstance(parser_result, dict) else {}
-        hscan = prs.get("headerScan") if isinstance(prs.get("headerScan"), dict) else {}
-        norm = hscan.get("normalizedColumns") if isinstance(hscan.get("normalizedColumns"), dict) else {}
-        layout = (norm.get("layout") or "unknown").lower()
-        cols = norm.get("columns") or []
+        review_cells = prs.get("reviewCells")
+        if not isinstance(review_cells, list):
+            review_cells = []
 
-        header_bottom_y = ar.get("header_bottom_y")
-        footer_y = ar.get("footer_y")
+        GREEN = (0, 200, 0)    # BGR: valid amps or valid combined cell
+        BLUE = (255, 0, 0)     # BGR: valid poles cell
+        RED = (0, 0, 255)      # BGR: occupied but unreadable/invalid
 
-        y_top = 0
-        y_bot = H - 1
-        if isinstance(header_bottom_y, (int, float)):
-            y_top = max(0, min(H - 1, int(header_bottom_y)))
-        if isinstance(footer_y, (int, float)):
-            y_bot = max(y_top + 1, min(H - 1, int(footer_y)))
+        for cell in review_cells:
+            if not isinstance(cell, dict):
+                continue
 
-        GREEN = (0, 255, 0)      # trip OR combined
-        BLUE  = (255, 0, 0)      # poles
-        ORANGE = (0, 165, 255)   # specialFeatures (CB Info / Notes / Options / Type)
-
-        def draw_col(col, color, label):
             try:
-                x1 = int(col.get("x_left", 0))
-                x2 = int(col.get("x_right", 0))
-            except Exception:
-                return
-            if x2 <= x1 + 1:
-                return
+                x1 = int(cell.get("xLeft"))
+                x2 = int(cell.get("xRight"))
+                y1 = int(cell.get("rowTop"))
+                y2 = int(cell.get("rowBottom"))
+            except (TypeError, ValueError):
+                continue
+
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            role = str(cell.get("role") or "").strip().lower()
+            status = str(cell.get("status") or "").strip().lower()
+
+            if status == "issue":
+                color = RED
+                label = "CHECK"
+                fill_alpha = 0.18
+                thickness = 3
+
+            elif status == "good" and role == "poles":
+                color = BLUE
+                label = "P"
+                fill_alpha = 0.10
+                thickness = 2
+
+            elif status == "good" and role in {"trip", "combo"}:
+                color = GREEN
+                label = "A" if role == "trip" else "OK"
+                fill_alpha = 0.10
+                thickness = 2
+
+            else:
+                continue
+
             self._draw_box(
                 vis,
-                [x1, y_top, x2, y_bot],
+                [x1, y1, x2, y2],
                 color,
                 label=label,
-                fill_alpha=0.12,   # faint fill
-                thickness=3
+                fill_alpha=fill_alpha,
+                thickness=thickness,
             )
-
-        for col in cols:
-            role = col.get("role")
-            if layout == "combined":
-                if role == "combo":
-                    draw_col(col, GREEN, "COMBO")
-                elif role == "specialFeatures":
-                    draw_col(col, ORANGE, "INFO")
-            elif layout == "separated":
-                if role == "trip":
-                    draw_col(col, GREEN, "TRIP")
-                elif role == "poles":
-                    draw_col(col, BLUE, "POLES")
-                elif role == "specialFeatures":
-                    draw_col(col, ORANGE, "INFO")
-            else:
-                # unknown layout: still show anything we have
-                if role == "combo":
-                    draw_col(col, GREEN, "COMBO")
-                elif role == "trip":
-                    draw_col(col, GREEN, "TRIP")
-                elif role == "poles":
-                    draw_col(col, BLUE, "POLES")
-                elif role == "specialFeatures":
-                    draw_col(col, ORANGE, "INFO")
 
         # Save one combined file for the UI
         safe_base = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(dedup_name or "panel")).strip("_") or "panel"

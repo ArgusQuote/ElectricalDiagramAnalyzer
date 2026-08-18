@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParser10.py
+# OcrLibrary/BreakerTableParser11.py
 from __future__ import annotations
 import os, re, cv2, numpy as np
 from typing import Dict, Optional, List, Tuple
@@ -10,7 +10,7 @@ try:
 except Exception:
     _HAS_OCR = False
 
-PARSER_VERSION = "BreakerParser10"
+PARSER_VERSION = "BreakerParser11"
 
 _HDR_OCR_SCALE        = 2.0
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
@@ -93,6 +93,471 @@ def normalize_gfi_modifier(cell_text: str) -> str:
             return "GFI"
 
     return ""
+
+def _is_blank_placeholder_text(text: str) -> bool:
+    """
+    Returns True when OCR text is only a blank-cell placeholder such as:
+
+        -
+        --
+        ---
+        _
+        __
+        —
+        ––
+        - - -
+        .-
+        -.
+
+    Does not treat text containing letters or digits as blank.
+    """
+    if not text:
+        return False
+
+    value = str(text).strip()
+    if not value:
+        return False
+
+    # Normalize common dash-like Unicode characters.
+    for ch in (
+        "\u2010",  # hyphen
+        "\u2011",  # non-breaking hyphen
+        "\u2012",  # figure dash
+        "\u2013",  # en dash
+        "\u2014",  # em dash
+        "\u2015",  # horizontal bar
+        "\u2212",  # minus sign
+    ):
+        value = value.replace(ch, "-")
+
+    # Remove whitespace and harmless punctuation that commonly appears
+    # when OCR reads a blank-cell dash.
+    compact = re.sub(r"[\s.,:;]+", "", value)
+
+    # OCR may read a dash as punctuation only.
+    if not compact:
+        return True
+
+    # Only dash/underscore/pipe/slash-like placeholder marks remain.
+    return bool(re.fullmatch(r"[-_/\\|]+", compact))
+
+def _cell_has_visual_content(
+    gray: np.ndarray,
+    x_left: int,
+    x_right: int,
+    row_top: int,
+    row_bottom: int,
+) -> bool:
+    """
+    Decide whether a breaker cell contains meaningful visible marks even when
+    OCR returns no text.
+
+    This is used to distinguish:
+
+      - genuinely empty cells -> no review overlay
+      - obscured / marked-up / unreadable cells -> red review overlay
+
+    Long horizontal and vertical grid lines are removed before measuring ink,
+    so the table borders alone should not make an empty cell look occupied.
+    """
+    if gray is None or not hasattr(gray, "shape"):
+        return False
+
+    H, W = gray.shape[:2]
+
+    x1 = max(0, min(W - 1, int(x_left)))
+    x2 = max(x1 + 1, min(W, int(x_right)))
+    y1 = max(0, min(H - 1, int(row_top)))
+    y2 = max(y1 + 1, min(H, int(row_bottom)))
+
+    if x2 <= x1 or y2 <= y1:
+        return False
+
+    crop = gray[y1:y2, x1:x2]
+    if crop is None or crop.size == 0:
+        return False
+
+    h, w = crop.shape[:2]
+    if h < 3 or w < 3:
+        return False
+
+    blur = cv2.GaussianBlur(crop, (3, 3), 0)
+
+    bw = cv2.adaptiveThreshold(
+        blur,
+        255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        15,
+        8,
+    )
+
+    # Remove horizontal table/grid lines.
+    horizontal_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (max(3, int(w * 0.55)), 1),
+    )
+    horizontal_lines = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        horizontal_kernel,
+        iterations=1,
+    )
+
+    # Remove vertical table/grid lines.
+    vertical_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (1, max(3, int(h * 0.65))),
+    )
+    vertical_lines = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        vertical_kernel,
+        iterations=1,
+    )
+
+    cleaned = cv2.subtract(bw, horizontal_lines)
+    cleaned = cv2.subtract(cleaned, vertical_lines)
+
+    # Ignore a tiny edge margin where table borders may remain.
+    edge_x = max(1, int(w * 0.04))
+    edge_y = max(1, int(h * 0.06))
+
+    if w > edge_x * 2 and h > edge_y * 2:
+        cleaned = cleaned[
+            edge_y:h - edge_y,
+            edge_x:w - edge_x,
+        ]
+
+    if cleaned.size == 0:
+        return False
+
+    num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        cleaned,
+        connectivity=8,
+    )
+
+    meaningful_area = 0
+    meaningful_components = 0
+
+    # Skip component 0, which is the background.
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        comp_w = int(stats[i, cv2.CC_STAT_WIDTH])
+        comp_h = int(stats[i, cv2.CC_STAT_HEIGHT])
+
+        # Ignore isolated noise pixels.
+        if area < 3:
+            continue
+
+        # Ignore extremely thin leftover grid fragments.
+        if comp_w <= 1 and comp_h >= max(4, int(h * 0.40)):
+            continue
+        if comp_h <= 1 and comp_w >= max(4, int(w * 0.40)):
+            continue
+
+        meaningful_area += area
+        meaningful_components += 1
+
+    crop_area = max(1, cleaned.shape[0] * cleaned.shape[1])
+    ink_ratio = float(meaningful_area) / float(crop_area)
+
+    # Either several visible fragments or enough total ink indicates that
+    # something occupies the cell.
+    return (
+        meaningful_components >= 2
+        or meaningful_area >= 8
+        or ink_ratio >= 0.008
+    )
+
+def _detect_visual_blank_placeholder(
+    gray: np.ndarray,
+    x_left: int,
+    x_right: int,
+    row_top: int,
+    row_bottom: int,
+) -> Optional[str]:
+    """
+    Conservatively detect intentional blank-cell placeholder marks when OCR
+    returned no usable text.
+
+    Returns:
+      - "dash" for clean dash / underscore-like placeholders
+      - "dot" for clean dot placeholders
+      - None for anything ambiguous, dense, tall, crossed, obscured, or noisy
+
+    Safety rule:
+      Anything that is not clearly a simple placeholder remains eligible for
+      the existing red review overlay.
+    """
+    if gray is None or not hasattr(gray, "shape"):
+        return None
+
+    H, W = gray.shape[:2]
+
+    x1 = max(0, min(W - 1, int(x_left)))
+    x2 = max(x1 + 1, min(W, int(x_right)))
+    y1 = max(0, min(H - 1, int(row_top)))
+    y2 = max(y1 + 1, min(H, int(row_bottom)))
+
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    crop = gray[y1:y2, x1:x2]
+    if crop is None or crop.size == 0:
+        return None
+
+    h, w = crop.shape[:2]
+    if h < 5 or w < 5:
+        return None
+
+    blur = cv2.GaussianBlur(crop, (3, 3), 0)
+
+    bw = cv2.adaptiveThreshold(
+        blur,
+        255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        15,
+        8,
+    )
+
+    # Remove full-width horizontal table lines.
+    horizontal_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (max(3, int(w * 0.65)), 1),
+    )
+    horizontal_lines = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        horizontal_kernel,
+        iterations=1,
+    )
+
+    # Remove full-height vertical table lines.
+    vertical_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (1, max(3, int(h * 0.70))),
+    )
+    vertical_lines = cv2.morphologyEx(
+        bw,
+        cv2.MORPH_OPEN,
+        vertical_kernel,
+        iterations=1,
+    )
+
+    cleaned = cv2.subtract(bw, horizontal_lines)
+    cleaned = cv2.subtract(cleaned, vertical_lines)
+
+    # Ignore cell borders and residual grid fragments.
+    edge_x = max(1, int(w * 0.06))
+    edge_y = max(1, int(h * 0.08))
+
+    if w <= edge_x * 2 or h <= edge_y * 2:
+        return None
+
+    cleaned = cleaned[
+        edge_y:h - edge_y,
+        edge_x:w - edge_x,
+    ]
+
+    if cleaned.size == 0:
+        return None
+
+    inner_h, inner_w = cleaned.shape[:2]
+    inner_area = max(1, inner_h * inner_w)
+
+    # Reconnect tiny horizontal gaps inside printed dashes.
+    #
+    # PDF rasterization, CLAHE, resizing, blur, and adaptive thresholding can
+    # split one intentional dash into several nearby fragments. A narrow
+    # horizontal closing kernel reconnects those fragments without broadly
+    # joining tall, crossed, handwritten, or irregular marks.
+    dash_join_width = max(
+        3,
+        min(7, int(round(inner_w * 0.025))),
+    )
+
+    dash_join_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (dash_join_width, 1),
+    )
+
+    cleaned_for_components = cv2.morphologyEx(
+        cleaned,
+        cv2.MORPH_CLOSE,
+        dash_join_kernel,
+        iterations=1,
+    )
+
+    num_labels, _labels, stats, centroids = (
+        cv2.connectedComponentsWithStats(
+            cleaned_for_components,
+            connectivity=8,
+        )
+    )
+
+    components = []
+
+    for i in range(1, num_labels):
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        comp_x = int(stats[i, cv2.CC_STAT_LEFT])
+        comp_y = int(stats[i, cv2.CC_STAT_TOP])
+        comp_w = int(stats[i, cv2.CC_STAT_WIDTH])
+        comp_h = int(stats[i, cv2.CC_STAT_HEIGHT])
+
+        # Ignore isolated threshold noise.
+        if area < 2:
+            continue
+
+        # Ignore obvious remaining full grid fragments.
+        if comp_w <= 1 and comp_h >= max(4, int(inner_h * 0.45)):
+            continue
+
+        if comp_h <= 1 and comp_w >= max(4, int(inner_w * 0.80)):
+            continue
+
+        center_x = float(centroids[i][0])
+        center_y = float(centroids[i][1])
+
+        components.append(
+            {
+                "area": area,
+                "x": comp_x,
+                "y": comp_y,
+                "w": comp_w,
+                "h": comp_h,
+                "cx": center_x,
+                "cy": center_y,
+            }
+        )
+
+    # A placeholder should contain very few simple marks.
+    if not components or len(components) > 3:
+        return None
+
+    total_area = sum(c["area"] for c in components)
+    ink_ratio = float(total_area) / float(inner_area)
+
+    # Anything dense remains a red-review candidate.
+    if ink_ratio > 0.06:
+        return None
+
+    # Reject tall or large components. These are more likely to be numbers,
+    # letters, handwriting, smudges, or an obstruction.
+    max_component_height = max(3, int(inner_h * 0.25))
+    max_component_area = max(8, int(inner_area * 0.035))
+
+    for c in components:
+        if c["h"] > max_component_height:
+            return None
+
+        if c["area"] > max_component_area:
+            return None
+
+    y_centers = [c["cy"] for c in components]
+
+    # Multiple placeholder marks should sit on approximately one baseline.
+    if len(y_centers) > 1:
+        if max(y_centers) - min(y_centers) > max(3.0, inner_h * 0.18):
+            return None
+
+    # ------------------------------------------------------------
+    # DOT PLACEHOLDER
+    # Examples:
+    #   .
+    #   ..
+    #   ...
+    # ------------------------------------------------------------
+    dots_only = True
+
+    for c in components:
+        max_dot_w = max(4, int(inner_w * 0.14))
+        max_dot_h = max(4, int(inner_h * 0.20))
+
+        aspect = float(c["w"]) / float(max(1, c["h"]))
+
+        if c["w"] > max_dot_w:
+            dots_only = False
+            break
+
+        if c["h"] > max_dot_h:
+            dots_only = False
+            break
+
+        if aspect < 0.40 or aspect > 2.50:
+            dots_only = False
+            break
+
+    if dots_only:
+        # Require the marks to remain inside the main body of the cell.
+        for c in components:
+            if c["cx"] < inner_w * 0.08:
+                return None
+
+            if c["cx"] > inner_w * 0.92:
+                return None
+
+            if c["cy"] < inner_h * 0.20:
+                return None
+
+            if c["cy"] > inner_h * 0.90:
+                return None
+
+        return "dot"
+
+    # ------------------------------------------------------------
+    # DASH / UNDERSCORE PLACEHOLDER
+    # Examples:
+    #   -
+    #   --
+    #   ___
+    # ------------------------------------------------------------
+    dashes_only = True
+
+    for c in components:
+        aspect = float(c["w"]) / float(max(1, c["h"]))
+
+        min_dash_width = max(3, int(inner_w * 0.05))
+        max_dash_width = max(min_dash_width, int(inner_w * 0.60))
+        max_dash_height = max(3, int(inner_h * 0.16))
+
+        if c["w"] < min_dash_width:
+            dashes_only = False
+            break
+
+        if c["w"] > max_dash_width:
+            dashes_only = False
+            break
+
+        if c["h"] > max_dash_height:
+            dashes_only = False
+            break
+
+        if aspect < 2.25:
+            dashes_only = False
+            break
+
+    if dashes_only:
+        left_edge = min(c["x"] for c in components)
+        right_edge = max(c["x"] + c["w"] for c in components)
+        total_span = right_edge - left_edge
+
+        # A placeholder should not cover most of the cell.
+        if total_span > inner_w * 0.75:
+            return None
+
+        # Reject marks pressed directly against the cell borders.
+        if left_edge < inner_w * 0.03:
+            return None
+
+        if right_edge > inner_w * 0.97:
+            return None
+
+        return "dash"
+
+    # Ambiguous shapes remain review-worthy.
+    return None
 
 class HeaderBandScanner:
     """
@@ -1875,6 +2340,13 @@ class SeparatedLayoutParser:
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}      # NON-GFI only
         gfi_breaker_counts: Dict[str, int] = {}  # GFI only
+        review_cells: List[Dict] = []
+
+        body_columns_by_index = {
+            int(col["index"]): col
+            for col in body_columns
+            if col.get("index") is not None
+        }
 
         for side in ("left", "right"):
             trip_idx = by_side[side].get("trip")
@@ -1885,46 +2357,277 @@ class SeparatedLayoutParser:
             if trip_idx is None or poles_idx is None or not side_row_spans:
                 continue
 
+            trip_col = body_columns_by_index.get(int(trip_idx))
+            poles_col = body_columns_by_index.get(int(poles_idx))
+
+            if trip_col is None or poles_col is None:
+                continue
+
             trip_tokens = tokens_by_col_index.get(trip_idx, [])
             poles_tokens = tokens_by_col_index.get(poles_idx, [])
-            sf_tokens = tokens_by_col_index.get(sf_idx, []) if sf_idx is not None else []
+            sf_tokens = (
+                tokens_by_col_index.get(sf_idx, [])
+                if sf_idx is not None
+                else []
+            )
 
             for row_idx, (row_top, row_bottom) in enumerate(side_row_spans):
-                trip_text = self._row_text_for_column(row_top, row_bottom, trip_tokens)
-                poles_text = self._row_text_for_column(row_top, row_bottom, poles_tokens)
+                trip_text = self._row_text_for_column(
+                    row_top,
+                    row_bottom,
+                    trip_tokens,
+                )
+                poles_text = self._row_text_for_column(
+                    row_top,
+                    row_bottom,
+                    poles_tokens,
+                )
 
                 amps = self._parse_trip_value(trip_text)
                 poles = self._parse_poles_value(poles_text)
 
+                trip_has_text = bool(str(trip_text or "").strip())
+                poles_has_text = bool(str(poles_text or "").strip())
+
+                trip_has_marks = _cell_has_visual_content(
+                    gray_body,
+                    trip_col["x_left"],
+                    trip_col["x_right"],
+                    row_top,
+                    row_bottom,
+                )
+
+                poles_has_marks = _cell_has_visual_content(
+                    gray_body,
+                    poles_col["x_left"],
+                    poles_col["x_right"],
+                    row_top,
+                    row_bottom,
+                )
+
+                combined_row_text = (
+                    f"{trip_text or ''} {poles_text or ''}"
+                ).strip().upper()
+
+                is_spare_or_space = (
+                    "SPARE" in combined_row_text
+                    or "SPACE" in combined_row_text
+                )
+
+                # First check placeholders successfully returned by OCR.
+                trip_text_placeholder = _is_blank_placeholder_text(
+                    trip_text
+                )
+                poles_text_placeholder = _is_blank_placeholder_text(
+                    poles_text
+                )
+
+                # If OCR returned no text but visible marks exist, perform a
+                # very strict visual-placeholder check.
+                trip_visual_placeholder = None
+                if not trip_has_text and trip_has_marks:
+                    trip_visual_placeholder = (
+                        _detect_visual_blank_placeholder(
+                            gray_body,
+                            trip_col["x_left"],
+                            trip_col["x_right"],
+                            row_top,
+                            row_bottom,
+                        )
+                    )
+
+                poles_visual_placeholder = None
+                if not poles_has_text and poles_has_marks:
+                    poles_visual_placeholder = (
+                        _detect_visual_blank_placeholder(
+                            gray_body,
+                            poles_col["x_left"],
+                            poles_col["x_right"],
+                            row_top,
+                            row_bottom,
+                        )
+                    )
+
+                # These variables are effectively the explicit cell tags:
+                #
+                #   text placeholder:
+                #       OCR read "--", "_", "..", etc.
+                #
+                #   visual placeholder:
+                #       OCR returned nothing, but the image contains a clean,
+                #       narrowly defined dash/dot placeholder.
+                trip_is_placeholder = (
+                    trip_text_placeholder
+                    or trip_visual_placeholder is not None
+                )
+
+                poles_is_placeholder = (
+                    poles_text_placeholder
+                    or poles_visual_placeholder is not None
+                )
+
+                if self.debug:
+                    if trip_is_placeholder:
+                        print(
+                            "[SeparatedLayoutParser] "
+                            f"side={side} row={row_idx} trip placeholder "
+                            f"text={trip_text!r} "
+                            f"visual={trip_visual_placeholder!r}"
+                        )
+
+                    if poles_is_placeholder:
+                        print(
+                            "[SeparatedLayoutParser] "
+                            f"side={side} row={row_idx} poles placeholder "
+                            f"text={poles_text!r} "
+                            f"visual={poles_visual_placeholder!r}"
+                        )
+
+                # Placeholder cells may contain visible ink, but that ink is
+                # intentional blank notation and must not make the row occupied.
+                trip_cell_has_content = (
+                    not trip_is_placeholder
+                    and (trip_has_text or trip_has_marks)
+                )
+
+                poles_cell_has_content = (
+                    not poles_is_placeholder
+                    and (poles_has_text or poles_has_marks)
+                )
+
+                row_has_content = (
+                    trip_cell_has_content
+                    or poles_cell_has_content
+                )
+
+                # Entirely empty row:
+                # no green, blue, or red overlays.
+                if not row_has_content:
+                    continue
+
+                # Intentionally unused breaker position:
+                # no overlay and no breaker.
+                if is_spare_or_space:
+                    continue
+
+                # Amperage cell:
+                #   valid -> green
+                #   invalid/missing within an occupied row -> red
+                if trip_is_placeholder:
+                    pass
+
+                elif amps is not None:
+                    review_cells.append(
+                        {
+                            "side": side,
+                            "rowIndex": int(row_idx),
+                            "rowTop": int(row_top),
+                            "rowBottom": int(row_bottom),
+                            "xLeft": int(trip_col["x_left"]),
+                            "xRight": int(trip_col["x_right"]),
+                            "role": "trip",
+                            "status": "good",
+                            "text": trip_text,
+                            "value": int(amps),
+                        }
+                    )
+                else:
+                    review_cells.append(
+                        {
+                            "side": side,
+                            "rowIndex": int(row_idx),
+                            "rowTop": int(row_top),
+                            "rowBottom": int(row_bottom),
+                            "xLeft": int(trip_col["x_left"]),
+                            "xRight": int(trip_col["x_right"]),
+                            "role": "trip",
+                            "status": "issue",
+                            "text": trip_text,
+                            "value": None,
+                            "reason": (
+                                "Amperage was missing or could not be parsed "
+                                "in an occupied breaker row."
+                            ),
+                        }
+                    )
+
+                # Poles cell:
+                #   valid -> blue
+                #   invalid/missing within an occupied row -> red
+                if poles_is_placeholder:
+                    pass
+
+                elif poles is not None:
+                    review_cells.append(
+                        {
+                            "side": side,
+                            "rowIndex": int(row_idx),
+                            "rowTop": int(row_top),
+                            "rowBottom": int(row_bottom),
+                            "xLeft": int(poles_col["x_left"]),
+                            "xRight": int(poles_col["x_right"]),
+                            "role": "poles",
+                            "status": "good",
+                            "text": poles_text,
+                            "value": int(poles),
+                        }
+                    )
+                else:
+                    review_cells.append(
+                        {
+                            "side": side,
+                            "rowIndex": int(row_idx),
+                            "rowTop": int(row_top),
+                            "rowBottom": int(row_bottom),
+                            "xLeft": int(poles_col["x_left"]),
+                            "xRight": int(poles_col["x_right"]),
+                            "role": "poles",
+                            "status": "issue",
+                            "text": poles_text,
+                            "value": None,
+                            "reason": (
+                                "Poles were missing or could not be parsed "
+                                "in an occupied breaker row."
+                            ),
+                        }
+                    )
+
+                # A breaker is included only when both values are valid.
                 if amps is None or poles is None:
                     continue
 
                 sf_text = ""
                 if sf_idx is not None and sf_tokens:
-                    sf_text = self._row_text_for_column(row_top, row_bottom, sf_tokens)
+                    sf_text = self._row_text_for_column(
+                        row_top,
+                        row_bottom,
+                        sf_tokens,
+                    )
 
                 gfi_flag = normalize_gfi_modifier(sf_text)
-
                 key = f"{poles}P_{amps}A"
 
-                # Split counts: GFI breakers are NOT included in breakerCounts
                 if gfi_flag:
-                    gfi_breaker_counts[key] = gfi_breaker_counts.get(key, 0) + 1
+                    gfi_breaker_counts[key] = (
+                        gfi_breaker_counts.get(key, 0) + 1
+                    )
                 else:
                     breaker_counts[key] = breaker_counts.get(key, 0) + 1
 
                 rec = {
                     "side": side,
-                    "rowIndex": row_idx,
-                    "rowTop": row_top,
-                    "rowBottom": row_bottom,
+                    "rowIndex": int(row_idx),
+                    "rowTop": int(row_top),
+                    "rowBottom": int(row_bottom),
                     "amperage": int(amps),
                     "poles": int(poles),
                     "tripText": trip_text,
                     "polesText": poles_text,
                 }
+
                 if gfi_flag:
                     rec["specialFeatures"] = gfi_flag
+
                 if sf_text:
                     rec["specialFeaturesText"] = sf_text
 
@@ -1941,8 +2644,9 @@ class SeparatedLayoutParser:
             "layout": "separated",
             "bodyColumns": body_columns,
             "detected_breakers": detected_breakers,
-            "breakerCounts": breaker_counts,              # NON-GFI
-            "gfiBreakerCounts": gfi_breaker_counts,       # GFI only
+            "breakerCounts": breaker_counts,
+            "gfiBreakerCounts": gfi_breaker_counts,
+            "reviewCells": review_cells,
         }
 
 class CombinedLayoutParser:
@@ -2806,6 +3510,13 @@ class CombinedLayoutParser:
         detected_breakers = []
         breaker_counts: Dict[str, int] = {}      # NON-GFI only
         gfi_breaker_counts: Dict[str, int] = {}  # GFI only
+        review_cells: List[Dict] = []
+
+        body_columns_by_index = {
+            int(col["index"]): col
+            for col in body_columns
+            if col.get("index") is not None
+        }
 
         for side in ("left", "right"):
             combo_idx = by_side[side].get("combo")
@@ -2815,47 +3526,175 @@ class CombinedLayoutParser:
             if combo_idx is None or not side_row_spans:
                 continue
 
+            combo_col = body_columns_by_index.get(int(combo_idx))
+            if combo_col is None:
+                continue
+
             combo_tokens = tokens_by_col_index.get(combo_idx, [])
-            sf_tokens = tokens_by_col_index.get(sf_idx, []) if sf_idx is not None else []
+            sf_tokens = (
+                tokens_by_col_index.get(sf_idx, [])
+                if sf_idx is not None
+                else []
+            )
 
             for row_idx, (row_top, row_bottom) in enumerate(side_row_spans):
-                combo_text = self._row_text_for_column(row_top, row_bottom, combo_tokens)
+                combo_text = self._row_text_for_column(
+                    row_top,
+                    row_bottom,
+                    combo_tokens,
+                )
+
                 combo_pairs = self._parse_combo_cell(combo_text)
+
+                combo_text_normalized = (
+                    str(combo_text or "").strip().upper()
+                )
+
+                combo_has_text = bool(combo_text_normalized)
+
+                combo_has_marks = _cell_has_visual_content(
+                    gray_body,
+                    combo_col["x_left"],
+                    combo_col["x_right"],
+                    row_top,
+                    row_bottom,
+                )
+
+                # Placeholder recognized directly from OCR text.
+                combo_text_placeholder = (
+                    _is_blank_placeholder_text(
+                        combo_text_normalized
+                    )
+                )
+
+                # Placeholder recognized visually only when OCR returned no
+                # usable text but the image still contains visible marks.
+                combo_visual_placeholder = None
+
+                if not combo_has_text and combo_has_marks:
+                    combo_visual_placeholder = (
+                        _detect_visual_blank_placeholder(
+                            gray_body,
+                            combo_col["x_left"],
+                            combo_col["x_right"],
+                            row_top,
+                            row_bottom,
+                        )
+                    )
+
+                combo_is_placeholder = (
+                    combo_text_placeholder
+                    or combo_visual_placeholder is not None
+                )
+
+                if self.debug and combo_is_placeholder:
+                    print(
+                        "[CombinedLayoutParser] "
+                        f"side={side} row={row_idx} combo placeholder "
+                        f"text={combo_text!r} "
+                        f"visual={combo_visual_placeholder!r}"
+                    )
+
+                is_spare_or_space = (
+                    "SPARE" in combo_text_normalized
+                    or "SPACE" in combo_text_normalized
+                )
+
+                # Empty rows, dash placeholders, and intentional spare/space rows
+                # receive no overlay.
+                if not combo_has_text and not combo_has_marks:
+                    continue
+
+                if combo_is_placeholder:
+                    continue
+
+                if is_spare_or_space:
+                    continue
+
+                if combo_pairs:
+                    review_cells.append(
+                        {
+                            "side": side,
+                            "rowIndex": int(row_idx),
+                            "rowTop": int(row_top),
+                            "rowBottom": int(row_bottom),
+                            "xLeft": int(combo_col["x_left"]),
+                            "xRight": int(combo_col["x_right"]),
+                            "role": "combo",
+                            "status": "good",
+                            "text": combo_text,
+                            "pairs": [
+                                {
+                                    "amperage": int(amps),
+                                    "poles": int(poles),
+                                }
+                                for amps, poles in combo_pairs
+                            ],
+                        }
+                    )
+                elif combo_has_text or combo_has_marks:
+                    review_cells.append(
+                        {
+                            "side": side,
+                            "rowIndex": int(row_idx),
+                            "rowTop": int(row_top),
+                            "rowBottom": int(row_bottom),
+                            "xLeft": int(combo_col["x_left"]),
+                            "xRight": int(combo_col["x_right"]),
+                            "role": "combo",
+                            "status": "issue",
+                            "text": combo_text,
+                            "pairs": [],
+                            "reason": (
+                                "Combined breaker cell contained marks "
+                                "but amperage/poles could not be parsed."
+                            ),
+                        }
+                    )
+
+                # Empty cells produce no review record and therefore no overlay.
                 if not combo_pairs:
                     continue
 
                 sf_text = ""
                 if sf_idx is not None and sf_tokens:
-                    sf_text = self._row_text_for_column(row_top, row_bottom, sf_tokens)
+                    sf_text = self._row_text_for_column(
+                        row_top,
+                        row_bottom,
+                        sf_tokens,
+                    )
 
                 gfi_flag = normalize_gfi_modifier(sf_text)
 
                 if self.debug:
-                    print(f"[CombinedLayoutParser] side={side} row={row_idx} text='{combo_text}' -> {combo_pairs}")
-
-                # Optional: de-dupe per row to avoid double-counting when regex finds overlaps
-                # combo_pairs = sorted(set(combo_pairs))
+                    print(
+                        f"[CombinedLayoutParser] side={side} "
+                        f"row={row_idx} text='{combo_text}' -> {combo_pairs}"
+                    )
 
                 for amps, poles in combo_pairs:
                     key = f"{poles}P_{amps}A"
 
-                    # Split counts: GFI breakers are NOT included in breakerCounts
                     if gfi_flag:
-                        gfi_breaker_counts[key] = gfi_breaker_counts.get(key, 0) + 1
+                        gfi_breaker_counts[key] = (
+                            gfi_breaker_counts.get(key, 0) + 1
+                        )
                     else:
                         breaker_counts[key] = breaker_counts.get(key, 0) + 1
 
                     rec = {
                         "side": side,
-                        "rowIndex": row_idx,
-                        "rowTop": row_top,
-                        "rowBottom": row_bottom,
+                        "rowIndex": int(row_idx),
+                        "rowTop": int(row_top),
+                        "rowBottom": int(row_bottom),
                         "amperage": int(amps),
                         "poles": int(poles),
                         "comboText": combo_text,
                     }
+
                     if gfi_flag:
                         rec["specialFeatures"] = gfi_flag
+
                     if sf_text:
                         rec["specialFeaturesText"] = sf_text
 
@@ -2872,8 +3711,9 @@ class CombinedLayoutParser:
             "layout": "combined",
             "bodyColumns": body_columns,
             "detected_breakers": detected_breakers,
-            "breakerCounts": breaker_counts,        # NON-GFI
-            "gfiBreakerCounts": gfi_breaker_counts, # GFI only
+            "breakerCounts": breaker_counts,
+            "gfiBreakerCounts": gfi_breaker_counts,
+            "reviewCells": review_cells,
         }
 
 class BreakerTableParser:
@@ -2955,16 +3795,20 @@ class BreakerTableParser:
             if self.debug:
                 print(f"[BreakerTableParser] Layout '{layout}' → no body parser yet.")
 
-        # --- Use counts from the layout parser (do NOT recompute) ---
+        # --- Use counts from the layout parser ---
         breaker_counts: Dict[str, int] = {}
         gfi_breaker_counts: Dict[str, int] = {}
+        review_cells: List[Dict] = []
 
         if layout == "separated" and separated_scan:
             breaker_counts = separated_scan.get("breakerCounts") or {}
             gfi_breaker_counts = separated_scan.get("gfiBreakerCounts") or {}
+            review_cells = separated_scan.get("reviewCells") or []
+
         elif layout == "combined" and combined_scan:
             breaker_counts = combined_scan.get("breakerCounts") or {}
             gfi_breaker_counts = combined_scan.get("gfiBreakerCounts") or {}
+            review_cells = combined_scan.get("reviewCells") or []
 
         if self.debug:
             print(
@@ -2972,7 +3816,7 @@ class BreakerTableParser:
                 f"{header_scan.get('band_y2')}) tokens={len(header_scan.get('tokens', []))}"
             )
 
-        # --- Build final JSON-safe result ---
+        # --- Build final result ---
         result = {
             "parserVersion": PARSER_VERSION,
             "name": None,
@@ -2980,6 +3824,7 @@ class BreakerTableParser:
             "detected_breakers": detected_breakers,
             "breakerCounts": breaker_counts,
             "gfiBreakerCounts": gfi_breaker_counts,
+            "reviewCells": review_cells,
             "headerScan": header_scan,
             "separatedScan": separated_scan,
             "combinedScan": combined_scan,

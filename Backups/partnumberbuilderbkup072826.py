@@ -1535,13 +1535,9 @@ class nqPanelboard():
         if spdPartNumber:
             output["SPD"] = spdPartNumber
 
-        # --- EQUIPMENT GROUND BAR ---
-        output["Ground Bar Kit"] = "PK27GTACU"
-        output["Ground Bar Note"] = (
-            "An aluminum ground bar is included with the interior. "
-            "Select the optional copper ground bar kit only if a copper ground bar is required."
-        )
-
+        # --- ALWAYS INCLUDE NEUTRAL AND GROUND BAR ---
+        output["Ground Bar Kit"] = "PK27GTACU" if material == "COPPER" else "PK27GTA"
+        
         # bump amperage up to the next available neutral size
         def bump_amp(size_map, target):
             sizes = sorted(size_map.keys())
@@ -1549,37 +1545,16 @@ class nqPanelboard():
                 if s >= target:
                     return size_map[s]
             return "n/a"
-
         # pick the correct neutral for 100% and 200%
-        output["Neutral (100%)"] = bump_amp(
-            neutralMap["100%"],
-            amperage
-        )
-        output["Neutral (200%)"] = bump_amp(
-            {
-                k: v
-                for k, v in neutralMap["200%"].items()
-                if v
-            },
-            amperage
-        )
+        output["Neutral (100%)"] = bump_amp(neutralMap["100%"], amperage)
+        output["Neutral (200%)"] = bump_amp({k: v for k, v in neutralMap["200%"].items() if v}, amperage)
 
-        # --- SERVICE-ENTRANCE OUTPUT ---
-        # NQ main-lug configurations never receive a barrierKit and
-        # remain not suitable for use as service equipment.
-        #
-        # Supported main-breaker configurations receive a barrierKit
-        # directly from allowedConfigurationsBreaker.
-        if barrierKit:
-            output["Service Entrance Note"] = (
-                "This main-breaker configuration can be used as service equipment "
-                "when the service-entrance kit and 100% neutral are included. "
-                "An aluminum equipment ground bar is included with the interior."
-            )
+        # --- SERVICE‐ENTRANCE OUTPUT ---
+        if serviceEntranceKit:
+            output["Service Entrance Note"] = ("For service‐entrance panels: 100% neutral, service entrance kit, and ground bar required")
+            output["Service Entrance Kit"] = serviceEntranceKit
         else:
-            output["Service Entrance Note"] = (
-                "Panel not suitable for service entrance."
-            )
+            output["Service Entrance Note"] = "Panel not suitable for service entrance."
 
         # Feed‐Thru Lugs
         if feedThruLugs:
@@ -1725,6 +1700,22 @@ class nfPanelboard():
             }
         }
 
+        # Ground bar kit mappings
+        groundBarKits = {
+            'ALUMINUM': {
+                (125, 18): 'PK12GTA',
+                (125, 30): 'PK18GTA',
+                (125, 42): 'PK23GTA',
+                (125, 54): 'PK23GTA',
+                (250, 'any'): 'PK27GTA',
+                (400, 'any'): 'PK27GTA',
+                (600, 'any'): 'PK27GTA',
+            },
+            'COPPER': {
+                ('any', 'any'): 'PK27GTACU'
+            }
+        }
+
         # Validate voltage
         validVoltages = [208, 240, 480]
         if voltage not in validVoltages:
@@ -1742,6 +1733,13 @@ class nfPanelboard():
             else:
                 return "Feed-thru lugs are not available for configurations above 400A."
         
+        # Extract ground bar kit
+        if material == 'COPPER':
+            groundBarKit = groundBarKits['COPPER'][('any', 'any')]
+        else:
+            key = (amperage, spaces) if (amperage, spaces) in groundBarKits['ALUMINUM'] else (amperage, 'any')
+            groundBarKit = groundBarKits['ALUMINUM'].get(key, "No ground bar kit available for this configuration.")
+
         # Extract configuration
         if typeOfMain == 'MAIN LUG':
             try:
@@ -1818,54 +1816,24 @@ class nfPanelboard():
         if feedThruLugs:
             output["Feed-Thru Lugs"] = ftlPartNumber
 
-        # --- EQUIPMENT GROUND BAR ---
-        # An aluminum equipment ground bar is included with every
-        # merchandised NF interior. The separate selectable accessory
-        # is therefore the optional copper ground bar kit.
-        output["Ground Bar Kit"] = "PK27GTACU"
-        output["Ground Bar Note"] = (
-            "An aluminum equipment ground bar is included with the panel interior. "
-            "Select the optional copper ground bar kit only if a copper ground bar is required."
-        )
+        # --- ALWAYS INCLUDE GROUND BAR KIT ---
+        output["Ground Bar Kit"] = groundBarKit
 
-        # --- ALWAYS INCLUDE BOTH NEUTRAL OPTIONS ---
+        # --- ALWAYS INCLUDE BOTH NEUTRALS ---
         neutralMap = {
-            100: "NFN1CU",
-            250: "NFN2CU",
-            400: "NFN6CU",
-            600: "NFN6CU",
+            100: "NFN1CU", 250: "NFN2CU", 400: "NFN6CU", 600: "NFN6CU"
         }
+        neutralMap200 = {100: "NFNL1", 250: "NFNL2", 400: "NFNL4"}
 
-        neutralMap200 = {
-            100: "NFNL1",
-            250: "NFNL2",
-            400: "NFNL4",
-        }
+        output["Neutral (100%)"] = self._bump_neutral(neutralMap, amperage)
+        output["Neutral (200%)"] = self._bump_neutral(neutralMap200, amperage)
 
-        output["Neutral (100%)"] = self._bump_neutral(
-            neutralMap,
-            amperage
-        )
-        output["Neutral (200%)"] = self._bump_neutral(
-            neutralMap200,
-            amperage
-        )
-
-        # --- SERVICE-ENTRANCE OUTPUT ---
-        # NF main-lug configurations never receive a serviceEntranceKit.
-        # Supported main-breaker configurations receive one directly
-        # from allowedConfigurationsBreaker.
+        # --- SERVICE‐ENTRANCE OUTPUT ---
         if serviceEntranceKit:
+            output["Service Entrance Note"] = ("For service‐entrance panels: 100% neutral, service entrance kit, and ground bar required")            
             output["Service Entrance Kit"] = serviceEntranceKit
-            output["Service Entrance Note"] = (
-                "This main-breaker configuration can be used as service equipment "
-                "when the service-entrance kit and 100% neutral are included. "
-                "An aluminum equipment ground bar is included with the interior."
-            )
         else:
-            output["Service Entrance Note"] = (
-                "Panel not suitable for service entrance."
-            )
+            output["Service Entrance Note"] = "Panel not suitable for service entrance."
 
         return output
 
@@ -2278,33 +2246,29 @@ class iLinePanelboard():
         neutralMap = {400:'HCW4SN', 600:'HCW6SN', 800:'HCW8SN', 1200:'HCW12SN'}
         result["Neutral"] = _bump(neutralMap, amperage)
 
-        # --- Determine barrier kit for supported service-entrance main breakers ---
+        # --- Determine barrier kit for SE-rated breakers ---
         barrierKit = None
-
-        # Use the panel family actually selected from the configuration table.
-        selectedPanelType = str(panelTypeLookup or "").strip().upper()
-
-        if typeOfMain == "MAIN BREAKER" and selectedPanelType in barrierKitMap:
+        if typeOfMain == 'MAIN BREAKER' and panelType in barrierKitMap:
+            # if we know a breaker‐type letter, use it…
             if mainBreakerType:
-                breakerLetter = str(mainBreakerType).strip()[:1].upper()
-                barrierKit = barrierKitMap[selectedPanelType].get(breakerLetter)
+                letter = mainBreakerType[:1].upper()
+                barrierKit = barrierKitMap[panelType].get(letter)
+            # otherwise fall back to the first one in the map
+            if not barrierKit:
+                barrierKit = next(iter(barrierKitMap[panelType].values()), None)
 
-        # --- Equipment ground bar ---
-        result["Ground Bar Kit"] = "PK32DGTA"
+        # --- Ground bar (always) ---
+        result["Ground Bar Kit"] = (
+            "PK32DGTA" if material=="ALUMINUM" else "PK32GTACU"
+        )
 
-
-        # --- Service-entrance output ---
+        # --- Service‐Entrance Kit & Note ---
         if barrierKit:
-            result["Service Entrance Note"] = (
-                "This main-breaker I-Line configuration can be service entrance rated "
-                "when the listed service-entrance barrier kit, neutral, and equipment "
-                "ground-bar kit are included."
-            )
-            result["Service Entrance Barrier Kit"] = barrierKit
+            result["Note"] = ("For service‐entrance I-Line panels: neutral + ground bar + barrier kit required")
+            result["Service Entrance Kit"] = barrierKit
         else:
-            result["Service Entrance Note"] = (
-                "Panel not suitable for service entrance."
-            )
+            result["Note"] = "Standard non-SE configuration"
+            result["Service Entrance Kit"] = "Panel not suitable for service entrance"
 
         return result
 
