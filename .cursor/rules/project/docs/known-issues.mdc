@@ -18,6 +18,40 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **APIv15 raw-cell OCR fallback -- LANDED 2026-08-19 (commit `510d07f`)** --
+  Production OCR advanced from `BreakerTableParserAPIv14` / `BreakerTableParser12`
+  to **`BreakerTableParserAPIv15` / `BreakerTableParser13`**. Parser13 is Parser12
+  plus a parse-aware raw-cell fallback: each body row is still de-gridded and OCR'd
+  first; when that read fails to yield a usable trip/poles/combo value, the
+  untouched cell is re-read. A successful prepped read always wins, so Parser12
+  gains (e.g. NESTLE border-touching cells) are preserved while the fallback makes
+  it structurally impossible to resolve fewer breaker rows than Parser11 did on
+  the same crop.
+  **Why it was needed:** measured APIv13-vs-v14 on NewTest crops showed v14 gained
+  **+113 breakers** overall (1822 → 1935) but lost rows on C (−2), I (−4), and O
+  (−1) because de-gridding occasionally dropped a trailing digit (`20 / 1` → `20`)
+  or left a fragment that OCR'd as a spurious character. Several apparent v14
+  "changes" on I.pdf combo cells were actually v14 **correcting** v13 pole
+  misreads (e.g. `20 / 2` parsed as 1P by v13, 2P by v14).
+  **Measured result (2026-08-19, laptop DevTestEnvBatch, `/home/marco/Documents/NewTest/`,
+  13 PDFs / 78 panels, PageFilterV5 + PanelSearchToolV26 + APIv15):**
+  - **Headline:** v15 **1943 breakers** vs v13 **1822** and v14 **1935**; **0/78
+    panels below v13**, **0/78 below v14**; NESTLE unchanged at **148** breakers.
+  - **Recovered vs v14:** C +2, I +5 (89 vs v13's 88), O +1; five panels total.
+  - **Unchanged vs v14:** B, D, H, J, K, L, NESTLE, NoAmps, good_tester_combo.
+  - **Wall time:** ~13 min 45 s for the full 13-PDF batch (+5% vs APIv14 batch).
+  - **Artifacts:** `DevEnv/JobSummaries/NewTestBatch__API_15__20260819_094752/`
+    (`batch_summary.json`, consolidated `review_overlays/` with 78 PNGs).
+  **Wired in:** `AnvilUplinkCode/uplink_server.py` and `DevEnv/DevTestEnv.py`
+  import APIv15. APIv13/v14 and Parser11/12 retained for comparison.
+  **Dev harnesses added:** `DevEnv/DevTestEnvBatch.py` (`--api {13,14,15}`),
+  `DevEnv/Compare3Way_v13_v14_v15.py`, `DevEnv/DiagnoseV14Regressions.py`,
+  `DevEnv/CollectReviewOverlays.py`.
+  **Remaining open OCR levers** (unchanged from Parser12 entry): role-specific
+  allowlists, target-height upscale per row band, conditional second pass on
+  low-conf cells, ALT pole voting. Combo-layout `/` misread as a digit
+  (`20 / 1` → `20 11`) remains a shared weakness in both v13 and v15.
+
 - **NESTLE.pdf full-pipeline eval -- DONE 2026-08-19 (laptop DevTestEnv; first customer-style sheet on current stack)** --
   First end-to-end run on a newly downloaded real-world PDF (`~/Documents/pdfToScan/NESTLE.pdf`,
   1 page, 4 panel schedules on sheet E800). Harness: `DevEnv/DevTestEnv.py` with

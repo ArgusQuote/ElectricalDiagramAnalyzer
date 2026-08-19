@@ -52,13 +52,15 @@ ElectricalDiagramAnalyzer/
 | `MLTableDetection/README.md` | Module reference doc. Has a 2026-05-08 preamble pointing readers at `known-issues.mdc` and the `training-panel-detector` skill for current state; the rest is original reference material for the "annotate, fine-tune" workflow. |
 | `MLTableDetection/requirements.txt` | ML-specific Python deps (transformers, torchmetrics, albumentations, timm, etc.). Installed on top of `MISC/requirements.txt` on the training host. |
 | `MLTableDetection/setup_label_studio.sh` | Convenience script for spinning up Label Studio for annotation work. |
-| `OcrLibrary/BreakerTableParserAPIv14.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of 2026-08-18). Exports `API_VERSION = "API_14"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser12`. (v8-v13 kept for comparison.) |
-| `OcrLibrary/BreakerTableParserAPIv13.py` | Previous orchestrator (`API_VERSION = "API_13"`, wires `BreakerTableParser11`). Kept for side-by-side comparison; it is the baseline in `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`. |
+| `OcrLibrary/BreakerTableParserAPIv15.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of 2026-08-19, commit `510d07f`). Exports `API_VERSION = "API_15"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser13`. |
+| `OcrLibrary/BreakerTableParserAPIv14.py` | Previous orchestrator (`API_VERSION = "API_14"`, wires `BreakerTableParser12`). Kept for side-by-side comparison; baseline for cell-prep A/B in `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py` and three-way harness `DevEnv/Compare3Way_v13_v14_v15.py`. |
+| `OcrLibrary/BreakerTableParserAPIv13.py` | Earlier orchestrator (`API_VERSION = "API_13"`, wires `BreakerTableParser11`). Kept for side-by-side comparison. |
 | `OcrLibrary/BreakerTableParserAPIv12.py` | Prior OCR pipeline orchestrator (`API_VERSION = "API_12"`). Superseded by APIv13; kept for comparison. |
 | `OcrLibrary/BreakerTableParserAPIv11.py` | Earlier OCR pipeline orchestrator (`API_VERSION = "API_11"`). Superseded by APIv12/v13; kept for comparison. |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv14). Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 kept for comparison. |
-| `OcrLibrary/BreakerTableParser12.py` | Table parser (production) -- column detection, breaker cell OCR, breaker extraction, red review overlays for bad detections. `PARSER_VERSION = "BreakerParser12"`. Adds `_prep_cell_for_ocr()`, which inpaints the table's grid lines out of each body cell before EasyOCR reads it, plus `_cellprep.png` BEFORE/AFTER debug images. |
+| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv15). Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 kept for comparison. |
+| `OcrLibrary/BreakerTableParser13.py` | Table parser (production) -- Parser12 plus raw-cell OCR fallback. `PARSER_VERSION = "BreakerParser13"`. When `_prep_cell_for_ocr()` yields no usable trip/poles/combo value for a row, the untouched cell is re-read; a successful prepped read always wins. |
+| `OcrLibrary/BreakerTableParser12.py` | Previous table parser (`PARSER_VERSION = "BreakerParser12"`). Adds `_prep_cell_for_ocr()` grid removal before body OCR plus `_cellprep.png` BEFORE/AFTER debug images. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser11.py` | Previous table parser (`PARSER_VERSION = "BreakerParser11"`), identical to Parser12 except that body cells are OCR'd with the grid still in them. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser10.py` | Prior table parser -- kept for comparison. |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
@@ -79,7 +81,7 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv14), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv15), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Backup snapshots**: dated `uplink_server_*bkup*.py` / `uplink_server_<date>.py` files live alongside the active server -- they are historical snapshots, NOT importable runtime modules.
 
 ### PageFilter
@@ -115,7 +117,7 @@ ElectricalDiagramAnalyzer/
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
 - **Purpose**: Three-stage OCR pipeline for breaker table extraction
-- **Entry point**: `BreakerTableParserAPIv14.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v13 kept for comparison)
+- **Entry point**: `BreakerTableParserAPIv15.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v14 kept for comparison)
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
 
 ### AnchoringClasses
@@ -153,7 +155,12 @@ ElectricalDiagramAnalyzer/
 ## DevEnv Artifacts (local full-pipeline runs)
 
 `DevEnv/DevTestEnv.py` runs PageFilter → PanelSearchTool → BreakerTablePipeline
-and writes outputs under fixed paths (not the production `~/jobs/...` layout):
+and writes outputs under fixed paths (not the production `~/jobs/...` layout).
+`DevEnv/DevTestEnvBatch.py` runs the same stack over every PDF in a directory
+(default `~/Documents/NewTest`); supports `--api {13,14,15}` for A/B runs.
+Comparison harnesses: `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`,
+`DevEnv/Compare3Way_v13_v14_v15.py`, `DevEnv/DiagnoseV14Regressions.py`,
+`DevEnv/CollectReviewOverlays.py`.
 
 | Path | Contents |
 |---|---|
