@@ -20,12 +20,12 @@ from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv13 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/hh.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/L.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
 SUMMARY_ROOT_DIR   = Path("~/ElectricalDiagramAnalyzer/DevEnv/JobSummaries").expanduser()
-
+ 
 for d in (FILTER_OUT_DIR, FINDER_OUT_DIR, PIPE_OUT_DIR, SUMMARY_ROOT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
