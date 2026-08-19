@@ -104,15 +104,17 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Location**: `OcrLibrary/` (BreakerTableParserAPIv14, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser12)
 - **API version string**: `API_VERSION = "API_14"` (exported by `BreakerTableParserAPIv14`)
 - **Recent parser hardening (2026-08-18, merge `62beba4`)**: `PanelHeaderParserV11` accepts `BKR`/`BRKR` main-breaker labels and `N/A` as a valid "none" for MAIN/AIC; `BreakerTableParser11` adds breaker-column header synonyms and red review overlays for bad breaker detections (ignoring explicit `" -- "` blank cells).
-- **Body-cell grid removal (2026-08-18)**: `BreakerTableParser12` de-grids every breaker body cell via `_prep_cell_for_ocr()` before EasyOCR, which recovers cells whose borders touched the glyphs. Grid lines are still needed *upstream* of this step -- row bands are derived from the horizontal dividers in the raw strip -- so removal happens per row band inside `_ocr_body_column_by_rows()`, never on the strip used for row detection. See the `known-issues.mdc` entry for the measured before/after.
+- **Body-cell grid removal (2026-08-18)**: `BreakerTableParser12` de-grids every breaker body cell via `_prep_cell_for_ocr()` before EasyOCR, which recovers cells whose borders touched the glyphs. Grid lines are still needed *upstream* of this step -- row bands are derived from the horizontal dividers in the raw strip -- so removal happens per row band inside `_ocr_body_column_by_rows()`, never on the strip used for row detection. See the `known-issues.mdc` entry for the measured before/after (APIv13-vs-v14 harness) and the **2026-08-19 NESTLE.pdf full-pipeline eval** for first end-to-end validation on an unseen customer-style sheet (148/151 breakers, zero misreads).
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses
 - **Consumers**: uplink_server via BreakerTablePipeline
 
 ### AnchoringClasses
 - **Purpose**: Structural layout detection -- finds header and footer anchor positions in panel images
 - **Location**: `AnchoringClasses/BreakerHeaderFinder.py`, `AnchoringClasses/BreakerFooterFinder.py`
+- **Footer CKT expected-row validation (2026-08-19, merge `b477fe7`)**: `BreakerFooterFinder._filter_normal_candidates_by_expected_row()`, called from `find_footer()`, cross-checks each normal-mode footer candidate's OCR'd circuit number against the number predicted by its physical row. Row pitch is estimated per side from the candidates' own value/y progression and anchored at `header_bottom_y`; candidates more than 4 circuit numbers (~two rows) from the expected value are dropped. OCR values are never rewritten -- survivors only gain diagnostic keys. The check bails out unchanged when there are fewer than 4 candidates or fewer than 2 usable pitch samples. First measured on NESTLE.pdf / 1RPA (2026-08-19). See `known-issues.mdc` for tolerance rationale and watch items.
+- **Versioning note**: unlike `OcrLibrary`, these files are **not** versioned -- they are edited in place, so a change here reaches `BreakerTableAnalyzer10`, `11`, and `12` at once and is not isolated to the current production API version.
 - **Dependencies**: EasyOCR reader (shared), OpenCV, NumPy
-- **Consumers**: BreakerTableAnalyzer12
+- **Consumers**: BreakerTableAnalyzer12 (production); also imported by the retained Analyzer10/11
 
 ### RulesEngine
 - **Purpose**: Processes component dicts from OCR to select equipment part numbers

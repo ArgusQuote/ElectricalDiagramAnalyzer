@@ -1,0 +1,227 @@
+{
+  "totals": {
+    "v13": 64,
+    "v14": 57,
+    "v15": 64
+  },
+  "panels": [
+    {
+      "crop": "C_electrical_filtered_page001_panel02.png",
+      "path": "DevEnv/BatchRuns/C/PanelSearchOutput/C_electrical_filtered_page001_panel02.png",
+      "v13": {
+        "name": "C",
+        "panelStatus": null,
+        "spaces": 18,
+        "breakerCounts": {
+          "1P_20A": 7,
+          "1P_50A": 2
+        },
+        "reviewCells": 10,
+        "count": 9,
+        "seconds": 9.0
+      },
+      "v14": {
+        "name": "C",
+        "panelStatus": null,
+        "spaces": 18,
+        "breakerCounts": {
+          "1P_20A": 5,
+          "1P_50A": 2
+        },
+        "reviewCells": 10,
+        "count": 7,
+        "seconds": 6.7
+      },
+      "v15": {
+        "name": "C",
+        "panelStatus": null,
+        "spaces": 18,
+        "breakerCounts": {
+          "1P_20A": 7,
+          "1P_50A": 2
+        },
+        "reviewCells": 10,
+        "count": 9,
+        "seconds": 6.9
+      },
+      "recovered_vs_v14": [
+        [
+          "left",
+          2
+        ],
+        [
+          "left",
+          6
+        ]
+      ],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "I_electrical_filtered_page001_panel02.png",
+      "path": "DevEnv/BatchRuns/I/PanelSearchOutput/I_electrical_filtered_page001_panel02.png",
+      "v13": {
+        "name": "P6",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 28
+        },
+        "reviewCells": 28,
+        "count": 28,
+        "seconds": 10.4
+      },
+      "v14": {
+        "name": "P6",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 26
+        },
+        "reviewCells": 28,
+        "count": 26,
+        "seconds": 10.6
+      },
+      "v15": {
+        "name": "P6",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 28
+        },
+        "reviewCells": 28,
+        "count": 28,
+        "seconds": 10.9
+      },
+      "recovered_vs_v14": [
+        [
+          "left",
+          4
+        ],
+        [
+          "left",
+          13
+        ]
+      ],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "I_electrical_filtered_page001_panel04.png",
+      "path": "DevEnv/BatchRuns/I/PanelSearchOutput/I_electrical_filtered_page001_panel04.png",
+      "v13": {
+        "name": "P6",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "3P_20A": 2,
+          "1P_20A": 8,
+          "2P_50A": 1,
+          "3P_30A": 3,
+          "1P_15A": 4,
+          "2P_15A": 1,
+          "2P_20A": 1
+        },
+        "reviewCells": 20,
+        "count": 20,
+        "seconds": 9.4
+      },
+      "v14": {
+        "name": "P6",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "3P_20A": 1,
+          "2P_50A": 1,
+          "3P_30A": 3,
+          "2P_20A": 2,
+          "2P_15A": 2,
+          "1P_20A": 6,
+          "1P_15A": 3
+        },
+        "reviewCells": 20,
+        "count": 18,
+        "seconds": 9.3
+      },
+      "v15": {
+        "name": "P6",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "3P_20A": 2,
+          "1P_20A": 7,
+          "2P_50A": 1,
+          "3P_30A": 3,
+          "2P_20A": 2,
+          "2P_15A": 2,
+          "1P_15A": 3
+        },
+        "reviewCells": 20,
+        "count": 20,
+        "seconds": 10.2
+      },
+      "recovered_vs_v14": [
+        [
+          "left",
+          1
+        ],
+        [
+          "left",
+          7
+        ]
+      ],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "O_electrical_filtered_page004_panel08.png",
+      "path": "DevEnv/BatchRuns/O/PanelSearchOutput/O_electrical_filtered_page004_panel08.png",
+      "v13": {
+        "name": "DA3",
+        "panelStatus": null,
+        "spaces": 30,
+        "breakerCounts": {
+          "2P_125A": 1,
+          "2P_100A": 2,
+          "3P_30A": 3,
+          "3P_20A": 1
+        },
+        "reviewCells": 14,
+        "count": 7,
+        "seconds": 7.5
+      },
+      "v14": {
+        "name": "DA3",
+        "panelStatus": null,
+        "spaces": 30,
+        "breakerCounts": {
+          "2P_125A": 1,
+          "2P_100A": 2,
+          "3P_30A": 2,
+          "3P_20A": 1
+        },
+        "reviewCells": 14,
+        "count": 6,
+        "seconds": 7.9
+      },
+      "v15": {
+        "name": "DA3",
+        "panelStatus": null,
+        "spaces": 30,
+        "breakerCounts": {
+          "2P_125A": 1,
+          "2P_100A": 2,
+          "3P_30A": 3,
+          "3P_20A": 1
+        },
+        "reviewCells": 14,
+        "count": 7,
+        "seconds": 8.5
+      },
+      "recovered_vs_v14": [
+        [
+          "left",
+          4
+        ]
+      ],
+      "still_lost_vs_v13": []
+    }
+  ]
+}

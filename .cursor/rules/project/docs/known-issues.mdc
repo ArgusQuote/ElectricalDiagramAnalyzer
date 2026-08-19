@@ -18,6 +18,150 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **NESTLE.pdf full-pipeline eval -- DONE 2026-08-19 (laptop DevTestEnv; first customer-style sheet on current stack)** --
+  First end-to-end run on a newly downloaded real-world PDF (`~/Documents/pdfToScan/NESTLE.pdf`,
+  1 page, 4 panel schedules on sheet E800). Harness: `DevEnv/DevTestEnv.py` with
+  `INPUT_PDF` overridden to NESTLE; stack PageFilterV5 + PanelSearchToolV26 +
+  BreakerTableParserAPIv14 (`debug=True`). Wall time ~45 s on laptop GPU (RTX 500 Ada).
+  Artifacts: `DevEnv/JobSummaries/NESTLE__20260819_073555/` (`summary.json`,
+  `full_pipeline_breaker_dump.json`); crops and overlays under
+  `DevEnv/PanelSearchOutput/` (see `file-locations.mdc` DevEnv artifacts subsection).
+  **Headline:** 4/4 panels found; all four headers correct (name, bus/main amps,
+  voltage, AIC where present); **148/151 breakers** detected with **zero wrong
+  amps/poles values** (no silent misreads). All four panels completed with empty
+  `panelStatus`. This is the first documented full-pipeline result combining
+  Parser12 cell prep, footer expected-row validation (landed same day), and
+  review-overlay diagnostics on a sheet that was not in the training or comparison
+  sets.
+  **Per-panel (panel crop → schedule name):**
+  - `panel01` → **3RPA** (400 A / 208 V): spaces 84, 68 breakers (sheet has 70
+    occupied rows with trip+pole values — 2 missed on last body row, see gaps).
+  - `panel02` → **1RPA** (400 A / 208 V): spaces reported **66** (sheet is 60 —
+    footer CKT `60` OCR'd at conf 0.39, below accept floor; see gaps), 48/49
+    breakers.
+  - `panel03` → **3LPA** (100 A / 480 V): spaces 42, 20/20 breakers — exact match.
+  - `panel04` → **1LPA** (125 A bus / 100 A main / 480 V): spaces 30, 12/12
+    breakers — exact match; `SPACE` rows with `--` trip correctly excluded.
+  **Improvement strategy validated on this run** (layers already landed; NESTLE
+  confirms they compose on an unseen doc):
+  1. **Versioned OCR modules** — Parser12 / APIv14 kept alongside v13 for A/B;
+     production advances without losing comparison baseline.
+  2. **Cell prep before OCR** — `_prep_cell_for_ocr()` grid removal (Parser12);
+     misreads traced via `*_cellprep.png` and `*_parser_body_*_overlay.png`.
+  3. **Structural validation without overwriting OCR** — footer expected-row
+     check rejected CKT outliers on 1RPA (`79`/`76` vs expected 9/6); OCR values
+     never rewritten.
+  4. **Strict breaker admission** — row counts only when both trip and poles parse;
+     failures surface as red `CHECK` cells in `{name}_review_overlay.png`, not
+     silent wrong BOM entries.
+  5. **Defense in depth** — RulesEngine input sanitizer and header guards (not
+     re-exercised on this dev run; production path unchanged).
+  **Footer expected-row validation — first measured evidence:** on 1RPA the new
+  filter rejected 2 of 52 footer CKT candidates (`expected=9,detected=79` and
+  `expected=6,detected=76`, delta 70 each) before panel-size selection. Downstream
+  footer still picked val=59 → panel_size=66 (separate footer-conf issue below).
+  **Remaining gaps exposed (still open; map to deferred OCR levers in the
+  Parser12 entry):**
+  1. **Last body row poles miss (3 breakers on 3RPA):** final row band is
+     truncated at `footer_y`; trip reads (`20 A`) but lone poles digit `1` gets
+     no EasyOCR box. Flagged in `reviewCells` as poles `status: issue`. Likely
+     levers: target-height upscale per row band (gap 4) and/or conditional retry
+     on empty poles (gap 5).
+  2. **1RPA spaces 66 vs 60:** last footer token `60` at conf **0.39** (<
+     `_HDR_MIN_CONF` 0.40) excluded from `values_present`; matcher rounded 59→66.
+     Same near-miss pattern as `H.pdf` trip recovery in the APIv14 comparison.
+  3. **1RPA one missed breaker (row 21 left):** same last-row / poles pattern as
+     3RPA.
+  4. **Review noise on SPACE rows:** 15 spurious `"Amperage was missing"` flags on
+     `--` placeholder rows in 3LPA/1LPA — cosmetic; does not change breaker counts.
+  **Debug artifact quick reference (laptop DevTestEnv):** when `debug=True`, raw
+  EasyOCR token overlays live in `DevEnv/PanelSearchOutput/debug/` (`*_parser_body_
+  sep_col*_overlay.png`, `*_cellprep.png`); combined review coloring (green/blue/red
+  + magenta header boxes) in `DevEnv/PanelSearchOutput/review_overlays/`. On
+  production/Paperspace jobs the same filenames land under
+  `{job_dir}/pdf_images/debug/` and `{job_dir}/pdf_images/review_overlays/` when
+  the crop path contains `/pdf_images/`. Review overlays are written even when
+  `debug=False`; per-column OCR overlays require `debug=True`.
+
+- **Footer-finder CKT expected-row validation -- LANDED 2026-08-19 (merge `b477fe7`, from branch `Production`)** --
+  Merge of `Production` into `TOOL_DEVELOPMENT_V3_MS`, carrying a single
+  upstream commit (`b98c7ea`, LW). Committed and pushed on
+  `origin/TOOL_DEVELOPMENT_V3_MS`. Note for orientation: `Production` is a
+  separate LW-maintained branch, distinct from `TOOL_Debug_MaxUserTesting`
+  which is the source of the earlier merges recorded below.
+  What changed:
+  - **New method `BreakerFooterFinder._filter_normal_candidates_by_expected_row()`**
+    (`AnchoringClasses/BreakerFooterFinder.py`, +177 lines). It sanity-checks
+    each normal-mode footer CKT candidate's OCR'd circuit number against the
+    circuit number *predicted* from that candidate's physical row position,
+    and drops extreme outliers.
+    - Row pitch is estimated per side (left and right independently -- no
+      left/right pairing is required) from consecutive candidates whose value
+      advances by 2, 4, 6, or 8, since same-side circuit numbers normally step
+      by 2 per row. Pitch is `y_delta / rows_advanced`, sampled only when it
+      falls in the 8.0-250.0 px band, and the pitch actually used is the
+      **median** of those samples.
+    - The first body row's center is `header_bottom_y + (row_pitch * 0.5)`;
+      a candidate's row index is the rounded distance from there in pitches.
+      Expected value is `1 + row*2` on the left side and `2 + row*2` on the
+      right.
+    - A candidate is kept when `abs(detected - expected) <= max_value_delta`,
+      and the call site passes **`max_value_delta=4`**, which is about two
+      physical rows. So expected 1 / detected 5 is kept while expected 1 /
+      detected 7 is rejected, matching the commit message.
+    - **OCR stays authoritative** -- the detected value is never overwritten.
+      Surviving candidates only gain the diagnostic keys `expected_value`,
+      `expected_delta`, and `estimated_row_index`; downstream bucket logic is
+      untouched.
+    - Candidates whose computed row index is negative (i.e. above the first
+      body row) are rejected outright.
+  - **Conservative bail-outs**, which deliberately preserve prior behavior
+    whenever the evidence is thin: fewer than 4 candidates returns the list
+    unchanged; a non-numeric `header_bottom_y` returns unchanged; fewer than 2
+    usable pitch samples returns unchanged and logs why. Candidates whose
+    `side` is neither `left` nor `right` are passed through untouched.
+  - **Wired in** at a single call site inside `find_footer()`, after the
+    footer candidate cutoff is selected and immediately before the
+    `values_present` / panel-size matching block that picks the normal-mode
+    footer.
+  - **Debug output**: with `debug=True` the method prints the estimated
+    `row_pitch` and `first_row_center_y`, a per-candidate `ROW CHECK` line
+    (row, side, expected, detected, delta, KEEP/REJECT), and a final
+    kept/rejected tally -- all under the existing `[BreakerFooterFinder]`
+    prefix.
+  - **`AnchoringClasses/BreakerFooterFinderBKUP081826.py`** was added (2096
+    lines). Verified byte-identical to the pre-merge `BreakerFooterFinder.py`
+    (both md5 `d9e1f5f706315868e5c9a270253185b3`), so it is a pure
+    pre-change snapshot rather than a variant, and is not importable runtime
+    code.
+  - **`DevEnv/DevTestEnv.py`**: the dev-harness `INPUT_PDF` was switched from
+    `SourcePdf/hh.pdf` to `SourcePdf/L.pdf`. Scratch setting only, no runtime
+    effect.
+  **Scope caution -- this is NOT a versioned module.** Unlike the `OcrLibrary`
+  convention, where a change spawns a new `BreakerTableParser12` / APIv14 and
+  leaves the previous file intact, `AnchoringClasses/BreakerFooterFinder.py`
+  is edited in place and is imported by `BreakerTableAnalyzer10`, `11`, **and**
+  `12`. The production chain (`uplink_server.py` -> APIv14 -> Analyzer12 ->
+  `BreakerFooterFinder`) therefore picks this change up immediately, and so do
+  the retained older analyzers. A practical consequence: APIv13-vs-APIv14
+  comparison runs are no longer isolated to the parser change, because both
+  API versions now share the new footer validation. Account for this before
+  re-running `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`.
+  **First measured evidence (2026-08-19, NESTLE.pdf / 1RPA):** expected-row
+  validation rejected 2 footer CKT outliers (`79`, `76`) with delta 70 vs
+  geometry-predicted 9 and 6. See the "NESTLE.pdf full-pipeline eval" entry
+  above for the full panel result; no dedicated before/after harness yet.
+  Watch items on future evals:
+  - Panels whose real circuit numbering legitimately departs from a uniform
+    `1,3,5,...` / `2,4,6,...` progression by more than 4 would have valid
+    candidates rejected; the two-row tolerance is the only slack in the check.
+  - The validation loop's `except (KeyError, TypeError, ValueError): continue`
+    **drops** a candidate with an unparsable `val` / `y_page` instead of
+    passing it through, which is stricter than the bail-out philosophy used
+    everywhere else in the method. It is believed unreachable because
+    candidates are numeric-filtered upstream, but it is the one path that can
+    silently lose a candidate.
+
 - **Production pipeline advanced to APIv13 + RulesEngine7 + PanelSearchToolV26 -- LANDED 2026-08-18 (merge `62beba4`)** --
   Merge of `TOOL_Debug_MaxUserTesting` into `TOOL_DEVELOPMENT_V3_MS`
   advanced the production OCR/rules/panel-finder stack and added uplink

@@ -17,7 +17,7 @@ if project_root not in sys.path:
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV5 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv14 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv15 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
 INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/L.pdf").expanduser()

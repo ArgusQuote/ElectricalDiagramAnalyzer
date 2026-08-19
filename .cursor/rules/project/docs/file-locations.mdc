@@ -57,12 +57,13 @@ ElectricalDiagramAnalyzer/
 | `OcrLibrary/BreakerTableParserAPIv12.py` | Prior OCR pipeline orchestrator (`API_VERSION = "API_12"`). Superseded by APIv13; kept for comparison. |
 | `OcrLibrary/BreakerTableParserAPIv11.py` | Earlier OCR pipeline orchestrator (`API_VERSION = "API_11"`). Superseded by APIv12/v13; kept for comparison. |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv13). Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 kept for comparison. |
+| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv14). Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 kept for comparison. |
 | `OcrLibrary/BreakerTableParser12.py` | Table parser (production) -- column detection, breaker cell OCR, breaker extraction, red review overlays for bad detections. `PARSER_VERSION = "BreakerParser12"`. Adds `_prep_cell_for_ocr()`, which inpaints the table's grid lines out of each body cell before EasyOCR reads it, plus `_cellprep.png` BEFORE/AFTER debug images. |
 | `OcrLibrary/BreakerTableParser11.py` | Previous table parser (`PARSER_VERSION = "BreakerParser11"`), identical to Parser12 except that body cells are OCR'd with the grid still in them. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser10.py` | Prior table parser -- kept for comparison. |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
-| `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
+| `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images. `find_footer()` calls `_filter_normal_candidates_by_expected_row()` (2026-08-19), which rejects footer CKT candidates whose OCR'd circuit number is more than 4 off the value predicted by their physical row. **Unversioned** -- edited in place, so changes reach Analyzer10/11/12 simultaneously. |
+| `AnchoringClasses/BreakerFooterFinderBKUP081826.py` | Pre-change snapshot of `BreakerFooterFinder.py` taken at the 2026-08-19 merge (byte-identical to the pre-merge file). Historical only, NOT an importable runtime module. Sibling `BreakerFooterFinderBKUP.py` / `BreakerFooterFinderBKUP042726.py` are older snapshots of the same kind. |
 | `RulesEngine/RulesEngine7.py` | Rules engine -- `process_job()` selects part numbers from component dicts. **Current production import** (as `RE2`). Extends RulesEngine6 (MMS/ERMS, ground-bar digest alignment, etc.). RE2-RE6 kept for comparison. |
 | `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
 | `Spec_Sheet_Analysis/Specs_AnalyzerV5.py` | Specification-PDF analyzer -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Text-based (pypdfium2) section finding + panelboard requirement classification + evidence images. **Current production version** (loaded dynamically; V6 exists but is NOT the active version). |
@@ -78,7 +79,7 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv13), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv14), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Backup snapshots**: dated `uplink_server_*bkup*.py` / `uplink_server_<date>.py` files live alongside the active server -- they are historical snapshots, NOT importable runtime modules.
 
 ### PageFilter
@@ -122,6 +123,8 @@ ElectricalDiagramAnalyzer/
 - **Purpose**: Detects header and footer anchor positions for layout analysis
 - **Entry point**: `BreakerHeaderFinder` and `BreakerFooterFinder` classes
 - **Dependencies**: EasyOCR reader (passed in), OpenCV, NumPy
+- **Not versioned**: unlike `OcrLibrary`, these modules carry no version suffix and are edited in place. `BreakerFooterFinder` is imported by `BreakerTableAnalyzer10`, `11`, and `12` alike, so a change here is not scoped to the active API version.
+- **Backup snapshots**: dated `BreakerFooterFinderBKUP*.py` files are historical copies kept alongside the active module, NOT importable runtime modules -- the same convention used for `uplink_server_*bkup*.py`.
 
 ### RulesEngine
 - **Path**: `RulesEngine/`
@@ -146,6 +149,30 @@ ElectricalDiagramAnalyzer/
 - **Purpose**: Centralized thread-pool caps and runtime determinism for spawned multiprocessing workers
 - **Entry point**: `worker_init.py` -- `cap_thread_pools()` and `set_runtime_determinism()`
 - **Dependencies**: None at import (lazily uses torch/cv2 if present)
+
+## DevEnv Artifacts (local full-pipeline runs)
+
+`DevEnv/DevTestEnv.py` runs PageFilter → PanelSearchTool → BreakerTablePipeline
+and writes outputs under fixed paths (not the production `~/jobs/...` layout):
+
+| Path | Contents |
+|---|---|
+| `DevEnv/PdfOutput/` | Page-filtered PDF (`*_electrical_filtered.pdf`) |
+| `DevEnv/PanelSearchOutput/` | Panel crop PNGs (`*_panelNN.png`) |
+| `DevEnv/PanelSearchOutput/magenta_overlays/` | Page-level panel-finder boxes (green boxes on rendered page; directory name is historical) |
+| `DevEnv/PanelSearchOutput/review_overlays/` | Per-panel review PNG — green trip, blue poles, red CHECK, magenta header attrs. **Written on every parse** (no `debug` gate). Named `{PanelName}_review_overlay.png`. |
+| `DevEnv/PanelSearchOutput/debug/` | **`debug=True` only.** Raw EasyOCR token overlays (`*_parser_body_sep_col{idx}_{role}_overlay.png`), cell-prep before/after (`*_cellprep.png`), header/footer band overlays, analyzer HF overlay. |
+| `DevEnv/ParserOutput/` | Reserved parser output dir (DevTestEnv creates it; primary dumps go to JobSummaries) |
+| `DevEnv/JobSummaries/{JOB_ID}/` | `summary.json` (header-focused component summary) and `full_pipeline_breaker_dump.json` (full pipeline result including `reviewCells`, `detected_breakers`, scans) |
+
+On **production / Paperspace**, the same overlay types land under the job folder:
+`{job_dir}/pdf_images/review_overlays/` (always) and
+`{job_dir}/pdf_images/debug/` (when `BreakerTablePipeline(debug=True)`, which
+production workers use). Crops must live under `{job_dir}/pdf_images/` for the
+review overlay writer to resolve that path.
+
+Example measured run: NESTLE.pdf (2026-08-19) — see `known-issues.mdc`
+"NESTLE.pdf full-pipeline eval" entry.
 
 ## Conventions
 

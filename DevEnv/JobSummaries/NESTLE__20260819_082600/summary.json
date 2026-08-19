@@ -1,0 +1,137 @@
+{
+  "ok": true,
+  "job_id": "NESTLE__20260819_082600",
+  "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NESTLE__20260819_082600",
+  "saved_pdf": "/home/marco/Documents/NewTest/NESTLE.pdf",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NESTLE__20260819_082600",
+  "images": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel04.png"
+  ],
+  "image_count": 4,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "3RPA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "1RPA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "3LPA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "1LPA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "3RPA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "1RPA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "3LPA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "1LPA": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 39111,
+  "cycle_time_str": "00:00:39:111",
+  "noticed_ts_ms": 1787145960102,
+  "parse_done_ts_ms": 1787145999214,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns/NESTLE/PdfOutput/NESTLE_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_14",
+    "header_breakers_total": 0,
+    "table_breakers_total": 148,
+    "parser_debug": true
+  }
+}

@@ -1,0 +1,282 @@
+{
+  "totals": {
+    "v13": 102,
+    "v14": 177,
+    "v15": 178
+  },
+  "panels": [
+    {
+      "crop": "NESTLE_electrical_filtered_page001_panel01.png",
+      "path": "DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel01.png",
+      "v13": {
+        "name": "3RPA",
+        "panelStatus": null,
+        "spaces": 84,
+        "breakerCounts": {
+          "2P_20A": 5,
+          "2P_40A": 1,
+          "3P_150A": 1,
+          "3P_60A": 1,
+          "1P_20A": 15,
+          "3P_15A": 1,
+          "3P_20A": 1
+        },
+        "reviewCells": 140,
+        "count": 25,
+        "seconds": 17.1
+      },
+      "v14": {
+        "name": "3RPA",
+        "panelStatus": null,
+        "spaces": 84,
+        "breakerCounts": {
+          "1P_20A": 55,
+          "2P_20A": 5,
+          "1P_25A": 1,
+          "2P_40A": 1,
+          "3P_150A": 1,
+          "3P_60A": 1,
+          "3P_15A": 1,
+          "3P_20A": 1,
+          "1P_15A": 2
+        },
+        "reviewCells": 140,
+        "count": 68,
+        "seconds": 14.9
+      },
+      "v15": {
+        "name": "3RPA",
+        "panelStatus": null,
+        "spaces": 84,
+        "breakerCounts": {
+          "1P_20A": 55,
+          "2P_20A": 5,
+          "1P_25A": 1,
+          "2P_40A": 1,
+          "3P_150A": 1,
+          "3P_60A": 1,
+          "3P_15A": 1,
+          "3P_20A": 1,
+          "1P_15A": 2
+        },
+        "reviewCells": 140,
+        "count": 68,
+        "seconds": 15.4
+      },
+      "recovered_vs_v14": [],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "NESTLE_electrical_filtered_page001_panel02.png",
+      "path": "DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel02.png",
+      "v13": {
+        "name": "1RPA",
+        "panelStatus": null,
+        "spaces": 66,
+        "breakerCounts": {
+          "3P_100A": 2,
+          "2P_40A": 1,
+          "2P_20A": 1,
+          "2P_15A": 1,
+          "2P_30A": 2,
+          "1P_20A": 19,
+          "3P_20A": 1
+        },
+        "reviewCells": 98,
+        "count": 27,
+        "seconds": 10.3
+      },
+      "v14": {
+        "name": "1RPA",
+        "panelStatus": null,
+        "spaces": 66,
+        "breakerCounts": {
+          "3P_100A": 2,
+          "2P_40A": 1,
+          "1P_20A": 39,
+          "2P_20A": 1,
+          "2P_15A": 1,
+          "2P_30A": 2,
+          "3P_20A": 1,
+          "1P_15A": 1
+        },
+        "reviewCells": 98,
+        "count": 48,
+        "seconds": 10.8
+      },
+      "v15": {
+        "name": "1RPA",
+        "panelStatus": null,
+        "spaces": 66,
+        "breakerCounts": {
+          "3P_100A": 2,
+          "2P_40A": 1,
+          "1P_20A": 39,
+          "2P_20A": 1,
+          "2P_15A": 1,
+          "2P_30A": 2,
+          "3P_20A": 1,
+          "1P_15A": 1
+        },
+        "reviewCells": 98,
+        "count": 48,
+        "seconds": 11.1
+      },
+      "recovered_vs_v14": [],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "NESTLE_electrical_filtered_page001_panel03.png",
+      "path": "DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel03.png",
+      "v13": {
+        "name": "3LPA",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "3P_20A": 3,
+          "3P_30A": 1,
+          "3P_40A": 1,
+          "3P_15A": 2,
+          "1P_20A": 5
+        },
+        "reviewCells": 54,
+        "count": 12,
+        "seconds": 7.9
+      },
+      "v14": {
+        "name": "3LPA",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 13,
+          "3P_20A": 3,
+          "3P_30A": 1,
+          "3P_40A": 1,
+          "3P_15A": 2
+        },
+        "reviewCells": 54,
+        "count": 20,
+        "seconds": 8.2
+      },
+      "v15": {
+        "name": "3LPA",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 13,
+          "3P_20A": 3,
+          "3P_30A": 1,
+          "3P_40A": 1,
+          "3P_15A": 2
+        },
+        "reviewCells": 54,
+        "count": 20,
+        "seconds": 8.4
+      },
+      "recovered_vs_v14": [],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "NESTLE_electrical_filtered_page001_panel04.png",
+      "path": "DevEnv/BatchRuns/NESTLE/PanelSearchOutput/NESTLE_electrical_filtered_page001_panel04.png",
+      "v13": {
+        "name": "1LPA",
+        "panelStatus": null,
+        "spaces": 30,
+        "breakerCounts": {
+          "3P_20A": 1,
+          "3P_15A": 2,
+          "1P_20A": 6
+        },
+        "reviewCells": 44,
+        "count": 9,
+        "seconds": 7.5
+      },
+      "v14": {
+        "name": "1LPA",
+        "panelStatus": null,
+        "spaces": 30,
+        "breakerCounts": {
+          "3P_20A": 1,
+          "3P_15A": 2,
+          "1P_20A": 9
+        },
+        "reviewCells": 44,
+        "count": 12,
+        "seconds": 7.3
+      },
+      "v15": {
+        "name": "1LPA",
+        "panelStatus": null,
+        "spaces": 30,
+        "breakerCounts": {
+          "3P_20A": 1,
+          "3P_15A": 2,
+          "1P_20A": 9
+        },
+        "reviewCells": 44,
+        "count": 12,
+        "seconds": 7.6
+      },
+      "recovered_vs_v14": [],
+      "still_lost_vs_v13": []
+    },
+    {
+      "crop": "I_electrical_filtered_page001_panel03.png",
+      "path": "DevEnv/BatchRuns/I/PanelSearchOutput/I_electrical_filtered_page001_panel03.png",
+      "v13": {
+        "name": "P4",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 23,
+          "3P_20A": 2,
+          "2P_20A": 1,
+          "2P_30A": 2,
+          "3P_60A": 1
+        },
+        "reviewCells": 30,
+        "count": 29,
+        "seconds": 9.5
+      },
+      "v14": {
+        "name": "P4",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 23,
+          "3P_200A": 1,
+          "3P_20A": 2,
+          "2P_20A": 1,
+          "2P_30A": 2
+        },
+        "reviewCells": 30,
+        "count": 29,
+        "seconds": 9.7
+      },
+      "v15": {
+        "name": "P4",
+        "panelStatus": null,
+        "spaces": 42,
+        "breakerCounts": {
+          "1P_20A": 23,
+          "3P_200A": 1,
+          "3P_20A": 2,
+          "2P_20A": 1,
+          "2P_30A": 2,
+          "3P_60A": 1
+        },
+        "reviewCells": 30,
+        "count": 30,
+        "seconds": 9.9
+      },
+      "recovered_vs_v14": [
+        [
+          "right",
+          19
+        ]
+      ],
+      "still_lost_vs_v13": []
+    }
+  ]
+}

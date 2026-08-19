@@ -1,0 +1,77 @@
+{
+  "ok": true,
+  "job_id": "C__20260819_094842",
+  "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/C__20260819_094842",
+  "saved_pdf": "/home/marco/Documents/NewTest/C.pdf",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/C__20260819_094842",
+  "images": [
+    "DevEnv/BatchRuns_v15/C/PanelSearchOutput/C_electrical_filtered_page001_panel02.png"
+  ],
+  "image_count": 1,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "C",
+      "source": "DevEnv/BatchRuns_v15/C/PanelSearchOutput/C_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 120,
+        "intRating": 22,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "C": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 12050,
+  "cycle_time_str": "00:00:12:050",
+  "noticed_ts_ms": 1787150922694,
+  "parse_done_ts_ms": 1787150934744,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_v15/C/PdfOutput/C_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_15",
+    "header_breakers_total": 0,
+    "table_breakers_total": 9,
+    "parser_debug": true
+  }
+}
