@@ -10,10 +10,10 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Pipeline Payloads
 
 ### BreakerTablePipeline Output
-- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv12.BreakerTablePipeline.run()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv14.BreakerTablePipeline.run()`
 - **Used by**: `_merge_component_from_btp()` in uplink_server.py
 - **Fields**:
-  - `apiVersion` -- str, pipeline API version (currently `"API_12"`)
+  - `apiVersion` -- str, pipeline API version (currently `"API_14"`)
   - `origin` -- str, source image path
   - `panelStatus` -- None if OK, str error message otherwise
   - `stages` -- dict of stage metadata (analyzer, parser, header)
@@ -37,7 +37,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `reviewOverlayPath` -- str or None, path to review overlay image
 
 ### Table Parser Output (results.parser)
-- **Location**: Returned by `OcrLibrary/BreakerTableParser10.BreakerTableParser.parse_from_analyzer()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParser12.BreakerTableParser.parse_from_analyzer()`
 - **Fields**:
   - `parserVersion` -- str
   - `name` -- str
@@ -65,7 +65,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Component Dict (OCR to RulesEngine)
 
 - **Location**: Built by `_merge_component_from_btp()` in `uplink_server.py`
-- **Used by**: `RulesEngine6.process_job()`
+- **Used by**: `RulesEngine7.process_job()`
 - **Fields**:
   - `type` -- str, always "panelboard"
   - `name` -- str, panel name from header parser
@@ -81,14 +81,14 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 
 ## RulesEngine Payload
 
-- **Location**: Built in `_process_job()`, consumed by `RulesEngine6.process_job()`
+- **Location**: Built in `_process_job()`, consumed by `RulesEngine7.process_job()`
 - **Structure**: `{"defaults": {...}, "items": [component_dict, ...]}`
   - `defaults` -- dict from `_DEFAULT_OVERRIDES` or `ui_overrides`
   - `items` -- list of component dicts (one per detected panel)
 - **Returns**: dict keyed by component name, each value containing part number selections, BOM items, and optional error/skip info
 - **Sanitization before rules (added 2026-07-03, merge `04a2361`)**: the
   `items` are always passed through `_rules_safe_components()` before being
-  handed to `RulesEngine6.process_job()`. This runs on all three rules
+  handed to `RulesEngine7.process_job()`. This runs on all three rules
   entry points -- `_process_job()`, `vm_rerun_rules_with_panel_edit()`, and
   `vm_rerun_rules_with_global_defaults()`. It produces a RulesEngine-only
   copy (the saved `result.json` components still keep the raw/editable
@@ -129,6 +129,8 @@ Detection `<job_id>/`:
 └── .cancel              # Sentinel file (created when job is canceled)
 ```
 
+Specs `specs_<id>/` and compatibility `compatibility__*` jobs use the same grouped per-user root with their own naming prefix. Compatibility jobs are temporary (retention governed by `COMPATIBILITY_TEMP_RETENTION_MINUTES`) and store uploaded PDFs under `uploaded_pdfs/`.
+
 Specs `specs_<id>/`:
 
 ```
@@ -142,6 +144,10 @@ specs_<id>/
 - **Fields**:
   - `state` -- str: "queued", "running", "done", "error", "cancelled"
   - `ts` -- str, ISO 8601 UTC timestamp of last update
+  - `heartbeat_ts` -- str, ISO 8601 UTC timestamp refreshed on every status write (used for stale-job detection and live progress)
+  - `node_id` -- str or absent, uplink process identifier written on each status update
+  - `job_type` -- str or absent; `"compatibility"` for quick compatibility-test jobs
+  - `recovery_requeue_attempts` -- int or absent, count of automatic requeue attempts after interruption
   - `progress` -- int, 0-100 percentage
   - `step` -- str, current pipeline step description
   - `owner_id` -- str, lowercased owner email
@@ -159,7 +165,7 @@ specs_<id>/
   - `saved_pdf` -- str, path to saved PDF
   - `image_count` -- int, number of panel PNGs processed
   - `components` -- list of component dicts
-  - `rules_result` -- dict from RulesEngine6
+  - `rules_result` -- dict from RulesEngine7
   - `ui_overrides` -- dict, effective overrides used
   - `cycle_time_ms` -- int, total processing time in ms
   - `cycle_time_str` -- str, human-readable cycle time
@@ -187,8 +193,12 @@ specs_<id>/
 | `WATCHDOG_TIMEOUT_MIN` | uplink_server.py (env) | 10 |
 | `WATCHDOG_KILL_GRACE_SEC` | uplink_server.py (env) | 3 |
 | `QUEUE_TIMEOUT_MIN` | uplink_server.py (env) | 25 |
+| `COMPATIBILITY_MAX_PANEL_ATTEMPTS` | uplink_server.py (env) | 3 |
+| `COMPATIBILITY_TIMEOUT_SEC` | uplink_server.py (env) | 60 |
+| `STALE_QUEUED_REQUEUE_SEC` | uplink_server.py (env) | 120 |
+| `RECOVERY_MAX_REQUEUE_ATTEMPTS` | uplink_server.py (env) | 3 |
 
-Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine6 and PartNumberBuilder.
+Amperage bounds (15-1200) are hardcoded in `_count_would_skip_breakers`. Voltage sets and snap maps are defined within RulesEngine7 and PartNumberBuilder.
 
 Specs retention constants (in `uplink_server.py`): `EXCLUDED_JOB_RETENTION_HOURS` (default 24) and `EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES` (env-overridable, default 10).
 
@@ -268,7 +278,7 @@ BreakerTablePipeline.run() → dict  (results with analyzer/header/parser)
 _merge_component_from_btp() → component dict  (type, name, attrs, notes)
     │
     ▼  (all components collected)
-RulesEngine6.process_job({"defaults": ..., "items": [...]}) → dict  (part numbers per component)
+RulesEngine7.process_job({"defaults": ..., "items": [...]}) → dict  (part numbers per component)
     │
     ▼
 result.json + status.json written to ~/jobs/groups/<group>/users/<owner>/<job_id>/

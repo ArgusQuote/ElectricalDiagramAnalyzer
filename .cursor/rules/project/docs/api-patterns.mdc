@@ -71,13 +71,29 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 - **Purpose**: Re-run only the rules engine after the user edits one component (no re-OCR)
 - **Parameters**: `job_id` (str), `owner_email` (str), `group_folder` (str), `original_panel_name` (str), `edited_component` (dict), `original_source_path=None` (str)
 - **Returns**: Updated result dict; reads `result.json`, swaps the one component, reruns RulesEngine, rewrites `result.json`
-- **Note (2026-07-03, merge `04a2361`)**: on edit it clears stale parser/problem status (`panelStatus`, `panelNote`, `specialHeaderType`, `_skipped`, `reason`, and the `attrs` keys `breaker_data_suppressed`, `breaker_suppression_reason`, `headerValidation*`) so the corrected panel is judged only from the edited attrs. The rules input is passed through `_rules_safe_components()` (validates/snaps quote-driving values, suppresses problem panels) before `RulesEngine6.process_job()`.
+- **Note (2026-07-03, merge `04a2361`; still active under RulesEngine7)**: on edit it clears stale parser/problem status (`panelStatus`, `panelNote`, `specialHeaderType`, `_skipped`, `reason`, and the `attrs` keys `breaker_data_suppressed`, `breaker_suppression_reason`, `headerValidation*`) so the corrected panel is judged only from the edited attrs. The rules input is passed through `_rules_safe_components()` (validates/snaps quote-driving values, suppresses problem panels) before `RulesEngine7.process_job()`.
 
 ### vm_rerun_rules_with_global_defaults
 - **Purpose**: Re-run the rules engine for all components after a global defaults change (no re-OCR)
 - **Parameters**: `job_id` (str), `owner_email` (str), `group_folder` (str), `clean_defaults` (dict)
 - **Returns**: Updated result dict; rewrites `result.json`
-- **Note (2026-07-03, merge `04a2361`)**: like the main job path and the per-panel edit path, the rules input is passed through `_rules_safe_components()` before `RulesEngine6.process_job()`.
+- **Note (2026-07-03, merge `04a2361`; still active under RulesEngine7)**: like the main job path and the per-panel edit path, the rules input is passed through `_rules_safe_components()` before `RulesEngine7.process_job()`.
+
+### vm_submit_compatibility_test
+- **Purpose**: Upload a PDF and start a quick compatibility-only job (PageFilter + panel finder + one-panel OCR parse; no RulesEngine / no BOM)
+- **Parameters**: `media` (Anvil BlobMedia), `owner_email=None` (str), `group_folder="personal"` (str), `access_code_value=""` (str), `plan_key=""` (str), `company_name=""` (str)
+- **Returns**: Dict with `ok`, `job_id` (prefixed `compatibility__`), `job_dir`, and submission metadata; returns `active_job_exists` if the user already has a detection job in flight
+- **Side effects**: Creates a temporary grouped per-user job directory, saves PDF under `uploaded_pdfs/`, writes initial `status.json` with `job_type="compatibility"`, enqueues job
+
+### vm_get_compatibility_status
+- **Purpose**: Poll progress or fetch the finished compatibility report
+- **Parameters**: `job_id` (str, must start with `compatibility__`), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: Dict with `state`, progress fields, and (when done) the compatibility result; `not_found` if the job id is invalid, expired, or not owned by the caller
+
+### vm_delete_compatibility_job
+- **Purpose**: Delete a compatibility-test job folder
+- **Parameters**: `job_id` (str, must start with `compatibility__`), `owner_email` (str), `group_folder="personal"` (str)
+- **Returns**: Dict result (ok/state); ownership-checked and path-traversal-guarded
 
 ### vm_upload_specs_pdf
 - **Purpose**: Upload a specification PDF for spec-sheet analysis (separate from detection)
@@ -145,7 +161,8 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 - **Job-level**: Exceptions during `_process_job` write `state="error"` and the traceback to `status.json`
 - **Watchdog**: Jobs exceeding `WATCHDOG_TIMEOUT_MIN` (default 10 min) are killed; status is set to error with a user-facing message
 - **Cancellation**: Workers check for a `.cancel` file in the job directory at each pipeline step
-- **No retry**: Failed jobs are not automatically retried; the user must resubmit
+- **Stale-job recovery (added 2026-08-18, merge `62beba4`)**: queued/running jobs whose `heartbeat_ts` goes stale, or jobs left in `running` after an uplink restart, may be automatically requeued (up to `RECOVERY_MAX_REQUEUE_ATTEMPTS`). Status polling and startup recovery both participate.
+- **Manual retry only for exhausted recovery**: once automatic requeue attempts are exhausted, the job is marked interrupted and the user must resubmit
 
 ## Timeout Configuration
 
@@ -156,6 +173,11 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 | `QUEUE_TIMEOUT_MIN` | Env var | 25 minutes |
 | `EXCLUDED_JOB_RETENTION_HOURS` | Constant | 24 hours |
 | `EXCLUDED_SPECS_ARTIFACT_RETENTION_MINUTES` | Env var | 10 minutes |
+| `COMPATIBILITY_TIMEOUT_SEC` | Env var | 60 seconds |
+| `COMPATIBILITY_MAX_PANEL_ATTEMPTS` | Env var | 3 panels |
+| `COMPATIBILITY_TEMP_RETENTION_MINUTES` | Env var | 20 minutes |
+| `STALE_QUEUED_REQUEUE_SEC` | Env var | 120 seconds |
+| `RECOVERY_MAX_REQUEUE_ATTEMPTS` | Env var | 3 |
 | Anvil Uplink connection timeout | Managed by anvil-uplink library | Library default |
 
 > The runtime queue-timeout setters (`vm_set_queue_timeout` / `vm_get_queue_timeout`)

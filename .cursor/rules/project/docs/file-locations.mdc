@@ -36,10 +36,12 @@ ElectricalDiagramAnalyzer/
 |---|---|
 | `AnvilUplinkCode/uplink_server.py` | Main entry point -- Anvil Uplink server, job queue, worker pool, all RPC callables |
 | `PageFilter/PageFilterV2.py` | Page filtering (older heuristic) -- kept for reference / regression comparison; not imported by production. |
-| `PageFilter/PageFilterV3.py` | Page filtering (last heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints. Currently the production import in `uplink_server.py`. |
+| `PageFilter/PageFilterV3.py` | Page filtering (production heuristic) -- OCR-based E-sheet detection, label scoring, whitespace footprints. Currently the production import in `uplink_server.py`. |
+| `PageFilter/PageFilterV5.py` | Page filtering (newer heuristic) -- adds index/bookmark-based page skipping. Used in `DevEnv/DevTestEnv.py`; not yet wired into production. |
 | `PageFilter/PageFilterV4.py` | Page filtering (ML wrapper) -- thin compatibility layer that wraps `PageClassifierML` behind the legacy `PageFilter` class / `readPdf()` API. No heuristic logic. |
 | `PageFilter/PageClassifierML.py` | ML page classifier -- MobileNetV2 binary classifier (has panel / no panel). Used directly or via the `PageFilterV4` wrapper. Training script not in-repo (was a one-shot on Marco's laptop). |
-| `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Heuristic panel detection -- void analysis, border search, panel cropping. Used as ground truth for ML evaluation. |
+| `VisualDetectionToolLibrary/PanelSearchToolV26.py` | Heuristic panel detection (production) -- void analysis, border search, panel cropping. |
+| `VisualDetectionToolLibrary/PanelSearchToolV25.py` | Prior heuristic panel detection. Retained as ground truth for ML table-detection evaluation (`known-issues.mdc` standing decision). |
 | `MLTableDetection/TableDetectorML.py` | ML table detection -- Table Transformer (DETR) for bounding-box-level panel detection. Default model path resolves to the fine-tuned v7 checkpoint at `~/Documents/TableAnnotations/models_v7/best/` and falls back to the HF pretrained `microsoft/table-transformer-detection` if no local checkpoint is found. See `_resolve_default_tatr_model_path()`. |
 | `MLTableDetection/train_table_transformer.py` | Training script for Table Transformer fine-tuning (COCO format). Exposes `--num-queries`, `--freeze-backbone-epochs`, `--hard-negatives-dir` flags. Recipe used for the production v7 model is recorded in `baselines/v7_2026-05-15/SUMMARY.md`. |
 | `MLTableDetection/evaluate_model.py` | Evaluation script -- mAP metrics, inference, box-level comparison with the heuristic. Modes: `--data` (COCO mAP), `--images` (inference), `--pdf` (heuristic-vs-ML box comparison). |
@@ -50,14 +52,18 @@ ElectricalDiagramAnalyzer/
 | `MLTableDetection/README.md` | Module reference doc. Has a 2026-05-08 preamble pointing readers at `known-issues.mdc` and the `training-panel-detector` skill for current state; the rest is original reference material for the "annotate, fine-tune" workflow. |
 | `MLTableDetection/requirements.txt` | ML-specific Python deps (transformers, torchmetrics, albumentations, timm, etc.). Installed on top of `MISC/requirements.txt` on the training host. |
 | `MLTableDetection/setup_label_studio.sh` | Convenience script for spinning up Label Studio for annotation work. |
-| `OcrLibrary/BreakerTableParserAPIv12.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of 2026-07-03, merge `04a2361`). Exports `API_VERSION = "API_12"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser10`. (v8-v11 kept for comparison.) |
-| `OcrLibrary/BreakerTableParserAPIv11.py` | Prior OCR pipeline orchestrator (`API_VERSION = "API_11"`). Superseded by APIv12; kept for comparison. |
+| `OcrLibrary/BreakerTableParserAPIv14.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of 2026-08-18). Exports `API_VERSION = "API_14"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser12`. (v8-v13 kept for comparison.) |
+| `OcrLibrary/BreakerTableParserAPIv13.py` | Previous orchestrator (`API_VERSION = "API_13"`, wires `BreakerTableParser11`). Kept for side-by-side comparison; it is the baseline in `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`. |
+| `OcrLibrary/BreakerTableParserAPIv12.py` | Prior OCR pipeline orchestrator (`API_VERSION = "API_12"`). Superseded by APIv13; kept for comparison. |
+| `OcrLibrary/BreakerTableParserAPIv11.py` | Earlier OCR pipeline orchestrator (`API_VERSION = "API_11"`). Superseded by APIv12/v13; kept for comparison. |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv12). Now includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (added 2026-07-03) so AIC/kA text (e.g. `65k`, `65KAIC`) and location/source text (e.g. `Location: ELECTRICAL 123`, `Fed From: MDP-1`) are never parsed as BUS/MAIN amps. V8/V9/V10 kept for comparison. |
-| `OcrLibrary/BreakerTableParser10.py` | Table parser -- column detection, breaker cell OCR, breaker extraction |
+| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv13). Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 kept for comparison. |
+| `OcrLibrary/BreakerTableParser12.py` | Table parser (production) -- column detection, breaker cell OCR, breaker extraction, red review overlays for bad detections. `PARSER_VERSION = "BreakerParser12"`. Adds `_prep_cell_for_ocr()`, which inpaints the table's grid lines out of each body cell before EasyOCR reads it, plus `_cellprep.png` BEFORE/AFTER debug images. |
+| `OcrLibrary/BreakerTableParser11.py` | Previous table parser (`PARSER_VERSION = "BreakerParser11"`), identical to Parser12 except that body cells are OCR'd with the grid still in them. Kept for comparison. |
+| `OcrLibrary/BreakerTableParser10.py` | Prior table parser -- kept for comparison. |
 | `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
 | `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images |
-| `RulesEngine/RulesEngine6.py` | Rules engine -- `process_job()` selects part numbers from component dicts. **Current production import** (as `RE2`). Adds MMS/ERMS handling on top of RE5/RE4. RE2-RE5 kept for comparison. |
+| `RulesEngine/RulesEngine7.py` | Rules engine -- `process_job()` selects part numbers from component dicts. **Current production import** (as `RE2`). Extends RulesEngine6 (MMS/ERMS, ground-bar digest alignment, etc.). RE2-RE6 kept for comparison. |
 | `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
 | `Spec_Sheet_Analysis/Specs_AnalyzerV5.py` | Specification-PDF analyzer -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Text-based (pypdfium2) section finding + panelboard requirement classification + evidence images. **Current production version** (loaded dynamically; V6 exists but is NOT the active version). |
 | `WorkerSetup/worker_init.py` | `cap_thread_pools()` (env thread caps, set before heavy imports) and `set_runtime_determinism()` (torch/cv2 thread counts + cuDNN determinism, set inside spawned workers). |
@@ -72,17 +78,18 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv12), RulesEngine (RulesEngine6), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv13), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Backup snapshots**: dated `uplink_server_*bkup*.py` / `uplink_server_<date>.py` files live alongside the active server -- they are historical snapshots, NOT importable runtime modules.
 
 ### PageFilter
 - **Path**: `PageFilter/`
 - **Purpose**: Filters PDF pages to keep only electrical/panel content
 - **Heuristic (older version)**: `PageFilterV2.PageFilter` -- kept for reference; not imported by production.
-- **Heuristic (last version)**: `PageFilterV3.PageFilter` class, `.readPdf()` method (OCR + regex + footprints). V3 is the final heuristic version; no V4 heuristic exists.
+- **Heuristic (production)**: `PageFilterV3.PageFilter` class, `.readPdf()` method (OCR + regex + footprints).
+- **Heuristic (newer, not production)**: `PageFilterV5.PageFilter` -- adds bookmark/index page skipping; used in `DevEnv/DevTestEnv.py`.
 - **ML classifier**: `PageClassifierML.PageClassifierML` class, `.readPdf()` method (MobileNetV2 binary classifier, ~250 ms/page).
 - **ML wrapper**: `PageFilterV4.PageFilter` class -- wraps `PageClassifierML` behind the legacy `readPdf()` API so callers can swap V3 → V4 transparently.
-- **Production import**: `uplink_server.py` (line 92) currently imports `PageFilterV3` (not yet updated to V4).
+- **Production import**: `uplink_server.py` currently imports `PageFilterV3` (not yet updated to V4 or V5).
 - **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV.
 - **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision (no EasyOCR needed).
 
@@ -101,13 +108,13 @@ ElectricalDiagramAnalyzer/
 ### VisualDetectionToolLibrary
 - **Path**: `VisualDetectionToolLibrary/`
 - **Purpose**: Detects and crops panel regions from PDF page bitmaps using heuristics
-- **Entry point**: `PanelSearchToolV25.PanelBoardSearch` class, `.readPdf()` method
+- **Entry point**: `PanelSearchToolV26.PanelBoardSearch` class, `.readPdf()` method (production). `PanelSearchToolV25` retained for ML eval ground truth.
 - **Dependencies**: pypdfium2, OpenCV, NumPy
 
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
 - **Purpose**: Three-stage OCR pipeline for breaker table extraction
-- **Entry point**: `BreakerTableParserAPIv12.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v11 kept for comparison)
+- **Entry point**: `BreakerTableParserAPIv14.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v13 kept for comparison)
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
 
 ### AnchoringClasses
@@ -119,7 +126,7 @@ ElectricalDiagramAnalyzer/
 ### RulesEngine
 - **Path**: `RulesEngine/`
 - **Purpose**: Maps OCR-extracted component attributes to equipment part numbers
-- **Entry point**: `RulesEngine6.process_job(payload)` function (active version, imported as `RE2`; RE2-RE5 kept for comparison). RE6 adds MMS/ERMS handling (e.g. ERMS on I-Line panels with ≥1200A mains).
+- **Entry point**: `RulesEngine7.process_job(payload)` function (active version, imported as `RE2`; RE2-RE6 kept for comparison). RE7 extends RE6 (MMS/ERMS, ground-bar digest alignment, etc.).
 - **Dependencies**: PartNumberSelector
 
 ### PartNumberSelector
@@ -142,10 +149,10 @@ ElectricalDiagramAnalyzer/
 
 ## Conventions
 
-- **Versioned files**: Modules carry version suffixes (e.g., V3, V25, 12). The highest number is normally the current active version, with lower versions kept for comparison in DevEnv scripts. Exception: `PageFilter/` -- V3 is the last heuristic and remains in production; V4 is an ML-based wrapper around `PageClassifierML`. Always confirm the active version by checking the import in `AnvilUplinkCode/uplink_server.py`.
+- **Versioned files**: Modules carry version suffixes (e.g., V3, V26, 12). The highest number is normally the current active version, with lower versions kept for comparison in DevEnv scripts. Exceptions: `PageFilter/` -- V3 is production; V4 is the ML wrapper; V5 exists but is not wired in. `PanelSearchTool` -- V26 is production; V25 remains ML eval ground truth. Always confirm the active version by checking the import in `AnvilUplinkCode/uplink_server.py`.
 - **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
 - **Backups**: `Backups/` contains Anvil form exports and server snapshots. Not part of the runtime.
 - **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.
 - **New pipeline module**: Create a new directory at the repo root with a versioned Python file (e.g., `NewModule/NewModuleV1.py`).
-- **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in the active rules engine (`RulesEngine6.py`).
+- **New part number builder**: Add a new class to `PartNumberSelector/PartNumberBuilder.py` and import it in the active rules engine (`RulesEngine7.py`).
 - **New RPC endpoint**: Add an `@anvil.server.callable` function in `uplink_server.py`.

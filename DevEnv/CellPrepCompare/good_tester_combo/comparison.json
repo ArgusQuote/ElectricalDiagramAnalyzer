@@ -1,0 +1,1009 @@
+{
+  "pdf": "/home/marco/Documents/Diagrams/good_tester_combo.pdf",
+  "baselineApi": "API_13",
+  "candidateApi": "API_14",
+  "totals": {
+    "panels": 4,
+    "panels_changed": 0,
+    "baseline_breakers": 41,
+    "candidate_breakers": 41,
+    "baseline_review_cells": 72,
+    "candidate_review_cells": 72
+  },
+  "panels": [
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel01.png",
+      "name": "HA2",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel02.png",
+      "name": "HA",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel03.png",
+      "name": "(unnamed)",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel04.png",
+      "name": "(unnamed) (2)",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    }
+  ],
+  "baseline": [
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel01.png",
+      "name": "HA2",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 42,
+      "amperage": 100,
+      "voltage": 480,
+      "breakerCounts": {
+        "3P_50A": 1,
+        "1P_20A": 33,
+        "3P_20A": 2
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 36,
+      "detectedBreakerCount": 36,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 0,
+          "amperage": 50,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "50 3"
+        },
+        {
+          "side": "left",
+          "rowIndex": 3,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 4,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 5,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 6,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 7,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 8,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 9,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 10,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 11,
+          "amperage": 20,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 3"
+        },
+        {
+          "side": "left",
+          "rowIndex": 14,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 15,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 16,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 17,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 18,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 19,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 20,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "right",
+          "rowIndex": 0,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 1,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 2,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 3,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 4,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 5,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 6,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 7,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 8,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 9,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 10,
+          "amperage": 20,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "3 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 13,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 14,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 15,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 16,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 17,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 18,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 19,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 20,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        }
+      ]
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel02.png",
+      "name": "HA",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 42,
+      "amperage": 100,
+      "voltage": 480,
+      "breakerCounts": {
+        "3P_30A": 2,
+        "1P_20A": 2,
+        "3P_20A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 36,
+      "detectedBreakerCount": 5,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 1,
+          "amperage": 30,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "30 3"
+        },
+        {
+          "side": "left",
+          "rowIndex": 4,
+          "amperage": 30,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "30 3"
+        },
+        {
+          "side": "right",
+          "rowIndex": 1,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 2,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 3,
+          "amperage": 20,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "3 20"
+        }
+      ]
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel03.png",
+      "name": "(unnamed)",
+      "panelStatus": "detected but skipped ((unnamed))",
+      "layout": null,
+      "spaces": "x",
+      "amperage": "x",
+      "voltage": "x",
+      "breakerCounts": {},
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 0,
+      "detectedBreakerCount": 0,
+      "breakers": []
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel04.png",
+      "name": "(unnamed) (2)",
+      "panelStatus": "detected but skipped ((unnamed) (2))",
+      "layout": null,
+      "spaces": "x",
+      "amperage": "x",
+      "voltage": "x",
+      "breakerCounts": {},
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 0,
+      "detectedBreakerCount": 0,
+      "breakers": []
+    }
+  ],
+  "candidate": [
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel01.png",
+      "name": "HA2",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 42,
+      "amperage": 100,
+      "voltage": 480,
+      "breakerCounts": {
+        "3P_50A": 1,
+        "1P_20A": 33,
+        "3P_20A": 2
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 36,
+      "detectedBreakerCount": 36,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 0,
+          "amperage": 50,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "50 3"
+        },
+        {
+          "side": "left",
+          "rowIndex": 3,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 4,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 5,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 6,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 7,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 8,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 9,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 10,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 11,
+          "amperage": 20,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 3"
+        },
+        {
+          "side": "left",
+          "rowIndex": 14,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 15,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 16,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 17,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 18,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 19,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "left",
+          "rowIndex": 20,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "20 1"
+        },
+        {
+          "side": "right",
+          "rowIndex": 0,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 1,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 2,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 3,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 4,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 5,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 6,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 7,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 8,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 9,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 10,
+          "amperage": 20,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "3 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 13,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 14,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 15,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 16,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 17,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 18,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 19,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 20,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        }
+      ]
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel02.png",
+      "name": "HA",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 42,
+      "amperage": 100,
+      "voltage": 480,
+      "breakerCounts": {
+        "3P_30A": 2,
+        "1P_20A": 2,
+        "3P_20A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 36,
+      "detectedBreakerCount": 5,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 1,
+          "amperage": 30,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "30 3"
+        },
+        {
+          "side": "left",
+          "rowIndex": 4,
+          "amperage": 30,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "30 3"
+        },
+        {
+          "side": "right",
+          "rowIndex": 1,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 2,
+          "amperage": 20,
+          "poles": 1,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "1 20"
+        },
+        {
+          "side": "right",
+          "rowIndex": 3,
+          "amperage": 20,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": null,
+          "polesText": null,
+          "comboText": "3 20"
+        }
+      ]
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel03.png",
+      "name": "(unnamed)",
+      "panelStatus": "detected but skipped ((unnamed))",
+      "layout": null,
+      "spaces": "x",
+      "amperage": "x",
+      "voltage": "x",
+      "breakerCounts": {},
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 0,
+      "detectedBreakerCount": 0,
+      "breakers": []
+    },
+    {
+      "crop": "good_tester_combo_electrical_filtered_page001_panel04.png",
+      "name": "(unnamed) (2)",
+      "panelStatus": "detected but skipped ((unnamed) (2))",
+      "layout": null,
+      "spaces": "x",
+      "amperage": "x",
+      "voltage": "x",
+      "breakerCounts": {},
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 0,
+      "detectedBreakerCount": 0,
+      "breakers": []
+    }
+  ],
+  "cellPrepImages": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col10_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col13_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col3_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel01_parser_body_combined_col6_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col10_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col13_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col3_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/good_tester_combo/candidate_v14/debug/good_tester_combo_electrical_filtered_page001_panel02_parser_body_combined_col6_cellprep.png"
+  ]
+}

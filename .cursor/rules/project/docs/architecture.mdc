@@ -22,21 +22,21 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
     │   └── PageFilterV4 / PageClassifierML (ML: MobileNetV2 binary classifier, ~250 ms/page)
     │       │  keeps electrical pages, outputs filtered PDF
     │       ▼
-    ├─► PanelBoardSearch (PanelSearchToolV25)
+    ├─► PanelBoardSearch (PanelSearchToolV26)
     │       │  detects panel regions, crops to PNGs
     │       ▼
-    ├─► BreakerTablePipeline (BreakerTableParserAPIv12)
+    ├─► BreakerTablePipeline (BreakerTableParserAPIv14)
     │       ├─► BreakerTableAnalyzer (Analyzer12)
     │       │       ├── BreakerHeaderFinder
     │       │       └── BreakerFooterFinder
     │       ├─► PanelHeaderParser (PanelHeaderParserV11)
-    │       └─► BreakerTableParser (BreakerTableParser10)
+    │       └─► BreakerTableParser (BreakerTableParser12)
     │       │  extracts structured OCR data per panel
     │       ▼
     ├─► _merge_component_from_btp()
     │       │  maps OCR results to component dicts
     │       ▼
-    └─► RulesEngine6.process_job()
+    └─► RulesEngine7.process_job()
             └── PartNumberBuilder (mccb, nqPanelboard, Disconnect, ...)
                 │  selects equipment part numbers
                 ▼
@@ -64,16 +64,18 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 ### AnvilUplinkCode (Orchestrator)
 - **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, worker pool, and watchdog
 - **Location**: `AnvilUplinkCode/uplink_server.py`
-- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv12), RulesEngine6, Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv13), RulesEngine7, Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
 - **Consumers**: Anvil web frontend via Uplink RPC
-- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV25`, `BreakerTableParserAPIv12`, `RulesEngine6`, and `Specs_AnalyzerV5` loaded dynamically).
+- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV26`, `BreakerTableParserAPIv14`, `RulesEngine7`, and `Specs_AnalyzerV5` loaded dynamically).
+- **Job recovery (added 2026-08-18, merge `62beba4`)**: stale queued/running jobs are detected via `heartbeat_ts` in `status.json` and requeued automatically after VM/Anvil disconnects (configurable via `STALE_QUEUED_REQUEUE_SEC`, `RECOVERY_MAX_REQUEUE_ATTEMPTS`, etc.). Live progress heartbeats emit incremental finding counts so the UI does not sit at 0% until OCR finishes.
 
 ### PageFilter
 - **Purpose**: Filters PDF pages to keep only electrical/panel schedule pages
-- **Heuristic approach (last version)**: `PageFilter/PageFilterV3.py` -- OCR-based E-sheet detection, regex label scoring, whitespace footprints. Slower (~1-3 s/page) due to EasyOCR. V3 is the final heuristic version; no V4 heuristic exists.
+- **Heuristic approach (production)**: `PageFilter/PageFilterV3.py` -- OCR-based E-sheet detection, regex label scoring, whitespace footprints. Slower (~1-3 s/page) due to EasyOCR.
+- **Heuristic approach (newer, not yet production)**: `PageFilter/PageFilterV5.py` -- extends the heuristic with index/bookmark-based page skipping for faster runs on bookmarked PDFs. Used in `DevEnv/DevTestEnv.py`; production still imports V3.
 - **ML approach**: `PageFilter/PageClassifierML.py` -- MobileNetV2 binary classifier (~250 ms/page on GPU). No OCR needed; classifies entire page images.
 - **ML wrapper**: `PageFilter/PageFilterV4.py` -- thin compatibility layer that wraps `PageClassifierML` behind the legacy `PageFilter` class name and `readPdf()` return signature, so callers can swap imports from V3 → V4 without other code changes. All heuristic logic (OCR, regex, footprints) has been removed from V4.
-- **Production import**: `uplink_server.py` currently uses `PageFilterV3` (not yet switched to V4)
+- **Production import**: `uplink_server.py` currently uses `PageFilterV3` (not yet switched to V4 or V5)
 - **Dependencies (heuristic)**: pypdfium2, pikepdf, EasyOCR, OpenCV
 - **Dependencies (ML)**: pypdfium2, pikepdf, PyTorch, torchvision
 - **Consumers**: uplink_server (pre-processing step)
@@ -89,18 +91,20 @@ result.json + status.json on disk; polled via vm_get_specs_status()
   - `README.md`, `requirements.txt`, `setup_label_studio.sh` -- module documentation and dev-environment helpers.
 - **Dependencies**: PyTorch, torchvision, transformers (`<5`), torchmetrics, albumentations, timm, accelerate.
 - **Licenses**: All MIT / BSD-3 / Apache 2.0 (commercial-friendly).
-- **Consumers**: `PageFilter/PageClassifierML.py` (page classification, via the V4 wrapper). `TableDetectorML` is **not yet wired into the main pipeline** -- the production table-detection step still uses the heuristic `PanelBoardSearch` (`PanelSearchToolV25`). v7 is ready as a drop-in replacement (same `readPdf()` API as `PanelBoardSearch`, exposed via the `PanelBoardSearch` alias at the bottom of `TableDetectorML.py`), but switching `uplink_server.py` to it is deferred until v7 is validated on a wider customer-PDF set.
+- **Consumers**: `PageFilter/PageClassifierML.py` (page classification, via the V4 wrapper). `TableDetectorML` is **not yet wired into the main pipeline** -- the production table-detection step still uses the heuristic `PanelBoardSearch` (`PanelSearchToolV26`). v7 is ready as a drop-in replacement (same `readPdf()` API as `PanelBoardSearch`, exposed via the `PanelBoardSearch` alias at the bottom of `TableDetectorML.py`), but switching `uplink_server.py` to it is deferred until v7 is validated on a wider customer-PDF set. ML training/eval ground truth remains `PanelSearchToolV25` per the standing decision in `known-issues.mdc`.
 
 ### VisualDetectionToolLibrary (Panel Detection)
 - **Purpose**: Detects panel table regions in PDF bitmaps using whitespace/void analysis and border detection
-- **Location**: `VisualDetectionToolLibrary/PanelSearchToolV25.py`
+- **Location**: `VisualDetectionToolLibrary/PanelSearchToolV26.py` (production). `PanelSearchToolV25.py` is retained as the ML evaluation ground-truth baseline.
 - **Dependencies**: pypdfium2, OpenCV, NumPy
 - **Consumers**: uplink_server (panel crop step)
 
 ### OcrLibrary (OCR Pipeline)
 - **Purpose**: Three-stage OCR pipeline -- layout analysis, header parsing, breaker table parsing
-- **Location**: `OcrLibrary/` (BreakerTableParserAPIv12, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser10)
-- **API version string**: `API_VERSION = "API_12"` (exported by `BreakerTableParserAPIv12`)
+- **Location**: `OcrLibrary/` (BreakerTableParserAPIv14, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser12)
+- **API version string**: `API_VERSION = "API_14"` (exported by `BreakerTableParserAPIv14`)
+- **Recent parser hardening (2026-08-18, merge `62beba4`)**: `PanelHeaderParserV11` accepts `BKR`/`BRKR` main-breaker labels and `N/A` as a valid "none" for MAIN/AIC; `BreakerTableParser11` adds breaker-column header synonyms and red review overlays for bad breaker detections (ignoring explicit `" -- "` blank cells).
+- **Body-cell grid removal (2026-08-18)**: `BreakerTableParser12` de-grids every breaker body cell via `_prep_cell_for_ocr()` before EasyOCR, which recovers cells whose borders touched the glyphs. Grid lines are still needed *upstream* of this step -- row bands are derived from the horizontal dividers in the raw strip -- so removal happens per row band inside `_ocr_body_column_by_rows()`, never on the strip used for row detection. See the `known-issues.mdc` entry for the measured before/after.
 - **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses
 - **Consumers**: uplink_server via BreakerTablePipeline
 
@@ -112,7 +116,7 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 
 ### RulesEngine
 - **Purpose**: Processes component dicts from OCR to select equipment part numbers
-- **Location**: `RulesEngine/RulesEngine6.py` (imported in `uplink_server.py` as `RE2`; exposes `process_job(payload)`). RulesEngine6 adds MMS/ERMS handling (e.g. ERMS on I-Line panels with a main breaker 1200A and larger) on top of RulesEngine5/4.
+- **Location**: `RulesEngine/RulesEngine7.py` (imported in `uplink_server.py` as `RE2`; exposes `process_job(payload)`). RulesEngine7 extends RulesEngine6 (MMS/ERMS handling, ground-bar behavior aligned with digest, etc.). RulesEngine6 is retained for comparison.
 - **Dependencies**: PartNumberSelector
 - **Consumers**: uplink_server (final pipeline step)
 
@@ -132,7 +136,7 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Purpose**: Part number lookup and selection logic for panelboards, breakers, disconnects, transformers
 - **Location**: `PartNumberSelector/PartNumberBuilder.py`
 - **Dependencies**: None (pure logic)
-- **Consumers**: RulesEngine6
+- **Consumers**: RulesEngine7
 
 ## Data Pipelines
 
@@ -146,12 +150,23 @@ result.json + status.json on disk; polled via vm_get_specs_status()
   5. `PanelBoardSearch.readPdf()` detects and crops panels to PNGs
   6. For each PNG (sequential): `BreakerTablePipeline.run()` extracts OCR data
   7. `_merge_component_from_btp()` maps each OCR result to a component dict (invalidates amperage/voltage/main when the header parser flagged the field missing or the value is out of range; flags parser-problem panels with `_skipped`)
-  8. `_rules_safe_components()` sanitizes the component list (see below), then `RulesEngine6.process_job()` selects part numbers for the sanitized components
+  8. `_rules_safe_components()` sanitizes the component list (see below), then `RulesEngine7.process_job()` selects part numbers for the sanitized components
   9. Write `result.json` and update `status.json` (state=done)
   10. Cleanup temporary files
 - **Output**: `result.json` with components, part numbers, and cycle time
 - **Error handling**: Exceptions write state=error to `status.json`; watchdog kills jobs exceeding timeout
 - **Post-run edits**: After a job completes, the UI can re-run only the rules step without re-doing OCR via `vm_rerun_rules_with_panel_edit()` (edit one component) or `vm_rerun_rules_with_global_defaults()` (re-apply default overrides to all components). Both read `result.json`, re-run RulesEngine, and rewrite `result.json`.
+
+### Quick Compatibility Test Pipeline (added 2026-08-18, merge `62beba4`)
+- **Trigger**: `vm_submit_compatibility_test()` callable from Anvil UI
+- **Purpose**: Run PageFilter + panel finder + one-panel OCR parse (no RulesEngine, no BOM) so the user can know whether a PDF is likely compatible before submitting a full job
+- **Steps**:
+  1. Save uploaded PDF to a temporary `compatibility__*` job dir under the grouped per-user layout
+  2. Run the same PageFilter configuration as production
+  3. Run panel finder; attempt up to `COMPATIBILITY_MAX_PANEL_ATTEMPTS` (default 3) candidate panels through `BreakerTablePipeline`
+  4. Write a compatibility report to `result.json`; poll via `vm_get_compatibility_status()`
+- **Timeout**: `COMPATIBILITY_TIMEOUT_SEC` (default 60 s); abandoned temp dirs are cleaned up after `COMPATIBILITY_TEMP_RETENTION_MINUTES`
+- **Concurrency**: blocked while the user has any active detection job in flight
 
 ### Spec Sheet Analysis Pipeline
 - **Trigger**: `vm_upload_specs_pdf()` saves the spec PDF, then `vm_start_specs_analysis()` launches a background `threading.Thread` (not the GPU worker pool)
@@ -180,8 +195,8 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
 
 ### Versioned Module Files
-- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV25, BreakerTableAnalyzer12, BreakerTableParserAPIv12)
-- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper) and `Spec_Sheet_Analysis` (V6 exists but `uplink_server.py` loads **V5**). Active OCR/rules versions as of this writing (2026-07-03): `BreakerTableParserAPIv12`, `PanelHeaderParserV11`, `BreakerTableParser10`, `RulesEngine6`.
+- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV26, BreakerTableAnalyzer12, BreakerTableParserAPIv14)
+- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper; V5 exists but is not wired in), `PanelSearchTool` (V26 is production; V25 remains ML eval ground truth), and `Spec_Sheet_Analysis` (V6 exists but `uplink_server.py` loads **V5**). Active OCR/rules versions as of this writing (2026-08-18): `BreakerTableParserAPIv14`, `PanelHeaderParserV11`, `BreakerTableParser12`, `RulesEngine7`.
 - **Alternatives considered**: Git branching only (harder to compare in dev scripts)
 - **Consequences**: Multiple version files in each directory; **always check the import in `uplink_server.py` to confirm the active version** rather than assuming the highest number wins
 
@@ -198,7 +213,7 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Consequences**: Callers who pass `model_path=None` get the best available model for their host. The fallback to the upstream pretrained model means imports never fail on the resolver step, only the final detection quality degrades to "zero-shot TATR" if no local checkpoint is present. The same pattern can be applied to future ML modules with out-of-repo weights.
 
 ### RulesEngine Input Sanitization (Separate from Saved Result)
-- **Decision** (added 2026-07-03, merge `04a2361`): every component list is passed through `_rules_safe_components()` in `uplink_server.py` immediately before `RulesEngine6.process_job()`, on all three rules entry points (`_process_job`, `vm_rerun_rules_with_panel_edit`, `vm_rerun_rules_with_global_defaults`). The sanitizer returns a rules-only copy; the persisted `result.json` components still carry the original raw/editable OCR evidence.
+- **Decision** (added 2026-07-03, merge `04a2361`; still active under RulesEngine7 as of 2026-08-18): every component list is passed through `_rules_safe_components()` in `uplink_server.py` immediately before `RulesEngine7.process_job()`, on all three rules entry points (`_process_job`, `vm_rerun_rules_with_panel_edit`, `vm_rerun_rules_with_global_defaults`). The sanitizer returns a rules-only copy; the persisted `result.json` components still carry the original raw/editable OCR evidence.
 - **Context**: Junk or ambiguous OCR (e.g. a "Location: ELECTRICAL 123" string mis-read as bus amps, or a `65k` AIC value read as a breaker amperage) could otherwise flow into the rules engine and manufacture a plausible-looking but wrong quoteable BOM. The fix is defense-in-depth: `PanelHeaderParserV11` now rejects such text at parse time, `_merge_component_from_btp()` invalidates out-of-range/missing header fields, and `_rules_safe_components()` is the final gate right before rules run.
 - **Behavior**: problem panels (`_skipped` true or non-empty `panelStatus`) are fully suppressed for rules (all quote-driving attrs nulled, `breaker_data_suppressed`/`breaker_suppression_reason` set) but stay visible/editable in the UI. Clean panels have their values validated/snapped: amps 100-1200 ending in 0/5, voltage in {120,208,240,480,600}, intRating in the standard AIC set, spaces snapped to standard even counts and capped at 84, trim in {SURFACE,FLUSH} (None for NEMA3R), breakers filtered to amps 15-1200 / poles 1-3 / not exceeding the panel limit. Manual edits via `vm_rerun_rules_with_panel_edit` clear stale status flags (`panelStatus`, `panelNote`, `specialHeaderType`, `_skipped`, `reason`, `headerValidation*`) so a user-corrected panel is re-judged purely from the edited attrs.
 - **Consequences**: the UI keeps full raw evidence for review/editing, but the BOM logic only ever sees sane inputs. When adding a new quote-driving attribute, extend `_rules_safe_components()` (not just the parser) so it can't leak unvalidated into the rules engine.

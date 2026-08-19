@@ -18,6 +18,162 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
+- **Production pipeline advanced to APIv13 + RulesEngine7 + PanelSearchToolV26 -- LANDED 2026-08-18 (merge `62beba4`)** --
+  Merge of `TOOL_Debug_MaxUserTesting` into `TOOL_DEVELOPMENT_V3_MS`
+  advanced the production OCR/rules/panel-finder stack and added uplink
+  stability features. This is committed on `origin/TOOL_DEVELOPMENT_V3_MS`.
+  What changed:
+  - **`uplink_server.py` now imports `OcrLibrary.BreakerTableParserAPIv13`**
+    (was APIv12); `API_VERSION = "API_13"`. New file
+    `OcrLibrary/BreakerTableParserAPIv13.py` wires
+    `BreakerTableParser11` (was Parser10). APIv12 is retained for
+    comparison.
+  - **`RulesEngine7`** is now the production rules import (was
+    RulesEngine6). Ground-bar behavior aligned with digest; RE6 kept
+    for comparison.
+  - **`PanelSearchToolV26`** is now the production panel finder (was
+    V25). **ML eval ground truth remains V25** per the standing
+    decision below -- do not silently switch ML baselines to V26.
+  - **Parser hardening**: `PanelHeaderParserV11` accepts BKR/BRKR main
+    labels and N/A for MAIN/AIC; `BreakerTableParser11` adds breaker
+    column header synonyms and red review overlays for bad detections
+    (ignoring explicit `" -- "` blank cells); footer-finder OCPD
+    hardening.
+  - **Quick compatibility test**: new RPCs
+    `vm_submit_compatibility_test`, `vm_get_compatibility_status`,
+    `vm_delete_compatibility_job` -- PageFilter + finder + one-panel
+    OCR parse, 60 s timeout, no RulesEngine/BOM.
+  - **Job recovery / live progress**: stale queued/running jobs
+    requeued after VM/Anvil hiccups via `heartbeat_ts`; incremental
+    finding-count heartbeats so the UI does not sit at 0%.
+  - **`PageFilterV5`** added (bookmark/index page skipping) and wired
+    in `DevEnv/DevTestEnv.py`; production still imports **PageFilterV3**.
+  - **Docs synced 2026-08-18**: `architecture.mdc`, `file-locations.mdc`,
+    `data-structures.mdc`, `api-patterns.mdc` updated to the above.
+  - **Standing reminder**: per the versioned-module convention, always
+    re-confirm the active version against the imports at the top of
+    `AnvilUplinkCode/uplink_server.py`.
+
+- **Breaker table body OCR -- grid-line removal on body cells LANDED in `BreakerTableParser12` / APIv14 (2026-08-18); gaps 2-6 below still open** --
+  Gap 1 of the entry below ("Grid lines inside OCR crops") is now fixed. The fix
+  lives in **new** modules, leaving the previous stack intact for comparison:
+  - `OcrLibrary/BreakerTableParser12.py` (`PARSER_VERSION = "BreakerParser12"`),
+    a copy of Parser11 plus the change below. Parser11 is untouched.
+  - `OcrLibrary/BreakerTableParserAPIv14.py` (`API_VERSION = "API_14"`), which
+    wires `BreakerTableAnalyzer12` + `PanelHeaderParserV11` + **Parser12**.
+    APIv13 is retained.
+  - `AnvilUplinkCode/uplink_server.py` and `DevEnv/DevTestEnv.py` import APIv14.
+  **What the fix does:** module-level `_prep_cell_for_ocr(gray_crop)` removes the
+  table's own borders from each body cell immediately before EasyOCR, called from
+  `_ocr_body_column_by_rows()` in **both** `SeparatedLayoutParser` and
+  `CombinedLayoutParser` (applied to the row band, before the `_HDR_OCR_SCALE`
+  resize). It binarizes the cell, opens with a horizontal kernel and a vertical
+  kernel, keeps only long/skinny components (full-width horizontal runs anywhere;
+  tall thin vertical runs **only within `_CELL_PREP_V_EDGE_ZONE_FR` of the left or
+  right edge**, which is what protects a centered `1` from being erased as a
+  border), then thin-dilates that mask and `cv2.INPAINT_TELEA`s it -- the same
+  approach `BreakerTableAnalyzer12._remove_grids_and_save` uses page-wide.
+  A small edge fringe is then flattened to the background level.
+  All thresholds are named `_CELL_PREP_*` constants at the top of the file.
+  **Coordinate mapping is deliberately preserved:** the crop is never resized or
+  offset (the residual fringe is *filled*, not cropped), so the existing
+  `_HDR_OCR_SCALE` scale-back and strip→page box math is untouched. Verified by
+  the token overlays still landing tightly on the glyphs.
+  **Debug support:** with `debug=True`, each body column also writes
+  `{base}_parser_body_sep_col{idx}_{role}_cellprep.png` (or
+  `..._combined_col{idx}_cellprep.png`) next to the existing `_overlay.png` -- a
+  BEFORE | AFTER image of the whole column with every prepped row band written
+  back, so grid removal can be eyeballed against the token overlay.
+  **Measured result (laptop, 2026-08-18).** `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`
+  runs PageFilter + PanelSearchToolV26 once and then parses the *same* crops with
+  APIv13 and APIv14, so differences isolate the parser change. Over 6 PDFs / 28
+  panels (`good_tester_combo`, `generic3`, `NoAmps`, `K`, `H`, `chucksmall`,
+  `makayla2`): **no panel regressed, no breaker was lost, and review-cell counts
+  were identical everywhere.** 24 of 28 panels were bit-identical.
+  - **Recovered false negative (the headline):** `H.pdf` panel01, **right side
+    row 2**. APIv13 read that trip cell as `'20 A'` at conf **0.39**, just under
+    the `_HDR_MIN_CONF` 0.40 accept floor, so the row produced no breaker at all
+    (18 breakers, `1P_20A` x15). With the borders removed the same cell reads at
+    high confidence, giving 19 breakers / `1P_20A` x16. This panel draws a tight
+    box around every cell, so the border was sitting directly against the glyphs
+    -- see `.../H/candidate_v14/debug/H_..._panel01_parser_body_sep_col11_trip_cellprep.png`
+    and `..._col10_poles_cellprep.png`.
+  - **Combined-layout raw text fixed:** `chucksmall` panels 01/02 (38 rows) went
+    from EasyOCR emitting `'20 A'` and `'1'` as two tokens with the `/` invisible,
+    to a single correct `'20 A / 1'` combo token. Parsed amps/poles are unchanged,
+    but the parser no longer has to lean on `_decode_amp_digits`' "lost slash"
+    repair (`'201'` → 20) to get there.
+  - Also seen: `'20A'` → `'20 A'` normalizations, and on `H` two new `'X'` tokens
+    (conf 0.59 / 0.25) exposed once the grid ink stopped fusing with a real X mark.
+    Both are harmless -- `_parse_trip_value` / `_parse_poles_value` reject `'X'`,
+    the 0.25 one is below the single-char floor, and the breaker tally rose by
+    exactly the one recovered row.
+  - **Known cost:** long combo tokens carry lower aggregate confidence than the
+    short fragments they replace (`'20 A / 1'` at 0.60-0.93 vs `'20 A'` at ~1.00).
+    Still comfortably above 0.40 on every observed cell, but this is the thing to
+    watch if `_HDR_MIN_CONF` is ever raised (gap 6 below).
+  - Artifacts: `DevEnv/CellPrepCompare/<pdf_stem>/comparison.json` plus
+    `baseline_v13/` and `candidate_v14/` crop copies with their own `debug/`
+    folders (regenerable; PNG/PDF are gitignored).
+  **Not addressed here (still open):** gaps 2-6 below, i.e. single OCR pass,
+  full-alphabet allowlist on numeric cells, fixed 2x upscale, unwired ALT pole
+  voting, and the low single-char confidence floor.
+
+- **Breaker table body OCR reliability -- cell-level EasyOCR with known prep gaps (documented 2026-08-18; gap 1 fixed 2026-08-18, see entry above)** --
+  Production breaker-table body values (trip amps, poles) are read by
+  `BreakerTableParser11` (`SeparatedLayoutParser` / `CombinedLayoutParser`),
+  wired through `BreakerTableParserAPIv13`. **Confirmed behavior:** OCR is
+  already **per cell**, not bulk -- each column is cropped once, row bands are
+  derived from horizontal grid lines on a reference column per side, and
+  `_ocr_body_column_by_rows()` calls EasyOCR once per row band (full column
+  width × one row height). Header-band column labels are OCR'd as one strip
+  per column (single header row). Misreads may therefore come from **cell prep /
+  OCR settings / post-OCR parsing**, not from reading many cells in one call.
+  **Diagnosis first:** with `BreakerTablePipeline(debug=True)`, inspect
+  `{crop}/debug/{base}_parser_body_sep_col{idx}_{role}_overlay.png` (or
+  `_parser_body_combined_col{idx}_overlay.png`) -- each token shows text +
+  confidence. Distinguish (a) EasyOCR wrong/missing text, (b) correct OCR
+  rejected by `_parse_trip_value` / `_parse_poles_value` / `_parse_combo_cell`
+  (e.g. amps must be ≥10 and %5==0), (c) silent wrong value that passes
+  validators (e.g. 20→30).
+  **Known prep / reliability gaps in production body path:**
+  1. **Grid lines inside OCR crops -- FIXED 2026-08-18 in `BreakerTableParser12`
+     (see the entry above); the description below is of the Parser11 behavior.**
+     Docstrings refer to "gridless" strips,
+     but `gray_body = raw_gray` with no grid removal before body OCR
+     (`SeparatedLayoutParser.parse`, ~lines 2079-2080). Column x-bounds sit on
+     vertical line centers; row bands are inflated to horizontal dividers (~2%
+     pad, often still including the line). Edge grid ink can cause digit/border
+     confusions (`1`/`|`, `0`/`8`). Elsewhere in the same file,
+     `_cell_has_visual_content` / `_detect_visual_blank_placeholder` already
+     morphologically remove H/V lines for *review* logic but not for OCR input.
+  2. **Single OCR pass per cell** -- body uses one `readtext` call per row
+     (`mag_ratio=1.0` after 2× OpenCV upscale). Panel header runs normal +
+     inverted passes; `BreakerHeaderFinder` runs mag 1.6 + 2.0; ALT module runs
+     up to four passes. No conditional retry on low confidence / empty cell.
+  3. **Full alphabet allowlist on numeric cells** -- `_HDR_OCR_ALLOWLIST`
+     includes all letters for trip/poles/combo body OCR. Role-specific tighter
+     allowlists (ALT uses `"0123456789A "` for numeric columns) are not applied;
+     `_normalize_digitish_chars` repairs S/Z→5, O→0, I/L/J/|→1 after the fact.
+  4. **Fixed 2× upscale, not target glyph height** -- `_HDR_OCR_SCALE = 2.0`
+     regardless of row band height or source DPI; panel-level upscale only when
+     H < 1600. Small text on large crops may remain under-resolved for EasyOCR.
+  5. **Pole voting ensemble not wired** -- `BreakerTableParserALTModuleized.py`
+     has `_vote_poles_digit` (OCR + template + ink/shape features, dash veto);
+     `BreakerTableParser11` does not use it.
+  6. **Low single-char confidence floor** -- body OCR accepts 1-char tokens at
+     `_HDR_MIN_CONF * 0.7` (= 0.28 at default 0.40), which admits weak pole-digit
+     reads; raising it trades false positives for false negatives unless paired
+     with retry/voting.
+  **Suggested fix order (Marco's call):** (1) inset crops and/or
+  reuse existing grid-line removal before body OCR -- **DONE 2026-08-18, see the
+  entry above**; (2) role-specific allowlists;
+  (3) target-height upscale per row band; (4) conditional second pass
+  (inverted/higher mag) on empty/low-conf cells; (5) wire ALT pole voting for
+  poles columns only. Re-verify on failing panels via debug overlays before/after.
+  `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py` is the harness for steps 2-5 as
+  well: point it at any two API versions' crops to get a per-panel, per-row diff.
+
 - **STANDING DECISION: the heuristic `PanelSearchToolV25` is ground truth for panel/table detection -- confirmed by Marco 2026-07-06** --
   For all panel-detection / table-detection ML work (TATR v7 and any
   future v8+), the heuristic `PanelSearchToolV25` boxes are treated as
@@ -1777,7 +1933,8 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   for transparent swap-in. Not yet integrated into `uplink_server.py` (still
   imports `PageFilterV3`).
 
-- **uplink_server.py imports PageFilterV3** -- V3 is the last heuristic page
-  filter; V4 is an ML-based wrapper around `PageClassifierML` (MobileNetV2).
-  `uplink_server.py` still imports `PageFilter.PageFilterV3` and has not yet
-  been switched to V4.
+- **uplink_server.py imports PageFilterV3** -- V3 remains the production
+  heuristic page filter. V4 is an ML-based wrapper around
+  `PageClassifierML` (MobileNetV2). V5 adds bookmark/index page skipping
+  and is wired in `DevEnv/DevTestEnv.py`, but `uplink_server.py` has not
+  yet been switched to V4 or V5.

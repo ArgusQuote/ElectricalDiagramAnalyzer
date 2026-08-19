@@ -1,0 +1,495 @@
+{
+  "pdf": "/home/marco/Documents/Diagrams/generic3.pdf",
+  "baselineApi": "API_13",
+  "candidateApi": "API_14",
+  "totals": {
+    "panels": 6,
+    "panels_changed": 0,
+    "baseline_breakers": 10,
+    "candidate_breakers": 10,
+    "baseline_review_cells": 20,
+    "candidate_review_cells": 20
+  },
+  "panels": [
+    {
+      "crop": "generic3_electrical_filtered_page001_panel01.png",
+      "name": "L1E",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel02.png",
+      "name": "LME",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel03.png",
+      "name": "LM",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel04.png",
+      "name": "L2",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel05.png",
+      "name": "LOE",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel06.png",
+      "name": "LED",
+      "status": "IDENTICAL",
+      "changedFields": {},
+      "rowDiffs": []
+    }
+  ],
+  "baseline": [
+    {
+      "crop": "generic3_electrical_filtered_page001_panel01.png",
+      "name": "L1E",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel02.png",
+      "name": "LME",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel03.png",
+      "name": "LM",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel04.png",
+      "name": "L2",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel05.png",
+      "name": "LOE",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 42,
+      "amperage": 100,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 18,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel06.png",
+      "name": "LED",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 30,
+      "amperage": 400,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_225A": 3,
+        "3P_60A": 1,
+        "3P_100A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 10,
+      "detectedBreakerCount": 5,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 0,
+          "amperage": 225,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "225 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "left",
+          "rowIndex": 1,
+          "amperage": 225,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "225 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "left",
+          "rowIndex": 2,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "right",
+          "rowIndex": 0,
+          "amperage": 225,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "225 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "right",
+          "rowIndex": 1,
+          "amperage": 100,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "100 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    }
+  ],
+  "candidate": [
+    {
+      "crop": "generic3_electrical_filtered_page001_panel01.png",
+      "name": "L1E",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel02.png",
+      "name": "LME",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel03.png",
+      "name": "LM",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel04.png",
+      "name": "L2",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 84,
+      "amperage": 225,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 39,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel05.png",
+      "name": "LOE",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 42,
+      "amperage": 100,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_60A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 2,
+      "detectedBreakerCount": 1,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 18,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    },
+    {
+      "crop": "generic3_electrical_filtered_page001_panel06.png",
+      "name": "LED",
+      "panelStatus": null,
+      "layout": null,
+      "spaces": 30,
+      "amperage": 400,
+      "voltage": 208,
+      "breakerCounts": {
+        "3P_225A": 3,
+        "3P_60A": 1,
+        "3P_100A": 1
+      },
+      "gfiBreakerCounts": {},
+      "reviewCellCount": 10,
+      "detectedBreakerCount": 5,
+      "breakers": [
+        {
+          "side": "left",
+          "rowIndex": 0,
+          "amperage": 225,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "225 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "left",
+          "rowIndex": 1,
+          "amperage": 225,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "225 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "left",
+          "rowIndex": 2,
+          "amperage": 60,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "60 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "right",
+          "rowIndex": 0,
+          "amperage": 225,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "225 A",
+          "polesText": "3",
+          "comboText": null
+        },
+        {
+          "side": "right",
+          "rowIndex": 1,
+          "amperage": 100,
+          "poles": 3,
+          "specialFeatures": null,
+          "tripText": "100 A",
+          "polesText": "3",
+          "comboText": null
+        }
+      ]
+    }
+  ],
+  "cellPrepImages": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel01_parser_body_sep_col10_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel01_parser_body_sep_col4_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel01_parser_body_sep_col5_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel01_parser_body_sep_col9_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel02_parser_body_sep_col10_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel02_parser_body_sep_col4_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel02_parser_body_sep_col5_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel02_parser_body_sep_col9_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel03_parser_body_sep_col10_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel03_parser_body_sep_col4_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel03_parser_body_sep_col5_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel03_parser_body_sep_col9_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel04_parser_body_sep_col10_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel04_parser_body_sep_col4_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel04_parser_body_sep_col5_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel04_parser_body_sep_col9_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel05_parser_body_sep_col10_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel05_parser_body_sep_col4_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel05_parser_body_sep_col5_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel05_parser_body_sep_col9_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel06_parser_body_sep_col10_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel06_parser_body_sep_col4_trip_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel06_parser_body_sep_col5_poles_cellprep.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/CellPrepCompare/generic3/candidate_v14/debug/generic3_electrical_filtered_page001_panel06_parser_body_sep_col9_poles_cellprep.png"
+  ]
+}
