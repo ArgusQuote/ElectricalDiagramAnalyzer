@@ -22,7 +22,7 @@ SNAP_MAP = {
     70: 72, 74: 72,
     82: 84, 86: 84,
 }
-
+ 
 VALID_VOLTAGES = {120, 208, 240, 480, 600}
 AMP_MIN = 100
 AMP_MAX = 1200
@@ -246,6 +246,68 @@ class BreakerTablePipeline:
                 color_bgr,
                 1,
                 cv2.LINE_AA,
+            )
+
+    def _attach_breaker_display_geometry(self, analyzer_result, parser_result):
+        """
+        Add normalized vertical positions to each detected breaker.
+
+        These values are based on the exact analyzer gray image used to build
+        the individual review overlay, so the UI can place left/right labels
+        at the same vertical location as the breaker in the overlay.
+
+        Existing breaker data is preserved. We only add:
+            yTopRatio
+            yBottomRatio
+            yCenterRatio
+        """
+        if not isinstance(parser_result, dict):
+            return
+
+        ar = analyzer_result or {}
+        gray = ar.get("gray")
+
+        if gray is None or not hasattr(gray, "shape"):
+            return
+
+        image_h = int(gray.shape[0])
+
+        if image_h <= 0:
+            return
+
+        breakers = parser_result.get("detected_breakers") or []
+
+        if not isinstance(breakers, list):
+            return
+
+        for breaker in breakers:
+            if not isinstance(breaker, dict):
+                continue
+
+            try:
+                row_top = int(breaker.get("rowTop"))
+                row_bottom = int(breaker.get("rowBottom"))
+            except (TypeError, ValueError):
+                continue
+
+            if row_bottom <= row_top:
+                continue
+
+            center_y = (row_top + row_bottom) / 2.0
+
+            breaker["yTopRatio"] = max(
+                0.0,
+                min(1.0, float(row_top) / float(image_h)),
+            )
+
+            breaker["yBottomRatio"] = max(
+                0.0,
+                min(1.0, float(row_bottom) / float(image_h)),
+            )
+
+            breaker["yCenterRatio"] = max(
+                0.0,
+                min(1.0, float(center_y) / float(image_h)),
             )
 
     def _build_review_overlay(self, *, image_path, analyzer_result, header_result, parser_result, dedup_name):
@@ -547,8 +609,15 @@ class BreakerTablePipeline:
                 if self.debug:
                     print(f"[WARN] Parser failed: {e}")
         # Ensure the table parser result advertises the deduped name for the UI
+        # and expose normalized breaker positions for the review UI.
+
         if isinstance(parser_result, dict):
             parser_result["name"] = dedup_name
+
+            self._attach_breaker_display_geometry(
+                analyzer_result,
+                parser_result,
+            )
 
         review_overlay_path = None
         try:
