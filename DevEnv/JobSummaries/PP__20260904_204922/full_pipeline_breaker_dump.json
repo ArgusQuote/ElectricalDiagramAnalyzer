@@ -1,0 +1,4410 @@
+[
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/PP_page001_panel01.png",
+    "results": {
+      "apiVersion": "API_15",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv15.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/PP_page001_panel01.png",
+          "header_y": 898,
+          "header_bottom_y": 1142,
+          "footer_y": 3692,
+          "footer_token_val": 60,
+          "panel_size": 66,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser13",
+          "name": "P",
+          "spaces": 66,
+          "detected_breakers": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 1147,
+              "rowBottom": 1231,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 2,
+              "rowTop": 1231,
+              "rowBottom": 1320,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 1320,
+              "rowBottom": 1404,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 1404,
+              "rowBottom": 1488,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 1488,
+              "rowBottom": 1574,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 1574,
+              "rowBottom": 1658,
+              "amperage": 60,
+              "poles": 2,
+              "tripText": "60 A",
+              "polesText": "2"
+            },
+            {
+              "side": "left",
+              "rowIndex": 8,
+              "rowTop": 1742,
+              "rowBottom": 1829,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 9,
+              "rowTop": 1829,
+              "rowBottom": 1913,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1913,
+              "rowBottom": 1999,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 11,
+              "rowTop": 1999,
+              "rowBottom": 2083,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 12,
+              "rowTop": 2083,
+              "rowBottom": 2169,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 13,
+              "rowTop": 2169,
+              "rowBottom": 2253,
+              "amperage": 20,
+              "poles": 2,
+              "tripText": "20 A",
+              "polesText": "2"
+            },
+            {
+              "side": "left",
+              "rowIndex": 15,
+              "rowTop": 2337,
+              "rowBottom": 2424,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 16,
+              "rowTop": 2424,
+              "rowBottom": 2508,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 19,
+              "rowTop": 2678,
+              "rowBottom": 2764,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 20,
+              "rowTop": 2764,
+              "rowBottom": 2848,
+              "amperage": 30,
+              "poles": 2,
+              "tripText": "30 A",
+              "polesText": "2"
+            },
+            {
+              "side": "left",
+              "rowIndex": 23,
+              "rowTop": 3019,
+              "rowBottom": 3105,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "left",
+              "rowIndex": 28,
+              "rowTop": 3443,
+              "rowBottom": 3530,
+              "amperage": 30,
+              "poles": 2,
+              "tripText": "30 A",
+              "polesText": "2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 1147,
+              "rowBottom": 1231,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 1231,
+              "rowBottom": 1320,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 1320,
+              "rowBottom": 1404,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 1404,
+              "rowBottom": 1488,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 1488,
+              "rowBottom": 1574,
+              "amperage": 20,
+              "poles": 2,
+              "tripText": "20 A",
+              "polesText": "2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 7,
+              "rowTop": 1658,
+              "rowBottom": 1742,
+              "amperage": 20,
+              "poles": 2,
+              "tripText": "20 A",
+              "polesText": "2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 1829,
+              "rowBottom": 1913,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1913,
+              "rowBottom": 1999,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 11,
+              "rowTop": 1999,
+              "rowBottom": 2083,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 12,
+              "rowTop": 2083,
+              "rowBottom": 2169,
+              "amperage": 20,
+              "poles": 2,
+              "tripText": "20 A",
+              "polesText": "2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 14,
+              "rowTop": 2253,
+              "rowBottom": 2337,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 15,
+              "rowTop": 2337,
+              "rowBottom": 2424,
+              "amperage": 30,
+              "poles": 2,
+              "tripText": "30 A",
+              "polesText": "2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 17,
+              "rowTop": 2508,
+              "rowBottom": 2592,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 18,
+              "rowTop": 2592,
+              "rowBottom": 2678,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 19,
+              "rowTop": 2678,
+              "rowBottom": 2764,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 20,
+              "rowTop": 2764,
+              "rowBottom": 2848,
+              "amperage": 30,
+              "poles": 2,
+              "tripText": "30 A",
+              "polesText": "2"
+            },
+            {
+              "side": "right",
+              "rowIndex": 26,
+              "rowTop": 3275,
+              "rowBottom": 3359,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            },
+            {
+              "side": "right",
+              "rowIndex": 27,
+              "rowTop": 3359,
+              "rowBottom": 3443,
+              "amperage": 20,
+              "poles": 1,
+              "tripText": "20 A",
+              "polesText": "1"
+            }
+          ],
+          "breakerCounts": {
+            "1P_20A": 27,
+            "2P_60A": 1,
+            "2P_20A": 4,
+            "2P_30A": 4
+          },
+          "gfiBreakerCounts": {},
+          "reviewCells": [
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 1147,
+              "rowBottom": 1231,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 1,
+              "rowTop": 1147,
+              "rowBottom": 1231,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 2,
+              "rowTop": 1231,
+              "rowBottom": 1320,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 2,
+              "rowTop": 1231,
+              "rowBottom": 1320,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 1320,
+              "rowBottom": 1404,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 3,
+              "rowTop": 1320,
+              "rowBottom": 1404,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 1404,
+              "rowBottom": 1488,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 4,
+              "rowTop": 1404,
+              "rowBottom": 1488,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 1488,
+              "rowBottom": 1574,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 5,
+              "rowTop": 1488,
+              "rowBottom": 1574,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 1574,
+              "rowBottom": 1658,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "60 A",
+              "value": 60
+            },
+            {
+              "side": "left",
+              "rowIndex": 6,
+              "rowTop": 1574,
+              "rowBottom": 1658,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "left",
+              "rowIndex": 8,
+              "rowTop": 1742,
+              "rowBottom": 1829,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 8,
+              "rowTop": 1742,
+              "rowBottom": 1829,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 9,
+              "rowTop": 1829,
+              "rowBottom": 1913,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 9,
+              "rowTop": 1829,
+              "rowBottom": 1913,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1913,
+              "rowBottom": 1999,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 10,
+              "rowTop": 1913,
+              "rowBottom": 1999,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 11,
+              "rowTop": 1999,
+              "rowBottom": 2083,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 11,
+              "rowTop": 1999,
+              "rowBottom": 2083,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 12,
+              "rowTop": 2083,
+              "rowBottom": 2169,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 12,
+              "rowTop": 2083,
+              "rowBottom": 2169,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 13,
+              "rowTop": 2169,
+              "rowBottom": 2253,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 13,
+              "rowTop": 2169,
+              "rowBottom": 2253,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "left",
+              "rowIndex": 15,
+              "rowTop": 2337,
+              "rowBottom": 2424,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 15,
+              "rowTop": 2337,
+              "rowBottom": 2424,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 16,
+              "rowTop": 2424,
+              "rowBottom": 2508,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 16,
+              "rowTop": 2424,
+              "rowBottom": 2508,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 19,
+              "rowTop": 2678,
+              "rowBottom": 2764,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 19,
+              "rowTop": 2678,
+              "rowBottom": 2764,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 20,
+              "rowTop": 2764,
+              "rowBottom": 2848,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "30 A",
+              "value": 30
+            },
+            {
+              "side": "left",
+              "rowIndex": 20,
+              "rowTop": 2764,
+              "rowBottom": 2848,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "left",
+              "rowIndex": 23,
+              "rowTop": 3019,
+              "rowBottom": 3105,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "left",
+              "rowIndex": 23,
+              "rowTop": 3019,
+              "rowBottom": 3105,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "left",
+              "rowIndex": 28,
+              "rowTop": 3443,
+              "rowBottom": 3530,
+              "xLeft": 1881,
+              "xRight": 2217,
+              "role": "trip",
+              "status": "good",
+              "text": "30 A",
+              "value": 30
+            },
+            {
+              "side": "left",
+              "rowIndex": 28,
+              "rowTop": 3443,
+              "rowBottom": 3530,
+              "xLeft": 2217,
+              "xRight": 2410,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 1147,
+              "rowBottom": 1231,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 1,
+              "rowTop": 1147,
+              "rowBottom": 1231,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 1231,
+              "rowBottom": 1320,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 2,
+              "rowTop": 1231,
+              "rowBottom": 1320,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 1320,
+              "rowBottom": 1404,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 3,
+              "rowTop": 1320,
+              "rowBottom": 1404,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 1404,
+              "rowBottom": 1488,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 4,
+              "rowTop": 1404,
+              "rowBottom": 1488,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 1488,
+              "rowBottom": 1574,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 5,
+              "rowTop": 1488,
+              "rowBottom": 1574,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "right",
+              "rowIndex": 7,
+              "rowTop": 1658,
+              "rowBottom": 1742,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 7,
+              "rowTop": 1658,
+              "rowBottom": 1742,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 1829,
+              "rowBottom": 1913,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 9,
+              "rowTop": 1829,
+              "rowBottom": 1913,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1913,
+              "rowBottom": 1999,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 10,
+              "rowTop": 1913,
+              "rowBottom": 1999,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 11,
+              "rowTop": 1999,
+              "rowBottom": 2083,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 11,
+              "rowTop": 1999,
+              "rowBottom": 2083,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 12,
+              "rowTop": 2083,
+              "rowBottom": 2169,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 12,
+              "rowTop": 2083,
+              "rowBottom": 2169,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "right",
+              "rowIndex": 14,
+              "rowTop": 2253,
+              "rowBottom": 2337,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 14,
+              "rowTop": 2253,
+              "rowBottom": 2337,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 15,
+              "rowTop": 2337,
+              "rowBottom": 2424,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "30 A",
+              "value": 30
+            },
+            {
+              "side": "right",
+              "rowIndex": 15,
+              "rowTop": 2337,
+              "rowBottom": 2424,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "right",
+              "rowIndex": 17,
+              "rowTop": 2508,
+              "rowBottom": 2592,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 17,
+              "rowTop": 2508,
+              "rowBottom": 2592,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 18,
+              "rowTop": 2592,
+              "rowBottom": 2678,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 18,
+              "rowTop": 2592,
+              "rowBottom": 2678,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 19,
+              "rowTop": 2678,
+              "rowBottom": 2764,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 19,
+              "rowTop": 2678,
+              "rowBottom": 2764,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 20,
+              "rowTop": 2764,
+              "rowBottom": 2848,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "30 A",
+              "value": 30
+            },
+            {
+              "side": "right",
+              "rowIndex": 20,
+              "rowTop": 2764,
+              "rowBottom": 2848,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "2",
+              "value": 2
+            },
+            {
+              "side": "right",
+              "rowIndex": 26,
+              "rowTop": 3275,
+              "rowBottom": 3359,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 26,
+              "rowTop": 3275,
+              "rowBottom": 3359,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            },
+            {
+              "side": "right",
+              "rowIndex": 27,
+              "rowTop": 3359,
+              "rowBottom": 3443,
+              "xLeft": 4188,
+              "xRight": 4527,
+              "role": "trip",
+              "status": "good",
+              "text": "20 A",
+              "value": 20
+            },
+            {
+              "side": "right",
+              "rowIndex": 27,
+              "rowTop": 3359,
+              "rowBottom": 3443,
+              "xLeft": 3995,
+              "xRight": 4188,
+              "role": "poles",
+              "status": "good",
+              "text": "1",
+              "value": 1
+            }
+          ],
+          "headerScan": {
+            "band_y1": 898,
+            "band_y2": 1142,
+            "tokens": [
+              {
+                "text": "CKT",
+                "conf": 0.9986578167088543,
+                "box_band": [
+                  34,
+                  169,
+                  170,
+                  239
+                ],
+                "box_page": [
+                  34,
+                  1067,
+                  170,
+                  1137
+                ]
+              },
+              {
+                "text": "Wire Size",
+                "conf": 0.9999899466579805,
+                "box_band": [
+                  323,
+                  168,
+                  602,
+                  241
+                ],
+                "box_page": [
+                  323,
+                  1066,
+                  602,
+                  1139
+                ]
+              },
+              {
+                "text": "Circuit Description",
+                "conf": 0.9574059779138693,
+                "box_band": [
+                  1040,
+                  167,
+                  1590,
+                  243
+                ],
+                "box_page": [
+                  1040,
+                  1065,
+                  1590,
+                  1141
+                ]
+              },
+              {
+                "text": "Trip",
+                "conf": 0.9699884275190266,
+                "box_band": [
+                  1980,
+                  170,
+                  2114,
+                  243
+                ],
+                "box_page": [
+                  1980,
+                  1068,
+                  2114,
+                  1141
+                ]
+              },
+              {
+                "text": "Poles",
+                "conf": 0.9999783552942619,
+                "box_band": [
+                  2229,
+                  168,
+                  2402,
+                  241
+                ],
+                "box_page": [
+                  2229,
+                  1066,
+                  2402,
+                  1139
+                ]
+              },
+              {
+                "text": "A",
+                "conf": 0.9999531512979196,
+                "box_band": [
+                  2649,
+                  176,
+                  2700,
+                  233
+                ],
+                "box_page": [
+                  2649,
+                  1074,
+                  2700,
+                  1131
+                ]
+              },
+              {
+                "text": "B",
+                "conf": 0.9947044808463978,
+                "box_band": [
+                  3173,
+                  174,
+                  3230,
+                  236
+                ],
+                "box_page": [
+                  3173,
+                  1072,
+                  3230,
+                  1134
+                ]
+              },
+              {
+                "text": "C",
+                "conf": 0.9369511772724906,
+                "box_band": [
+                  3704,
+                  172,
+                  3764,
+                  239
+                ],
+                "box_page": [
+                  3704,
+                  1070,
+                  3764,
+                  1137
+                ]
+              },
+              {
+                "text": "Poles",
+                "conf": 0.9999718512093189,
+                "box_band": [
+                  4007,
+                  168,
+                  4180,
+                  241
+                ],
+                "box_page": [
+                  4007,
+                  1066,
+                  4180,
+                  1139
+                ]
+              },
+              {
+                "text": "Trip",
+                "conf": 0.9998562932014465,
+                "box_band": [
+                  4290,
+                  170,
+                  4425,
+                  243
+                ],
+                "box_page": [
+                  4290,
+                  1068,
+                  4425,
+                  1141
+                ]
+              },
+              {
+                "text": "Circuit Description",
+                "conf": 0.6734040001740083,
+                "box_band": [
+                  4818,
+                  168,
+                  5367,
+                  243
+                ],
+                "box_page": [
+                  4818,
+                  1066,
+                  5367,
+                  1141
+                ]
+              },
+              {
+                "text": "Wire Size",
+                "conf": 0.9978016728400027,
+                "box_band": [
+                  5807,
+                  167,
+                  6089,
+                  243
+                ],
+                "box_page": [
+                  5807,
+                  1065,
+                  6089,
+                  1141
+                ]
+              },
+              {
+                "text": "CKT",
+                "conf": 0.9990109740676416,
+                "box_band": [
+                  6236,
+                  169,
+                  6374,
+                  239
+                ],
+                "box_page": [
+                  6236,
+                  1067,
+                  6374,
+                  1137
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel01_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel01_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 173,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9986578167088543,
+                    "box_band": [
+                      34,
+                      169,
+                      170,
+                      239
+                    ],
+                    "box_page": [
+                      34,
+                      1067,
+                      170,
+                      1137
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 173,
+                "x_right": 749,
+                "items": [
+                  {
+                    "text": "Wire Size",
+                    "conf": 0.9999899466579805,
+                    "box_band": [
+                      323,
+                      168,
+                      602,
+                      241
+                    ],
+                    "box_page": [
+                      323,
+                      1066,
+                      602,
+                      1139
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 749,
+                "x_right": 1881,
+                "items": [
+                  {
+                    "text": "Circuit Description",
+                    "conf": 0.9574059779138693,
+                    "box_band": [
+                      1040,
+                      167,
+                      1590,
+                      243
+                    ],
+                    "box_page": [
+                      1040,
+                      1065,
+                      1590,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1881,
+                "x_right": 2217,
+                "items": [
+                  {
+                    "text": "Trip",
+                    "conf": 0.9699884275190266,
+                    "box_band": [
+                      1980,
+                      170,
+                      2114,
+                      243
+                    ],
+                    "box_page": [
+                      1980,
+                      1068,
+                      2114,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 2217,
+                "x_right": 2410,
+                "items": [
+                  {
+                    "text": "Poles",
+                    "conf": 0.9999783552942619,
+                    "box_band": [
+                      2229,
+                      168,
+                      2402,
+                      241
+                    ],
+                    "box_page": [
+                      2229,
+                      1066,
+                      2402,
+                      1139
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 2410,
+                "x_right": 2940,
+                "items": [
+                  {
+                    "text": "A",
+                    "conf": 0.9999531512979196,
+                    "box_band": [
+                      2649,
+                      176,
+                      2700,
+                      233
+                    ],
+                    "box_page": [
+                      2649,
+                      1074,
+                      2700,
+                      1131
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2940,
+                "x_right": 3467,
+                "items": [
+                  {
+                    "text": "B",
+                    "conf": 0.9947044808463978,
+                    "box_band": [
+                      3173,
+                      174,
+                      3230,
+                      236
+                    ],
+                    "box_page": [
+                      3173,
+                      1072,
+                      3230,
+                      1134
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 3467,
+                "x_right": 3995,
+                "items": [
+                  {
+                    "text": "C",
+                    "conf": 0.9369511772724906,
+                    "box_band": [
+                      3704,
+                      172,
+                      3764,
+                      239
+                    ],
+                    "box_page": [
+                      3704,
+                      1070,
+                      3764,
+                      1137
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 3995,
+                "x_right": 4188,
+                "items": [
+                  {
+                    "text": "Poles",
+                    "conf": 0.9999718512093189,
+                    "box_band": [
+                      4007,
+                      168,
+                      4180,
+                      241
+                    ],
+                    "box_page": [
+                      4007,
+                      1066,
+                      4180,
+                      1139
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 4188,
+                "x_right": 4527,
+                "items": [
+                  {
+                    "text": "Trip",
+                    "conf": 0.9998562932014465,
+                    "box_band": [
+                      4290,
+                      170,
+                      4425,
+                      243
+                    ],
+                    "box_page": [
+                      4290,
+                      1068,
+                      4425,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 4527,
+                "x_right": 5658,
+                "items": [
+                  {
+                    "text": "Circuit Description",
+                    "conf": 0.6734040001740083,
+                    "box_band": [
+                      4818,
+                      168,
+                      5367,
+                      243
+                    ],
+                    "box_page": [
+                      4818,
+                      1066,
+                      5367,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 12,
+                "x_left": 5658,
+                "x_right": 6235,
+                "items": [
+                  {
+                    "text": "Wire Size",
+                    "conf": 0.9978016728400027,
+                    "box_band": [
+                      5807,
+                      167,
+                      6089,
+                      243
+                    ],
+                    "box_page": [
+                      5807,
+                      1065,
+                      6089,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 13,
+                "x_left": 6235,
+                "x_right": 6375,
+                "items": [
+                  {
+                    "text": "CKT",
+                    "conf": 0.9990109740676416,
+                    "box_band": [
+                      6236,
+                      169,
+                      6374,
+                      239
+                    ],
+                    "box_page": [
+                      6236,
+                      1067,
+                      6374,
+                      1137
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "ckt": 1,
+                "description": 3,
+                "trip": 4,
+                "poles": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 173,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 173,
+                  "x_right": 749,
+                  "texts": [
+                    "Wire",
+                    "Size"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 749,
+                  "x_right": 1881,
+                  "texts": [
+                    "Circuit",
+                    "Description"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1881,
+                  "x_right": 2217,
+                  "texts": [
+                    "Trip"
+                  ],
+                  "role": "trip",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 2217,
+                  "x_right": 2410,
+                  "texts": [
+                    "Poles"
+                  ],
+                  "role": "poles",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2410,
+                  "x_right": 2940,
+                  "texts": [
+                    "A"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2940,
+                  "x_right": 3467,
+                  "texts": [
+                    "B"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 3467,
+                  "x_right": 3995,
+                  "texts": [
+                    "C"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 3995,
+                  "x_right": 4188,
+                  "texts": [
+                    "Poles"
+                  ],
+                  "role": "poles",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 10,
+                  "x_left": 4188,
+                  "x_right": 4527,
+                  "texts": [
+                    "Trip"
+                  ],
+                  "role": "trip",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 4527,
+                  "x_right": 5658,
+                  "texts": [
+                    "Circuit",
+                    "Description"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 12,
+                  "x_left": 5658,
+                  "x_right": 6235,
+                  "texts": [
+                    "Wire",
+                    "Size"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 13,
+                  "x_left": 6235,
+                  "x_right": 6375,
+                  "texts": [
+                    "CKT"
+                  ],
+                  "role": "ckt",
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "separated"
+            }
+          },
+          "separatedScan": {
+            "layout": "separated",
+            "bodyColumns": [
+              {
+                "index": 4,
+                "role": "trip",
+                "x_left": 1881,
+                "x_right": 2217,
+                "y_top": 1142,
+                "y_bottom": 3692,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel01_parser_body_sep_col4_trip_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 5,
+                "role": "poles",
+                "x_left": 2217,
+                "x_right": 2410,
+                "y_top": 1142,
+                "y_bottom": 3692,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel01_parser_body_sep_col5_poles_overlay.png",
+                "side": "left"
+              },
+              {
+                "index": 9,
+                "role": "poles",
+                "x_left": 3995,
+                "x_right": 4188,
+                "y_top": 1142,
+                "y_bottom": 3692,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel01_parser_body_sep_col9_poles_overlay.png",
+                "side": "right"
+              },
+              {
+                "index": 10,
+                "role": "trip",
+                "x_left": 4188,
+                "x_right": 4527,
+                "y_top": 1142,
+                "y_bottom": 3692,
+                "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel01_parser_body_sep_col10_trip_overlay.png",
+                "side": "right"
+              }
+            ],
+            "detected_breakers": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 1147,
+                "rowBottom": 1231,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 2,
+                "rowTop": 1231,
+                "rowBottom": 1320,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 1320,
+                "rowBottom": 1404,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 1404,
+                "rowBottom": 1488,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 1488,
+                "rowBottom": 1574,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 1574,
+                "rowBottom": 1658,
+                "amperage": 60,
+                "poles": 2,
+                "tripText": "60 A",
+                "polesText": "2"
+              },
+              {
+                "side": "left",
+                "rowIndex": 8,
+                "rowTop": 1742,
+                "rowBottom": 1829,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 9,
+                "rowTop": 1829,
+                "rowBottom": 1913,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1913,
+                "rowBottom": 1999,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 11,
+                "rowTop": 1999,
+                "rowBottom": 2083,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 12,
+                "rowTop": 2083,
+                "rowBottom": 2169,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 13,
+                "rowTop": 2169,
+                "rowBottom": 2253,
+                "amperage": 20,
+                "poles": 2,
+                "tripText": "20 A",
+                "polesText": "2"
+              },
+              {
+                "side": "left",
+                "rowIndex": 15,
+                "rowTop": 2337,
+                "rowBottom": 2424,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 16,
+                "rowTop": 2424,
+                "rowBottom": 2508,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 19,
+                "rowTop": 2678,
+                "rowBottom": 2764,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 20,
+                "rowTop": 2764,
+                "rowBottom": 2848,
+                "amperage": 30,
+                "poles": 2,
+                "tripText": "30 A",
+                "polesText": "2"
+              },
+              {
+                "side": "left",
+                "rowIndex": 23,
+                "rowTop": 3019,
+                "rowBottom": 3105,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "left",
+                "rowIndex": 28,
+                "rowTop": 3443,
+                "rowBottom": 3530,
+                "amperage": 30,
+                "poles": 2,
+                "tripText": "30 A",
+                "polesText": "2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 1147,
+                "rowBottom": 1231,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 1231,
+                "rowBottom": 1320,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 1320,
+                "rowBottom": 1404,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 1404,
+                "rowBottom": 1488,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 1488,
+                "rowBottom": 1574,
+                "amperage": 20,
+                "poles": 2,
+                "tripText": "20 A",
+                "polesText": "2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 7,
+                "rowTop": 1658,
+                "rowBottom": 1742,
+                "amperage": 20,
+                "poles": 2,
+                "tripText": "20 A",
+                "polesText": "2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 1829,
+                "rowBottom": 1913,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1913,
+                "rowBottom": 1999,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 11,
+                "rowTop": 1999,
+                "rowBottom": 2083,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 12,
+                "rowTop": 2083,
+                "rowBottom": 2169,
+                "amperage": 20,
+                "poles": 2,
+                "tripText": "20 A",
+                "polesText": "2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 14,
+                "rowTop": 2253,
+                "rowBottom": 2337,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 15,
+                "rowTop": 2337,
+                "rowBottom": 2424,
+                "amperage": 30,
+                "poles": 2,
+                "tripText": "30 A",
+                "polesText": "2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 17,
+                "rowTop": 2508,
+                "rowBottom": 2592,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 18,
+                "rowTop": 2592,
+                "rowBottom": 2678,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 19,
+                "rowTop": 2678,
+                "rowBottom": 2764,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 20,
+                "rowTop": 2764,
+                "rowBottom": 2848,
+                "amperage": 30,
+                "poles": 2,
+                "tripText": "30 A",
+                "polesText": "2"
+              },
+              {
+                "side": "right",
+                "rowIndex": 26,
+                "rowTop": 3275,
+                "rowBottom": 3359,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              },
+              {
+                "side": "right",
+                "rowIndex": 27,
+                "rowTop": 3359,
+                "rowBottom": 3443,
+                "amperage": 20,
+                "poles": 1,
+                "tripText": "20 A",
+                "polesText": "1"
+              }
+            ],
+            "breakerCounts": {
+              "1P_20A": 27,
+              "2P_60A": 1,
+              "2P_20A": 4,
+              "2P_30A": 4
+            },
+            "gfiBreakerCounts": {},
+            "reviewCells": [
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 1147,
+                "rowBottom": 1231,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 1,
+                "rowTop": 1147,
+                "rowBottom": 1231,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 2,
+                "rowTop": 1231,
+                "rowBottom": 1320,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 2,
+                "rowTop": 1231,
+                "rowBottom": 1320,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 1320,
+                "rowBottom": 1404,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 3,
+                "rowTop": 1320,
+                "rowBottom": 1404,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 1404,
+                "rowBottom": 1488,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 4,
+                "rowTop": 1404,
+                "rowBottom": 1488,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 1488,
+                "rowBottom": 1574,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 5,
+                "rowTop": 1488,
+                "rowBottom": 1574,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 1574,
+                "rowBottom": 1658,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "60 A",
+                "value": 60
+              },
+              {
+                "side": "left",
+                "rowIndex": 6,
+                "rowTop": 1574,
+                "rowBottom": 1658,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "left",
+                "rowIndex": 8,
+                "rowTop": 1742,
+                "rowBottom": 1829,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 8,
+                "rowTop": 1742,
+                "rowBottom": 1829,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 9,
+                "rowTop": 1829,
+                "rowBottom": 1913,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 9,
+                "rowTop": 1829,
+                "rowBottom": 1913,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1913,
+                "rowBottom": 1999,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 10,
+                "rowTop": 1913,
+                "rowBottom": 1999,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 11,
+                "rowTop": 1999,
+                "rowBottom": 2083,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 11,
+                "rowTop": 1999,
+                "rowBottom": 2083,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 12,
+                "rowTop": 2083,
+                "rowBottom": 2169,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 12,
+                "rowTop": 2083,
+                "rowBottom": 2169,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 13,
+                "rowTop": 2169,
+                "rowBottom": 2253,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 13,
+                "rowTop": 2169,
+                "rowBottom": 2253,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "left",
+                "rowIndex": 15,
+                "rowTop": 2337,
+                "rowBottom": 2424,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 15,
+                "rowTop": 2337,
+                "rowBottom": 2424,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 16,
+                "rowTop": 2424,
+                "rowBottom": 2508,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 16,
+                "rowTop": 2424,
+                "rowBottom": 2508,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 19,
+                "rowTop": 2678,
+                "rowBottom": 2764,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 19,
+                "rowTop": 2678,
+                "rowBottom": 2764,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 20,
+                "rowTop": 2764,
+                "rowBottom": 2848,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "30 A",
+                "value": 30
+              },
+              {
+                "side": "left",
+                "rowIndex": 20,
+                "rowTop": 2764,
+                "rowBottom": 2848,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "left",
+                "rowIndex": 23,
+                "rowTop": 3019,
+                "rowBottom": 3105,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "left",
+                "rowIndex": 23,
+                "rowTop": 3019,
+                "rowBottom": 3105,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "left",
+                "rowIndex": 28,
+                "rowTop": 3443,
+                "rowBottom": 3530,
+                "xLeft": 1881,
+                "xRight": 2217,
+                "role": "trip",
+                "status": "good",
+                "text": "30 A",
+                "value": 30
+              },
+              {
+                "side": "left",
+                "rowIndex": 28,
+                "rowTop": 3443,
+                "rowBottom": 3530,
+                "xLeft": 2217,
+                "xRight": 2410,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 1147,
+                "rowBottom": 1231,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 1,
+                "rowTop": 1147,
+                "rowBottom": 1231,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 1231,
+                "rowBottom": 1320,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 2,
+                "rowTop": 1231,
+                "rowBottom": 1320,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 1320,
+                "rowBottom": 1404,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 3,
+                "rowTop": 1320,
+                "rowBottom": 1404,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 1404,
+                "rowBottom": 1488,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 4,
+                "rowTop": 1404,
+                "rowBottom": 1488,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 1488,
+                "rowBottom": 1574,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 5,
+                "rowTop": 1488,
+                "rowBottom": 1574,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "right",
+                "rowIndex": 7,
+                "rowTop": 1658,
+                "rowBottom": 1742,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 7,
+                "rowTop": 1658,
+                "rowBottom": 1742,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 1829,
+                "rowBottom": 1913,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 9,
+                "rowTop": 1829,
+                "rowBottom": 1913,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1913,
+                "rowBottom": 1999,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 10,
+                "rowTop": 1913,
+                "rowBottom": 1999,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 11,
+                "rowTop": 1999,
+                "rowBottom": 2083,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 11,
+                "rowTop": 1999,
+                "rowBottom": 2083,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 12,
+                "rowTop": 2083,
+                "rowBottom": 2169,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 12,
+                "rowTop": 2083,
+                "rowBottom": 2169,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "right",
+                "rowIndex": 14,
+                "rowTop": 2253,
+                "rowBottom": 2337,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 14,
+                "rowTop": 2253,
+                "rowBottom": 2337,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 15,
+                "rowTop": 2337,
+                "rowBottom": 2424,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "30 A",
+                "value": 30
+              },
+              {
+                "side": "right",
+                "rowIndex": 15,
+                "rowTop": 2337,
+                "rowBottom": 2424,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "right",
+                "rowIndex": 17,
+                "rowTop": 2508,
+                "rowBottom": 2592,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 17,
+                "rowTop": 2508,
+                "rowBottom": 2592,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 18,
+                "rowTop": 2592,
+                "rowBottom": 2678,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 18,
+                "rowTop": 2592,
+                "rowBottom": 2678,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 19,
+                "rowTop": 2678,
+                "rowBottom": 2764,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 19,
+                "rowTop": 2678,
+                "rowBottom": 2764,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 20,
+                "rowTop": 2764,
+                "rowBottom": 2848,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "30 A",
+                "value": 30
+              },
+              {
+                "side": "right",
+                "rowIndex": 20,
+                "rowTop": 2764,
+                "rowBottom": 2848,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "2",
+                "value": 2
+              },
+              {
+                "side": "right",
+                "rowIndex": 26,
+                "rowTop": 3275,
+                "rowBottom": 3359,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 26,
+                "rowTop": 3275,
+                "rowBottom": 3359,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              },
+              {
+                "side": "right",
+                "rowIndex": 27,
+                "rowTop": 3359,
+                "rowBottom": 3443,
+                "xLeft": 4188,
+                "xRight": 4527,
+                "role": "trip",
+                "status": "good",
+                "text": "20 A",
+                "value": 20
+              },
+              {
+                "side": "right",
+                "rowIndex": 27,
+                "rowTop": 3359,
+                "rowBottom": 3443,
+                "xLeft": 3995,
+                "xRight": 4188,
+                "role": "poles",
+                "status": "good",
+                "text": "1",
+                "value": 1
+              }
+            ]
+          },
+          "combinedScan": null,
+          "reviewOverlayPath": "review_overlays/P_review_overlay.png"
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "P",
+          "attrs": {
+            "amperage": 225,
+            "voltage": 208,
+            "intRating": 65,
+            "detected_breakers": [],
+            "mainBreakerAmperage": 225,
+            "trimStyle": "SURFACE",
+            "enclosure": "Nema3R"
+          },
+          "winningBoxes": {
+            "name": [
+              522,
+              47,
+              1464,
+              203
+            ],
+            "voltage": [
+              3011,
+              213,
+              3581,
+              302
+            ],
+            "bus": [
+              4642,
+              373,
+              5229,
+              477
+            ],
+            "main": [
+              4634,
+              371,
+              5230,
+              484
+            ],
+            "mounting": [
+              1038,
+              382,
+              1589,
+              478
+            ],
+            "enclosure": [
+              1018,
+              457,
+              1604,
+              558
+            ],
+            "aic": [
+              4656,
+              202,
+              5190,
+              313
+            ]
+          },
+          "boxImageShape": {
+            "w": 6408,
+            "h": 5250
+          },
+          "reviewOverlayPath": "review_overlays/P_review_overlay.png"
+        }
+      },
+      "panelStatus": null
+    },
+    "header_breakers": [],
+    "table_breakers": [
+      {
+        "side": "left",
+        "rowIndex": 1,
+        "rowTop": 1147,
+        "rowBottom": 1231,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 2,
+        "rowTop": 1231,
+        "rowBottom": 1320,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 3,
+        "rowTop": 1320,
+        "rowBottom": 1404,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 4,
+        "rowTop": 1404,
+        "rowBottom": 1488,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 5,
+        "rowTop": 1488,
+        "rowBottom": 1574,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 6,
+        "rowTop": 1574,
+        "rowBottom": 1658,
+        "amperage": 60,
+        "poles": 2,
+        "tripText": "60 A",
+        "polesText": "2"
+      },
+      {
+        "side": "left",
+        "rowIndex": 8,
+        "rowTop": 1742,
+        "rowBottom": 1829,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 9,
+        "rowTop": 1829,
+        "rowBottom": 1913,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 10,
+        "rowTop": 1913,
+        "rowBottom": 1999,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 11,
+        "rowTop": 1999,
+        "rowBottom": 2083,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 12,
+        "rowTop": 2083,
+        "rowBottom": 2169,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 13,
+        "rowTop": 2169,
+        "rowBottom": 2253,
+        "amperage": 20,
+        "poles": 2,
+        "tripText": "20 A",
+        "polesText": "2"
+      },
+      {
+        "side": "left",
+        "rowIndex": 15,
+        "rowTop": 2337,
+        "rowBottom": 2424,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 16,
+        "rowTop": 2424,
+        "rowBottom": 2508,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 19,
+        "rowTop": 2678,
+        "rowBottom": 2764,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 20,
+        "rowTop": 2764,
+        "rowBottom": 2848,
+        "amperage": 30,
+        "poles": 2,
+        "tripText": "30 A",
+        "polesText": "2"
+      },
+      {
+        "side": "left",
+        "rowIndex": 23,
+        "rowTop": 3019,
+        "rowBottom": 3105,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "left",
+        "rowIndex": 28,
+        "rowTop": 3443,
+        "rowBottom": 3530,
+        "amperage": 30,
+        "poles": 2,
+        "tripText": "30 A",
+        "polesText": "2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 1,
+        "rowTop": 1147,
+        "rowBottom": 1231,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 2,
+        "rowTop": 1231,
+        "rowBottom": 1320,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 3,
+        "rowTop": 1320,
+        "rowBottom": 1404,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 4,
+        "rowTop": 1404,
+        "rowBottom": 1488,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 5,
+        "rowTop": 1488,
+        "rowBottom": 1574,
+        "amperage": 20,
+        "poles": 2,
+        "tripText": "20 A",
+        "polesText": "2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 7,
+        "rowTop": 1658,
+        "rowBottom": 1742,
+        "amperage": 20,
+        "poles": 2,
+        "tripText": "20 A",
+        "polesText": "2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 9,
+        "rowTop": 1829,
+        "rowBottom": 1913,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 10,
+        "rowTop": 1913,
+        "rowBottom": 1999,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 11,
+        "rowTop": 1999,
+        "rowBottom": 2083,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 12,
+        "rowTop": 2083,
+        "rowBottom": 2169,
+        "amperage": 20,
+        "poles": 2,
+        "tripText": "20 A",
+        "polesText": "2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 14,
+        "rowTop": 2253,
+        "rowBottom": 2337,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 15,
+        "rowTop": 2337,
+        "rowBottom": 2424,
+        "amperage": 30,
+        "poles": 2,
+        "tripText": "30 A",
+        "polesText": "2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 17,
+        "rowTop": 2508,
+        "rowBottom": 2592,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 18,
+        "rowTop": 2592,
+        "rowBottom": 2678,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 19,
+        "rowTop": 2678,
+        "rowBottom": 2764,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 20,
+        "rowTop": 2764,
+        "rowBottom": 2848,
+        "amperage": 30,
+        "poles": 2,
+        "tripText": "30 A",
+        "polesText": "2"
+      },
+      {
+        "side": "right",
+        "rowIndex": 26,
+        "rowTop": 3275,
+        "rowBottom": 3359,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      },
+      {
+        "side": "right",
+        "rowIndex": 27,
+        "rowTop": 3359,
+        "rowBottom": 3443,
+        "amperage": 20,
+        "poles": 1,
+        "tripText": "20 A",
+        "polesText": "1"
+      }
+    ]
+  },
+  {
+    "image": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/PP_page001_panel02.png",
+    "results": {
+      "apiVersion": "API_15",
+      "origin": "/home/paperspace/ElectricalDiagramAnalyzer/OcrLibrary/BreakerTableParserAPIv15.py",
+      "stages": {
+        "analyzer": true,
+        "parser": true,
+        "header": true
+      },
+      "results": {
+        "analyzer": {
+          "src_path": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/PP_page001_panel02.png",
+          "header_y": 898,
+          "header_bottom_y": 1142,
+          "footer_y": null,
+          "footer_token_val": null,
+          "panel_size": null,
+          "debug_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug",
+          "gray": "[[255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n ...\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]\n [255 255 255 ... 255 255 255]]"
+        },
+        "parser": {
+          "parserVersion": "BreakerParser13",
+          "name": "MDP",
+          "spaces": null,
+          "detected_breakers": [],
+          "breakerCounts": {},
+          "gfiBreakerCounts": {},
+          "reviewCells": [],
+          "headerScan": {
+            "band_y1": 898,
+            "band_y2": 1142,
+            "tokens": [
+              {
+                "text": "CKTI",
+                "conf": 0.5175845081563776,
+                "box_band": [
+                  34,
+                  169,
+                  172,
+                  242
+                ],
+                "box_page": [
+                  34,
+                  1067,
+                  172,
+                  1140
+                ]
+              },
+              {
+                "text": "Wire Size",
+                "conf": 0.996935345306023,
+                "box_band": [
+                  322,
+                  169,
+                  602,
+                  241
+                ],
+                "box_page": [
+                  322,
+                  1067,
+                  602,
+                  1139
+                ]
+              },
+              {
+                "text": "Circuit Description",
+                "conf": 0.999960041657967,
+                "box_band": [
+                  1040,
+                  167,
+                  1590,
+                  243
+                ],
+                "box_page": [
+                  1040,
+                  1065,
+                  1590,
+                  1141
+                ]
+              },
+              {
+                "text": "Trip",
+                "conf": 0.7763069199243648,
+                "box_band": [
+                  1979,
+                  170,
+                  2115,
+                  243
+                ],
+                "box_page": [
+                  1979,
+                  1068,
+                  2115,
+                  1141
+                ]
+              },
+              {
+                "text": "Poles",
+                "conf": 0.9999638543767252,
+                "box_band": [
+                  2228,
+                  169,
+                  2402,
+                  242
+                ],
+                "box_page": [
+                  2228,
+                  1067,
+                  2402,
+                  1140
+                ]
+              },
+              {
+                "text": "A",
+                "conf": 0.999979853731535,
+                "box_band": [
+                  2649,
+                  176,
+                  2701,
+                  235
+                ],
+                "box_page": [
+                  2649,
+                  1074,
+                  2701,
+                  1133
+                ]
+              },
+              {
+                "text": "B",
+                "conf": 0.9833412040308964,
+                "box_band": [
+                  3173,
+                  174,
+                  3231,
+                  238
+                ],
+                "box_page": [
+                  3173,
+                  1072,
+                  3231,
+                  1136
+                ]
+              },
+              {
+                "text": "C",
+                "conf": 0.9569599371261042,
+                "box_band": [
+                  3704,
+                  172,
+                  3764,
+                  238
+                ],
+                "box_page": [
+                  3704,
+                  1070,
+                  3764,
+                  1136
+                ]
+              },
+              {
+                "text": "Poles",
+                "conf": 0.9999593228349047,
+                "box_band": [
+                  4007,
+                  171,
+                  4180,
+                  241
+                ],
+                "box_page": [
+                  4007,
+                  1069,
+                  4180,
+                  1139
+                ]
+              },
+              {
+                "text": "Trip",
+                "conf": 0.9999397397041321,
+                "box_band": [
+                  4289,
+                  170,
+                  4426,
+                  243
+                ],
+                "box_page": [
+                  4289,
+                  1068,
+                  4426,
+                  1141
+                ]
+              },
+              {
+                "text": "Circuit Description",
+                "conf": 0.9530345008708571,
+                "box_band": [
+                  4817,
+                  167,
+                  5368,
+                  243
+                ],
+                "box_page": [
+                  4817,
+                  1065,
+                  5368,
+                  1141
+                ]
+              },
+              {
+                "text": "Wire Size",
+                "conf": 0.7535072435835637,
+                "box_band": [
+                  5806,
+                  168,
+                  6087,
+                  240
+                ],
+                "box_page": [
+                  5806,
+                  1066,
+                  6087,
+                  1138
+                ]
+              },
+              {
+                "text": "CKTI",
+                "conf": 0.49974900484085083,
+                "box_band": [
+                  6236,
+                  169,
+                  6374,
+                  242
+                ],
+                "box_page": [
+                  6236,
+                  1067,
+                  6374,
+                  1140
+                ]
+              }
+            ],
+            "debugImageRaw": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel02_parser_header_band_raw.png",
+            "debugImageOverlay": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput/debug/PP_page001_panel02_parser_header_band_overlay.png",
+            "columnGroups": [
+              {
+                "index": 1,
+                "x_left": 33,
+                "x_right": 173,
+                "items": [
+                  {
+                    "text": "CKTI",
+                    "conf": 0.5175845081563776,
+                    "box_band": [
+                      34,
+                      169,
+                      172,
+                      242
+                    ],
+                    "box_page": [
+                      34,
+                      1067,
+                      172,
+                      1140
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "x_left": 173,
+                "x_right": 749,
+                "items": [
+                  {
+                    "text": "Wire Size",
+                    "conf": 0.996935345306023,
+                    "box_band": [
+                      322,
+                      169,
+                      602,
+                      241
+                    ],
+                    "box_page": [
+                      322,
+                      1067,
+                      602,
+                      1139
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 3,
+                "x_left": 749,
+                "x_right": 1881,
+                "items": [
+                  {
+                    "text": "Circuit Description",
+                    "conf": 0.999960041657967,
+                    "box_band": [
+                      1040,
+                      167,
+                      1590,
+                      243
+                    ],
+                    "box_page": [
+                      1040,
+                      1065,
+                      1590,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 4,
+                "x_left": 1881,
+                "x_right": 2217,
+                "items": [
+                  {
+                    "text": "Trip",
+                    "conf": 0.7763069199243648,
+                    "box_band": [
+                      1979,
+                      170,
+                      2115,
+                      243
+                    ],
+                    "box_page": [
+                      1979,
+                      1068,
+                      2115,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 5,
+                "x_left": 2217,
+                "x_right": 2410,
+                "items": [
+                  {
+                    "text": "Poles",
+                    "conf": 0.9999638543767252,
+                    "box_band": [
+                      2228,
+                      169,
+                      2402,
+                      242
+                    ],
+                    "box_page": [
+                      2228,
+                      1067,
+                      2402,
+                      1140
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 6,
+                "x_left": 2410,
+                "x_right": 2940,
+                "items": [
+                  {
+                    "text": "A",
+                    "conf": 0.999979853731535,
+                    "box_band": [
+                      2649,
+                      176,
+                      2701,
+                      235
+                    ],
+                    "box_page": [
+                      2649,
+                      1074,
+                      2701,
+                      1133
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 7,
+                "x_left": 2940,
+                "x_right": 3467,
+                "items": [
+                  {
+                    "text": "B",
+                    "conf": 0.9833412040308964,
+                    "box_band": [
+                      3173,
+                      174,
+                      3231,
+                      238
+                    ],
+                    "box_page": [
+                      3173,
+                      1072,
+                      3231,
+                      1136
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 8,
+                "x_left": 3467,
+                "x_right": 3995,
+                "items": [
+                  {
+                    "text": "C",
+                    "conf": 0.9569599371261042,
+                    "box_band": [
+                      3704,
+                      172,
+                      3764,
+                      238
+                    ],
+                    "box_page": [
+                      3704,
+                      1070,
+                      3764,
+                      1136
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 9,
+                "x_left": 3995,
+                "x_right": 4188,
+                "items": [
+                  {
+                    "text": "Poles",
+                    "conf": 0.9999593228349047,
+                    "box_band": [
+                      4007,
+                      171,
+                      4180,
+                      241
+                    ],
+                    "box_page": [
+                      4007,
+                      1069,
+                      4180,
+                      1139
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 10,
+                "x_left": 4188,
+                "x_right": 4527,
+                "items": [
+                  {
+                    "text": "Trip",
+                    "conf": 0.9999397397041321,
+                    "box_band": [
+                      4289,
+                      170,
+                      4426,
+                      243
+                    ],
+                    "box_page": [
+                      4289,
+                      1068,
+                      4426,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 11,
+                "x_left": 4527,
+                "x_right": 5658,
+                "items": [
+                  {
+                    "text": "Circuit Description",
+                    "conf": 0.9530345008708571,
+                    "box_band": [
+                      4817,
+                      167,
+                      5368,
+                      243
+                    ],
+                    "box_page": [
+                      4817,
+                      1065,
+                      5368,
+                      1141
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 12,
+                "x_left": 5658,
+                "x_right": 6235,
+                "items": [
+                  {
+                    "text": "Wire Size",
+                    "conf": 0.7535072435835637,
+                    "box_band": [
+                      5806,
+                      168,
+                      6087,
+                      240
+                    ],
+                    "box_page": [
+                      5806,
+                      1066,
+                      6087,
+                      1138
+                    ]
+                  }
+                ]
+              },
+              {
+                "index": 13,
+                "x_left": 6235,
+                "x_right": 6375,
+                "items": [
+                  {
+                    "text": "CKTI",
+                    "conf": 0.49974900484085083,
+                    "box_band": [
+                      6236,
+                      169,
+                      6374,
+                      242
+                    ],
+                    "box_page": [
+                      6236,
+                      1067,
+                      6374,
+                      1140
+                    ]
+                  }
+                ]
+              }
+            ],
+            "normalizedColumns": {
+              "roles": {
+                "description": 3,
+                "trip": 4,
+                "poles": 5
+              },
+              "columns": [
+                {
+                  "index": 1,
+                  "x_left": 33,
+                  "x_right": 173,
+                  "texts": [
+                    "CKTI"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 2,
+                  "x_left": 173,
+                  "x_right": 749,
+                  "texts": [
+                    "Wire",
+                    "Size"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 3,
+                  "x_left": 749,
+                  "x_right": 1881,
+                  "texts": [
+                    "Circuit",
+                    "Description"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 4,
+                  "x_left": 1881,
+                  "x_right": 2217,
+                  "texts": [
+                    "Trip"
+                  ],
+                  "role": "trip",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 5,
+                  "x_left": 2217,
+                  "x_right": 2410,
+                  "texts": [
+                    "Poles"
+                  ],
+                  "role": "poles",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 6,
+                  "x_left": 2410,
+                  "x_right": 2940,
+                  "texts": [
+                    "A"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 7,
+                  "x_left": 2940,
+                  "x_right": 3467,
+                  "texts": [
+                    "B"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 8,
+                  "x_left": 3467,
+                  "x_right": 3995,
+                  "texts": [
+                    "C"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 9,
+                  "x_left": 3995,
+                  "x_right": 4188,
+                  "texts": [
+                    "Poles"
+                  ],
+                  "role": "poles",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 10,
+                  "x_left": 4188,
+                  "x_right": 4527,
+                  "texts": [
+                    "Trip"
+                  ],
+                  "role": "trip",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 11,
+                  "x_left": 4527,
+                  "x_right": 5658,
+                  "texts": [
+                    "Circuit",
+                    "Description"
+                  ],
+                  "role": "description",
+                  "ignoredReason": null
+                },
+                {
+                  "index": 12,
+                  "x_left": 5658,
+                  "x_right": 6235,
+                  "texts": [
+                    "Wire",
+                    "Size"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                },
+                {
+                  "index": 13,
+                  "x_left": 6235,
+                  "x_right": 6375,
+                  "texts": [
+                    "CKTI"
+                  ],
+                  "role": null,
+                  "ignoredReason": null
+                }
+              ],
+              "layout": "separated"
+            }
+          },
+          "separatedScan": {
+            "layout": "separated",
+            "bodyColumns": [],
+            "detected_breakers": [],
+            "breakerCounts": {},
+            "error": "Missing footer_y from analyzer; cannot determine body band."
+          },
+          "combinedScan": null,
+          "reviewOverlayPath": "review_overlays/MDP_review_overlay.png",
+          "sizeDetectionStatus": "unknown",
+          "bodyParseStatus": "skipped",
+          "bodyParseNote": "Could not determine panel size/spaces."
+        },
+        "header": {
+          "type": "panelboard",
+          "name": "MDP",
+          "attrs": {
+            "amperage": 400,
+            "voltage": 208,
+            "intRating": 65,
+            "detected_breakers": [],
+            "mainBreakerAmperage": 400,
+            "trimStyle": "SURFACE",
+            "enclosure": "Nema3R",
+            "breaker_data_suppressed": true,
+            "breaker_suppression_reason": "Could not determine panel size/spaces."
+          },
+          "winningBoxes": {
+            "name": [
+              520,
+              40,
+              1656,
+              208
+            ],
+            "voltage": [
+              3010,
+              207,
+              3582,
+              303
+            ],
+            "bus": [
+              4636,
+              372,
+              5230,
+              483
+            ],
+            "main": [
+              4677,
+              452,
+              5229,
+              557
+            ],
+            "mounting": [
+              1038,
+              382,
+              1589,
+              478
+            ],
+            "enclosure": [
+              1018,
+              457,
+              1604,
+              553
+            ],
+            "aic": [
+              4656,
+              202,
+              5290,
+              313
+            ]
+          },
+          "boxImageShape": {
+            "w": 6408,
+            "h": 3976
+          },
+          "reviewOverlayPath": "review_overlays/MDP_review_overlay.png",
+          "panelNote": "Could not determine panel size/spaces."
+        }
+      },
+      "panelStatus": "detected but skipped (MDP)"
+    },
+    "header_breakers": [],
+    "table_breakers": []
+  }
+]
