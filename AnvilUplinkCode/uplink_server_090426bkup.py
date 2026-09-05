@@ -11,7 +11,6 @@ import anvil.server
 import platform
 import os as _os
 from anvil import BlobMedia
-import hashlib
 
 # ---------- CONFIG ----------
 # Resolve the repo root from this file's location so the server runs
@@ -44,7 +43,7 @@ Do not use this job for troubleshooting, QA review, style analysis, training, or
 """
 
 CLEANUP_SWEEP_INTERVAL_SEC = int(os.environ.get("CLEANUP_SWEEP_INTERVAL_SEC", "600"))  # 10 minutes
-
+ 
 # ---------- PANEL FINDER CONFIG (PanelSearchToolV18) ----------
 PANEL_FINDER_DEFAULTS = {
     "render_dpi": 1400,
@@ -174,7 +173,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv16 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+from OcrLibrary.BreakerTableParserAPIv15 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine7 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
@@ -2823,37 +2822,6 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     panel_note = str(hdr.get("panelNote") or "").strip()
     special_header_type = hdr.get("specialHeaderType") if isinstance(hdr.get("specialHeaderType"), dict) else None
 
-    # Existing-panel metadata normally comes from the header parser.
-    # Fall back to parser/root payload defensively in case the pipeline
-    # nests the header-parser result differently.
-    suspected_existing = bool(
-        hdr.get("suspectedExisting", False)
-        or prs.get("suspectedExisting", False)
-        or (result_dict or {}).get("suspectedExisting", False)
-    )
-
-    existing_reason = str(
-        hdr.get("existingReason")
-        or prs.get("existingReason")
-        or (result_dict or {}).get("existingReason")
-        or ""
-    ).strip()
-
-    existing_detection = str(
-        hdr.get("existingDetection")
-        or prs.get("existingDetection")
-        or (result_dict or {}).get("existingDetection")
-        or ""
-    ).strip()
-
-    print(
-        f"[EXISTING DEBUG] "
-        f"name={hdr.get('name')!r} "
-        f"flag={suspected_existing!r} "
-        f"detection={existing_detection!r} "
-        f"reason={existing_reason!r}"
-    )
-
     # Header fields
     name   = hdr.get("name") or ""
     h_attrs = hdr.get("attrs") or {}
@@ -2938,17 +2906,9 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
         "type": "panelboard",
         "name": name,
         "source": src_img,
-
         "panelStatus": panel_status,
         "panelNote": panel_note,
         "specialHeaderType": special_header_type,
-
-        # Existing-equipment review metadata.
-        # Does NOT affect Rules Engine processing.
-        "suspectedExisting": suspected_existing,
-        "existingReason": existing_reason,
-        "existingDetection": existing_detection,
-
         "attrs": {
             "amperage": amperage,
             "spaces": spaces,
@@ -5034,61 +4994,27 @@ if not _IS_WORKER_SUBPROCESS:
             _spawn_persistent_worker(i)
 
         for i in range(MAX_WORKERS):
-            t = threading.Thread(
-                target=_dequeue_loop,
-                args=(i,),
-                daemon=True,
-            )
+            t = threading.Thread(target=_dequeue_loop, args=(i,), daemon=True)
             t.start()
             _WORKERS.append(t)
 
         print(
             f">>> Worker pool started: {MAX_WORKERS} slots, "
-            f"{MAX_WORKERS} dequeue threads, "
-            f"per-user cap={MAX_INFLIGHT_PER_USER}"
+            f"{MAX_WORKERS} dequeue threads, per-user cap={MAX_INFLIGHT_PER_USER}"
         )
 
         # Important:
-        # If the uplink process restarted, status.json files survived
-        # but _JOB_Q did not. Requeue stranded jobs.
+        # If the uplink process restarted, status.json files survived but _JOB_Q did not.
+        # This requeues stranded queued/running jobs so customers do not get stuck forever.
         _recover_orphaned_detection_jobs_on_startup()
 
     except Exception as e:
-        print(
-            f">>> Worker pool startup failed: {e}"
-        )
-        print(
-            traceback.format_exc()
-        )
+        print(f">>> Worker pool startup failed: {e}")
+        print(traceback.format_exc())
 
-
-# --------------------------------------------------
-# Background retention cleanup
-#
-# This runs maintenance separately from customer
-# requests so status/result calls stay lightweight.
-# --------------------------------------------------
-if not _IS_WORKER_SUBPROCESS:
-    try:
-        _retention_thread = threading.Thread(
-            target=_excluded_cleanup_loop,
-            name="job-retention-cleanup",
-            daemon=True,
-        )
-
-        _retention_thread.start()
-
-        print(
-            f">>> Retention cleanup thread started | "
-            f"interval={CLEANUP_SWEEP_INTERVAL_SEC}s"
-        )
-
-    except Exception as e:
-        print(
-            f">>> Could not start retention cleanup thread: "
-            f"{type(e).__name__}: {e}"
-        )
-
+        # If workers cannot start, make sure stale active jobs do not sit forever.
+        # This does not mark brand-new queued jobs error immediately; it only lets
+        # status polling/queue timeout handle them.
 
 def _active_job_for_owner(owner_email: str, group_folder: str = "personal") -> dict | None:
     """
@@ -6346,410 +6272,73 @@ def vm_list_overlay_images(job_id: str, owner_email: str, group_folder: str = "p
     return out
 
 @anvil.server.callable
-def vm_fetch_image(
-    job_id: str,
-    owner_email: str,
-    source_path: str,
-    group_folder: str = "personal",
-):
+def vm_fetch_image(job_id: str, owner_email: str, source_path: str, group_folder: str = "personal"):
     """
-    Return a lightweight cached WEB PREVIEW of a job image.
-
-    IMPORTANT:
-      - Original detection/OCR image is NEVER modified.
-      - Large source images are resized/compressed for browser display.
-      - Generated web previews are cached on disk.
-      - Subsequent requests reuse the cached preview.
-
-    This prevents huge PNG files from being pushed through
-    Anvil Uplink every time the output page needs an image.
+    Return an image as BlobMedia.
+    Accepts only job-relative paths inside this job folder.
     """
-    import hashlib
-    import cv2
-
-    started = time.perf_counter()
-
-    job_id = str(
-        job_id or ""
-    ).strip()
-
-    owner_email = str(
-        owner_email or ""
-    ).strip().lower()
-
-    raw = str(
-        source_path or ""
-    ).strip().replace("\\", "/")
+    job_id = str(job_id or "").strip()
+    owner_email = str(owner_email or "").strip().lower()
+    raw = str(source_path or "").strip().replace("\\", "/")
 
     if not job_id or not owner_email or not raw:
-        raise RuntimeError(
-            "Image unavailable."
-        )
+        raise RuntimeError("Image unavailable.")
 
-    if (
-        "/" in job_id
-        or "\\" in job_id
-        or ".." in job_id
-    ):
-        raise RuntimeError(
-            "Image unavailable."
-        )
+    if "/" in job_id or "\\" in job_id or ".." in job_id:
+        raise RuntimeError("Image unavailable.")
 
-    # Never accept absolute client paths.
+    # Do not accept absolute paths from the client.
     p_in = Path(raw)
-
     if p_in.is_absolute():
-        raise RuntimeError(
-            "Image unavailable."
-        )
+        raise RuntimeError("Image unavailable.")
 
     if ".." in p_in.parts:
-        raise RuntimeError(
-            "Image unavailable."
-        )
+        raise RuntimeError("Image unavailable.")
 
-    # --------------------------------------------------
-    # Resolve correct job folder
-    # --------------------------------------------------
     if job_id.startswith("specs_"):
-        job_root = (
-            _resolve_specs_job_dir_for_owner(
-                job_id,
-                owner_email,
-                group_folder,
-            )
-        )
+        job_root = _resolve_specs_job_dir_for_owner(job_id, owner_email, group_folder)
     else:
-        job_root = (
-            _resolve_job_dir_for_owner(
-                job_id,
-                owner_email,
-                group_folder,
-            )
-        )
-
+        job_root = _resolve_job_dir_for_owner(job_id, owner_email, group_folder)
     if job_root is None:
-        raise RuntimeError(
-            "Image unavailable."
-        )
+        raise RuntimeError("Image unavailable.")
 
-    sp = _status_paths(
-        job_root
-    )
-
-    st = (
-        _json_read_or_none(
-            sp["status"]
-        )
-        or {}
-    )
+    sp = _status_paths(job_root)
+    st = _json_read_or_none(sp["status"]) or {}
 
     if _is_excluded_job_expired(st):
         try:
-            shutil.rmtree(
-                job_root,
-                ignore_errors=True,
-            )
-
-            print(
-                f">>> deleted expired excluded "
-                f"job on image fetch: {job_root}"
-            )
-
+            shutil.rmtree(job_root, ignore_errors=True)
+            print(f">>> deleted expired excluded job on image fetch: {job_root}")
         except Exception:
             pass
+        raise FileNotFoundError("Job not found. Please resubmit your PDF.")
 
-        raise FileNotFoundError(
-            "Job not found. "
-            "Please resubmit your PDF."
-        )
+    job_owner = str(st.get("owner_email") or st.get("owner_id") or "").strip().lower()
+    if not job_owner or job_owner != owner_email:
+        raise RuntimeError("Image unavailable.")
 
-    job_owner = str(
-        st.get("owner_email")
-        or st.get("owner_id")
-        or ""
-    ).strip().lower()
-
-    if (
-        not job_owner
-        or job_owner != owner_email
-    ):
-        raise RuntimeError(
-            "Image unavailable."
-        )
-
-    # --------------------------------------------------
-    # Resolve requested image
-    # --------------------------------------------------
-    p = (
-        job_root / p_in
-    ).resolve()
+    p = (job_root / p_in).resolve()
 
     try:
-        p.relative_to(
-            job_root
-        )
-
+        p.relative_to(job_root)
     except ValueError:
-        raise RuntimeError(
-            "Image unavailable."
-        )
+        raise RuntimeError("Image unavailable.")
 
     if not p.is_file():
-        raise RuntimeError(
-            "Image unavailable."
-        )
+        raise RuntimeError("Image unavailable.")
 
-    if p.suffix.lower() not in (
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-    ):
-        raise RuntimeError(
-            "Image unavailable."
-        )
+    if p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+        raise RuntimeError("Image unavailable.")
 
-    stat = p.stat()
+    ctype_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
 
-    original_size = int(
-        stat.st_size
-    )
-
-    # --------------------------------------------------
-    # Small images can already travel directly.
-    #
-    # No point spending CPU recompressing a 300 KB image.
-    # --------------------------------------------------
-    DIRECT_LIMIT = (
-        300_000
-    )
-
-    if original_size <= DIRECT_LIMIT:
-        data = p.read_bytes()
-
-        ctype_map = {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".webp": "image/webp",
-        }
-
-        ctype = ctype_map.get(
-            p.suffix.lower(),
-            "application/octet-stream",
-        )
-
-        elapsed = (
-            time.perf_counter()
-            - started
-        )
-
-        print(
-            f">>> IMAGE DIRECT | "
-            f"{p.name} | "
-            f"{original_size / 1024 / 1024:.2f} MB | "
-            f"{elapsed:.3f}s"
-        )
-
-        return BlobMedia(
-            ctype,
-            data,
-            name=p.name,
-        )
-
-    # --------------------------------------------------
-    # Large image:
-    # create/reuse web-friendly cached JPEG.
-    # --------------------------------------------------
-    MAX_DIMENSION = 1800
-    JPEG_QUALITY = 80
-
-    cache_dir = (
-        Path(job_root)
-        / ".web_previews"
-    )
-
-    cache_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    cache_identity = (
-        f"{raw}|"
-        f"{stat.st_size}|"
-        f"{stat.st_mtime_ns}|"
-        f"{MAX_DIMENSION}|"
-        f"{JPEG_QUALITY}"
-    )
-
-    cache_hash = hashlib.sha1(
-        cache_identity.encode(
-            "utf-8"
-        )
-    ).hexdigest()
-
-    preview_path = (
-        cache_dir
-        / f"{cache_hash}.jpg"
-    )
-
-    # --------------------------------------------------
-    # Cached preview already exists.
-    # --------------------------------------------------
-    if preview_path.is_file():
-        preview_bytes = (
-            preview_path.read_bytes()
-        )
-
-        elapsed = (
-            time.perf_counter()
-            - started
-        )
-
-        print(
-            f">>> IMAGE CACHE HIT | "
-            f"{p.name} | "
-            f"original="
-            f"{original_size / 1024 / 1024:.2f} MB | "
-            f"preview="
-            f"{len(preview_bytes) / 1024 / 1024:.2f} MB | "
-            f"{elapsed:.3f}s"
-        )
-
-        return BlobMedia(
-            "image/jpeg",
-            preview_bytes,
-            name=(
-                f"{p.stem}_web.jpg"
-            ),
-        )
-
-    # --------------------------------------------------
-    # Build cached preview.
-    # --------------------------------------------------
-    decode_start = (
-        time.perf_counter()
-    )
-
-    img = cv2.imread(
-        str(p),
-        cv2.IMREAD_COLOR,
-    )
-
-    if img is None:
-        raise RuntimeError(
-            "Image could not be decoded."
-        )
-
-    decode_sec = (
-        time.perf_counter()
-        - decode_start
-    )
-
-    h, w = img.shape[:2]
-
-    longest = max(
-        int(w),
-        int(h),
-    )
-
-    if longest > MAX_DIMENSION:
-        scale = (
-            MAX_DIMENSION
-            / float(longest)
-        )
-
-        new_w = max(
-            1,
-            int(round(w * scale)),
-        )
-
-        new_h = max(
-            1,
-            int(round(h * scale)),
-        )
-
-        img = cv2.resize(
-            img,
-            (new_w, new_h),
-            interpolation=cv2.INTER_AREA,
-        )
-
-    else:
-        new_w = int(w)
-        new_h = int(h)
-
-    encode_start = (
-        time.perf_counter()
-    )
-
-    ok, encoded = cv2.imencode(
-        ".jpg",
-        img,
-        [
-            int(
-                cv2.IMWRITE_JPEG_QUALITY
-            ),
-            JPEG_QUALITY,
-        ],
-    )
-
-    if not ok:
-        raise RuntimeError(
-            "Could not create web preview."
-        )
-
-    preview_bytes = (
-        encoded.tobytes()
-    )
-
-    encode_sec = (
-        time.perf_counter()
-        - encode_start
-    )
-
-    # Persist for future page loads.
-    try:
-        preview_path.write_bytes(
-            preview_bytes
-        )
-    except Exception as e:
-        print(
-            f">>> Could not cache web preview | "
-            f"{type(e).__name__}: {e}"
-        )
-
-    total_sec = (
-        time.perf_counter()
-        - started
-    )
-
-    print(
-        "\n"
-        ">>> WEB IMAGE CREATED\n"
-        f"    source: {p.name}\n"
-        f"    original dimensions: "
-        f"{w}x{h}\n"
-        f"    preview dimensions: "
-        f"{new_w}x{new_h}\n"
-        f"    original size: "
-        f"{original_size / 1024 / 1024:.2f} MB\n"
-        f"    preview size: "
-        f"{len(preview_bytes) / 1024 / 1024:.2f} MB\n"
-        f"    decode: "
-        f"{decode_sec:.3f}s\n"
-        f"    encode: "
-        f"{encode_sec:.3f}s\n"
-        f"    VM total: "
-        f"{total_sec:.3f}s\n"
-    )
-
-    return BlobMedia(
-        "image/jpeg",
-        preview_bytes,
-        name=f"{p.stem}_web.jpg",
-    )
+    ctype = ctype_map.get(p.suffix.lower(), "application/octet-stream")
+    return BlobMedia(ctype, p.read_bytes(), name=p.name)
 
 @anvil.server.callable
 def vm_set_watchdog_timeout(minutes: int) -> dict:
@@ -6964,6 +6553,7 @@ def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "person
     """Status primarily from disk; does not return final result. Enforces ownership by email."""
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
+    _cleanup_expired_excluded_jobs()
 
     if not job_id or not owner_email:
         return {
@@ -7085,6 +6675,8 @@ def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "person
 @anvil.server.callable
 def vm_list_jobs(owner_id: str, limit: int = 50, group_folder: str = "personal") -> list[dict]:
     print(f">>> vm_list_jobs called | owner_id={owner_id!r} | NODE_ID={NODE_ID}")
+
+    _cleanup_all_retention_policies()
 
     owner_id = str(owner_id or "").strip().lower()
     if not owner_id:

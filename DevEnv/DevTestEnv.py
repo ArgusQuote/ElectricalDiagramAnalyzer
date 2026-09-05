@@ -17,10 +17,10 @@ if project_root not in sys.path:
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV5 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv15 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv16 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/PP.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/Panels_Example.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -79,37 +79,111 @@ def normalize_header_attrs(attrs: dict | None) -> dict:
     }
 
 
-def build_component_summary(img_path: str, result: dict, unnamed_counts: dict[str, int]) -> dict:
+def build_component_summary(
+    img_path: str,
+    result: dict,
+    unnamed_counts: dict[str, int]
+) -> dict:
     stages = result.get("results") or {}
     hdr_res = stages.get("header") or {}
 
-    raw_name = str((hdr_res.get("name") or "")).strip()
-    base_name = raw_name if raw_name else "(unnamed)"
+    raw_name = str(
+        hdr_res.get("name") or ""
+    ).strip()
 
-    unnamed_counts[base_name] = unnamed_counts.get(base_name, 0) + 1
+    base_name = (
+        raw_name
+        if raw_name
+        else "(unnamed)"
+    )
+
+    unnamed_counts[base_name] = (
+        unnamed_counts.get(base_name, 0) + 1
+    )
+
     occurrence = unnamed_counts[base_name]
 
     if occurrence == 1:
         final_name = base_name
     else:
-        final_name = f"{base_name} ({occurrence})"
+        final_name = (
+            f"{base_name} ({occurrence})"
+        )
 
-    attrs = normalize_header_attrs((hdr_res.get("attrs") or {}))
+    attrs = normalize_header_attrs(
+        hdr_res.get("attrs") or {}
+    )
 
-    panel_note = str(hdr_res.get("panelNote") or "").strip()
-    special_header_type = hdr_res.get("specialHeaderType")
-    panel_status = str((result.get("panelStatus") or "")).strip()
+    panel_note = str(
+        hdr_res.get("panelNote") or ""
+    ).strip()
+
+    special_header_type = hdr_res.get(
+        "specialHeaderType"
+    )
+
+    panel_status = str(
+        result.get("panelStatus") or ""
+    ).strip()
+
+    # -----------------------------------------
+    # Existing-panel metadata
+    # Mirror the production server behavior.
+    # This does NOT skip or alter the panel.
+    # -----------------------------------------
+    suspected_existing = bool(
+        hdr_res.get(
+            "suspectedExisting",
+            False,
+        )
+    )
+
+    existing_reason = str(
+        hdr_res.get(
+            "existingReason"
+        )
+        or ""
+    ).strip()
+
+    existing_detection = str(
+        hdr_res.get(
+            "existingDetection"
+        )
+        or ""
+    ).strip()
 
     return {
         "type": "panelboard",
         "name": final_name,
         "source": str(img_path),
+
         "panelStatus": panel_status,
         "panelNote": panel_note,
-        "specialHeaderType": ensure_json_safe(special_header_type) if isinstance(special_header_type, dict) else None,
+
+        "specialHeaderType": (
+            ensure_json_safe(
+                special_header_type
+            )
+            if isinstance(
+                special_header_type,
+                dict,
+            )
+            else None
+        ),
+
+        # Existing-equipment metadata
+        "suspectedExisting": (
+            suspected_existing
+        ),
+        "existingReason": (
+            existing_reason
+        ),
+        "existingDetection": (
+            existing_detection
+        ),
+
         "attrs": attrs,
     }
-
 
 def build_default_ui_overrides() -> dict:
     return {
@@ -270,6 +344,27 @@ def main():
         print("panelNote :", hdr_res.get("panelNote"))
         print("specialHeaderType :", hdr_res.get("specialHeaderType"))
         print("panelStatus :", result.get("panelStatus"))
+        print(
+            "suspectedExisting :",
+            hdr_res.get(
+                "suspectedExisting",
+                False,
+            ),
+        )
+
+        print(
+            "existingDetection :",
+            hdr_res.get(
+                "existingDetection",
+            ),
+        )
+
+        print(
+            "existingReason :",
+            hdr_res.get(
+                "existingReason",
+            ),
+        )
         hdr_breakers = ((hdr_res.get("attrs") or {}).get("detected_breakers") or [])
 
         print("\n=== TABLE PARSER (summary) ===")
