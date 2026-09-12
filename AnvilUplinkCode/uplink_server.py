@@ -2958,6 +2958,12 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
             "trimStyle": trim_style,
             "enclosure": enclosure,
             "detected_breakers": det_brkrs,
+            "breaker_position_issues": list(
+                (prs or {}).get(
+                    "breakerPositionIssues"
+                )
+                or []
+            ),
         },
     }
 
