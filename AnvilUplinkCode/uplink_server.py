@@ -4909,7 +4909,7 @@ def _run_specs_analysis_job(job_id: str):
             job_type="specs_analysis",
         )
 
-        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV5.py"
+        module_path = REPO_ROOT / "Spec_Sheet_Analysis" / "Specs_AnalyzerV7.py"
         print(f">>> SPECS DEBUG selected module_path={module_path}")
 
         if not module_path.is_file():
@@ -4929,7 +4929,7 @@ def _run_specs_analysis_job(job_id: str):
 
         analyze_specs_pdf_for_ui = getattr(spec_module, "analyze_specs_pdf_for_ui", None)
         if analyze_specs_pdf_for_ui is None:
-            raise AttributeError("Specs_AnalyzerV5.py does not define analyze_specs_pdf_for_ui")
+            raise AttributeError("Specs_AnalyzerV7.py does not define analyze_specs_pdf_for_ui")
 
         result = analyze_specs_pdf_for_ui(
             pdf_path=str(saved_pdf),

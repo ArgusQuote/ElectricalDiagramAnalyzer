@@ -2174,13 +2174,75 @@ def detect_next_spec_boundary(
                 )
             )
 
+
+            # ----------------------------------------------
+            # Compact CSI specification sections.
+            #
+            # Example:
+            #   26 30 00 - FACILITY ELECTRICAL POWER
+            #   26 32 00 - PACKAGED GENERATOR ASSEMBLIES
+            #   A. GENERAL
+            #
+            # Or:
+            #   26 24 23 - ENCLOSED LOW-VOLTAGE
+            #   MOTOR CONTROLLERS
+            #   A. Combination starters shall...
+            #
+            # These documents use lettered requirements
+            # rather than PART 1 / 1.01 structure.
+            # ----------------------------------------------
+            compact_heading_pattern = re.compile(
+                r"^\s*(?:SECTION\s+)?"
+                r"\d{2}[\s.\-]*\d{2}[\s.\-]*\d{2}"
+                r"(?:\.\d{2})?"
+                r"\s+[-–—]\s+[A-Za-z]",
+                re.IGNORECASE
+            )
+
+            compact_heading = bool(
+                compact_heading_pattern.match(line)
+            )
+
+            direct_lettered_body = bool(
+                following
+                and re.match(
+                    r"^A\.\s+\S",
+                    following[0]
+                )
+            )
+
+            nested_compact_body = bool(
+                len(following) >= 2
+                and compact_heading_pattern.match(
+                    following[0]
+                )
+                and re.match(
+                    r"^A\.\s+\S",
+                    following[1]
+                )
+            )
+
+            compact_section_found = (
+                compact_heading
+                and (
+                    direct_lettered_body
+                    or nested_compact_body
+                )
+            )
+
             if (
                 not is_toc
                 and not is_page_number
-                and part_one_found
-                and (inline_title or split_title)
+                and (
+                    (
+                        part_one_found
+                        and (inline_title or split_title)
+                    )
+                    or compact_section_found
+                )
             ):
                 return "next_csi_section"
+
 
     # -------------------------------------------------
     # 2. Legacy Division 16 section headings
@@ -4471,6 +4533,41 @@ def test_boundary_detector():
             ],
             None,
             1,
+        ),
+        (
+            "S7 compact nested section",
+            [
+                "26 30 00 - FACILITY ELECTRICAL "
+                "POWER GENERATING AND STORING EQUIPMENT",
+                "26 32 00 - PACKAGED GENERATOR ASSEMBLIES",
+                "A. GENERAL",
+                "1. Preferred manufacturers:",
+            ],
+            "next_csi_section",
+            0,
+        ),
+        (
+            "S18 compact direct section",
+            [
+                "26 24 23 - ENCLOSED LOW-VOLTAGE "
+                "MOTOR CONTROLLERS",
+                "A. Combination starters and motor "
+                "control centers shall have fuses.",
+                "B. Provide phase loss protection.",
+            ],
+            "next_csi_section",
+            0,
+        ),
+        (
+            "S13 comma-separated reference protection",
+            [
+                "26 05 11, REQUIREMENTS FOR "
+                "ELECTRICAL INSTALLATIONS.",
+                "Requirements common to Division 26.",
+                "1.3 QUALITY ASSURANCE",
+            ],
+            None,
+            0,
         ),
         (
             "Standalone related-work reference",
