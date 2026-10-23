@@ -17,10 +17,10 @@ if project_root not in sys.path:
 # ---------- IMPORTS ----------
 from PageFilter.PageFilterV5 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv16 import BreakerTablePipeline, API_VERSION
+from OcrLibrary.BreakerTableParserAPIv17 import BreakerTablePipeline, API_VERSION
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/NESTLE.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/J.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -86,6 +86,7 @@ def build_component_summary(
 ) -> dict:
     stages = result.get("results") or {}
     hdr_res = stages.get("header") or {}
+    tbl_res = stages.get("parser") or {}
 
     raw_name = str(
         hdr_res.get("name") or ""
@@ -117,6 +118,22 @@ def build_component_summary(
     panel_note = str(
         hdr_res.get("panelNote") or ""
     ).strip()
+
+    # --- Existing breakers from description column ---
+    existing_breaker_count = int(
+        tbl_res.get("existingBreakerCount") or 0
+    )
+
+    existing_breaker_note = str(
+        tbl_res.get("existingBreakerNote") or ""
+    ).strip()
+
+    if existing_breaker_note and existing_breaker_note not in panel_note:
+        panel_note = (
+            f"{panel_note} | {existing_breaker_note}"
+            if panel_note
+            else existing_breaker_note
+        )
 
     special_header_type = hdr_res.get(
         "specialHeaderType"
@@ -159,6 +176,10 @@ def build_component_summary(
 
         "panelStatus": panel_status,
         "panelNote": panel_note,
+
+        "hasExistingBreakers": bool(existing_breaker_count),
+        "existingBreakerCount": existing_breaker_count,
+        "existingBreakerNote": existing_breaker_note,
 
         "specialHeaderType": (
             ensure_json_safe(

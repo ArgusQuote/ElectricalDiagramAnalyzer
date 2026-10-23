@@ -174,7 +174,7 @@ _log_run_fingerprint("init")
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv16 import BreakerTablePipeline, API_VERSION, reset_name_deduper
+from OcrLibrary.BreakerTableParserAPIv17 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine7 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
@@ -2921,6 +2921,26 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     spaces     = spaces_t if spaces_t is not None else spaces_h
     det_brkrs  = hdr_brkrs + tbl_brkrs
 
+
+    # --- Existing breakers detected within this panel ---
+    # This is separate from whether the panel itself is existing.
+    existing_breaker_count = int(
+        (prs or {}).get("existingBreakerCount") or 0
+    )
+
+    existing_breaker_note = str(
+        (prs or {}).get("existingBreakerNote") or ""
+    ).strip()
+
+    # Preserve any existing panel note and append this warning.
+    if existing_breaker_note and existing_breaker_note not in panel_note:
+        panel_note = (
+            f"{panel_note} | {existing_breaker_note}"
+            if panel_note
+            else existing_breaker_note
+        )
+
+
     # ===== 2-strikes pre-check =====
     panel_limit = next((v for v in (main_amp, amperage) if isinstance(v, int) and v > 0), None)
     would_skip = _count_would_skip_breakers(det_brkrs, panel_limit)
@@ -2942,6 +2962,10 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
         "panelStatus": panel_status,
         "panelNote": panel_note,
         "specialHeaderType": special_header_type,
+
+        "hasExistingBreakers": bool(existing_breaker_count),
+        "existingBreakerCount": existing_breaker_count,
+        "existingBreakerNote": existing_breaker_note,
 
         # Existing-equipment review metadata.
         # Does NOT affect Rules Engine processing.
