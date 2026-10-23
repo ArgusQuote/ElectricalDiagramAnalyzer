@@ -635,6 +635,8 @@ def _normalize_component_for_none(obj):
     def coerce(v):
         if v is None:
             return "NONE"
+        if isinstance(v, bool):
+            return v
         if isinstance(v, Path):
             return str(v)
         if isinstance(v, NP_INT):

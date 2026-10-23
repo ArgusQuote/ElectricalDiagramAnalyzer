@@ -10,7 +10,7 @@ try:
 except Exception:
     _HAS_OCR = False
 
-PARSER_VERSION = "BreakerParser13"
+PARSER_VERSION = "BreakerParser14"
 
 _HDR_OCR_SCALE        = 2.0
 _HDR_OCR_ALLOWLIST    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -/().#"
