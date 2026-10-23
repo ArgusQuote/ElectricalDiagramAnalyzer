@@ -1,0 +1,195 @@
+{
+  "ok": true,
+  "job_id": "DEREKFIRST__20261019_191056",
+  "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/DEREKFIRST__20261019_191056",
+  "saved_pdf": "/home/marco/Documents/pdfToScan/derekfirst.pdf",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/DEREKFIRST__20261019_191056",
+  "images": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page008_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page008_panel02.png"
+  ],
+  "image_count": 6,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "B (4)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 200,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "B (5)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "A (3)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "225A (2)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page007_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 42,
+        "mainBreakerAmperage": 200,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MOUINTTNG",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page008_panel01.png",
+      "panelStatus": "detected but skipped (MOUINTTNG)",
+      "panelNote": "Lighting schedule detected",
+      "specialHeaderType": {
+        "kind": "lighting_schedule",
+        "note": "Lighting schedule detected",
+        "matched_text": "LIGHTING FIXTURE SCHEDULE LIGHTING FIXTURE SCHEDULE",
+        "matched_tokens": [
+          "FIXTURE",
+          "LIGHT",
+          "SCHEDULE"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (5)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PanelSearchOutput/derekfirst_electrical_filtered_page008_panel02.png",
+      "panelStatus": "detected but skipped ((unnamed) (5))",
+      "panelNote": "Could not determine panel size/spaces.",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": null,
+        "spaces": "NONE",
+        "voltage": null,
+        "intRating": null,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "B (4)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "B (5)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "A (3)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "225A (2)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MOUINTTNG": {
+      "Skipped": "Lighting schedule detected"
+    },
+    "(unnamed) (5)": {
+      "Skipped": "Could not determine panel size/spaces."
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 66306,
+  "cycle_time_str": "00:01:06:306",
+  "noticed_ts_ms": 1792455056861,
+  "parse_done_ts_ms": 1792455123167,
+  "debug": {
+    "kept_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/derekfirst/PdfOutput/derekfirst_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_15",
+    "header_breakers_total": 0,
+    "table_breakers_total": 103,
+    "parser_debug": false
+  }
+}

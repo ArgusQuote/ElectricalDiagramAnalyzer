@@ -1,0 +1,709 @@
+{
+  "ok": true,
+  "job_id": "PAGES_FROM_AGRACE_PHASE_2_BID_SET__20261019_190311",
+  "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/PAGES_FROM_AGRACE_PHASE_2_BID_SET__20261019_190311",
+  "saved_pdf": "/home/marco/Documents/pdfToScan/Pages_from_Agrace_Phase_2_BID_SET.pdf",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/PAGES_FROM_AGRACE_PHASE_2_BID_SET__20261019_190311",
+  "images": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page006_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page006_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page006_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page008_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page008_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page008_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page009_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page009_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page009_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page011_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page011_panel02.png"
+  ],
+  "image_count": 31,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (3)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel01.png",
+      "panelStatus": "detected but skipped ((unnamed) (3))",
+      "panelNote": "Switchboard detected",
+      "specialHeaderType": {
+        "kind": "switchboard",
+        "note": "Switchboard detected",
+        "matched_text": "Switchboard: MDP-A1 Switchboard: MDP-A1",
+        "matched_tokens": [
+          "A1",
+          "MDP",
+          "SWITCHBOARD"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-A1B",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LP-A1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-AIA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page003_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 250,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 250,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MP-A1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MP-A2-LL",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (4)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel03.png",
+      "panelStatus": "detected but skipped ((unnamed) (4))",
+      "panelNote": "Switchboard detected",
+      "specialHeaderType": {
+        "kind": "switchboard",
+        "note": "Switchboard detected",
+        "matched_text": "Switchboard: MDP-A2 Switchboard: MDP-A2",
+        "matched_tokens": [
+          "A2",
+          "MDP",
+          "SWITCHBOARD"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LP-A2-LL",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page004_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 110,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 110,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-H7",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 110,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 110,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-H5",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 110,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 110,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-H8",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 110,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 110,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-H6",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page005_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 110,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 110,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MP-A2-L1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page006_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EQ-A2-L1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page006_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LP-A2-L1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page006_panel03.png",
+      "panelStatus": "detected but skipped (LP-A2-L1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 110,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 110,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MP-H3",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 300,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 300,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EQ-A2-LL",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LS-A2",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MDP-H3",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page007_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 300,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 300,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-H3",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page008_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LS-H3",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page008_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EQ-H3",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page008_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "RP-H4",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page009_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MP-H4",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page009_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MDP-H4",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page009_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MBNILA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MBNILA (2)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EQ-HA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LS-H4",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page010_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MCNILA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page011_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "MBCILA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PanelSearchOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered_page011_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 200,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "(unnamed) (3)": {
+      "Skipped": "Switchboard detected"
+    },
+    "RP-A1B": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "LP-A1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-AIA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MP-A1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MP-A2-LL": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "(unnamed) (4)": {
+      "Skipped": "Switchboard detected"
+    },
+    "LP-A2-LL": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-H7": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-H5": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-H8": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-H6": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MP-A2-L1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EQ-A2-L1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "LP-A2-L1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "MP-H3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EQ-A2-LL": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "LS-A2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MDP-H3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-H3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "LS-H3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EQ-H3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "RP-H4": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MP-H4": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MDP-H4": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MBNILA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MBNILA (2)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EQ-HA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "LS-H4": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MCNILA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "MBCILA": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 374688,
+  "cycle_time_str": "00:06:14:688",
+  "noticed_ts_ms": 1792454591056,
+  "parse_done_ts_ms": 1792454965745,
+  "debug": {
+    "kept_pages": [
+      1,
+      2,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "dropped_pages": [
+      3,
+      4,
+      5
+    ],
+    "filtered_pdf": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/Pages_from_Agrace_Phase_2_BID_SET/PdfOutput/Pages_from_Agrace_Phase_2_BID_SET_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_15",
+    "header_breakers_total": 0,
+    "table_breakers_total": 898,
+    "parser_debug": false
+  }
+}
