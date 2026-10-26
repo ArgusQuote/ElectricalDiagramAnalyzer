@@ -1014,6 +1014,22 @@ class BreakerFooterFinder:
 
             return "".join(out)
 
+        def _is_ckt_label(word: str) -> bool:
+            """
+            Strictly recognize CKT/CCT and common OCR artifacts caused
+            by an adjacent vertical grid line.
+
+            norm_word() collapses I, L, 1, !, and | into I, so:
+                CKTI, CKT1, CKT!, CKTL, CKT| -> CKTI
+                ICKT, 1CKT, !CKT, LCKT, |CKT -> ICKT
+            """
+            return norm_word(word) in {
+                "CKT",
+                "CCT",
+                "CKTI",
+                "ICKT",
+            }
+
         def _is_like(word: str, targets: List[str], base_threshold: float = 0.78) -> bool:
             """
             General fuzzy match `word` against a list of canonical `targets`.
@@ -1145,7 +1161,7 @@ class BreakerFooterFinder:
 
             # --- Detect "strong" CKT label (e.g. 'CKT #', 'CKT NO.', 'CKT NUMBER') ---
             has_ckt_core = any(
-                _is_like(t, ["CKT", "CCT"], base_threshold=0.95) for t in texts
+                _is_ckt_label(t) for t in texts
             )
             has_ckt_number_assoc = False
             for t in texts:
@@ -1204,11 +1220,14 @@ class BreakerFooterFinder:
                 if is_sentence_like:
                     continue
 
-                # --- CKT / CCT / NO. (very strict; basically exact) ---
-                if _is_like(
-                    w_raw,
-                    ["CKT", "CCT", "NO", "NO."],
-                    base_threshold=0.95,  # high threshold; 3-char token must be almost exact
+                # --- CKT / CCT / grid-line OCR variants / NO. ---
+                if (
+                    _is_ckt_label(w_raw)
+                    or _is_like(
+                        w_raw,
+                        ["NO", "NO."],
+                        base_threshold=0.95,
+                    )
                 ):
                     score["ckt"] += 3
 

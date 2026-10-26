@@ -82,7 +82,16 @@ class BreakerHeaderFinder:
         self.last_horizontal_mask_path: Optional[str] = None
 
         self.CATEGORY_ALIASES = {
-            "ckt": {"CKT", "CCT"},
+            # Accept CKT/CCT plus a vertical grid line misread on either side.
+            # _normalize_text converts 1 -> I and removes punctuation such as !.
+            "ckt": {
+                "CKT",
+                "CCT",
+                "CKTI",
+                "CKTL",
+                "ICKT",
+                "LCKT",
+            },
             "description": {
                 "CIRCUITDESCRIPTION", "DESCRIPTION", "LOADDESCRIPTION",
                 "DESIGNATION", "LOADDESIGNATION", "NAME",

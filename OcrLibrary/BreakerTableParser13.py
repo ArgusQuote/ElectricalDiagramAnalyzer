@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParser12.py
+# OcrLibrary/BreakerTableParser13.py
 from __future__ import annotations
 import os, re, cv2, numpy as np
 from typing import Dict, Optional, List, Tuple
@@ -4118,6 +4118,600 @@ class BreakerTableParser:
         self._separated_parser = SeparatedLayoutParser(debug=self.debug, reader=self.reader)        
         self._combined_parser  = CombinedLayoutParser(debug=self.debug, reader=self.reader)
 
+    @staticmethod
+    def _ckt_number(text):
+        """
+        Return one positive circuit number from a CKT cell.
+
+        Multiple different numbers are treated as unreadable so the
+        physical odd/even sequence can infer the correct value.
+        """
+        matches = re.findall(r"\d{1,3}", str(text or ""))
+
+        if len(matches) != 1:
+            return None
+
+        try:
+            value = int(matches[0])
+        except (TypeError, ValueError):
+            return None
+
+        return value if value > 0 else None
+
+
+    def _attach_circuit_positions(
+        self,
+        analyzer_result,
+        header_scan,
+        layout,
+        spaces,
+        detected_breakers,
+        review_cells,
+    ):
+        """
+        Add display-only circuit positions without changing breaker values.
+
+        The CKT column supplies the physical one-row grid. Printed circuit
+        numbers validate that grid; missing numbers are inferred from the
+        required odd/even sequence.
+
+        Left:  1, 3, 5, 7...
+        Right: 2, 4, 6, 8...
+        """
+        issues = []
+        gray = (analyzer_result or {}).get("gray")
+
+        if gray is None or not hasattr(gray, "shape") or not spaces:
+            return issues
+
+        try:
+            body_top = int(
+                analyzer_result.get("header_bottom_y")
+            )
+            body_bottom = int(
+                analyzer_result.get("footer_y")
+            )
+            spaces = int(spaces)
+
+        except (TypeError, ValueError):
+            return issues
+
+        if body_bottom <= body_top or spaces <= 0:
+            return issues
+
+        normalized = (
+            (header_scan or {})
+            .get("normalizedColumns")
+            or {}
+        )
+
+        columns = normalized.get("columns") or []
+
+        parser = (
+            self._combined_parser
+            if layout == "combined"
+            else self._separated_parser
+        )
+
+        image_width = int(gray.shape[1])
+
+        expected_rows = max(
+            1,
+            (spaces + 1) // 2,
+        )
+
+        rows_by_side = {
+            "left": [],
+            "right": [],
+        }
+
+        grid_uncertain = {
+            "left": False,
+            "right": False,
+        }
+
+        ckt_columns = {
+            "left": None,
+            "right": None,
+        }
+
+        # Find the primary CKT column on each side.
+        for column in columns:
+            if (
+                not isinstance(column, dict)
+                or column.get("role") != "ckt"
+            ):
+                continue
+
+            side = str(
+                column.get("side")
+                or ""
+            ).strip().lower()
+
+            if side not in ckt_columns:
+                try:
+                    center_x = (
+                        float(column.get("x_left"))
+                        + float(column.get("x_right"))
+                    ) / 2.0
+
+                    side = (
+                        "left"
+                        if center_x < image_width / 2.0
+                        else "right"
+                    )
+
+                except (TypeError, ValueError):
+                    continue
+
+            if ckt_columns[side] is None:
+                ckt_columns[side] = column
+
+        # Build the complete physical CKT-row grid for each side.
+        for side in ("left", "right"):
+            column = ckt_columns.get(side)
+
+            if not isinstance(column, dict):
+                continue
+
+            try:
+                x_left = max(
+                    0,
+                    int(column.get("x_left")),
+                )
+
+                x_right = min(
+                    image_width,
+                    int(column.get("x_right")),
+                )
+
+            except (TypeError, ValueError):
+                continue
+
+            if x_right <= x_left:
+                continue
+
+            strip = gray[
+                body_top:body_bottom,
+                x_left:x_right,
+            ]
+
+            if strip is None or strip.size == 0:
+                continue
+
+            bands = list(
+                parser._compute_row_bands_in_strip(
+                    strip
+                )
+                or []
+            )
+
+            # If structural line detection did not return exactly one row
+            # per circuit position, retain a complete evenly-spaced grid
+            # and flag its positions for review.
+            if len(bands) != expected_rows:
+                grid_uncertain[side] = True
+                strip_height = int(strip.shape[0])
+
+                bands = [
+                    (
+                        round(
+                            row_index
+                            * strip_height
+                            / expected_rows
+                        ),
+                        round(
+                            (row_index + 1)
+                            * strip_height
+                            / expected_rows
+                        ),
+                    )
+                    for row_index in range(
+                        expected_rows
+                    )
+                ]
+
+            def _valid_ckt_tokens(tokens):
+                text = parser._row_tokens_text(
+                    tokens
+                )
+
+                return (
+                    self._ckt_number(text)
+                    is not None
+                )
+
+            tokens = (
+                parser._ocr_body_column_by_rows(
+                    strip_gray=strip,
+                    x_left=x_left,
+                    body_y_top=body_top,
+                    row_bands_strip=bands,
+                    row_value_ok=_valid_ckt_tokens,
+                )
+            )
+
+            first_circuit = (
+                1 if side == "left" else 2
+            )
+
+            for (
+                row_index,
+                (local_top, local_bottom),
+            ) in enumerate(bands):
+
+                row_top = (
+                    body_top
+                    + int(local_top)
+                )
+
+                row_bottom = (
+                    body_top
+                    + int(local_bottom)
+                )
+
+                circuit = (
+                    first_circuit
+                    + row_index * 2
+                )
+
+                text = (
+                    parser._row_text_for_column(
+                        row_top,
+                        row_bottom,
+                        tokens,
+                    )
+                )
+
+                observed = self._ckt_number(
+                    text
+                )
+
+                conflict = (
+                    observed is not None
+                    and observed != circuit
+                )
+
+                rows_by_side[side].append(
+                    {
+                        "top": row_top,
+                        "bottom": row_bottom,
+                        "circuit": circuit,
+                        "observed": observed,
+                        "conflict": conflict,
+                    }
+                )
+
+        def _map_span(
+            side,
+            row_top,
+            row_bottom,
+            span,
+        ):
+            """
+            Select the contiguous CKT rows having the greatest physical
+            overlap with this breaker cell.
+            """
+            rows = rows_by_side.get(side) or []
+
+            try:
+                span = max(
+                    1,
+                    int(span or 1),
+                )
+
+                row_top = float(row_top)
+                row_bottom = float(row_bottom)
+
+            except (TypeError, ValueError):
+                return None, True
+
+            if (
+                not rows
+                or row_bottom <= row_top
+                or span > len(rows)
+            ):
+                return None, True
+
+            breaker_center = (
+                row_top + row_bottom
+            ) / 2.0
+
+            candidates = []
+
+            for start in range(
+                len(rows) - span + 1
+            ):
+                window = rows[
+                    start:start + span
+                ]
+
+                overlap = sum(
+                    max(
+                        0.0,
+                        min(
+                            row_bottom,
+                            row["bottom"],
+                        )
+                        - max(
+                            row_top,
+                            row["top"],
+                        ),
+                    )
+                    for row in window
+                )
+
+                window_center = (
+                    window[0]["top"]
+                    + window[-1]["bottom"]
+                ) / 2.0
+
+                candidates.append(
+                    (
+                        overlap,
+                        -abs(
+                            breaker_center
+                            - window_center
+                        ),
+                        -start,
+                        start,
+                    )
+                )
+
+            candidates.sort(
+                reverse=True
+            )
+
+            best = candidates[0]
+
+            ambiguous = (
+                best[0] <= 0
+            )
+
+            if (
+                len(candidates) > 1
+                and abs(
+                    best[0]
+                    - candidates[1][0]
+                ) <= 1.0
+            ):
+                ambiguous = True
+
+            start = best[3]
+
+            return (
+                rows[start:start + span],
+                ambiguous,
+            )
+
+        def _display_row(
+            mapped_rows,
+            poles,
+        ):
+            # 2P always displays on its top circuit.
+            if poles == 2:
+                return mapped_rows[0]
+
+            # 3P always displays on its middle circuit.
+            if poles >= 3:
+                return mapped_rows[
+                    len(mapped_rows) // 2
+                ]
+
+            return mapped_rows[0]
+
+        seen_issues = {
+            (
+                issue["side"],
+                issue["circuitNumber"],
+                issue["reason"],
+            )
+            for issue in issues
+        }
+
+        def _add_issue(
+            side,
+            circuit,
+            reason,
+        ):
+            key = (
+                side,
+                int(circuit),
+                str(reason),
+            )
+
+            if key in seen_issues:
+                return
+
+            seen_issues.add(key)
+
+            issues.append(
+                {
+                    "side": side,
+                    "circuitNumber": int(
+                        circuit
+                    ),
+                    "reason": str(reason),
+                }
+            )
+
+        # Add circuit metadata to valid breaker records.
+        for breaker in (
+            detected_breakers or []
+        ):
+            if not isinstance(
+                breaker,
+                dict,
+            ):
+                continue
+
+            side = str(
+                breaker.get("side")
+                or ""
+            ).strip().lower()
+
+            try:
+                poles = int(
+                    breaker.get("poles")
+                    or 1
+                )
+            except (TypeError, ValueError):
+                poles = 1
+
+            mapped_rows, ambiguous = (
+                _map_span(
+                    side,
+                    breaker.get("rowTop"),
+                    breaker.get("rowBottom"),
+                    poles,
+                )
+            )
+
+            if not mapped_rows:
+                breaker[
+                    "circuitPositionIssue"
+                ] = True
+
+                continue
+
+            display_row = _display_row(
+                mapped_rows,
+                poles,
+            )
+
+            circuit_numbers = [
+                row["circuit"]
+                for row in mapped_rows
+            ]
+
+            conflict = any(
+                row["conflict"]
+                for row in mapped_rows
+            )
+
+            uncertain = bool(
+                grid_uncertain.get(side)
+            )
+
+            has_issue = (
+                ambiguous
+                or conflict
+                or uncertain
+            )
+
+            breaker[
+                "circuitNumbers"
+            ] = circuit_numbers
+
+            breaker[
+                "startCircuitNumber"
+            ] = circuit_numbers[0]
+
+            # This is the exact circuit row where 2B should display
+            # the breaker label.
+            breaker[
+                "circuitNumber"
+            ] = display_row["circuit"]
+
+            breaker[
+                "circuitPositionSource"
+            ] = (
+                "ckt_ocr"
+                if all(
+                    row["observed"]
+                    == row["circuit"]
+                    for row in mapped_rows
+                )
+                else "ckt_sequence"
+            )
+
+            breaker[
+                "circuitPositionIssue"
+            ] = has_issue
+
+        # Find a known pole count for existing red review cells.
+        poles_by_cell = {}
+
+        for cell in review_cells or []:
+            if not isinstance(cell, dict):
+                continue
+
+            key = (
+                str(
+                    cell.get("side")
+                    or ""
+                ).strip().lower(),
+                cell.get("rowIndex"),
+                cell.get("rowTop"),
+                cell.get("rowBottom"),
+            )
+
+            if cell.get("role") == "poles":
+                try:
+                    poles_by_cell[key] = int(
+                        cell.get("value")
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+        # Convert existing red overlay cells into output markers.
+        for cell in review_cells or []:
+            if (
+                not isinstance(cell, dict)
+                or cell.get("status") != "issue"
+            ):
+                continue
+
+            side = str(
+                cell.get("side")
+                or ""
+            ).strip().lower()
+
+            key = (
+                side,
+                cell.get("rowIndex"),
+                cell.get("rowTop"),
+                cell.get("rowBottom"),
+            )
+
+            poles = poles_by_cell.get(
+                key,
+                1,
+            )
+
+            mapped_rows, _ambiguous = (
+                _map_span(
+                    side,
+                    cell.get("rowTop"),
+                    cell.get("rowBottom"),
+                    poles,
+                )
+            )
+
+            if not mapped_rows:
+                continue
+
+            circuit = _display_row(
+                mapped_rows,
+                poles,
+            )["circuit"]
+
+            cell["circuitNumber"] = (
+                circuit
+            )
+
+            _add_issue(
+                side,
+                circuit,
+                cell.get("reason")
+                or (
+                    "Breaker value could not "
+                    "be read confidently."
+                ),
+            )
+
+        return issues
+
     def parse_from_analyzer(self, analyzer_result: Dict) -> Dict:
         """
         Entry point used by the API.
@@ -4184,6 +4778,17 @@ class BreakerTableParser:
             gfi_breaker_counts = combined_scan.get("gfiBreakerCounts") or {}
             review_cells = combined_scan.get("reviewCells") or []
 
+        breaker_position_issues = (
+            self._attach_circuit_positions(
+                analyzer_result=analyzer_result,
+                header_scan=header_scan,
+                layout=layout,
+                spaces=spaces,
+                detected_breakers=detected_breakers,
+                review_cells=review_cells,
+            )
+        )
+
         if self.debug:
             print(
                 f"[BreakerTableParser] Header band y:[{header_scan.get('band_y1')},"
@@ -4199,6 +4804,7 @@ class BreakerTableParser:
             "breakerCounts": breaker_counts,
             "gfiBreakerCounts": gfi_breaker_counts,
             "reviewCells": review_cells,
+            "breakerPositionIssues": breaker_position_issues,
             "headerScan": header_scan,
             "separatedScan": separated_scan,
             "combinedScan": combined_scan,
