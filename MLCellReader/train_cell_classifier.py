@@ -242,7 +242,8 @@ def train_model(train_ds, val_ds, classes, weights, args, device) -> Tuple[CellN
     criterion = nn.CrossEntropyLoss(weight=weights.to(device), label_smoothing=0.05)
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
+    val_loader = (DataLoader(val_ds, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
+                  if val_ds is not None else None)
 
     best_state, best_score, best_epoch, history = None, -1.0, 0, []
     for epoch in range(1, args.epochs + 1):
@@ -256,6 +257,14 @@ def train_model(train_ds, val_ds, classes, weights, args, device) -> Tuple[CellN
             optimizer.step()
             running += float(loss) * len(targets)
         scheduler.step()
+
+        if val_loader is None:
+            # No held-out data to pick an epoch with: keep the final, lowest-LR weights.
+            history.append({"epoch": epoch, "train_loss": running / len(train_ds)})
+            print(f"[train] epoch {epoch:3d}  train_loss={running / len(train_ds):.4f}")
+            best_epoch = epoch
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            continue
 
         preds, _, truths, val_loss = predict_dataset(model, val_loader, device)
         score = balanced_accuracy(preds, truths)
@@ -368,6 +377,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--folds", type=int, default=None,
                         help="K-fold over whole PDFs; use with --fold (overrides --val-fraction)")
     parser.add_argument("--fold", type=int, default=None, help="Which fold to hold out (0-based)")
+    parser.add_argument("--no-holdout", action="store_true",
+                        help="Train the shippable model on every label (no validation report; "
+                             "measure quality with --folds first)")
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--device", default=None,
                         help="cuda / cpu (default: cuda when available)")
@@ -403,11 +415,16 @@ def main() -> int:
     if (args.folds is None) != (args.fold is None):
         print("[train] --folds and --fold must be given together")
         return 2
+    if args.no_holdout and args.folds is not None:
+        print("[train] --no-holdout cannot be combined with --folds")
+        return 2
     if args.folds is not None:
         if not 0 <= args.fold < args.folds:
             print(f"[train] --fold must be in 0..{args.folds - 1}")
             return 2
         train, val = split_by_pdf_fold(samples, args.folds, args.fold)
+    elif args.no_holdout:
+        train, val = samples, []
     else:
         train, val = split_by_pdf(samples, args.val_fraction, args.seed)
     print(f"[train] train={len(train)}  val={len(val)}  "
@@ -416,17 +433,22 @@ def main() -> int:
     class_to_idx = {c: i for i, c in enumerate(classes)}
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     train_ds = CellDataset(train, class_to_idx, train=True, seed=args.seed)
-    val_ds = CellDataset(val, class_to_idx, train=False, seed=args.seed)
+    val_ds = CellDataset(val, class_to_idx, train=False, seed=args.seed) if val else None
 
     start = time.perf_counter()
     model, training = train_model(train_ds, val_ds, classes, class_weights(train, classes), args, device)
-    report, errors = build_report(model, val_ds, val, classes, device, args.batch_size)
-    print_report(report)
+    if val_ds is not None:
+        report, errors = build_report(model, val_ds, val, classes, device, args.batch_size)
+        print_report(report)
+    else:
+        report, errors = {"val_samples": 0, "note": "trained with --no-holdout"}, []
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
     suffix = "_SMOKE" if args.smoke_weak_labels else ""
     if args.folds is not None:
         suffix += f"_fold{args.fold}of{args.folds}"
+    elif args.no_holdout:
+        suffix += "_final"
     out_dir = models_dir(root) / f"{args.target}_{stamp}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
     meta = {
