@@ -2389,6 +2389,7 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
     - Does NOT touch worker subprocesses.
     - Only reads result.json, swaps one component, reruns RulesEngine, writes result.json.
     """
+    _require_trusted_job_caller()
 
     if not job_id or not str(job_id).strip():
         return {"ok": False, "error": "Missing job_id."}
@@ -2677,6 +2678,7 @@ def vm_rerun_rules_with_global_defaults(job_id: str, owner_email: str, group_fol
     Updates ui_overrides.panelboards, applies override-level fields where needed,
     reruns RulesEngine, writes result.json/status.json, and returns updated result.
     """
+    _require_trusted_job_caller()
 
     if not job_id or not str(job_id).strip():
         return {"ok": False, "error": "Missing job_id."}
@@ -5364,6 +5366,7 @@ def vm_ping():
 
 @anvil.server.callable
 def vm_get_active_job_for_user(owner_email: str, group_folder: str = "personal") -> dict:
+    _require_trusted_job_caller()
     owner_email = str(owner_email or "").strip().lower()
     group_folder = _safe_folder_key(group_folder or "personal", "personal")
 
@@ -5394,6 +5397,7 @@ def vm_clear_temporary_analysis_jobs(
 
     Normal BOM jobs are never touched.
     """
+    _require_trusted_job_caller()
     owner_email = str(
         owner_email or ""
     ).strip().lower()
@@ -5549,6 +5553,7 @@ def vm_submit_compatibility_test(
     """
     Save a temporary PDF and queue a compatibility-only job.
     """
+    _require_trusted_job_caller()
     if not owner_email or not str(
         owner_email
     ).strip():
@@ -5712,6 +5717,7 @@ def vm_get_compatibility_status(
     """
     Return compatibility progress or the finished report.
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
 
     owner_email = str(
@@ -5955,6 +5961,7 @@ def vm_delete_compatibility_job(
       - result.json
       - status.json
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
 
     owner_email = str(
@@ -6062,6 +6069,7 @@ def vm_submit_for_detection(
     Create job folder, save PDF, record 'noticed' time, render images, persist normalized overrides, enqueue worker.
     Ownership is always the lowercased email address.
     """
+    _require_trusted_job_caller()
     if not owner_email or not str(owner_email).strip():
         raise RuntimeError("owner_email required")
 
@@ -6173,6 +6181,7 @@ def vm_upload_specs_pdf(
       - raw PDF is deleted after analysis
       - generated artifacts remain only until the next short cleanup window
     """
+    _require_trusted_job_caller()
     if not owner_email or not str(owner_email).strip():
         raise RuntimeError("owner_email required")
 
@@ -6238,6 +6247,7 @@ def vm_start_specs_analysis(job_id: str, owner_email: str, group_folder: str = "
     """
     Start analysis only after the specs PDF has already been uploaded/saved.
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
     group_folder = _safe_folder_key(group_folder or "personal", "personal")
@@ -6293,6 +6303,7 @@ def vm_start_specs_analysis(job_id: str, owner_email: str, group_folder: str = "
 
 @anvil.server.callable
 def vm_get_specs_status(job_id: str, owner_email: str, group_folder: str = "personal") -> dict:
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
     group_folder = _safe_folder_key(group_folder or "personal", "personal")
@@ -6383,6 +6394,7 @@ def vm_delete_specs_job(job_id: str, owner_email: str, group_folder: str = "pers
     Delete a specs-only temp job folder.
     Supports grouped specs storage and legacy flat specs jobs.
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
     group_folder = _safe_folder_key(group_folder or "personal", "personal")
@@ -6424,6 +6436,7 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str, group_folder: 
     Returns job-relative PNG paths for FULL-PAGE magenta overlays.
     Enforces ownership.
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
 
@@ -6490,6 +6503,7 @@ def vm_list_magenta_overlay_images(job_id: str, owner_email: str, group_folder: 
 
 @anvil.server.callable
 def vm_list_overlay_images(job_id: str, owner_email: str, group_folder: str = "personal") -> list[str]:
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
 
@@ -6550,6 +6564,7 @@ def vm_fetch_image(
     This prevents huge PNG files from being pushed through
     Anvil Uplink every time the output page needs an image.
     """
+    _require_trusted_job_caller()
     import hashlib
     import cv2
 
@@ -6943,6 +6958,7 @@ def vm_set_watchdog_timeout(minutes: int) -> dict:
   Set the watchdog timeout (minutes) at runtime.
   Persists only for this process lifetime.
   """
+  _require_trusted_job_caller()
   global WATCHDOG_TIMEOUT_MIN
   try:
     m = int(minutes)
@@ -7067,6 +7083,7 @@ def vm_get_job_result(job_id: str, owner_email: str, group_folder: str = "person
     Return saved result.json for a completed job.
     This should never return {} silently.
     """
+    _require_trusted_job_caller()
     try:
         job_id = str(job_id or "").strip()
         req_email = str(owner_email or "").strip().lower()
@@ -7148,6 +7165,7 @@ def vm_get_job_result(job_id: str, owner_email: str, group_folder: str = "person
 @anvil.server.callable
 def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "personal") -> dict:
     """Status primarily from disk; does not return final result. Enforces ownership by email."""
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_email = str(owner_email or "").strip().lower()
 
@@ -7270,6 +7288,7 @@ def vm_get_job_status(job_id: str, owner_email: str, group_folder: str = "person
 
 @anvil.server.callable
 def vm_list_jobs(owner_id: str, limit: int = 50, group_folder: str = "personal") -> list[dict]:
+    _require_trusted_job_caller()
     print(f">>> vm_list_jobs called | owner_id={owner_id!r} | NODE_ID={NODE_ID}")
 
     owner_id = str(owner_id or "").strip().lower()
@@ -7378,6 +7397,7 @@ def vm_delete_job(job_id: str, owner_id: str, group_folder: str = "personal") ->
     - status owner must match owner_id
     - active queued/running/unknown jobs are not hard-deleted here; cancel them instead
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_id = str(owner_id or "").strip().lower()
 
@@ -7441,6 +7461,7 @@ def vm_cancel_job(job_id: str, owner_id: str, group_folder: str = "personal") ->
     - owner_id must match owner_email/owner_id in status.json
     - completed/error/canceled jobs cannot be canceled
     """
+    _require_trusted_job_caller()
     job_id = str(job_id or "").strip()
     owner_id = str(owner_id or "").strip().lower()
 
