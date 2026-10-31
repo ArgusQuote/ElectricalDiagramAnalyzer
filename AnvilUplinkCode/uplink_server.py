@@ -711,6 +711,136 @@ def _result_write(dir_path: Path, result: dict):
     with open(paths["result"], "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, default=str, indent=2)
 
+
+# ---------- Persistent BOM review state ----------
+_REVIEW_STATE_LOCK = threading.RLock()
+
+
+def _review_state_path(job_dir):
+    return _assert_under_base(Path(job_dir) / "review_state.json")
+
+
+def _review_approval_names(job_dir):
+    payload = _json_read_or_none(_review_state_path(job_dir)) or {}
+    names = payload.get("approved_panels", []) if isinstance(payload, dict) else []
+
+    if not isinstance(names, list):
+        names = []
+
+    return {
+        str(name).strip().upper()
+        for name in names
+        if isinstance(name, str) and name.strip()
+    }
+
+
+def _write_review_approvals(job_dir, approved):
+    path = _review_state_path(job_dir)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+
+    payload = {
+        "approved_panels": sorted(approved),
+        "updated_at_utc": _now_utc().isoformat(),
+    }
+
+    try:
+        with temporary.open("w", encoding="utf-8") as output:
+            json.dump(payload, output, indent=2)
+
+        os.replace(temporary, path)
+
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _invalidate_review_approvals(job_dir, designation=None):
+    with _REVIEW_STATE_LOCK:
+        approved = _review_approval_names(job_dir)
+
+        if designation is None:
+            approved.clear()
+        else:
+            approved.discard(str(designation or "").strip().upper())
+
+        _write_review_approvals(job_dir, approved)
+
+
+def _require_trusted_job_caller():
+    """Reject direct browser access to owner-scoped VM operations."""
+    caller = getattr(anvil.server.context, "remote_caller", None)
+
+    if caller is None or not bool(caller.is_trusted):
+        raise PermissionError(
+            "Call the authorized Anvil server endpoint."
+        )
+
+
+@anvil.server.callable
+def vm_job_review_approvals(
+    job_id, owner_email, group_folder, action, designation=""
+):
+    _require_trusted_job_caller()
+
+    action = str(action or "").strip().lower()
+
+    if action not in ("load", "approve"):
+        return {"ok": False, "error": "Invalid review action."}
+
+    job_dir = _resolve_job_dir_for_owner(
+        job_id, owner_email, group_folder
+    )
+
+    if job_dir is None:
+        return {"ok": False, "error": "Job not found."}
+
+    status = _json_read_or_none(
+        _status_paths(job_dir)["status"]
+    ) or {}
+
+    if (
+        status.get("state") != "done"
+        or _is_excluded_job_expired(status)
+        or str(
+            status.get("owner_email") or status.get("owner_id") or ""
+        ).strip().lower() != str(owner_email or "").strip().lower()
+    ):
+        return {"ok": False, "error": "Job not available."}
+
+    if action == "approve":
+        key = str(designation or "").strip().upper()
+        result = _json_read_or_none(
+            _status_paths(job_dir)["result"]
+        ) or {}
+
+        components = result.get("components") or []
+
+        valid_names = {
+            str(component.get("name") or "").strip().upper()
+            for component in components
+            if isinstance(component, dict)
+            and str(component.get("type") or "").strip().lower()
+            == "panelboard"
+        }
+
+        if not key or key not in valid_names:
+            return {
+                "ok": False,
+                "error": "Panel not found in saved job.",
+            }
+
+    with _REVIEW_STATE_LOCK:
+        approved = _review_approval_names(job_dir)
+
+        if action == "approve":
+            approved.add(key)
+            _write_review_approvals(job_dir, approved)
+
+    return {
+        "ok": True,
+        "approved_panels": sorted(approved),
+    }
+
 # ---------- Stale / orphaned job recovery helpers ----------
 
 def _status_dt(value):
@@ -1591,6 +1721,7 @@ def _collect_keep_relpaths(job_dir: Path, keep_pdf: bool = True) -> set[str]:
     keep.add("status.json")
     keep.add("result.json")
     keep.add("edits.json")
+    keep.add("review_state.json")
     keep.add(EXCLUDED_JOB_MARKER_FILENAME)
 
     pdf_images = job_dir / "pdf_images"
@@ -2497,6 +2628,27 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
 
     _result_write(job_dir, result)
 
+    # Reset approval for the original and updated equipment identities.
+    original_approval_name = str(
+        (old_component_for_edit_log or {}).get("name")
+        or original_panel_name
+        or ""
+    ).strip()
+
+    updated_approval_name = str(
+        cleaned.get("name") or ""
+    ).strip()
+
+    for approval_name in {
+        original_approval_name,
+        updated_approval_name,
+    }:
+        if approval_name:
+            _invalidate_review_approvals(
+                job_dir,
+                approval_name,
+            )
+
     _status_write(
         job_dir,
         "done",
@@ -2677,6 +2829,8 @@ def vm_rerun_rules_with_global_defaults(job_id: str, owner_email: str, group_fol
     result["last_edited_at_utc"] = now
 
     _result_write(job_dir, result)
+
+    _invalidate_review_approvals(job_dir)
 
     _status_write(
         job_dir,
