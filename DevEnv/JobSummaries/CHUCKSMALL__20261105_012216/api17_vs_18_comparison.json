@@ -1,0 +1,28 @@
+[
+  {
+    "job": "chucksmall.pdf",
+    "crop": "chucksmall_electrical_filtered_page001_panel01.png",
+    "panel_v17": "OTEPLA2I",
+    "panel_v18": "OTEPLA2I",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 42,
+    "v18_breakers": 42,
+    "raw_changed": true,
+    "error": ""
+  },
+  {
+    "job": "chucksmall.pdf",
+    "crop": "chucksmall_electrical_filtered_page001_panel02.png",
+    "panel_v17": "OTEPLA3",
+    "panel_v18": "OTEPLA3",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 37,
+    "v18_breakers": 37,
+    "raw_changed": true,
+    "error": ""
+  }
+]

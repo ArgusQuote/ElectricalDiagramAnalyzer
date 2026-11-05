@@ -1,0 +1,116 @@
+[
+  {
+    "job": "NoAmps.pdf",
+    "crop": "NoAmps_electrical_filtered_page001_panel01.png",
+    "panel_v17": "EQUIP.",
+    "panel_v18": "EQUIP.",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "NoAmps.pdf",
+    "crop": "NoAmps_electrical_filtered_page001_panel02.png",
+    "panel_v17": "EP",
+    "panel_v18": "EP",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 79,
+    "v18_breakers": 79,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "NoAmps.pdf",
+    "crop": "NoAmps_electrical_filtered_page001_panel03.png",
+    "panel_v17": "PP3",
+    "panel_v18": "PP3",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 39,
+    "v18_breakers": 39,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "NoAmps.pdf",
+    "crop": "NoAmps_electrical_filtered_page001_panel04.png",
+    "panel_v17": "PP2",
+    "panel_v18": "PP2",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 33,
+    "v18_breakers": 33,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "NoAmps.pdf",
+    "crop": "NoAmps_electrical_filtered_page001_panel05.png",
+    "panel_v17": "LP",
+    "panel_v18": "LP",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 42,
+    "v18_breakers": 42,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "NoAmps.pdf",
+    "crop": "NoAmps_electrical_filtered_page001_panel06.png",
+    "panel_v17": "PP1",
+    "panel_v18": "PP1",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 25,
+    "v18_breakers": 25,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]

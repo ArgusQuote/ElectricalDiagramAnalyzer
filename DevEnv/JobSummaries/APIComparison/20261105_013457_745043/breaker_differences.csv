@@ -1,0 +1,13 @@
+job,crop,panel_v17,panel_v18,category,breaker_type,v17_qty,v18_qty,difference
+B.pdf,B_electrical_filtered_page001_panel01.png,B,B,breaker,1P_20A,34,42,8
+B.pdf,B_electrical_filtered_page001_panel02.png,A,A,breaker,1P_20A,10,21,11
+B.pdf,B_electrical_filtered_page001_panel03.png,LIA,LIA,breaker,1P_20A,23,26,3
+C.pdf,C_electrical_filtered_page001_panel02.png,C,C,breaker,1P_20A,7,8,1
+D.pdf,D_electrical_filtered_page001_panel01.png,B (2),B (2),breaker,1P_20A,34,42,8
+D.pdf,D_electrical_filtered_page001_panel02.png,A (2),A (2),breaker,1P_20A,10,21,11
+D.pdf,D_electrical_filtered_page001_panel03.png,LIA (2),LIA (2),breaker,1P_20A,23,26,3
+generic2.pdf,generic2_electrical_filtered_page001_panel01__tbl01.png,RIA,RIA,breaker,1P_20A,78,81,3
+N.pdf,N_electrical_filtered_page001_panel01.png,3RPA,3RPA,breaker,1P_20A,55,57,2
+N.pdf,N_electrical_filtered_page001_panel02.png,1RPA,1RPA,breaker,1P_20A,39,40,1
+NESTLE.pdf,NESTLE_electrical_filtered_page001_panel01.png,3RPA (2),3RPA (2),breaker,1P_20A,55,57,2
+NESTLE.pdf,NESTLE_electrical_filtered_page001_panel02.png,1RPA (2),1RPA (2),breaker,1P_20A,39,40,1

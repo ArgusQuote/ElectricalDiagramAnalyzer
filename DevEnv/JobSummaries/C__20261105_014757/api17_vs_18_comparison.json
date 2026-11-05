@@ -1,0 +1,1140 @@
+[
+  {
+    "job": "C.pdf",
+    "crop": "C_electrical_filtered_page001_panel02.png",
+    "panel_v17": "C",
+    "panel_v18": "C",
+    "status": "CHANGED",
+    "field_differences": [
+      {
+        "field": "table.detected_breakers_count",
+        "v17": 9,
+        "v18": 10
+      },
+      {
+        "field": "table.detected_breakers",
+        "v17": [
+          {
+            "side": "left",
+            "rowIndex": 2,
+            "rowTop": 385,
+            "rowBottom": 454,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.1523545706371191,
+            "yBottomRatio": 0.17965967550455086,
+            "yCenterRatio": 0.16600712307083498
+          },
+          {
+            "side": "left",
+            "rowIndex": 4,
+            "rowTop": 523,
+            "rowBottom": 593,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2069647803719826,
+            "yBottomRatio": 0.23466561139691333,
+            "yCenterRatio": 0.22081519588444795
+          },
+          {
+            "side": "left",
+            "rowIndex": 5,
+            "rowTop": 593,
+            "rowBottom": 664,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "IP-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.23466561139691333,
+            "yBottomRatio": 0.2627621685793431,
+            "yCenterRatio": 0.2487138899881282
+          },
+          {
+            "side": "left",
+            "rowIndex": 6,
+            "rowTop": 664,
+            "rowBottom": 735,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2627621685793431,
+            "yBottomRatio": 0.29085872576177285,
+            "yCenterRatio": 0.27681044717055797
+          },
+          {
+            "side": "right",
+            "rowIndex": 2,
+            "rowTop": 385,
+            "rowBottom": 454,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitNumbers": [
+              2
+            ],
+            "startCircuitNumber": 2,
+            "circuitNumber": 2,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.1523545706371191,
+            "yBottomRatio": 0.17965967550455086,
+            "yCenterRatio": 0.16600712307083498
+          },
+          {
+            "side": "right",
+            "rowIndex": 3,
+            "rowTop": 454,
+            "rowBottom": 523,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitNumbers": [
+              4
+            ],
+            "startCircuitNumber": 4,
+            "circuitNumber": 4,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.17965967550455086,
+            "yBottomRatio": 0.2069647803719826,
+            "yCenterRatio": 0.19331222793826672
+          },
+          {
+            "side": "right",
+            "rowIndex": 4,
+            "rowTop": 523,
+            "rowBottom": 593,
+            "amperage": 50,
+            "poles": 1,
+            "comboText": "1P-ZOA",
+            "circuitNumbers": [
+              6
+            ],
+            "startCircuitNumber": 6,
+            "circuitNumber": 6,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2069647803719826,
+            "yBottomRatio": 0.23466561139691333,
+            "yCenterRatio": 0.22081519588444795
+          },
+          {
+            "side": "right",
+            "rowIndex": 5,
+            "rowTop": 593,
+            "rowBottom": 664,
+            "amperage": 50,
+            "poles": 1,
+            "comboText": "#K1P-ZOA",
+            "circuitNumbers": [
+              8
+            ],
+            "startCircuitNumber": 8,
+            "circuitNumber": 8,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.23466561139691333,
+            "yBottomRatio": 0.2627621685793431,
+            "yCenterRatio": 0.2487138899881282
+          },
+          {
+            "side": "right",
+            "rowIndex": 6,
+            "rowTop": 664,
+            "rowBottom": 735,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitNumbers": [
+              10
+            ],
+            "startCircuitNumber": 10,
+            "circuitNumber": 10,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2627621685793431,
+            "yBottomRatio": 0.29085872576177285,
+            "yCenterRatio": 0.27681044717055797
+          }
+        ],
+        "v18": [
+          {
+            "side": "left",
+            "rowIndex": 2,
+            "rowTop": 385,
+            "rowBottom": 454,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.1523545706371191,
+            "yBottomRatio": 0.17965967550455086,
+            "yCenterRatio": 0.16600712307083498
+          },
+          {
+            "side": "left",
+            "rowIndex": 3,
+            "rowTop": 454,
+            "rowBottom": 523,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "20/1",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.17965967550455086,
+            "yBottomRatio": 0.2069647803719826,
+            "yCenterRatio": 0.19331222793826672
+          },
+          {
+            "side": "left",
+            "rowIndex": 4,
+            "rowTop": 523,
+            "rowBottom": 593,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2069647803719826,
+            "yBottomRatio": 0.23466561139691333,
+            "yCenterRatio": 0.22081519588444795
+          },
+          {
+            "side": "left",
+            "rowIndex": 5,
+            "rowTop": 593,
+            "rowBottom": 664,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "IP-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.23466561139691333,
+            "yBottomRatio": 0.2627621685793431,
+            "yCenterRatio": 0.2487138899881282
+          },
+          {
+            "side": "left",
+            "rowIndex": 6,
+            "rowTop": 664,
+            "rowBottom": 735,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2627621685793431,
+            "yBottomRatio": 0.29085872576177285,
+            "yCenterRatio": 0.27681044717055797
+          },
+          {
+            "side": "right",
+            "rowIndex": 2,
+            "rowTop": 385,
+            "rowBottom": 454,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitNumbers": [
+              2
+            ],
+            "startCircuitNumber": 2,
+            "circuitNumber": 2,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.1523545706371191,
+            "yBottomRatio": 0.17965967550455086,
+            "yCenterRatio": 0.16600712307083498
+          },
+          {
+            "side": "right",
+            "rowIndex": 3,
+            "rowTop": 454,
+            "rowBottom": 523,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitNumbers": [
+              4
+            ],
+            "startCircuitNumber": 4,
+            "circuitNumber": 4,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.17965967550455086,
+            "yBottomRatio": 0.2069647803719826,
+            "yCenterRatio": 0.19331222793826672
+          },
+          {
+            "side": "right",
+            "rowIndex": 4,
+            "rowTop": 523,
+            "rowBottom": 593,
+            "amperage": 50,
+            "poles": 1,
+            "comboText": "1P-ZOA",
+            "circuitNumbers": [
+              6
+            ],
+            "startCircuitNumber": 6,
+            "circuitNumber": 6,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2069647803719826,
+            "yBottomRatio": 0.23466561139691333,
+            "yCenterRatio": 0.22081519588444795
+          },
+          {
+            "side": "right",
+            "rowIndex": 5,
+            "rowTop": 593,
+            "rowBottom": 664,
+            "amperage": 50,
+            "poles": 1,
+            "comboText": "#K1P-ZOA",
+            "circuitNumbers": [
+              8
+            ],
+            "startCircuitNumber": 8,
+            "circuitNumber": 8,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.23466561139691333,
+            "yBottomRatio": 0.2627621685793431,
+            "yCenterRatio": 0.2487138899881282
+          },
+          {
+            "side": "right",
+            "rowIndex": 6,
+            "rowTop": 664,
+            "rowBottom": 735,
+            "amperage": 20,
+            "poles": 1,
+            "comboText": "1P-2OA",
+            "circuitNumbers": [
+              10
+            ],
+            "startCircuitNumber": 10,
+            "circuitNumber": 10,
+            "circuitPositionSource": "ckt_ocr",
+            "circuitPositionIssue": true,
+            "yTopRatio": 0.2627621685793431,
+            "yBottomRatio": 0.29085872576177285,
+            "yCenterRatio": 0.27681044717055797
+          }
+        ]
+      }
+    ],
+    "breaker_differences": [
+      {
+        "category": "breaker",
+        "breaker_type": "1P_20A",
+        "v17_qty": 7,
+        "v18_qty": 8,
+        "difference": 1
+      }
+    ],
+    "v17_breakers": 9,
+    "v18_breakers": 10,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.breakerCounts.1P_20A",
+        "v17": "7",
+        "v18": "8"
+      },
+      {
+        "path": "parser.combinedScan.breakerCounts.1P_20A",
+        "v17": "7",
+        "v18": "8"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].comboText",
+        "v17": "\"1P-2OA\"",
+        "v18": "\"20/1\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].rowBottom",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].rowIndex",
+        "v17": "4",
+        "v18": "3"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].rowTop",
+        "v17": "523",
+        "v18": "454"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].yBottomRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].yCenterRatio",
+        "v17": "0.22081519588444795",
+        "v18": "0.19331222793826672"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[1].yTopRatio",
+        "v17": "0.2069647803719826",
+        "v18": "0.17965967550455086"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].comboText",
+        "v17": "\"IP-2OA\"",
+        "v18": "\"1P-2OA\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].rowBottom",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].rowIndex",
+        "v17": "5",
+        "v18": "4"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].rowTop",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].yBottomRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].yCenterRatio",
+        "v17": "0.2487138899881282",
+        "v18": "0.22081519588444795"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[2].yTopRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].comboText",
+        "v17": "\"1P-2OA\"",
+        "v18": "\"IP-2OA\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].rowBottom",
+        "v17": "735",
+        "v18": "664"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].rowIndex",
+        "v17": "6",
+        "v18": "5"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].rowTop",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].yBottomRatio",
+        "v17": "0.29085872576177285",
+        "v18": "0.2627621685793431"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].yCenterRatio",
+        "v17": "0.27681044717055797",
+        "v18": "0.2487138899881282"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[3].yTopRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].circuitNumber",
+        "v17": "2",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].circuitNumbers",
+        "v17": "[2]",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].circuitPositionSource",
+        "v17": "\"ckt_ocr\"",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].rowBottom",
+        "v17": "454",
+        "v18": "735"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].rowIndex",
+        "v17": "2",
+        "v18": "6"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].rowTop",
+        "v17": "385",
+        "v18": "664"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].side",
+        "v17": "\"right\"",
+        "v18": "\"left\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].startCircuitNumber",
+        "v17": "2",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].yBottomRatio",
+        "v17": "0.17965967550455086",
+        "v18": "0.29085872576177285"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].yCenterRatio",
+        "v17": "0.16600712307083498",
+        "v18": "0.27681044717055797"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[4].yTopRatio",
+        "v17": "0.1523545706371191",
+        "v18": "0.2627621685793431"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].circuitNumber",
+        "v17": "4",
+        "v18": "2"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].circuitNumbers[0]",
+        "v17": "4",
+        "v18": "2"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].rowBottom",
+        "v17": "523",
+        "v18": "454"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].rowIndex",
+        "v17": "3",
+        "v18": "2"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].rowTop",
+        "v17": "454",
+        "v18": "385"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].startCircuitNumber",
+        "v17": "4",
+        "v18": "2"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].yBottomRatio",
+        "v17": "0.2069647803719826",
+        "v18": "0.17965967550455086"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].yCenterRatio",
+        "v17": "0.19331222793826672",
+        "v18": "0.16600712307083498"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[5].yTopRatio",
+        "v17": "0.17965967550455086",
+        "v18": "0.1523545706371191"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].amperage",
+        "v17": "50",
+        "v18": "20"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].circuitNumber",
+        "v17": "6",
+        "v18": "4"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].circuitNumbers[0]",
+        "v17": "6",
+        "v18": "4"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].comboText",
+        "v17": "\"1P-ZOA\"",
+        "v18": "\"1P-2OA\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].rowBottom",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].rowIndex",
+        "v17": "4",
+        "v18": "3"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].rowTop",
+        "v17": "523",
+        "v18": "454"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].startCircuitNumber",
+        "v17": "6",
+        "v18": "4"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].yBottomRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].yCenterRatio",
+        "v17": "0.22081519588444795",
+        "v18": "0.19331222793826672"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[6].yTopRatio",
+        "v17": "0.2069647803719826",
+        "v18": "0.17965967550455086"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].circuitNumber",
+        "v17": "8",
+        "v18": "6"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].circuitNumbers[0]",
+        "v17": "8",
+        "v18": "6"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].comboText",
+        "v17": "\"#K1P-ZOA\"",
+        "v18": "\"1P-ZOA\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].rowBottom",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].rowIndex",
+        "v17": "5",
+        "v18": "4"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].rowTop",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].startCircuitNumber",
+        "v17": "8",
+        "v18": "6"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].yBottomRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].yCenterRatio",
+        "v17": "0.2487138899881282",
+        "v18": "0.22081519588444795"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[7].yTopRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].amperage",
+        "v17": "20",
+        "v18": "50"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].circuitNumber",
+        "v17": "10",
+        "v18": "8"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].circuitNumbers[0]",
+        "v17": "10",
+        "v18": "8"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].comboText",
+        "v17": "\"1P-2OA\"",
+        "v18": "\"#K1P-ZOA\""
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].rowBottom",
+        "v17": "735",
+        "v18": "664"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].rowIndex",
+        "v17": "6",
+        "v18": "5"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].rowTop",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].startCircuitNumber",
+        "v17": "10",
+        "v18": "8"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].yBottomRatio",
+        "v17": "0.29085872576177285",
+        "v18": "0.2627621685793431"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].yCenterRatio",
+        "v17": "0.27681044717055797",
+        "v18": "0.2487138899881282"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[8].yTopRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.combinedScan.detected_breakers[9]",
+        "v17": "<MISSING>",
+        "v18": "{\"side\": \"right\", \"rowIndex\": 6, \"rowTop\": 664, \"rowBottom\": 735, \"amperage\": 20, \"poles\": 1, \"comboText\": \"1P-2OA\", \"circuitNumbers\": [10], \"startCircuitNumber\": 10, \"circuitNumber\": 10, \"circuitPositionSource\": \"ckt_ocr\", \"circuitPositionIssue\": true, \"yTopRatio\": 0.2627621685793431, \"yBottomRatio\": 0.29085872576177285, \"yCenterRatio\": 0.27681044717055797}"
+      },
+      {
+        "path": "parser.combinedScan.reviewCells[1].pairs[0]",
+        "v17": "<MISSING>",
+        "v18": "{\"amperage\": 20, \"poles\": 1}"
+      },
+      {
+        "path": "parser.combinedScan.reviewCells[1].reason",
+        "v17": "\"Combined breaker cell contained marks but amperage/poles could not be parsed.\"",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.combinedScan.reviewCells[1].status",
+        "v17": "\"issue\"",
+        "v18": "\"good\""
+      },
+      {
+        "path": "parser.combinedScan.reviewCells[1].text",
+        "v17": "\"0 IP-2OA\"",
+        "v18": "\"20/1\""
+      },
+      {
+        "path": "parser.detected_breakers[1].comboText",
+        "v17": "\"1P-2OA\"",
+        "v18": "\"20/1\""
+      },
+      {
+        "path": "parser.detected_breakers[1].rowBottom",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.detected_breakers[1].rowIndex",
+        "v17": "4",
+        "v18": "3"
+      },
+      {
+        "path": "parser.detected_breakers[1].rowTop",
+        "v17": "523",
+        "v18": "454"
+      },
+      {
+        "path": "parser.detected_breakers[1].yBottomRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.detected_breakers[1].yCenterRatio",
+        "v17": "0.22081519588444795",
+        "v18": "0.19331222793826672"
+      },
+      {
+        "path": "parser.detected_breakers[1].yTopRatio",
+        "v17": "0.2069647803719826",
+        "v18": "0.17965967550455086"
+      },
+      {
+        "path": "parser.detected_breakers[2].comboText",
+        "v17": "\"IP-2OA\"",
+        "v18": "\"1P-2OA\""
+      },
+      {
+        "path": "parser.detected_breakers[2].rowBottom",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.detected_breakers[2].rowIndex",
+        "v17": "5",
+        "v18": "4"
+      },
+      {
+        "path": "parser.detected_breakers[2].rowTop",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.detected_breakers[2].yBottomRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.detected_breakers[2].yCenterRatio",
+        "v17": "0.2487138899881282",
+        "v18": "0.22081519588444795"
+      },
+      {
+        "path": "parser.detected_breakers[2].yTopRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.detected_breakers[3].comboText",
+        "v17": "\"1P-2OA\"",
+        "v18": "\"IP-2OA\""
+      },
+      {
+        "path": "parser.detected_breakers[3].rowBottom",
+        "v17": "735",
+        "v18": "664"
+      },
+      {
+        "path": "parser.detected_breakers[3].rowIndex",
+        "v17": "6",
+        "v18": "5"
+      },
+      {
+        "path": "parser.detected_breakers[3].rowTop",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.detected_breakers[3].yBottomRatio",
+        "v17": "0.29085872576177285",
+        "v18": "0.2627621685793431"
+      },
+      {
+        "path": "parser.detected_breakers[3].yCenterRatio",
+        "v17": "0.27681044717055797",
+        "v18": "0.2487138899881282"
+      },
+      {
+        "path": "parser.detected_breakers[3].yTopRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.detected_breakers[4].circuitNumber",
+        "v17": "2",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.detected_breakers[4].circuitNumbers",
+        "v17": "[2]",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.detected_breakers[4].circuitPositionSource",
+        "v17": "\"ckt_ocr\"",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.detected_breakers[4].rowBottom",
+        "v17": "454",
+        "v18": "735"
+      },
+      {
+        "path": "parser.detected_breakers[4].rowIndex",
+        "v17": "2",
+        "v18": "6"
+      },
+      {
+        "path": "parser.detected_breakers[4].rowTop",
+        "v17": "385",
+        "v18": "664"
+      },
+      {
+        "path": "parser.detected_breakers[4].side",
+        "v17": "\"right\"",
+        "v18": "\"left\""
+      },
+      {
+        "path": "parser.detected_breakers[4].startCircuitNumber",
+        "v17": "2",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.detected_breakers[4].yBottomRatio",
+        "v17": "0.17965967550455086",
+        "v18": "0.29085872576177285"
+      },
+      {
+        "path": "parser.detected_breakers[4].yCenterRatio",
+        "v17": "0.16600712307083498",
+        "v18": "0.27681044717055797"
+      },
+      {
+        "path": "parser.detected_breakers[4].yTopRatio",
+        "v17": "0.1523545706371191",
+        "v18": "0.2627621685793431"
+      },
+      {
+        "path": "parser.detected_breakers[5].circuitNumber",
+        "v17": "4",
+        "v18": "2"
+      },
+      {
+        "path": "parser.detected_breakers[5].circuitNumbers[0]",
+        "v17": "4",
+        "v18": "2"
+      },
+      {
+        "path": "parser.detected_breakers[5].rowBottom",
+        "v17": "523",
+        "v18": "454"
+      },
+      {
+        "path": "parser.detected_breakers[5].rowIndex",
+        "v17": "3",
+        "v18": "2"
+      },
+      {
+        "path": "parser.detected_breakers[5].rowTop",
+        "v17": "454",
+        "v18": "385"
+      },
+      {
+        "path": "parser.detected_breakers[5].startCircuitNumber",
+        "v17": "4",
+        "v18": "2"
+      },
+      {
+        "path": "parser.detected_breakers[5].yBottomRatio",
+        "v17": "0.2069647803719826",
+        "v18": "0.17965967550455086"
+      },
+      {
+        "path": "parser.detected_breakers[5].yCenterRatio",
+        "v17": "0.19331222793826672",
+        "v18": "0.16600712307083498"
+      },
+      {
+        "path": "parser.detected_breakers[5].yTopRatio",
+        "v17": "0.17965967550455086",
+        "v18": "0.1523545706371191"
+      },
+      {
+        "path": "parser.detected_breakers[6].amperage",
+        "v17": "50",
+        "v18": "20"
+      },
+      {
+        "path": "parser.detected_breakers[6].circuitNumber",
+        "v17": "6",
+        "v18": "4"
+      },
+      {
+        "path": "parser.detected_breakers[6].circuitNumbers[0]",
+        "v17": "6",
+        "v18": "4"
+      },
+      {
+        "path": "parser.detected_breakers[6].comboText",
+        "v17": "\"1P-ZOA\"",
+        "v18": "\"1P-2OA\""
+      },
+      {
+        "path": "parser.detected_breakers[6].rowBottom",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.detected_breakers[6].rowIndex",
+        "v17": "4",
+        "v18": "3"
+      },
+      {
+        "path": "parser.detected_breakers[6].rowTop",
+        "v17": "523",
+        "v18": "454"
+      },
+      {
+        "path": "parser.detected_breakers[6].startCircuitNumber",
+        "v17": "6",
+        "v18": "4"
+      },
+      {
+        "path": "parser.detected_breakers[6].yBottomRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.detected_breakers[6].yCenterRatio",
+        "v17": "0.22081519588444795",
+        "v18": "0.19331222793826672"
+      },
+      {
+        "path": "parser.detected_breakers[6].yTopRatio",
+        "v17": "0.2069647803719826",
+        "v18": "0.17965967550455086"
+      },
+      {
+        "path": "parser.detected_breakers[7].circuitNumber",
+        "v17": "8",
+        "v18": "6"
+      },
+      {
+        "path": "parser.detected_breakers[7].circuitNumbers[0]",
+        "v17": "8",
+        "v18": "6"
+      },
+      {
+        "path": "parser.detected_breakers[7].comboText",
+        "v17": "\"#K1P-ZOA\"",
+        "v18": "\"1P-ZOA\""
+      },
+      {
+        "path": "parser.detected_breakers[7].rowBottom",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.detected_breakers[7].rowIndex",
+        "v17": "5",
+        "v18": "4"
+      },
+      {
+        "path": "parser.detected_breakers[7].rowTop",
+        "v17": "593",
+        "v18": "523"
+      },
+      {
+        "path": "parser.detected_breakers[7].startCircuitNumber",
+        "v17": "8",
+        "v18": "6"
+      },
+      {
+        "path": "parser.detected_breakers[7].yBottomRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.detected_breakers[7].yCenterRatio",
+        "v17": "0.2487138899881282",
+        "v18": "0.22081519588444795"
+      },
+      {
+        "path": "parser.detected_breakers[7].yTopRatio",
+        "v17": "0.23466561139691333",
+        "v18": "0.2069647803719826"
+      },
+      {
+        "path": "parser.detected_breakers[8].amperage",
+        "v17": "20",
+        "v18": "50"
+      },
+      {
+        "path": "parser.detected_breakers[8].circuitNumber",
+        "v17": "10",
+        "v18": "8"
+      },
+      {
+        "path": "parser.detected_breakers[8].circuitNumbers[0]",
+        "v17": "10",
+        "v18": "8"
+      },
+      {
+        "path": "parser.detected_breakers[8].comboText",
+        "v17": "\"1P-2OA\"",
+        "v18": "\"#K1P-ZOA\""
+      },
+      {
+        "path": "parser.detected_breakers[8].rowBottom",
+        "v17": "735",
+        "v18": "664"
+      },
+      {
+        "path": "parser.detected_breakers[8].rowIndex",
+        "v17": "6",
+        "v18": "5"
+      },
+      {
+        "path": "parser.detected_breakers[8].rowTop",
+        "v17": "664",
+        "v18": "593"
+      },
+      {
+        "path": "parser.detected_breakers[8].startCircuitNumber",
+        "v17": "10",
+        "v18": "8"
+      },
+      {
+        "path": "parser.detected_breakers[8].yBottomRatio",
+        "v17": "0.29085872576177285",
+        "v18": "0.2627621685793431"
+      },
+      {
+        "path": "parser.detected_breakers[8].yCenterRatio",
+        "v17": "0.27681044717055797",
+        "v18": "0.2487138899881282"
+      },
+      {
+        "path": "parser.detected_breakers[8].yTopRatio",
+        "v17": "0.2627621685793431",
+        "v18": "0.23466561139691333"
+      },
+      {
+        "path": "parser.detected_breakers[9]",
+        "v17": "<MISSING>",
+        "v18": "{\"side\": \"right\", \"rowIndex\": 6, \"rowTop\": 664, \"rowBottom\": 735, \"amperage\": 20, \"poles\": 1, \"comboText\": \"1P-2OA\", \"circuitNumbers\": [10], \"startCircuitNumber\": 10, \"circuitNumber\": 10, \"circuitPositionSource\": \"ckt_ocr\", \"circuitPositionIssue\": true, \"yTopRatio\": 0.2627621685793431, \"yBottomRatio\": 0.29085872576177285, \"yCenterRatio\": 0.27681044717055797}"
+      },
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      },
+      {
+        "path": "parser.reviewCells[1].pairs[0]",
+        "v17": "<MISSING>",
+        "v18": "{\"amperage\": 20, \"poles\": 1}"
+      },
+      {
+        "path": "parser.reviewCells[1].reason",
+        "v17": "\"Combined breaker cell contained marks but amperage/poles could not be parsed.\"",
+        "v18": "<MISSING>"
+      },
+      {
+        "path": "parser.reviewCells[1].status",
+        "v17": "\"issue\"",
+        "v18": "\"good\""
+      },
+      {
+        "path": "parser.reviewCells[1].text",
+        "v17": "\"0 IP-2OA\"",
+        "v18": "\"20/1\""
+      }
+    ],
+    "error": ""
+  }
+]

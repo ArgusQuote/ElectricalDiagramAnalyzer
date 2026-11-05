@@ -1,0 +1,22 @@
+[
+  {
+    "job": "H.pdf",
+    "crop": "H_electrical_filtered_page001_panel01.png",
+    "panel_v17": "P",
+    "panel_v18": "P",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 19,
+    "v18_breakers": 19,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]

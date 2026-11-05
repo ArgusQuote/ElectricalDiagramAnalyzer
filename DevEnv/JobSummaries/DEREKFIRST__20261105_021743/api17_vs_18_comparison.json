@@ -1,0 +1,116 @@
+[
+  {
+    "job": "derekfirst.pdf",
+    "crop": "derekfirst_electrical_filtered_page007_panel01.png",
+    "panel_v17": "B (3)",
+    "panel_v18": "B (3)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 37,
+    "v18_breakers": 37,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "derekfirst.pdf",
+    "crop": "derekfirst_electrical_filtered_page007_panel02.png",
+    "panel_v17": "B (4)",
+    "panel_v18": "B (4)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 37,
+    "v18_breakers": 37,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "derekfirst.pdf",
+    "crop": "derekfirst_electrical_filtered_page007_panel03.png",
+    "panel_v17": "A (3)",
+    "panel_v18": "A (3)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 13,
+    "v18_breakers": 13,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "derekfirst.pdf",
+    "crop": "derekfirst_electrical_filtered_page007_panel04.png",
+    "panel_v17": "225A",
+    "panel_v18": "225A",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 8,
+    "v18_breakers": 8,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "derekfirst.pdf",
+    "crop": "derekfirst_electrical_filtered_page008_panel01.png",
+    "panel_v17": "MOUINTTNG",
+    "panel_v18": "MOUINTTNG",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "derekfirst.pdf",
+    "crop": "derekfirst_electrical_filtered_page008_panel02.png",
+    "panel_v17": "(unnamed)",
+    "panel_v18": "(unnamed)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]
