@@ -47,6 +47,40 @@ from OcrLibrary.ocr_timeout import readtext_with_timeout as _readtext_with_timeo
 # Body-column roles the cell classifier was trained on.
 _CELL_CLASSIFIER_ROLES = ("trip", "poles", "combo")
 
+# Value-source tag on tokens, review cells, and breakers the classifier supplied,
+# so reviewers and downstream code can tell model reads from OCR reads.
+CELL_CLASSIFIER_SOURCE = "cell_classifier"
+
+
+def _row_read_by_classifier(row_top: int, row_bottom: int, col_tokens) -> bool:
+    """True when this column's text for the row band came from the cell classifier."""
+    for tok in col_tokens or ():
+        if tok.get("source") != CELL_CLASSIFIER_SOURCE:
+            continue
+        _, y1, _, y2 = tok["box_page"]
+        if row_top <= 0.5 * (y1 + y2) < row_bottom:
+            return True
+    return False
+
+
+def _cell_classifier_runtime_info() -> Dict:
+    """Which classifier models this process runs (or why it runs none), for job logs."""
+    try:
+        from MLCellReader.cell_fallback import CellFallbackReader
+    except ImportError as exc:
+        return {"enabled": False, "disabledReason": f"MLCellReader unavailable: {exc}"}
+    return CellFallbackReader.shared().describe()
+
+
+def _cell_classifier_summary(review_cells) -> Dict[str, int]:
+    """Count classifier-filled cells per role for one panel's result."""
+    counts: Dict[str, int] = {}
+    for cell in review_cells or ():
+        if cell.get("source") == CELL_CLASSIFIER_SOURCE:
+            role = str(cell.get("role") or "unknown")
+            counts[role] = counts.get(role, 0) + 1
+    return counts
+
 
 def _cell_classifier_row_tokens(row_gray, role: Optional[str]):
     """
@@ -2289,6 +2323,7 @@ class SeparatedLayoutParser:
                 prep_vis[row_top:row_bottom, :] = row_prepped
 
             row_tokens = self._ocr_row_band_tokens(row_prepped)
+            row_source = None
 
             # De-gridding wins on cells whose borders touch the glyphs, but on a
             # minority of cells it drops a trailing digit or leaves a fragment
@@ -2312,6 +2347,7 @@ class SeparatedLayoutParser:
                     ml_tokens = _cell_classifier_row_tokens(row_gray, classifier_role)
                     if ml_tokens and row_value_ok(ml_tokens):
                         row_tokens = ml_tokens
+                        row_source = CELL_CLASSIFIER_SOURCE
                         if self.debug:
                             print(
                                 f"[{PARSER_VERSION}] cell classifier recovered {classifier_role} row "
@@ -2326,13 +2362,14 @@ class SeparatedLayoutParser:
                 y1_page = body_y_top + row_top + y1_row
                 y2_page = body_y_top + row_top + y2_row
 
-                tokens.append(
-                    {
-                        "text": txt_clean,
-                        "conf": conf_f,
-                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                    }
-                )
+                token = {
+                    "text": txt_clean,
+                    "conf": conf_f,
+                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                }
+                if row_source:
+                    token["source"] = row_source
+                tokens.append(token)
 
         if prep_vis is not None:
             _save_cell_prep_comparison(strip_gray, prep_vis, debug_prep_path)
@@ -2746,6 +2783,11 @@ class SeparatedLayoutParser:
 
                 amps = self._parse_trip_value(trip_text)
                 poles = self._parse_poles_value(poles_text)
+                classifier_fields = [
+                    field
+                    for field, col_tokens in (("amperage", trip_tokens), ("poles", poles_tokens))
+                    if _row_read_by_classifier(row_top, row_bottom, col_tokens)
+                ]
 
                 trip_has_text = bool(str(trip_text or "").strip())
                 poles_has_text = bool(str(poles_text or "").strip())
@@ -2892,6 +2934,8 @@ class SeparatedLayoutParser:
                             "value": int(amps),
                         }
                     )
+                    if "amperage" in classifier_fields:
+                        review_cells[-1]["source"] = CELL_CLASSIFIER_SOURCE
                 else:
                     review_cells.append(
                         {
@@ -2933,6 +2977,8 @@ class SeparatedLayoutParser:
                             "value": int(poles),
                         }
                     )
+                    if "poles" in classifier_fields:
+                        review_cells[-1]["source"] = CELL_CLASSIFIER_SOURCE
                 else:
                     review_cells.append(
                         {
@@ -2985,6 +3031,10 @@ class SeparatedLayoutParser:
                     "tripText": trip_text,
                     "polesText": poles_text,
                 }
+
+                if classifier_fields:
+                    rec["source"] = CELL_CLASSIFIER_SOURCE
+                    rec["classifierFields"] = classifier_fields
 
                 if gfi_flag:
                     rec["specialFeatures"] = gfi_flag
@@ -3275,6 +3325,7 @@ class CombinedLayoutParser:
                 prep_vis[row_top:row_bottom, :] = row_prepped
 
             row_tokens = self._ocr_row_band_tokens(row_prepped)
+            row_source = None
 
             # See the note on the separated-layout parser: a successful prepped
             # read always wins, but a cell the de-gridding damaged is re-read
@@ -3294,6 +3345,7 @@ class CombinedLayoutParser:
                     ml_tokens = _cell_classifier_row_tokens(row_gray, classifier_role)
                     if ml_tokens and row_value_ok(ml_tokens):
                         row_tokens = ml_tokens
+                        row_source = CELL_CLASSIFIER_SOURCE
                         if self.debug:
                             print(
                                 f"[{PARSER_VERSION}] cell classifier recovered combo row "
@@ -3308,13 +3360,14 @@ class CombinedLayoutParser:
                 y1_page = body_y_top + row_top + y1_row
                 y2_page = body_y_top + row_top + y2_row
 
-                tokens.append(
-                    {
-                        "text": txt_clean,
-                        "conf": conf_f,
-                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                    }
-                )
+                token = {
+                    "text": txt_clean,
+                    "conf": conf_f,
+                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                }
+                if row_source:
+                    token["source"] = row_source
+                tokens.append(token)
 
         if prep_vis is not None:
             _save_cell_prep_comparison(strip_gray, prep_vis, debug_prep_path)
@@ -3992,6 +4045,11 @@ class CombinedLayoutParser:
                 )
 
                 combo_pairs = self._parse_combo_cell(combo_text)
+                combo_by_classifier = _row_read_by_classifier(
+                    row_top,
+                    row_bottom,
+                    combo_tokens,
+                )
 
                 combo_text_normalized = (
                     str(combo_text or "").strip().upper()
@@ -4079,6 +4137,8 @@ class CombinedLayoutParser:
                             ],
                         }
                     )
+                    if combo_by_classifier:
+                        review_cells[-1]["source"] = CELL_CLASSIFIER_SOURCE
                 elif combo_has_text or combo_has_marks:
                     review_cells.append(
                         {
@@ -4138,6 +4198,10 @@ class CombinedLayoutParser:
                         "poles": int(poles),
                         "comboText": combo_text,
                     }
+
+                    if combo_by_classifier:
+                        rec["source"] = CELL_CLASSIFIER_SOURCE
+                        rec["classifierFields"] = ["amperage", "poles"]
 
                     if gfi_flag:
                         rec["specialFeatures"] = gfi_flag
@@ -5159,6 +5223,10 @@ class BreakerTableParser:
             "existingBreakerNote": existing_breaker_note,
             "reviewCells": review_cells,
             "breakerPositionIssues": breaker_position_issues,
+            "cellClassifier": {
+                **_cell_classifier_runtime_info(),
+                "filledCells": _cell_classifier_summary(review_cells),
+            },
             "headerScan": header_scan,
             "separatedScan": separated_scan,
             "combinedScan": combined_scan,

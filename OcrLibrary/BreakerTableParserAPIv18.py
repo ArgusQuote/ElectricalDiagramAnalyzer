@@ -376,6 +376,9 @@ class BreakerTablePipeline:
         #   good combo cell     -> GREEN
         #   unreadable/invalid  -> RED
         #
+        # Either layout:
+        #   value supplied by the cell classifier -> ORANGE "ML" (verify by eye)
+        #
         # Empty cells are intentionally absent from reviewCells and therefore
         # receive no overlay.
 
@@ -387,6 +390,7 @@ class BreakerTablePipeline:
         GREEN = (0, 200, 0)    # BGR: valid amps or valid combined cell
         BLUE = (255, 0, 0)     # BGR: valid poles cell
         RED = (0, 0, 255)      # BGR: occupied but unreadable/invalid
+        ORANGE = (0, 140, 255) # BGR: value read by the cell classifier, not OCR
 
         for cell in review_cells:
             if not isinstance(cell, dict):
@@ -409,6 +413,12 @@ class BreakerTablePipeline:
             if status == "issue":
                 color = RED
                 label = "CHECK"
+                fill_alpha = 0.18
+                thickness = 3
+
+            elif status == "good" and cell.get("source") == "cell_classifier":
+                color = ORANGE
+                label = "ML"
                 fill_alpha = 0.18
                 thickness = 3
 

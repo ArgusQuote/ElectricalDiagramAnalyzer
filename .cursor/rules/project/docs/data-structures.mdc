@@ -52,6 +52,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `hasExistingBreakers` / `existingBreakerCount` / `existingBreakerNote` -- breakers whose description contains a standalone `EX` / `EXISTING`
   - `reviewCells` -- list of cells to highlight in the review overlay (`role`, `status`, `text`, `reason`, bounds)
   - `breakerPositionIssues` -- list of CKT-grid / printed-circuit-number mismatches from `_attach_circuit_positions()`
+  - `cellClassifier` (Parser15+ only) -- `{enabled, disabledReason, pinned, device, models: {amps|poles: {run, sha256, classes, allowedClasses}}, minConfidence, filledCells: {role: count}}`. Breakers and review cells whose value the classifier supplied carry `source: "cell_classifier"`; such breakers also carry `classifierFields` (`["amperage"]`, `["poles"]`, or both).
   - `headerScan.normalizedColumns` -- column layout info
   - `separatedScan` -- dict or None, separated layout parse results
   - `combinedScan` -- dict or None, combined layout parse results
@@ -87,6 +88,7 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `attrs.breaker_position_issues` -- list, copied from parser `breakerPositionIssues`
   - `suspectedExisting`, `existingReason`, `existingDetection` -- existing-*panel* review metadata (from header parser, falling back to parser/result)
   - `hasExistingBreakers`, `existingBreakerCount`, `existingBreakerNote` -- existing-*breaker* review metadata; the note is also appended to `panelNote`
+  - `cellClassifier` -- present only when the parser emits it (APIv18 / Parser15); copied verbatim for audit, never read by the Rules Engine
   - `notes` -- list of str, optional warnings (e.g., breaker suppression reason)
 
 ## RulesEngine Payload

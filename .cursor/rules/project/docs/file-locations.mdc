@@ -70,7 +70,9 @@ ElectricalDiagramAnalyzer/
 | `OcrLibrary/BreakerTableParser12.py` | Previous table parser (`PARSER_VERSION = "BreakerParser12"`). Adds `_prep_cell_for_ocr()` grid removal before body OCR plus `_cellprep.png` BEFORE/AFTER debug images. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser11.py` | Previous table parser (`PARSER_VERSION = "BreakerParser11"`), identical to Parser12 except that body cells are OCR'd with the grid still in them. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser10.py` | Prior table parser -- kept for comparison. |
-| `MLCellReader/cell_fallback.py` | `CellFallbackReader.shared()` -- loads the amps/poles models and reads one cell for Parser15. Env: `CELL_CLASSIFIER_MODELS_DIR`, `CELL_CLASSIFIER_DISABLE`. |
+| `MLCellReader/cell_fallback.py` | `CellFallbackReader.shared()` -- loads the amps/poles models and reads one cell for Parser15. Loads the models pinned in `production_models.json` (sha256-verified, CPU by default). Env: `CELL_CLASSIFIER_MODELS_DIR`, `CELL_CLASSIFIER_DISABLE`, `CELL_CLASSIFIER_DEVICE`, `CELL_CLASSIFIER_USE_LATEST`. |
+| `MLCellReader/production_models.json` | Production model pin: run name, sha256, `min_confidence`, `allowed_classes` per target. Update it (and re-run `tune_fallback_gate.py`) whenever a new final model is promoted. |
+| `MLCellReader/tune_fallback_gate.py` | Held-out K-fold sweep of the fallback confidence floor and per-class fill precision. |
 | `MLCellReader/cell_classifier.py` | `CellNet` CNN and `CellClassifier` load/predict wrapper. |
 | `MLCellReader/cell_data.py` | Data-root layout (`~/Documents/CellAnnotations`, env `CELL_ANNOTATIONS_ROOT`), label records, image normalization. |
 | `MLCellReader/harvest_cell_crops.py` | Harvests raw cell crops + weak OCR labels from parser runs into `manifest.jsonl`. |
@@ -137,7 +139,7 @@ ElectricalDiagramAnalyzer/
 - **Path**: `MLCellReader/`
 - **Purpose**: CNN classifiers for single breaker body cells (amps, poles), used as the last-resort read in `BreakerTableParser15`, plus the harvest → label → train tooling
 - **Entry point**: `cell_fallback.CellFallbackReader.shared().read_cell(role, gray_crop)`
-- **Data / weights**: out of repo under `~/Documents/CellAnnotations/` (crops come from customer drawings; never commit them). `models/amps_latest.txt` and `models/poles_latest.txt` hold absolute run-dir paths and must be written per host.
+- **Data / weights**: out of repo under `~/Documents/CellAnnotations/` (crops come from customer drawings; never commit them). `models/amps_latest.txt` and `models/poles_latest.txt` hold absolute run-dir paths and must be written per host; production loading ignores them and uses the host-independent pin in `MLCellReader/production_models.json`.
 - **Dependencies**: PyTorch, OpenCV, NumPy
 
 ### AnchoringClasses

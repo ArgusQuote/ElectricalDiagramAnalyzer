@@ -374,22 +374,23 @@ def choose_test_pdfs():
 
 
 
-# Keys that only name the code version that produced a result. They always
-# differ between API 17 and API 18, so comparing them would flag every panel.
-VERSION_TAG_KEYS = frozenset({"parserVersion", "apiVersion", "analyzerVersion"})
+# Keys that describe the run rather than the panel: code version tags, and the
+# cell-classifier model report only API 18 emits. They always differ between
+# API 17 and API 18, so comparing them would flag every panel.
+RUN_METADATA_KEYS = frozenset({"parserVersion", "apiVersion", "analyzerVersion", "cellClassifier"})
 
 
-def without_version_tags(value):
-    """Return a copy of value with VERSION_TAG_KEYS removed at every depth."""
+def without_run_metadata(value):
+    """Return a copy of value with RUN_METADATA_KEYS removed at every depth."""
     if isinstance(value, dict):
         return {
-            k: without_version_tags(v)
+            k: without_run_metadata(v)
             for k, v in value.items()
-            if k not in VERSION_TAG_KEYS
+            if k not in RUN_METADATA_KEYS
         }
 
     if isinstance(value, (list, tuple)):
-        return [without_version_tags(v) for v in value]
+        return [without_run_metadata(v) for v in value]
 
     return value
 
@@ -568,7 +569,7 @@ def compare_parser_outputs(
         f17, b17, g17, h17, t17 = extract(old)
         f18, b18, g18, h18, t18 = extract(new)
         h17, t17, h18, t18 = (
-            without_version_tags(x) for x in (h17, t17, h18, t18)
+            without_run_metadata(x) for x in (h17, t17, h18, t18)
         )
 
         record["panel_v17"] = str(f17["name"] or "")

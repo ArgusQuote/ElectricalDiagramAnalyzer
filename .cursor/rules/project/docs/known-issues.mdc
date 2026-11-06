@@ -52,8 +52,9 @@ This file tracks known bugs, limitations, and deferred work items for the projec
  for trip / poles / combo cells. Order: de-gridded EasyOCR → raw-cell EasyOCR →
  `MLCellReader` CNN on the raw row crop. The model's answer must pass the same parse
  checks as OCR, and it never overrides a successful OCR read. Combo cells need both
- models above `MIN_CONFIDENCE = 0.5`. Without model files, or with
- `CELL_CLASSIFIER_DISABLE=1`, Parser15 behaves like Parser14.
+ models to pass their gate. Without model files, or with
+ `CELL_CLASSIFIER_DISABLE=1`, Parser15 behaves like Parser14 (verified 2026-11-06:
+ identical breakers, counts, review cells, position issues and spaces on B.pdf).
  **Training data / models (out of repo):** about 13.4k labeled cells from 25 PDFs in
  `~/Documents/CellAnnotations/` on Marco's laptop. Final models in use since
  2026-10-27: `poles_20261027_140858_final` (model.pt sha256 `3f411af6f2f7…`) and
@@ -65,7 +66,26 @@ This file tracks known bugs, limitations, and deferred work items for the projec
  in "fill only cells OCR missed" mode, poles wrong cells fell from 92 to 26 of 7,172
  and amps from 171 to 15 of 7,277. Nearly all OCR errors were misses, not misreads.
  Fold scores use best-epoch selection on the validation fold, so they are slightly
- optimistic.
+ optimistic. **Correction (2026-11-06):** those figures took the model's top class
+ with no confidence floor. Under the parser's 0.5 floor the amps model filled only
+ 40 of the 169 OCR-missed amps cells, because it is underconfident (121 cells had the
+ right top class below 0.5). See the gate tuning below.
+ - **Gate tuning (laptop, 2026-11-06, `MLCellReader/tune_fallback_gate.py`):** 10 fresh
+ fold models on the corrected labels (`{poles,amps}_20261106_*_fold{0..4}of5`), each
+ scored only on the PDFs it was held out from, fill-only-when-OCR-missed mode.
+ Findings: every wrong poles fill but one was a predicted `3` (1 right of 14), and
+ every predicted amps `100` was wrong (0 of 10, conf 0.48-0.77, true blank or `0`).
+ Pinned gate in `MLCellReader/production_models.json`: poles floor 0.5, classes
+ {1, 2}; amps floor 0.35, classes {15, 20, 25, 30, 35, 50, 60}. Result on held-out
+ cells: poles 99 right / 0 wrong of 105 OCR misses (was 100 / 13 at the old
+ 0.5-any-class gate); amps 160 right / 5 phantom / 0 wrong-value of 169 misses (was
+ 40 / 8). The 5 phantoms are four `20`s in blank combo cells (a combo row also needs
+ a poles value to become a breaker) and one `15`. Caveat: the gate is tuned on fold
+ models; the shipped `_final` models are trained on all labels and may be calibrated
+ slightly differently. Excluded classes stay red CHECK for human review.
+ Full-pipeline check with the tuned gate (laptop, `DevTestEnvBatch.py --api 18
+ --no-debug`, `~/Documents/NewTest/`, 2026-11-06): 13/13 PDFs, 78 panels, **1991
+ breakers** -- the same total as the 2026-10-27 v18 run (v17: 1943); wall time 18:06.
  - **LW 29-PDF comparison (`380a953`, `DevEnv/JobSummaries/APIComparison/20261105_013457_745043/`):**
  221 panels, 0 job failures. The report shows 17 `MATCH` and 192 `RAW_ONLY`, but that
  split came from a harness bug: the `parserVersion` string always differs between
@@ -93,14 +113,25 @@ This file tracks known bugs, limitations, and deferred work items for the projec
  predicted. 20 A is about 62% of amps labels, so rare ratings are weak. New drawing
  styles mostly make the model decline (cell stays red CHECK), but confident wrong
  answers are possible.
- **Deferred before promoting APIv18 to production (Marco's call):**
- (1) force CPU inference in `cell_fallback.py` (the device currently defaults to CUDA;
- measured ~9 ms/cell on 1 CPU thread vs ~0.8 ms on GPU); (2) pin the model version and
- verify sha256 at load, and log it per job; (3) tag classifier-filled cells
- (`source: "cell_classifier"`) and give them a distinct review-overlay color;
- (4) tune `MIN_CONFIDENCE` / temperature-scale, and consider restricting amps to
- common ratings; (5) a repeatable retrain-and-compare script; (6) spot-check the B/D
- +22 breakers in review overlays.
+ **Production-readiness work, 2026-11-06:**
+ (1) **CPU by default** -- `cell_fallback.py` loads on CPU unless
+ `CELL_CLASSIFIER_DEVICE=cuda` (~21 ms per combo cell, two models, on a loaded laptop
+ CPU; only OCR-missed cells pay it). (2) **Pinned + verified models** --
+ `MLCellReader/production_models.json` names run dirs (host-independent) and sha256;
+ mismatch or missing file disables the fallback. `CELL_CLASSIFIER_USE_LATEST=1` uses
+ `*_latest.txt` for experiments. Each parser result carries a `cellClassifier` block
+ (models, sha256, device, floors, `filledCells`), copied onto the component in
+ `uplink_server.py`. (3) **Tagging** -- classifier-filled breakers / review cells carry
+ `source: "cell_classifier"` (+ `classifierFields`), drawn ORANGE "ML" in APIv18
+ review overlays. (4) **Gate tuned** -- see "Gate tuning" above. (5) The fold-sweep
+ half of a retrain-and-compare script exists (`tune_fallback_gate.py`); retraining is
+ still manual (`train_cell_classifier.py --folds 5 --fold N`, then `--no-holdout`, then
+ update the pin). (6) **B/D spot-check done** -- all 22 classifier-filled breakers on
+ B.pdf (and the same three panels in D.pdf) are lone pole `1` cells beside `20` trips,
+ and all 22 were confirmed correct by eye in the review overlays (B: 96 → 118 breakers).
+ **Remaining before promotion (Marco's call):** switch `uplink_server.py` from APIv17
+ to APIv18 and restart `anvil-uplink`; copy `production_models.json`'s two run dirs to
+ any host that runs the parser (already on Paperspace); then retire Parser14/APIv17.
 
 - **APIv15 raw-cell OCR fallback -- LANDED 2026-08-19 (commit `510d07f`; production has since moved to APIv17, see entry above)** --
   Production OCR advanced from `BreakerTableParserAPIv14` / `BreakerTableParser12`

@@ -3003,6 +3003,12 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
         comp["notes"] = notes
         comp["attrs"]["breaker_data_suppressed"] = True
 
+    # Parser15+ reports which cell-classifier models ran and which cells they
+    # filled; kept for audit only, the Rules Engine never reads it.
+    cell_classifier = (prs or {}).get("cellClassifier")
+    if isinstance(cell_classifier, dict):
+        comp["cellClassifier"] = cell_classifier
+
     return comp
 
 # ---------- Compatibility panel selection ----------

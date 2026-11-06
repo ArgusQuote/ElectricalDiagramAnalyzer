@@ -1,0 +1,16 @@
+{
+  "models": {
+    "amps": {
+      "run": "amps_20261027_141547_final",
+      "sha256": "dc014e01f4a2312b6a3c92f4724ad34d10cc80031988bdb674ca75bec584afed",
+      "min_confidence": 0.35,
+      "allowed_classes": ["15", "20", "25", "30", "35", "50", "60"]
+    },
+    "poles": {
+      "run": "poles_20261027_140858_final",
+      "sha256": "3f411af6f2f7d2376cb1474042afd3483a117f54893db48c7469c8a15f80af8d",
+      "min_confidence": 0.5,
+      "allowed_classes": ["1", "2"]
+    }
+  }
+}
