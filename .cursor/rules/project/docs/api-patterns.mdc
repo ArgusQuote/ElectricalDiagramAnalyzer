@@ -129,7 +129,7 @@ All endpoints are in `AnvilUplinkCode/uplink_server.py`, decorated with `@anvil.
 ### vm_fetch_image
 - **Purpose**: Return an image file as BlobMedia for display in the UI
 - **Parameters**: `job_id` (str), `owner_email` (str), `source_path` (str -- absolute or job-relative), `group_folder="personal"` (str)
-- **Returns**: `anvil.BlobMedia` with image bytes
+- **Returns**: `anvil.BlobMedia`. Files up to 300 KB are returned as-is. Larger images are returned as a cached web preview: JPEG, long side ≤ 1800 px, quality 80, stored under `{job_dir}/.web_previews/` and keyed by path + size + mtime. The original detection/OCR image is never modified.
 - **Security**: Validates path is under the job directory to prevent path traversal
 
 ### vm_get_default_overrides

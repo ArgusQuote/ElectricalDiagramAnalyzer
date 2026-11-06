@@ -10,20 +10,20 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
 ## Pipeline Payloads
 
 ### BreakerTablePipeline Output
-- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv14.BreakerTablePipeline.run()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParserAPIv17.BreakerTablePipeline.run()` (production; APIv18 has the same shape)
 - **Used by**: `_merge_component_from_btp()` in uplink_server.py
 - **Fields**:
-  - `apiVersion` -- str, pipeline API version (currently `"API_14"`)
+  - `apiVersion` -- str, pipeline API version (currently `"API_17"` in production)
   - `origin` -- str, source image path
   - `panelStatus` -- None if OK, str error message otherwise
   - `stages` -- dict of stage metadata (analyzer, parser, header)
   - `results` -- dict containing the three stage outputs:
     - `results.analyzer` -- dict: `src_path`, `header_y`, `header_bottom_y`, `footer_y`, `footer_token_val`, `panel_size`, `debug_dir`, `gray`
     - `results.header` -- dict: `type`, `name`, `attrs`, `winningBoxes`, `boxImageShape`, `reviewOverlayPath`
-    - `results.parser` -- dict: `parserVersion`, `name`, `spaces`, `detected_breakers`, `breakerCounts`, `gfiBreakerCounts`, `headerScan`, `separatedScan`, `combinedScan`, `reviewOverlayPath`
+    - `results.parser` -- dict: `parserVersion`, `name`, `spaces`, `detected_breakers`, `breakerCounts`, `gfiBreakerCounts`, `excludedSpaceRows`, `hasExistingBreakers`, `existingBreakerCount`, `existingBreakerNote`, `reviewCells`, `breakerPositionIssues`, `headerScan`, `separatedScan`, `combinedScan`, `reviewOverlayPath`
 
 ### Header Parser Output (results.header)
-- **Location**: Returned by `OcrLibrary/PanelHeaderParserV11.PanelParser.parse_panel()`
+- **Location**: Returned by `OcrLibrary/PanelHeaderParserV12.PanelParser.parse_panel()`
 - **Fields**:
   - `type` -- str, always "panelboard"
   - `name` -- str, detected panel name
@@ -35,16 +35,23 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `winningBoxes` -- dict of bounding rects: `name`, `voltage`, `bus`, `main`, `aic`
   - `boxImageShape` -- dict: `w`, `h`
   - `reviewOverlayPath` -- str or None, path to review overlay image
+  - `suspectedExisting` -- bool (V12), NAME text fuzzily matches `EXISTING`
+  - `existingReason` -- str (V12), human-readable reason for the flag
+  - `existingDetection` -- str (V12), which detection rule fired
 
 ### Table Parser Output (results.parser)
-- **Location**: Returned by `OcrLibrary/BreakerTableParser12.BreakerTableParser.parse_from_analyzer()`
+- **Location**: Returned by `OcrLibrary/BreakerTableParser14.BreakerTableParser.parse_from_analyzer()` (production; Parser15 has the same shape)
 - **Fields**:
-  - `parserVersion` -- str
+  - `parserVersion` -- str (`"BreakerParser14"` in production, `"BreakerParser15"` under APIv18)
   - `name` -- str
   - `spaces` -- int or None, number of panel spaces
-  - `detected_breakers` -- list of breaker dicts: `{amperage, count, poles, ...}`
-  - `breakerCounts` -- dict of amperage-to-count mappings
-  - `gfiBreakerCounts` -- dict of GFI breaker counts
+  - `detected_breakers` -- list of breaker dicts: `{amperage, count, poles, ...}`. Description analysis can add `specialFeatures` (`"GFI"`), `suspectedExisting`, `existingDetection` (`"description_marker"`), `existingReason`, `descriptionReview`; circuit-position confirmation adds display-only circuit numbers.
+  - `breakerCounts` -- dict of `"<poles>P_<amps>A"`-to-count mappings (non-GFI only)
+  - `gfiBreakerCounts` -- dict of GFI breaker counts, same key format
+  - `excludedSpaceRows` -- list of `{side, rowTop, rowBottom, descriptionText, ocrConfidence, reason}` for rows removed because the description is a confirmed `SPACE`
+  - `hasExistingBreakers` / `existingBreakerCount` / `existingBreakerNote` -- breakers whose description contains a standalone `EX` / `EXISTING`
+  - `reviewCells` -- list of cells to highlight in the review overlay (`role`, `status`, `text`, `reason`, bounds)
+  - `breakerPositionIssues` -- list of CKT-grid / printed-circuit-number mismatches from `_attach_circuit_positions()`
   - `headerScan.normalizedColumns` -- column layout info
   - `separatedScan` -- dict or None, separated layout parse results
   - `combinedScan` -- dict or None, combined layout parse results
@@ -77,6 +84,9 @@ This project uses plain Python dicts (not ORM entities or dataclasses) as its pr
   - `attrs.mainBreakerAmperage` -- int or None
   - `attrs.detected_breakers` -- list of breaker dicts (merged from header + table parser)
   - `attrs.breaker_data_suppressed` -- bool, True if breakers were suppressed by 2-strikes rule
+  - `attrs.breaker_position_issues` -- list, copied from parser `breakerPositionIssues`
+  - `suspectedExisting`, `existingReason`, `existingDetection` -- existing-*panel* review metadata (from header parser, falling back to parser/result)
+  - `hasExistingBreakers`, `existingBreakerCount`, `existingBreakerNote` -- existing-*breaker* review metadata; the note is also appended to `panelNote`
   - `notes` -- list of str, optional warnings (e.g., breaker suppression reason)
 
 ## RulesEngine Payload

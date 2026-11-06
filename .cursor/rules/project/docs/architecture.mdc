@@ -25,12 +25,13 @@ AnvilUplinkCode/uplink_server.py ── vm_submit_for_detection()
     ├─► PanelBoardSearch (PanelSearchToolV26)
     │       │  detects panel regions, crops to PNGs
     │       ▼
-    ├─► BreakerTablePipeline (BreakerTableParserAPIv15)
+    ├─► BreakerTablePipeline (BreakerTableParserAPIv17)
     │       ├─► BreakerTableAnalyzer (Analyzer12)
     │       │       ├── BreakerHeaderFinder
     │       │       └── BreakerFooterFinder
-    │       ├─► PanelHeaderParser (PanelHeaderParserV11)
-    │       └─► BreakerTableParser (BreakerTableParser13)
+    │       ├─► PanelHeaderParser (PanelHeaderParserV12)
+    │       └─► BreakerTableParser (BreakerTableParser14)
+    │               [APIv18 / Parser15 adds MLCellReader cell-classifier fallback; dev only]
     │       │  extracts structured OCR data per panel
     │       ▼
     ├─► _merge_component_from_btp()
@@ -52,7 +53,7 @@ Specs PDF Upload (Anvil UI) ── vm_upload_specs_pdf()
 vm_start_specs_analysis() ── background thread ── _run_specs_analysis_job()
     │
     ▼
-Spec_Sheet_Analysis/Specs_AnalyzerV5.analyze_specs_pdf_for_ui(pdf_path, job_dir)
+Spec_Sheet_Analysis/Specs_AnalyzerV7.analyze_specs_pdf_for_ui(pdf_path, job_dir)
     │  text-based section finding, panelboard requirement classification,
     │  evidence-image generation (pypdfium2 text extraction; no OCR/GPU)
     ▼
@@ -64,9 +65,10 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 ### AnvilUplinkCode (Orchestrator)
 - **Purpose**: Anvil Uplink server; exposes RPC callables, manages job queue, worker pool, and watchdog
 - **Location**: `AnvilUplinkCode/uplink_server.py`
-- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv15), RulesEngine7, Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, PanelBoardSearch, BreakerTablePipeline (APIv17), RulesEngine7, Spec_Sheet_Analysis (Specs_AnalyzerV7), WorkerSetup
 - **Consumers**: Anvil web frontend via Uplink RPC
-- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV26`, `BreakerTableParserAPIv15`, `RulesEngine7`, and `Specs_AnalyzerV5` loaded dynamically).
+- **Note on active versions**: always confirm the live version by reading the imports at the top of `uplink_server.py` (currently `PageFilterV3`, `PanelSearchToolV26`, `BreakerTableParserAPIv17`, `RulesEngine7`, and `Specs_AnalyzerV7` loaded dynamically).
+- **Existing-equipment metadata (2026-09/10, LW)**: `_merge_component_from_btp()` copies the header parser's `suspectedExisting` / `existingReason` / `existingDetection` (existing *panel*) and the table parser's `existingBreakerCount` / `existingBreakerNote` (EX/EXISTING *breakers*) onto the component dict (top level, next to `panelStatus` / `panelNote`) as `suspectedExisting`, `existingReason`, `existingDetection`, `hasExistingBreakers`, `existingBreakerCount`, `existingBreakerNote`. The existing-breaker note is appended to `panelNote` so the UI surfaces "review supply scope". The parser's `breakerPositionIssues` list is carried through as `attrs.breaker_position_issues`. These are review flags only; they do not feed RulesEngine or change breaker counts.
 - **Job recovery (added 2026-08-18, merge `62beba4`)**: stale queued/running jobs are detected via `heartbeat_ts` in `status.json` and requeued automatically after VM/Anvil disconnects (configurable via `STALE_QUEUED_REQUEUE_SEC`, `RECOVERY_MAX_REQUEUE_ATTEMPTS`, etc.). Live progress heartbeats emit incremental finding counts so the UI does not sit at 0% until OCR finishes.
 
 ### PageFilter
@@ -101,8 +103,12 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 
 ### OcrLibrary (OCR Pipeline)
 - **Purpose**: Three-stage OCR pipeline -- layout analysis, header parsing, breaker table parsing
-- **Location**: `OcrLibrary/` (BreakerTableParserAPIv15, BreakerTableAnalyzer12, PanelHeaderParserV11, BreakerTableParser13)
-- **API version string**: `API_VERSION = "API_15"` (exported by `BreakerTableParserAPIv15`)
+- **Location**: `OcrLibrary/` (BreakerTableParserAPIv17, BreakerTableAnalyzer12, PanelHeaderParserV12, BreakerTableParser14)
+- **API version string**: `API_VERSION = "API_17"` (exported by `BreakerTableParserAPIv17`). Each `BreakerTableParserAPIvN.py` must export `API_VERSION = "API_N"`; harnesses label and compare runs by this string.
+- **Description-column analysis, GFI, SPACE, EX breakers (Parser13 in place; Parser14+)**: `_analyze_description_columns()` OCRs each breaker row's description cell. A whole-cell `SPACE` read with high confidence in both cleaned and raw OCR removes that row (recorded in `excludedSpaceRows`); `SPARE` and uncertain reads keep the breaker and add a review cell. GFI/GFCI tokens split counts into `gfiBreakerCounts` (normalized by `normalize_gfi_modifier()`). Descriptions containing a standalone `EX` / `EXISTING` flag the breaker `suspectedExisting` and roll up into `existingBreakerCount` / `existingBreakerNote`.
+- **Circuit-position confirmation (2026-09-12, `bc76c82`)**: `_attach_circuit_positions()` assigns display-only circuit numbers from the CKT column grid (left odd, right even), validating printed numbers and inferring missing ones. Mismatches are returned as `breakerPositionIssues`; breaker values are never changed.
+- **Existing-panel detection (`PanelHeaderParserV12`, 2026-09-05)**: `_detect_existing_panel()` fuzzily matches `EXISTING` (edit distance ≤ 2, e.g. `EXIST1NG`) in the raw NAME text and emits `suspectedExisting`, `existingReason`, `existingDetection`. `EX` was added to the name-noise word list.
+- **ML cell-classifier fallback (`BreakerTableParser15` / `APIv18`, commit `7ed03e5`; NOT production)**: a third read stage inside `_ocr_body_column_by_rows()` for trip / poles / combo cells. Order: de-gridded EasyOCR → raw-cell EasyOCR → `MLCellReader.cell_fallback.CellFallbackReader` on the raw row crop. The classifier's answer is converted to OCR-like text and must pass the same `row_value_ok` / `_parse_*` checks, and it never overrides a successful OCR read. Combo cells need both the amps and poles models above `MIN_CONFIDENCE` (0.5, untuned). Disable with `CELL_CLASSIFIER_DISABLE=1`; models are found via `CELL_CLASSIFIER_MODELS_DIR` or `~/Documents/CellAnnotations/models/{amps,poles}_latest.txt`. If no models are found the parser behaves exactly like Parser14. Measured results are in `known-issues.mdc` ("APIv18 ML cell-classifier fallback").
 - **Recent parser hardening (2026-08-18, merge `62beba4`)**: `PanelHeaderParserV11` accepts `BKR`/`BRKR` main-breaker labels and `N/A` as a valid "none" for MAIN/AIC; `BreakerTableParser11` adds breaker-column header synonyms and red review overlays for bad breaker detections (ignoring explicit `" -- "` blank cells).
 - **Body-cell grid removal (2026-08-18)**: `BreakerTableParser12` de-grids every breaker body cell via `_prep_cell_for_ocr()` before EasyOCR, which recovers cells whose borders touched the glyphs. Grid lines are still needed *upstream* of this step -- row bands are derived from the horizontal dividers in the raw strip -- so removal happens per row band inside `_ocr_body_column_by_rows()`, never on the strip used for row detection. See the `known-issues.mdc` entry for the measured before/after (APIv13-vs-v14 harness) and the **2026-08-19 NESTLE.pdf full-pipeline eval** for first end-to-end validation on an unseen customer-style sheet (148/151 breakers, zero misreads).
 - **Raw-cell OCR fallback (2026-08-19, commit `510d07f`)**: `BreakerTableParser13` keeps Parser12's de-gridded read as the primary path but re-OCRs the untouched cell whenever the prepped read fails to yield a usable trip/poles/combo value. A successful prepped read always wins, so Parser12 gains are preserved while the fallback prevents the cell-prep step from ever resolving fewer breaker rows than Parser11 did on the same crop. Measured on `/home/marco/Documents/NewTest/` (13 PDFs / 78 panels, laptop DevTestEnvBatch): v15 totals **1943 breakers** vs v13 **1822** and v14 **1935**; **0/78 panels below v13**, **0/78 below v14**, NESTLE unchanged at **148**. See `known-issues.mdc` "APIv15 raw-cell fallback" entry.
@@ -113,6 +119,7 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Purpose**: Structural layout detection -- finds header and footer anchor positions in panel images
 - **Location**: `AnchoringClasses/BreakerHeaderFinder.py`, `AnchoringClasses/BreakerFooterFinder.py`
 - **Footer CKT expected-row validation (2026-08-19, merge `b477fe7`)**: `BreakerFooterFinder._filter_normal_candidates_by_expected_row()`, called from `find_footer()`, cross-checks each normal-mode footer candidate's OCR'd circuit number against the number predicted by its physical row. Row pitch is estimated per side from the candidates' own value/y progression and anchored at `header_bottom_y`; candidates more than 4 circuit numbers (~two rows) from the expected value are dropped. OCR values are never rewritten -- survivors only gain diagnostic keys. The check bails out unchanged when there are fewer than 4 candidates or fewer than 2 usable pitch samples. First measured on NESTLE.pdf / 1RPA (2026-08-19). See `known-issues.mdc` for tolerance rationale and watch items.
+- **CKT label OCR variants (2026-09-04, `83e7479`)**: `BreakerHeaderFinder` (`_is_ckt_label()`) and `BreakerFooterFinder` accept `CKTI` / `ICKT` (plus `CKTL` / `LCKT` in the footer finder) alongside `CKT` / `CCT`, because an adjacent vertical grid line is often OCR'd as `I`, `L`, `1`, `!` or `|` glued to the label.
 - **Versioning note**: unlike `OcrLibrary`, these files are **not** versioned -- they are edited in place, so a change here reaches `BreakerTableAnalyzer10`, `11`, and `12` at once and is not isolated to the current production API version.
 - **Dependencies**: EasyOCR reader (shared), OpenCV, NumPy
 - **Consumers**: BreakerTableAnalyzer12 (production); also imported by the retained Analyzer10/11
@@ -125,9 +132,24 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 
 ### Spec_Sheet_Analysis (Specs Pipeline)
 - **Purpose**: Analyzes uploaded specification PDFs (not drawings) to locate the panelboard spec section and classify requirements. Text-extraction based (pypdfium2), not OCR/GPU based, so it runs in a lightweight background thread rather than the GPU worker pool.
-- **Location**: `Spec_Sheet_Analysis/Specs_AnalyzerV5.py` -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Loaded dynamically by `uplink_server.py` via `importlib` from the repo path.
+- **Location**: `Spec_Sheet_Analysis/Specs_AnalyzerV7.py` -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Loaded dynamically by `uplink_server.py` via `importlib` from the repo path (switched from V5 in `e777092`, 2026-10-16; the importlib module name string is still `argus_specs_analyzer_v5`, which is cosmetic).
 - **Dependencies**: pypdfium2, Pillow
 - **Consumers**: uplink_server (`_run_specs_analysis_job`, the `vm_*_specs_*` callables)
+
+### MLCellReader (Breaker Cell Classifier)
+- **Purpose**: Small CNN classifiers that read a single breaker body cell (trip amps, poles) when EasyOCR fails. They also include the tooling to harvest, label and train on those cells.
+- **Location**: `MLCellReader/` (added in `7ed03e5`, 2026-10-27)
+- **Components**:
+  - `cell_fallback.py` -- `CellFallbackReader.shared()`, a lazy, thread-safe singleton used by `BreakerTableParser15`. `read_cell(role, gray_crop)` returns `(text, min_conf)` or `None`. Roles map to targets: `trip`→amps, `poles`→poles, `combo`→both.
+  - `cell_classifier.py` -- `CellNet` CNN (48×192 letterboxed grayscale input) plus the `CellClassifier.load()/predict` wrapper. Device defaults to CUDA when available.
+  - `cell_data.py` -- data-root layout, label records, `class_for_target()`, image normalization.
+  - `harvest_cell_crops.py` -- extracts raw trip/poles/combo cell crops plus weak OCR labels from parser runs into the manifest.
+  - `label_server.py` -- local-only (127.0.0.1) browser labeling tool with autosave, per-role tabs and "Easy / Needs review / Already labeled" views.
+  - `train_cell_classifier.py` -- trains one target (`--target amps|poles`). Supports `--folds K --fold F` (held-out by whole PDF) and `--no-holdout` (final model, updates `<target>_latest.txt`).
+- **Data (out of repo, from customer drawings)**: `~/Documents/CellAnnotations/` (override with `CELL_ANNOTATIONS_ROOT`): `manifest.jsonl`, append-only `labels.jsonl` (last label wins), `crops/<role>/`, and `models/<target>_<stamp>[_foldNofK|_final]/` with `amps_latest.txt` / `poles_latest.txt` pointers. The pointers hold absolute paths, so each host needs its own.
+- **Class vocabulary**: poles `1/2/3/blank`; amps limited to values with ≥5 training examples (currently 0, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 100, 110, 125, 150, 200, 225, blank). An unseen rating cannot be predicted.
+- **Dependencies**: PyTorch, OpenCV, NumPy
+- **Consumers**: `BreakerTableParser15` (via APIv18). Not imported by production `uplink_server.py`.
 
 ### WorkerSetup (Runtime Determinism)
 - **Purpose**: Centralizes thread-pool caps and determinism settings for spawned workers
@@ -198,8 +220,8 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 - **Consequences**: Higher per-job overhead but guaranteed determinism and isolation
 
 ### Versioned Module Files
-- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV26, BreakerTableAnalyzer12, BreakerTableParserAPIv15)
-- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper; V5 exists but is not wired in), `PanelSearchTool` (V26 is production; V25 remains ML eval ground truth), and `Spec_Sheet_Analysis` (V6 exists but `uplink_server.py` loads **V5**). Active OCR/rules versions as of this writing (2026-08-19): `BreakerTableParserAPIv15`, `PanelHeaderParserV11`, `BreakerTableParser13`, `RulesEngine7`.
+- **Decision**: Modules carry version suffixes (e.g., PanelSearchToolV26, BreakerTableAnalyzer12, BreakerTableParserAPIv17)
+- **Context**: Enables side-by-side comparison during development; the highest number is *usually* the active version, but there are real exceptions -- `PageFilter` (V3 heuristic is in production; V4 is the ML wrapper; V5 exists but is not wired in), `PanelSearchTool` (V26 is production; V25 remains ML eval ground truth), and `BreakerTableParserAPI` (v18 exists, but production imports **v17**; v18 is used by `DevEnv/DevTestEnv.py` and `DevEnv/compare_breaker_apis.py`). Active versions as of `380a953` (2026-11-05): `BreakerTableParserAPIv17`, `PanelHeaderParserV12`, `BreakerTableParser14`, `RulesEngine7`, `Specs_AnalyzerV7`.
 - **Alternatives considered**: Git branching only (harder to compare in dev scripts)
 - **Consequences**: Multiple version files in each directory; **always check the import in `uplink_server.py` to confirm the active version** rather than assuming the highest number wins
 
@@ -217,6 +239,6 @@ result.json + status.json on disk; polled via vm_get_specs_status()
 
 ### RulesEngine Input Sanitization (Separate from Saved Result)
 - **Decision** (added 2026-07-03, merge `04a2361`; still active under RulesEngine7 as of 2026-08-18): every component list is passed through `_rules_safe_components()` in `uplink_server.py` immediately before `RulesEngine7.process_job()`, on all three rules entry points (`_process_job`, `vm_rerun_rules_with_panel_edit`, `vm_rerun_rules_with_global_defaults`). The sanitizer returns a rules-only copy; the persisted `result.json` components still carry the original raw/editable OCR evidence.
-- **Context**: Junk or ambiguous OCR (e.g. a "Location: ELECTRICAL 123" string mis-read as bus amps, or a `65k` AIC value read as a breaker amperage) could otherwise flow into the rules engine and manufacture a plausible-looking but wrong quoteable BOM. The fix is defense-in-depth: `PanelHeaderParserV11` now rejects such text at parse time, `_merge_component_from_btp()` invalidates out-of-range/missing header fields, and `_rules_safe_components()` is the final gate right before rules run.
+- **Context**: Junk or ambiguous OCR (e.g. a "Location: ELECTRICAL 123" string mis-read as bus amps, or a `65k` AIC value read as a breaker amperage) could otherwise flow into the rules engine and manufacture a plausible-looking but wrong quoteable BOM. The fix is defense-in-depth: `PanelHeaderParserV11` (and V12) rejects such text at parse time, `_merge_component_from_btp()` invalidates out-of-range/missing header fields, and `_rules_safe_components()` is the final gate right before rules run.
 - **Behavior**: problem panels (`_skipped` true or non-empty `panelStatus`) are fully suppressed for rules (all quote-driving attrs nulled, `breaker_data_suppressed`/`breaker_suppression_reason` set) but stay visible/editable in the UI. Clean panels have their values validated/snapped: amps 100-1200 ending in 0/5, voltage in {120,208,240,480,600}, intRating in the standard AIC set, spaces snapped to standard even counts and capped at 84, trim in {SURFACE,FLUSH} (None for NEMA3R), breakers filtered to amps 15-1200 / poles 1-3 / not exceeding the panel limit. Manual edits via `vm_rerun_rules_with_panel_edit` clear stale status flags (`panelStatus`, `panelNote`, `specialHeaderType`, `_skipped`, `reason`, `headerValidation*`) so a user-corrected panel is re-judged purely from the edited attrs.
 - **Consequences**: the UI keeps full raw evidence for review/editing, but the BOM logic only ever sees sane inputs. When adding a new quote-driving attribute, extend `_rules_safe_components()` (not just the parser) so it can't leak unvalidated into the rules engine.

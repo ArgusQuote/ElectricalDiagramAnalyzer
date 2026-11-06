@@ -14,6 +14,7 @@ ElectricalDiagramAnalyzer/
 ├── VisualDetectionToolLibrary/# Heuristic panel/table detection
 ├── MLTableDetection/          # ML-based table detection and page classification
 ├── OcrLibrary/                # OCR pipeline (analyzer, header parser, table parser)
+├── MLCellReader/              # Breaker-cell CNN classifiers + harvest/label/train tools
 ├── AnchoringClasses/          # Header/footer anchor detection
 ├── RulesEngine/               # Part number selection rules
 ├── PartNumberSelector/        # Equipment part number lookup tables
@@ -52,23 +53,35 @@ ElectricalDiagramAnalyzer/
 | `MLTableDetection/README.md` | Module reference doc. Has a 2026-05-08 preamble pointing readers at `known-issues.mdc` and the `training-panel-detector` skill for current state; the rest is original reference material for the "annotate, fine-tune" workflow. |
 | `MLTableDetection/requirements.txt` | ML-specific Python deps (transformers, torchmetrics, albumentations, timm, etc.). Installed on top of `MISC/requirements.txt` on the training host. |
 | `MLTableDetection/setup_label_studio.sh` | Convenience script for spinning up Label Studio for annotation work. |
-| `OcrLibrary/BreakerTableParserAPIv15.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of 2026-08-19, commit `510d07f`). Exports `API_VERSION = "API_15"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV11`, `BreakerTableParser13`. |
+| `OcrLibrary/BreakerTableParserAPIv18.py` | OCR pipeline orchestrator with the ML cell-classifier fallback (`API_VERSION = "API_18"`). Wires `BreakerTableAnalyzer12`, `PanelHeaderParserV12`, `BreakerTableParser15`. **Not production**; used by `DevEnv/DevTestEnv.py` and `DevEnv/compare_breaker_apis.py`. |
+| `OcrLibrary/BreakerTableParserAPIv17.py` | OCR pipeline orchestrator -- `BreakerTablePipeline` class. **Current production import** (as of `380a953`). Exports `API_VERSION = "API_17"` and `reset_name_deduper`. Wires together `BreakerTableAnalyzer12`, `PanelHeaderParserV12`, `BreakerTableParser14`. |
+| `OcrLibrary/BreakerTableParserAPIv16.py` | Intermediate orchestrator (`API_VERSION = "API_16"`, wires `PanelHeaderParserV12` + `BreakerTableParser13`). Kept for comparison. Exported `"API_15"` by mistake until 2026-11-06. |
+| `OcrLibrary/BreakerTableParserAPIv15.py` | Previous orchestrator (`API_VERSION = "API_15"`, wires `PanelHeaderParserV11` + `BreakerTableParser13`). Kept for comparison. |
 | `OcrLibrary/BreakerTableParserAPIv14.py` | Previous orchestrator (`API_VERSION = "API_14"`, wires `BreakerTableParser12`). Kept for side-by-side comparison; baseline for cell-prep A/B in `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py` and three-way harness `DevEnv/Compare3Way_v13_v14_v15.py`. |
 | `OcrLibrary/BreakerTableParserAPIv13.py` | Earlier orchestrator (`API_VERSION = "API_13"`, wires `BreakerTableParser11`). Kept for side-by-side comparison. |
 | `OcrLibrary/BreakerTableParserAPIv12.py` | Prior OCR pipeline orchestrator (`API_VERSION = "API_12"`). Superseded by APIv13; kept for comparison. |
 | `OcrLibrary/BreakerTableParserAPIv11.py` | Earlier OCR pipeline orchestrator (`API_VERSION = "API_11"`). Superseded by APIv12/v13; kept for comparison. |
 | `OcrLibrary/BreakerTableAnalyzer12.py` | Layout analyzer -- header/footer finding, image prep, CLAHE |
-| `OcrLibrary/PanelHeaderParserV11.py` | Header parser -- extracts panel name, voltage, amperage, AIC via OCR. **Current production import** (via APIv15). Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 kept for comparison. |
-| `OcrLibrary/BreakerTableParser13.py` | Table parser (production) -- Parser12 plus raw-cell OCR fallback. `PARSER_VERSION = "BreakerParser13"`. When `_prep_cell_for_ocr()` yields no usable trip/poles/combo value for a row, the untouched cell is re-read; a successful prepped read always wins. |
+| `OcrLibrary/PanelHeaderParserV12.py` | Header parser -- V11 plus `_detect_existing_panel()` (fuzzy `EXISTING` in the NAME → `suspectedExisting` / `existingReason` / `existingDetection`). **Current production import** (via APIv17). |
+| `OcrLibrary/PanelHeaderParserV11.py` | Previous header parser. Includes `_looks_like_aic_or_ka_text()` / `_looks_like_non_amp_context_text()` guards (2026-07-03) and BKR/BRKR/`N/A` MAIN/AIC handling (2026-08-18). V8/V9/V10 also kept for comparison. |
+| `OcrLibrary/BreakerTableParser15.py` | Table parser -- Parser14 plus a last-resort `MLCellReader` cell-classifier read for trip/poles/combo cells that both EasyOCR passes missed. `PARSER_VERSION = "BreakerParser15"`. Not production (used via APIv18). |
+| `OcrLibrary/BreakerTableParser14.py` | Table parser (production, via APIv17). `PARSER_VERSION = "BreakerParser14"`. Adds `_analyze_description_columns()`: confirmed-SPACE row exclusion (`excludedSpaceRows`), GFI counts (`gfiBreakerCounts`), and EX/EXISTING breaker flags (`existingBreakerCount`, `existingBreakerNote`), plus `_attach_circuit_positions()` (`breakerPositionIssues`). |
+| `OcrLibrary/BreakerTableParser13.py` | Previous table parser -- Parser12 plus raw-cell OCR fallback. `PARSER_VERSION = "BreakerParser13"`. Also received LW's circuit-position and description/GFI edits in place (2026-09). |
 | `OcrLibrary/BreakerTableParser12.py` | Previous table parser (`PARSER_VERSION = "BreakerParser12"`). Adds `_prep_cell_for_ocr()` grid removal before body OCR plus `_cellprep.png` BEFORE/AFTER debug images. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser11.py` | Previous table parser (`PARSER_VERSION = "BreakerParser11"`), identical to Parser12 except that body cells are OCR'd with the grid still in them. Kept for comparison. |
 | `OcrLibrary/BreakerTableParser10.py` | Prior table parser -- kept for comparison. |
-| `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images |
+| `MLCellReader/cell_fallback.py` | `CellFallbackReader.shared()` -- loads the amps/poles models and reads one cell for Parser15. Env: `CELL_CLASSIFIER_MODELS_DIR`, `CELL_CLASSIFIER_DISABLE`. |
+| `MLCellReader/cell_classifier.py` | `CellNet` CNN and `CellClassifier` load/predict wrapper. |
+| `MLCellReader/cell_data.py` | Data-root layout (`~/Documents/CellAnnotations`, env `CELL_ANNOTATIONS_ROOT`), label records, image normalization. |
+| `MLCellReader/harvest_cell_crops.py` | Harvests raw cell crops + weak OCR labels from parser runs into `manifest.jsonl`. |
+| `MLCellReader/label_server.py` | Local-only (127.0.0.1) labeling web tool with autosave. |
+| `MLCellReader/train_cell_classifier.py` | Trains the amps or poles model; `--folds/--fold` for held-out-by-PDF tests, `--no-holdout` for the final model. |
+| `AnchoringClasses/BreakerHeaderFinder.py` | Finds header anchor line in panel images. `_is_ckt_label()` accepts `CKT`/`CCT` plus grid-line OCR variants `CKTI`/`ICKT`. |
 | `AnchoringClasses/BreakerFooterFinder.py` | Finds footer anchor and column separators in panel images. `find_footer()` calls `_filter_normal_candidates_by_expected_row()` (2026-08-19), which rejects footer CKT candidates whose OCR'd circuit number is more than 4 off the value predicted by their physical row. **Unversioned** -- edited in place, so changes reach Analyzer10/11/12 simultaneously. |
 | `AnchoringClasses/BreakerFooterFinderBKUP081826.py` | Pre-change snapshot of `BreakerFooterFinder.py` taken at the 2026-08-19 merge (byte-identical to the pre-merge file). Historical only, NOT an importable runtime module. Sibling `BreakerFooterFinderBKUP.py` / `BreakerFooterFinderBKUP042726.py` are older snapshots of the same kind. |
 | `RulesEngine/RulesEngine7.py` | Rules engine -- `process_job()` selects part numbers from component dicts. **Current production import** (as `RE2`). Extends RulesEngine6 (MMS/ERMS, ground-bar digest alignment, etc.). RE2-RE6 kept for comparison. |
 | `PartNumberSelector/PartNumberBuilder.py` | Part number builders for MCCB, panelboards, disconnects, transformers, etc. |
-| `Spec_Sheet_Analysis/Specs_AnalyzerV5.py` | Specification-PDF analyzer -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Text-based (pypdfium2) section finding + panelboard requirement classification + evidence images. **Current production version** (loaded dynamically; V6 exists but is NOT the active version). |
+| `Spec_Sheet_Analysis/Specs_AnalyzerV7.py` | Specification-PDF analyzer -- entry point `analyze_specs_pdf_for_ui(pdf_path, job_dir)`. Text-based (pypdfium2) section finding + panelboard requirement classification + evidence images. **Current production version** (loaded dynamically since `e777092`, 2026-10-16). V1-V6 kept for comparison. |
 | `WorkerSetup/worker_init.py` | `cap_thread_pools()` (env thread caps, set before heavy imports) and `set_runtime_determinism()` (torch/cv2 thread counts + cuDNN determinism, set inside spawned workers). |
 | `OcrLibrary/labels_config.jsonc` | OCR/header parsing config -- name exclusions, stopwords, label anchors |
 | `OcrLibrary/breaker_labels_config.jsonc` | Breaker label configuration |
@@ -81,7 +94,7 @@ ElectricalDiagramAnalyzer/
 - **Path**: `AnvilUplinkCode/`
 - **Purpose**: Server orchestration -- RPC endpoints, job lifecycle, worker pool, watchdog
 - **Entry point**: `uplink_server.py` (run with `python AnvilUplinkCode/uplink_server.py`)
-- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv15), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV5), WorkerSetup
+- **Dependencies**: PageFilter, VisualDetectionToolLibrary, OcrLibrary (APIv17), RulesEngine (RulesEngine7), Spec_Sheet_Analysis (Specs_AnalyzerV7), WorkerSetup
 - **Backup snapshots**: dated `uplink_server_*bkup*.py` / `uplink_server_<date>.py` files live alongside the active server -- they are historical snapshots, NOT importable runtime modules.
 
 ### PageFilter
@@ -117,8 +130,15 @@ ElectricalDiagramAnalyzer/
 ### OcrLibrary
 - **Path**: `OcrLibrary/`
 - **Purpose**: Three-stage OCR pipeline for breaker table extraction
-- **Entry point**: `BreakerTableParserAPIv15.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v14 kept for comparison)
-- **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc
+- **Entry point**: `BreakerTableParserAPIv17.BreakerTablePipeline` class, `.run()` method (active version; APIv8-v16 kept for comparison; APIv18 is the ML-fallback candidate)
+- **Dependencies**: EasyOCR, OpenCV, NumPy, AnchoringClasses, labels_config.jsonc; Parser15 also lazily imports `MLCellReader`
+
+### MLCellReader
+- **Path**: `MLCellReader/`
+- **Purpose**: CNN classifiers for single breaker body cells (amps, poles), used as the last-resort read in `BreakerTableParser15`, plus the harvest → label → train tooling
+- **Entry point**: `cell_fallback.CellFallbackReader.shared().read_cell(role, gray_crop)`
+- **Data / weights**: out of repo under `~/Documents/CellAnnotations/` (crops come from customer drawings; never commit them). `models/amps_latest.txt` and `models/poles_latest.txt` hold absolute run-dir paths and must be written per host.
+- **Dependencies**: PyTorch, OpenCV, NumPy
 
 ### AnchoringClasses
 - **Path**: `AnchoringClasses/`
@@ -143,7 +163,7 @@ ElectricalDiagramAnalyzer/
 ### Spec_Sheet_Analysis
 - **Path**: `Spec_Sheet_Analysis/`
 - **Purpose**: Analyzes specification PDFs (not drawings) to find the panelboard spec section and classify requirements. Text-extraction based (pypdfium2), no OCR/GPU.
-- **Entry point**: `Specs_AnalyzerV5.analyze_specs_pdf_for_ui(pdf_path, job_dir)` (active version; V1-V4 and V6 also present, but `uplink_server.py` loads **V5** dynamically via `importlib`)
+- **Entry point**: `Specs_AnalyzerV7.analyze_specs_pdf_for_ui(pdf_path, job_dir)` (active version, loaded dynamically via `importlib`; V1-V6 also present)
 - **Dependencies**: pypdfium2, Pillow
 
 ### WorkerSetup
@@ -157,10 +177,28 @@ ElectricalDiagramAnalyzer/
 `DevEnv/DevTestEnv.py` runs PageFilter → PanelSearchTool → BreakerTablePipeline
 and writes outputs under fixed paths (not the production `~/jobs/...` layout).
 `DevEnv/DevTestEnvBatch.py` runs the same stack over every PDF in a directory
-(default `~/Documents/NewTest`); supports `--api {13,14,15}` for A/B runs.
-Comparison harnesses: `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`,
+(default `~/Documents/NewTest`); supports `--api {13,14,15,16,17,18}` for A/B runs,
+plus `--input-dir`, `--artifact-root`, `--no-debug`, `--batch-label`.
+`DevTestEnv.py` currently imports APIv18 and PageFilterV5.
+Comparison harnesses: `DevEnv/compare_breaker_apis.py` (APIv17 vs APIv18 on the
+same crops; see below), `DevEnv/CompareCellPrep_APIv13_vs_APIv14.py`,
 `DevEnv/Compare3Way_v13_v14_v15.py`, `DevEnv/DiagnoseV14Regressions.py`,
 `DevEnv/CollectReviewOverlays.py`.
+
+`DevEnv/compare_breaker_apis.py` (added `380a953`) has no CLI; it is configured by
+the `RUN_MODE` / `ONE_JOB` / `SELECTED_JOBS` / `FIRST_N_JOBS` constants at the top
+and reads `DevEnv/SourcePdf/` (S1–S23 are always skipped). For each PDF it runs
+filter + finder once, then parses every crop with APIv18 and APIv17. Per job it
+writes `api17_raw_results.json` and `api17_vs_18_comparison.json` next to the
+normal `summary.json`. Cumulative reports go to
+`DevEnv/JobSummaries/APIComparison/<stamp>/`: `comparison.json`, `job_summary.csv`,
+`panel_comparison.csv`, `breaker_differences.csv`, `difference_details.csv`.
+Panel statuses: `MATCH`, `CHANGED` (parsed fields or breaker counts differ),
+`RAW_ONLY` (compared fields match but other raw parser/header output differs,
+e.g. `breakerPositionIssues`), `INCOMPLETE`, `ERROR`. Version-tag keys
+(`parserVersion`, `apiVersion`, `analyzerVersion`; `VERSION_TAG_KEYS`) are
+stripped before the raw comparison. Reports generated before 2026-11-06 did not
+strip them, so they show almost every panel as `RAW_ONLY`.
 
 | Path | Contents |
 |---|---|
@@ -183,7 +221,7 @@ Example measured run: NESTLE.pdf (2026-08-19) — see `known-issues.mdc`
 
 ## Conventions
 
-- **Versioned files**: Modules carry version suffixes (e.g., V3, V26, 12). The highest number is normally the current active version, with lower versions kept for comparison in DevEnv scripts. Exceptions: `PageFilter/` -- V3 is production; V4 is the ML wrapper; V5 exists but is not wired in. `PanelSearchTool` -- V26 is production; V25 remains ML eval ground truth. Always confirm the active version by checking the import in `AnvilUplinkCode/uplink_server.py`.
+- **Versioned files**: Modules carry version suffixes (e.g., V3, V26, 12). The highest number is normally the current active version, with lower versions kept for comparison in DevEnv scripts. Exceptions: `PageFilter/` -- V3 is production; V4 is the ML wrapper; V5 exists but is not wired in. `PanelSearchTool` -- V26 is production; V25 remains ML eval ground truth. `BreakerTableParserAPI` -- v17 is production; v18 (ML fallback) is dev only. Always confirm the active version by checking the import in `AnvilUplinkCode/uplink_server.py`.
 - **DevEnv scripts**: Development and batch testing scripts live in `DevEnv/`. Use these for standalone testing of individual pipeline stages.
 - **Backups**: `Backups/` contains Anvil form exports and server snapshots. Not part of the runtime.
 - **Import path**: The repo root must be on `sys.path`. `uplink_server.py` adds it explicitly. Dev scripts should do the same.

@@ -374,6 +374,26 @@ def choose_test_pdfs():
 
 
 
+# Keys that only name the code version that produced a result. They always
+# differ between API 17 and API 18, so comparing them would flag every panel.
+VERSION_TAG_KEYS = frozenset({"parserVersion", "apiVersion", "analyzerVersion"})
+
+
+def without_version_tags(value):
+    """Return a copy of value with VERSION_TAG_KEYS removed at every depth."""
+    if isinstance(value, dict):
+        return {
+            k: without_version_tags(v)
+            for k, v in value.items()
+            if k not in VERSION_TAG_KEYS
+        }
+
+    if isinstance(value, (list, tuple)):
+        return [without_version_tags(v) for v in value]
+
+    return value
+
+
 def find_raw_differences(old, new, prefix, normalize, limit=2000):
     """Find exact changed paths within parser output."""
     differences = []
@@ -547,6 +567,9 @@ def compare_parser_outputs(
 
         f17, b17, g17, h17, t17 = extract(old)
         f18, b18, g18, h18, t18 = extract(new)
+        h17, t17, h18, t18 = (
+            without_version_tags(x) for x in (h17, t17, h18, t18)
+        )
 
         record["panel_v17"] = str(f17["name"] or "")
         record["panel_v18"] = str(f18["name"] or "")

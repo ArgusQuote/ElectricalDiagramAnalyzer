@@ -18,7 +18,91 @@ This file tracks known bugs, limitations, and deferred work items for the projec
 
 ## Current Open Issues
 
-- **APIv15 raw-cell OCR fallback -- LANDED 2026-08-19 (commit `510d07f`)** --
+- **Production OCR advanced to APIv17; APIv18 ML cell-classifier fallback validated but NOT production -- documented 2026-11-06 (through commit `380a953`)** --
+ Supersedes the "APIv15 raw-cell fallback" entry below as the current production
+ state. Confirm against the imports at the top of `AnvilUplinkCode/uplink_server.py`.
+ **Production stack (`uplink_server.py`):** `PageFilterV3`, `PanelSearchToolV26`,
+ `BreakerTableParserAPIv17` (→ `BreakerTableAnalyzer12` + `PanelHeaderParserV12` +
+ `BreakerTableParser14`), `RulesEngine7`, `Specs_AnalyzerV7` (dynamic import, switched
+ from V5 in `e777092`).
+ **What landed between 2026-08-19 and 2026-11-05 (mostly LW, via `Production` merges):**
+ - `83e7479` -- CKT header/footer labels accept grid-line OCR variants (`CKTI`, `ICKT`,
+ and in the footer finder `CKTL`, `LCKT`). `AnchoringClasses` are unversioned, so this
+ reaches every analyzer version.
+ - `0e512ef` -- `PanelHeaderParserV12`: existing-panel detection from the NAME text
+ (`suspectedExisting`, `existingReason`, `existingDetection`).
+ - `bc76c82`, `479c14b`, `4fb2621` -- circuit-position confirmation
+ (`breakerPositionIssues`) and description-column analysis: confirmed-SPACE row
+ exclusion, GFI counts, EX/EXISTING breaker flags (`existingBreakerCount`,
+ `existingBreakerNote`). These went into Parser13 in place, then into the new Parser14.
+ - `uplink_server.py` carries the existing-panel and existing-breaker flags onto each
+ component and appends the existing-breaker note to `panelNote`. `vm_fetch_image` now
+ serves cached JPEG previews for images over 300 KB.
+ - `e777092` -- `Specs_AnalyzerV7` becomes the production specs analyzer.
+ - `7ed03e5` (Marco, 2026-10-27) -- `MLCellReader/` package, `BreakerTableParser15`,
+ `BreakerTableParserAPIv18`, and `DevTestEnvBatch.py --api {17,18}`.
+ - `380a953` (LW, 2026-11-05) -- `DevEnv/compare_breaker_apis.py` APIv17-vs-APIv18
+ harness, plus a 29-PDF comparison run committed under `DevEnv/JobSummaries/`.
+ **Fixed 2026-11-06:** `BreakerTableParserAPIv16.py` exported `API_VERSION = "API_15"`
+ (copy-paste leftover), so harnesses that label runs by `API_VERSION` mislabeled v16
+ runs. It now exports `"API_16"`, and `DevTestEnvBatch.py` accepts `--api 16`. The
+ first-line filename comments of APIv16/v17/v18 and Parser14 were corrected too.
+ Any v16 result saved before this fix is labeled `API_15`.
+ **APIv18 design (Parser15):** a third read stage inside `_ocr_body_column_by_rows()`
+ for trip / poles / combo cells. Order: de-gridded EasyOCR → raw-cell EasyOCR →
+ `MLCellReader` CNN on the raw row crop. The model's answer must pass the same parse
+ checks as OCR, and it never overrides a successful OCR read. Combo cells need both
+ models above `MIN_CONFIDENCE = 0.5`. Without model files, or with
+ `CELL_CLASSIFIER_DISABLE=1`, Parser15 behaves like Parser14.
+ **Training data / models (out of repo):** about 13.4k labeled cells from 25 PDFs in
+ `~/Documents/CellAnnotations/` on Marco's laptop. Final models in use since
+ 2026-10-27: `poles_20261027_140858_final` (model.pt sha256 `3f411af6f2f7…`) and
+ `amps_20261027_141547_final` (sha256 `dc014e01f4a2…`). Both are also on Paperspace
+ under `/home/paperspace/Documents/CellAnnotations/models/` with Paperspace-path
+ `*_latest.txt` pointers (verified identical predictions on 30 real cells).
+ **Measured results:**
+ - **Held-out-by-PDF 5-fold test (laptop, 2026-10-26, before the 13 label fixes):**
+ in "fill only cells OCR missed" mode, poles wrong cells fell from 92 to 26 of 7,172
+ and amps from 171 to 15 of 7,277. Nearly all OCR errors were misses, not misreads.
+ Fold scores use best-epoch selection on the validation fold, so they are slightly
+ optimistic.
+ - **LW 29-PDF comparison (`380a953`, `DevEnv/JobSummaries/APIComparison/20261105_013457_745043/`):**
+ 221 panels, 0 job failures. The report shows 17 `MATCH` and 192 `RAW_ONLY`, but that
+ split came from a harness bug: the `parserVersion` string always differs between
+ v17 and v18, so it marked nearly every panel as a raw difference. Re-checked from the
+ saved differences, 189 of the 192 differ only in that tag, so **206 panels are true
+ matches**. The other 3 `RAW_ONLY` panels (generic2 R1, N 3LPA, NESTLE 3LPA) have
+ identical breakers but different `breakerPositionIssues` (circuit-number warnings).
+ The harness was fixed on 2026-11-06 to ignore version-tag keys; reports generated
+ before that still show the inflated `RAW_ONLY` count. 12 panels
+ `CHANGED` on 6 PDFs (B +22, D +22, generic2 +3, N +3, NESTLE +3, C +1), all in the
+ same direction: v18 found **+54 breakers** and lost none. 0 GFI-type differences.
+ - **Paperspace NewTest batch (2026-10-27, `DevTestEnvBatch.py --no-debug`,
+ `anvil-uplink` running alongside):** 13/13 PDFs, 78 panels both runs; breakers
+ **1943 (v17) → 1991 (v18)**, i.e. B +22, D +22, NESTLE +3, C +1. Wall time 23:43 vs
+ 23:13 (no measurable cost). Artifacts on Paperspace in `~/bench_20261027/`
+ (`SUMMARY.md`, logs, per-PDF artifacts) and
+ `~/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/PS_perf_v1{7,8}__*`.
+ **Label quality:** a suspect-label review (held-out model confident ≥ 0.7 and
+ disagreeing with the human label) found 26 cells. 13 were labeling mistakes (lone
+ "1" pole cells marked blank on B.pdf and good_tester_combo) and were corrected on
+ 2026-10-27 by appending new labels. The other 13 were model errors on rare amps
+ values (110, 225, 35, 80) and on 2/3-pole digits.
+ **Known limits:** amps classes cover only ratings with ≥ 5 examples (0, 15, 20, 25,
+ 30, 35, 40, 50, 60, 70, 80, 100, 110, 125, 150, 200, 225); 45, 90 and 250+ can't be
+ predicted. 20 A is about 62% of amps labels, so rare ratings are weak. New drawing
+ styles mostly make the model decline (cell stays red CHECK), but confident wrong
+ answers are possible.
+ **Deferred before promoting APIv18 to production (Marco's call):**
+ (1) force CPU inference in `cell_fallback.py` (the device currently defaults to CUDA;
+ measured ~9 ms/cell on 1 CPU thread vs ~0.8 ms on GPU); (2) pin the model version and
+ verify sha256 at load, and log it per job; (3) tag classifier-filled cells
+ (`source: "cell_classifier"`) and give them a distinct review-overlay color;
+ (4) tune `MIN_CONFIDENCE` / temperature-scale, and consider restricting amps to
+ common ratings; (5) a repeatable retrain-and-compare script; (6) spot-check the B/D
+ +22 breakers in review overlays.
+
+- **APIv15 raw-cell OCR fallback -- LANDED 2026-08-19 (commit `510d07f`; production has since moved to APIv17, see entry above)** --
   Production OCR advanced from `BreakerTableParserAPIv14` / `BreakerTableParser12`
   to **`BreakerTableParserAPIv15` / `BreakerTableParser13`**. Parser13 is Parser12
   plus a parse-aware raw-cell fallback: each body row is still de-gridded and OCR'd
@@ -2111,7 +2195,7 @@ This file tracks known bugs, limitations, and deferred work items for the projec
   for transparent swap-in. Not yet integrated into `uplink_server.py` (still
   imports `PageFilterV3`).
 
-- **uplink_server.py imports PageFilterV3** -- V3 remains the production
+- **uplink_server.py imports PageFilterV3** (still true as of `380a953`) -- V3 remains the production
   heuristic page filter. V4 is an ML-based wrapper around
   `PageClassifierML` (MobileNetV2). V5 adds bookmark/index page skipping
   and is wired in `DevEnv/DevTestEnv.py`, but `uplink_server.py` has not
