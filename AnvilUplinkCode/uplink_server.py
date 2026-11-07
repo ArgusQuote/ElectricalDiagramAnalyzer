@@ -175,7 +175,7 @@ _log_run_fingerprint("init")
 from PageFilter.PageFilterV3 import PageFilter
 from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv17 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine7 as RE2  # must expose process_job(payload)
+import RulesEngine.RulesEngine8 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
@@ -1928,6 +1928,318 @@ def render_pdf_to_images(saved_pdf: Path, img_dir: Path, dpi: int = 400, status_
     print(f">>> rendered {len(crops)} image(s)")
     return crops
 
+
+# ---------- Feed-through lug enclosure sizing ----------
+
+# Schneider NQ/NF FTL cabinet heights, in inches.
+# Key: (panel family, interior amperage, L=main lugs / M=main breaker)
+_ARGUS_FTL_CABINET_HEIGHTS = {
+    ("NQ", 225, "L"): {30: 38, 42: 38, 72: 50, 84: 56},
+    ("NQ", 225, "M"): {30: 50, 42: 50, 72: 62, 84: 68},
+    ("NQ", 400, "L"): {30: 50, 42: 56, 72: 68, 84: 68},
+    ("NQ", 400, "M"): {30: 62, 42: 68, 72: 80, 84: 80},
+
+    ("NF", 125, "L"): {18: 32, 30: 38},
+    ("NF", 125, "M"): {18: 44, 30: 50},
+    ("NF", 250, "L"): {30: 50, 42: 56, 54: 62},
+    ("NF", 250, "M"): {30: 62, 42: 68, 54: 74},
+    ("NF", 400, "L"): {30: 56, 42: 62, 54: 68},
+    ("NF", 400, "M"): {30: 68, 42: 74, 54: 80},
+}
+
+_ARGUS_FTL_KITS = {
+    "NQFTL2L": ("NQ", 225),
+    "NQFTL2H": ("NQ", 225),
+    "NQFTL4L": ("NQ", 400),
+    "NQFTL4H": ("NQ", 400),
+    "NF125FTL": ("NF", 125),
+    "NF250FTL": ("NF", 250),
+    "NF400FTL": ("NF", 400),
+}
+
+
+def _argus_ftl_enclosure_parts(bom: dict) -> tuple[str, str | None]:
+    """Calculate the FTL-ready box and trim without changing other BOM items."""
+
+    kit = str(bom.get("Feed-Thru Lugs") or "").strip().upper()
+
+    if kit not in _ARGUS_FTL_KITS:
+        raise ValueError(
+            "This panel has no supported field-installable FTL kit."
+        )
+
+    family, rating = _ARGUS_FTL_KITS[kit]
+    interior = str(bom.get("Interior") or "").strip().upper()
+
+    if not interior.startswith(family):
+        raise ValueError(
+            "FTL kit and panelboard interior do not match."
+        )
+
+    interior_code = re.search(r"L([1246])C?$", interior)
+
+    interior_ratings = {
+        "NQ": {"1": 100, "2": 225, "4": 400, "6": 600},
+        "NF": {"1": 125, "2": 250, "4": 400, "6": 600},
+    }
+
+    if (
+        not interior_code
+        or interior_ratings[family].get(interior_code.group(1)) != rating
+    ):
+        raise ValueError(
+            "FTL kit does not match the selected interior rating."
+        )
+
+    main_part = str(bom.get("Main Breaker") or "").strip().upper()
+
+    # These configurations require special depth / factory verification.
+    if main_part.startswith(("LG", "LJ", "LL", "LR")):
+        raise ValueError(
+            "PowerPacT L main breaker with FTL requires special "
+            "enclosure/factory assembly verification. "
+            "Automatic FTL resizing is unavailable."
+        )
+
+    main_type = (
+        "M"
+        if (main_part or bom.get("Main Breaker Kit"))
+        else "L"
+    )
+
+    box = str(bom.get("Box") or "").strip().upper()
+    match = re.fullmatch(r"MH(\d+)(BE|WP)", box)
+
+    if not match:
+        raise ValueError(
+            "Only standard MHxxBE / MHxxWP enclosures "
+            "can be resized automatically."
+        )
+
+    current_height = int(match.group(1))
+    suffix = match.group(2)
+
+    trim = bom.get("Trim")
+    trim_suffix = None
+
+    if suffix == "BE":
+        trim_match = re.fullmatch(
+            r"NC\d+([A-Z0-9]+)",
+            str(trim or "").strip().upper(),
+        )
+
+        if not trim_match:
+            raise ValueError(
+                "Cannot identify the current NEMA 1 trim style."
+            )
+
+        trim_suffix = trim_match.group(1)
+
+    elif trim:
+        raise ValueError(
+            "NEMA 3R should not have a separate trim in the BOM."
+        )
+
+    # Extract the circuit count from the actual selected interior.
+    interior_spaces = re.fullmatch(
+        r"(?:NQ|NF)(?:4)?(\d+)L[1246]C?",
+        interior,
+    )
+
+    if not interior_spaces:
+        raise ValueError(
+            "Cannot identify circuit count from interior part number."
+        )
+
+    spaces = int(interior_spaces.group(1))
+
+    # Verify the low/high circuit-count NQ kit is correct.
+    if family == "NQ":
+        expected_suffix = "L" if spaces in (30, 42) else "H"
+
+        if kit[-1] != expected_suffix:
+            raise ValueError(
+                "NQ FTL kit does not match the interior circuit count."
+            )
+
+    heights = _ARGUS_FTL_CABINET_HEIGHTS.get(
+        (family, rating, main_type),
+        {},
+    )
+
+    target_height = heights.get(spaces)
+
+    # NQ's 54-circuit FTL requires 6 inches additional height.
+    if target_height is None and family == "NQ" and spaces == 54:
+        target_height = current_height + 6
+
+    if target_height is None:
+        raise ValueError(
+            f"FTL enclosure sizing is not verified for "
+            f"{family} {rating}A, {spaces} circuits, "
+            f"{'main breaker' if main_type == 'M' else 'main lugs'}."
+        )
+
+    if target_height < current_height:
+        raise ValueError(
+            "FTL enclosure table conflicts with the existing "
+            "cabinet height. Manual review required."
+        )
+
+    standard_heights = {
+        26, 32, 38, 44, 50, 56, 62, 68, 74, 80, 86
+    }
+
+    if target_height not in standard_heights:
+        raise ValueError(
+            "Required FTL enclosure is not a verified "
+            "standard MH cabinet size."
+        )
+
+    new_box = f"MH{target_height}{suffix}"
+
+    new_trim = (
+        f"NC{target_height}{trim_suffix}"
+        if trim_suffix
+        else None
+    )
+
+    return new_box, new_trim
+
+
+def _argus_ftl_update_result(
+    result: dict,
+    panel_name: str,
+    selected: bool,
+) -> str:
+    """Change one saved panel BOM without OCR or a full rules rerun."""
+
+    if type(selected) is not bool:
+        raise ValueError(
+            "FTL selection must be true or false."
+        )
+
+    rules = result.get("rules_result") or {}
+
+    key_matches = [
+        key
+        for key, value in rules.items()
+        if (
+            str(key).strip().upper()
+            == str(panel_name).strip().upper()
+            and isinstance(value, dict)
+        )
+    ]
+
+    if len(key_matches) != 1:
+        raise ValueError(
+            "Panel was not found uniquely in the saved BOM."
+        )
+
+    key = key_matches[0]
+    bom = rules[key]
+
+    selected_set = set(
+        result.get("ftl_selected_panels") or []
+    )
+
+    base = dict(
+        result.get("ftl_base_enclosures") or {}
+    )
+
+    already_selected = key in selected_set
+
+    if already_selected == selected:
+        return key
+
+    if selected:
+        new_box, new_trim = _argus_ftl_enclosure_parts(bom)
+
+        # Save exactly what existed before FTL was selected.
+        base[key] = {
+            "Box": bom["Box"],
+            "Trim": bom.get("Trim"),
+        }
+
+        bom["Box"] = new_box
+
+        if new_trim is None:
+            bom.pop("Trim", None)
+        else:
+            bom["Trim"] = new_trim
+
+        selected_set.add(key)
+
+    else:
+        original = base.get(key)
+
+        if not isinstance(original, dict) or not original.get("Box"):
+            raise ValueError(
+                "Original enclosure was not saved; "
+                "cannot safely undo FTL."
+            )
+
+        bom["Box"] = original["Box"]
+
+        if original.get("Trim"):
+            bom["Trim"] = original["Trim"]
+        else:
+            bom.pop("Trim", None)
+
+        selected_set.discard(key)
+        base.pop(key, None)
+
+    result["ftl_selected_panels"] = sorted(selected_set)
+    result["ftl_base_enclosures"] = base
+
+    return key
+
+
+def _argus_ftl_reapply_after_rerun(result: dict) -> None:
+    """Preserve valid FTL selections after a full panel/defaults rules rerun."""
+
+    previous = list(
+        result.get("ftl_selected_panels") or []
+    )
+
+    result["ftl_selected_panels"] = []
+    result["ftl_base_enclosures"] = {}
+    result.pop("ftl_selection_warnings", None)
+
+    warnings = []
+
+    for panel_name in previous:
+        try:
+            _argus_ftl_update_result(
+                result,
+                panel_name,
+                True,
+            )
+
+        except (ValueError, KeyError, TypeError) as exc:
+            warnings.append(
+                f"{panel_name}: FTL selection cleared "
+                f"after regeneration: {exc}"
+            )
+
+            for key, bom in (result.get("rules_result") or {}).items():
+                if (
+                    str(key).strip().upper()
+                    == str(panel_name).strip().upper()
+                    and isinstance(bom, dict)
+                ):
+                    bom.setdefault("Notes", []).append(
+                        "Previous feed-through lug selection "
+                        f"needs review: {exc}"
+                    )
+                    break
+
+    if warnings:
+        result["ftl_selection_warnings"] = warnings
+
+# ---------- End feed-through lug enclosure sizing ----------
+
+
 # ---------- Rules payload helper ----------
 def _build_rules_payload(defaults: dict, items: list[dict]) -> dict:
     """Assemble the payload dict expected by RulesEngine4.process_job() from UI defaults and component items."""
@@ -2449,6 +2761,38 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
     if not isinstance(components, list):
         return {"ok": False, "error": "Saved result does not contain a valid components list."}
 
+
+    # FTL-only accessory update.
+    # Reuses the authorized panel-edit RPC without rerunning
+    # OCR, RulesEngine, or invalidating review approvals.
+    if edited_component.get("__argus_ftl_toggle_only__") is True:
+        try:
+            panel_key = _argus_ftl_update_result(
+                result,
+                original_panel_name,
+                edited_component.get("selected"),
+            )
+
+        except (ValueError, KeyError, TypeError) as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+            }
+
+        _result_write(job_dir, result)
+
+        return {
+            "ok": True,
+            "ftl_only": True,
+            "job_id": job_id,
+            "panel_name": panel_key,
+            "panel_bom": result["rules_result"][panel_key],
+            "ftl_selected_panels": result.get(
+                "ftl_selected_panels", []
+            ),
+        }
+
+
     def _norm_name(value):
         return str(value or "").strip().upper()
 
@@ -2618,9 +2962,15 @@ def vm_rerun_rules_with_panel_edit(job_id: str, owner_email: str, group_folder: 
             "error": f"{type(e).__name__}: {e}"
         }
 
+
     result["components"] = components
     result["rules_result"] = new_rules_result
+
+    # Rebuild the FTL enclosure adjustments from fresh rules output.
+    _argus_ftl_reapply_after_rerun(result)
+
     result["ui_overrides"] = ui_overrides
+
     result["manually_edited"] = True
     result["last_edited_panel"] = cleaned.get("name") or original_panel_name
     result["last_edited_at_utc"] = _now_utc().isoformat()
@@ -2822,9 +3172,15 @@ def vm_rerun_rules_with_global_defaults(job_id: str, owner_email: str, group_fol
 
     now = _now_utc().isoformat()
 
+
     result["components"] = components
     result["rules_result"] = new_rules_result
+
+    # Rebuild the FTL enclosure adjustments from fresh rules output.
+    _argus_ftl_reapply_after_rerun(result)
+
     result["ui_overrides"] = ui_overrides
+
     result["manually_edited"] = True
     result["global_defaults_edited"] = True
     result["last_edited_panel"] = "GLOBAL_DEFAULTS"
