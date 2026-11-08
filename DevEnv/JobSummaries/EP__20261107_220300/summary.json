@@ -1,0 +1,170 @@
+{
+  "ok": true,
+  "job_id": "EP__20261107_220300",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/EP.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PanelSearchOutput/EP_electrical_filtered_page001_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PanelSearchOutput/EP_electrical_filtered_page002_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PanelSearchOutput/EP_electrical_filtered_page002_panel02.png"
+  ],
+  "image_count": 3,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "A (4)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PanelSearchOutput/EP_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 120,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "WIREFILL",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PanelSearchOutput/EP_electrical_filtered_page002_panel01.png",
+      "panelStatus": "detected but skipped (WIREFILL)",
+      "panelNote": "Conduit schedule detected",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": {
+        "kind": "conduit_schedule",
+        "note": "Conduit schedule detected",
+        "matched_text": "POWER CONDUIT SCHEDULE POWER CONDUIT SCHEDULE",
+        "matched_tokens": [
+          "CONDUIT",
+          "POWER",
+          "SCHEDULE"
+        ]
+      },
+      "suspectedExisting": true,
+      "existingReason": "x",
+      "existingDetection": "x",
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (3)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PanelSearchOutput/EP_electrical_filtered_page002_panel02.png",
+      "panelStatus": "detected but skipped ((unnamed) (3))",
+      "panelNote": "Conduit schedule detected",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": {
+        "kind": "conduit_schedule",
+        "note": "Conduit schedule detected",
+        "matched_text": "INSTRUMENTATION CONDUIT SCHEDULE INSTRUMENTA TION CONDUIT SCHEDULE",
+        "matched_tokens": [
+          "CONDUIT",
+          "INSTRUMENTA",
+          "INSTRUMENTATION",
+          "SCHEDULE",
+          "TION"
+        ]
+      },
+      "suspectedExisting": true,
+      "existingReason": "x",
+      "existingDetection": "x",
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "A (4)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "WIREFILL": {
+      "Skipped": "Conduit schedule detected"
+    },
+    "(unnamed) (3)": {
+      "Skipped": "Conduit schedule detected"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 104014,
+  "cycle_time_str": "00:01:44:014",
+  "noticed_ts_ms": 1794088980558,
+  "parse_done_ts_ms": 1794089084573,
+  "debug": {
+    "kept_pages": [
+      5,
+      6,
+      7
+    ],
+    "dropped_pages": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/EP__20261107_220300/PdfOutput/EP_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_18",
+    "header_breakers_total": 0,
+    "table_breakers_total": 18
+  }
+}

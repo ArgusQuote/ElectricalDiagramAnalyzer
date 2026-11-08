@@ -1,0 +1,164 @@
+{
+  "ok": true,
+  "job_id": "HH__20261107_222438",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/hh.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel04.png"
+  ],
+  "image_count": 4,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "L1 (3)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel01.png",
+      "panelStatus": "detected but skipped (L1 (3))",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L2 (3)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel02.png",
+      "panelStatus": "detected but skipped (L2 (3))",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 250,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L3 (2)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel03.png",
+      "panelStatus": "detected but skipped (L3 (2))",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "H1 (2)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PanelSearchOutput/hh_electrical_filtered_page001_panel04.png",
+      "panelStatus": "detected but skipped (H1 (2))",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 250,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "L1 (3)": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "L2 (3)": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "L3 (2)": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "H1 (2)": {
+      "Skipped": "Could not determine panel size/spaces."
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 58688,
+  "cycle_time_str": "00:00:58:688",
+  "noticed_ts_ms": 1794090278900,
+  "parse_done_ts_ms": 1794090337589,
+  "debug": {
+    "kept_pages": [
+      4
+    ],
+    "dropped_pages": [
+      1,
+      2,
+      3
+    ],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/HH__20261107_222438/PdfOutput/hh_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_18",
+    "header_breakers_total": 0,
+    "table_breakers_total": 0
+  }
+}
