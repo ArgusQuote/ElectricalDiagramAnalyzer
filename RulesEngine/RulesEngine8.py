@@ -726,13 +726,36 @@ class PanelboardEngine(BaseEngine):
 
         # Use the presence of mainBreakerAmperage to determine main breaker panelboard
         has_mb = raw.get("mainBreakerAmperage") not in (None, "", 0)
+
         if has_mb:
             raw["typeOfMain"] = "MAIN BREAKER"
-            return self._build_main_breaker(raw)
+            panel = self._build_main_breaker(raw)
         else:
             raw.pop("mainBreakerAmperage", None)
             raw["typeOfMain"] = "MAIN LUG"
-            return self._build_main_lug(raw)
+            panel = self._build_main_lug(raw)
+
+        enclosure_type = str(
+            raw.get("enclosure") or ""
+        ).upper().replace(" ", "")
+
+        if (
+            enclosure_type == "NEMA3R"
+            and isinstance(panel, dict)
+            and not panel.get("error")
+            and not panel.get("_skipped")
+        ):
+            note = (
+                "NEMA 3R panelboards must be bottom fed. "
+                "Verify field feed arrangement."
+            )
+
+            notes = panel.setdefault("Notes", [])
+
+            if note not in notes:
+                notes.append(note)
+
+        return panel
         
     @staticmethod
     def _merge_gfi_counts_into_detected(raw: dict) -> None:
@@ -1110,8 +1133,9 @@ class PanelboardEngine(BaseEngine):
         space_candidates = set()
         pair_candidates = []
 
-        table = getattr(builder, "allowedConfigurationsBreaker", {}) or {}
-        for (minA, maxA, spc, phs, voltSpec), _params in table.items():
+        # Include all NQ main-breaker configurations,
+        # including recovered LA/LH overlapping entries.
+        for (minA, maxA, spc, phs, voltSpec), _params in builder.iterMainBreakerConfigurations():
             volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
             if phs != phase or lookup_voltage not in volts:
                 continue
@@ -1154,6 +1178,95 @@ class PanelboardEngine(BaseEngine):
             "pairs": sorted(pair_candidates, key=lambda x: ((x[1] - requested_spaces), (x[0] - requested_amps), x[0], x[1])),
         }
 
+    def _main_breaker_frame_aic(self, frame, voltage):
+        """Return the catalog AIC of a permitted frame at the application voltage."""
+        voltage = 240 if voltage in (120, 208, 240) else voltage
+
+        # (240V AIC, 480V AIC)
+        ratings = {
+            "HD": (25, 18), "HG": (65, 35), "HJ": (100, 65),
+            "HL": (125, 100), "HR": (200, 200),
+            "JD": (25, 18), "JG": (65, 35), "JJ": (100, 65),
+            "JL": (125, 100), "JR": (200, 200),
+            "QB": (10, None), "QD": (25, None),
+            "QG": (65, None), "QJ": (100, None),
+            "LA": (42, 30), "LH": (65, 35),
+            "LG": (65, 35), "LJ": (100, 65),
+            "LL": (125, 100), "LR": (200, 200),
+        }
+
+        pair = ratings.get(frame)
+        if pair is None:
+            return None
+
+        return pair[0] if voltage == 240 else (
+            pair[1] if voltage == 480 else None
+        )
+
+    def _main_breaker_frame_candidates(
+        self, params, main_amps, aic, voltage, phase, raw
+    ):
+        """Find allowed frames that can actually build the requested main."""
+        rating_voltage = 240 if voltage in (120, 208, 240) else voltage
+        pole_count = raw.get("poles", 2 if phase == "1PHASE" else 3)
+        requested_trip = str(raw.get("tripFunction") or "").strip().upper()
+        requested_frame = str(raw.get("mainBreakerType") or "").strip().upper()
+
+        result = []
+        generator = mccb()
+
+        # Only evaluate frames listed in this actual allowed configuration.
+        for frame in params[2]:
+            if requested_frame and frame != requested_frame:
+                continue
+
+            frame_aic = self._main_breaker_frame_aic(frame, rating_voltage)
+            if frame_aic is None or frame_aic < aic:
+                continue
+
+            if frame in ("LA", "LH"):
+                trip = "MAGNETIC"
+                if raw.get("grounding") or requested_trip == "ELECTRONIC":
+                    continue
+
+            elif frame.startswith("L"):
+                trip = "ELECTRONIC"
+                if requested_trip == "MAGNETIC":
+                    continue
+
+            elif frame.startswith("Q"):
+                trip = "MAGNETIC"
+                if requested_trip == "ELECTRONIC":
+                    continue
+
+            else:
+                trip = requested_trip or (
+                    "ELECTRONIC" if frame.endswith("R") else "MAGNETIC"
+                )
+
+            attrs = {
+                "frame": frame[0],
+                "termination": "LUG",
+                "poles": pole_count,
+                "amperage": main_amps,
+                "voltage": rating_voltage,
+                "intRating": frame_aic,
+                "tripFunction": trip,
+                "grounding": raw.get("grounding", False),
+            }
+
+            part = generator.generateMccbPartNumber(attrs)
+
+            # Verify the part-number family matches the requested frame.
+            expected_prefix = frame[0] + frame[1] + "L"
+
+            if not isinstance(part, str) or not part.startswith(expected_prefix):
+                continue
+
+            result.append((frame, frame_aic, trip, part))
+
+        return result
+
     def _find_main_breaker_config_params(
         self,
         family: str,
@@ -1162,6 +1275,7 @@ class PanelboardEngine(BaseEngine):
         spaces: int,
         phase: str,
         lookup_voltage: int,
+        preferred_frame: str | None = None,
     ):
         """
         Re-resolve the final main-breaker panelboard configuration after a bump.
@@ -1175,11 +1289,17 @@ class PanelboardEngine(BaseEngine):
         spaces = _safe_int(spaces, 0)
         lookup_voltage = _safe_int(lookup_voltage, 0)
 
-        table = getattr(builder, "allowedConfigurationsBreaker", {}) or {}
+        # NQ must use its complete configuration list.
+        # NF continues using its own allowed-configuration table.
+        config_items = (
+            builder.iterMainBreakerConfigurations()
+            if family == "NQ"
+            else (getattr(builder, "allowedConfigurationsBreaker", {}) or {}).items()
+        )
 
         matches = []
 
-        for key, params in table.items():
+        for key, params in config_items:
             # NQ/NF main breaker keys:
             # (minA, maxA, spaces, phase, voltageSpec)
             minA, maxA, spc, phs, voltSpec = key
@@ -1193,6 +1313,9 @@ class PanelboardEngine(BaseEngine):
             if phs != phase:
                 continue
             if lookup_voltage not in volts:
+                continue
+
+            if preferred_frame and preferred_frame not in params[2]:
                 continue
 
             matches.append((maxA, params))
@@ -1894,8 +2017,11 @@ class PanelboardEngine(BaseEngine):
             panelAttrs["feedThruLugs"] = False
 
         voltage     = _safe_int(panelAttrs.get("voltage"), 0)
-        phase       = "1PHASE" if voltage == 120 else "3PHASE"
-        lookup_voltage = voltage
+        phase = "1PHASE" if voltage == 120 else "3PHASE"
+
+        # NQ stores 3-phase 240V configurations under 208V lookup keys.
+        # Keep the actual voltage unchanged for breaker AIC calculations.
+        lookup_voltage = 208 if phase == "3PHASE" and voltage == 240 else voltage
         breaker_amps = _safe_int(raw.get("mainBreakerAmperage"), 0)
 #        if "intRating" not in raw:
 #            return {"error": "Missing interrupting rating for main breaker"}
@@ -1920,11 +2046,19 @@ class PanelboardEngine(BaseEngine):
         cost_rank = {"NQ": 0, "NF": 1}
 
         candidates = []
+
         for fam, builder in families:
-            for (minA, maxA, spc, phs, voltSpec), params in builder.allowedConfigurationsBreaker.items():
+            config_items = (
+                builder.iterMainBreakerConfigurations()
+                if fam == "NQ"
+                else builder.allowedConfigurationsBreaker.items()
+            )
+
+            for (minA, maxA, spc, phs, voltSpec), params in config_items:
                 volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
                 if (
                     minA <= bus_amps <= maxA
+                    and breaker_amps <= maxA
                     and spc >= spaces
                     and phs == phase
                     and lookup_voltage in volts
@@ -1936,9 +2070,9 @@ class PanelboardEngine(BaseEngine):
         if not candidates:
             # Last-chance NQ for 208V & 84+ circuits before I-LINE
             if (phase == "3PHASE" and lookup_voltage == 208 and spaces >= 84):
-                for (minA, maxA, spc, phs, voltSpec), params in nq_builder.allowedConfigurationsBreaker.items():
+                for (minA, maxA, spc, phs, voltSpec), params in nq_builder.iterMainBreakerConfigurations():
                     volts = voltSpec if isinstance(voltSpec, (list, tuple)) else (voltSpec,)
-                    if (minA <= bus_amps <= maxA) and (spc >= spaces) and (phs == phase) and (208 in volts or 240 in volts):
+                    if (minA <= bus_amps <= maxA) and (breaker_amps <= maxA) and (spc >= spaces) and (phs == phase) and (208 in volts or 240 in volts):
                         candidates.append((0, maxA, "NQ", params))
                         break
             if not candidates:
@@ -1996,12 +2130,48 @@ class PanelboardEngine(BaseEngine):
 
         _, best_maxA, best_fam, best_params = min(candidates, key=lambda x: (x[0], x[1]))
 
+        # Select a buildable frame from the actual allowed configurations.
         best_by_family = {}
-        for _rank, _maxA, _fam, _params in sorted(candidates, key=lambda x: (x[0], x[1])):
-            if _fam not in best_by_family:
-                best_by_family[_fam] = (_maxA, _params)
 
-        family_try_order = [f for f in (["NQ", "NF"] if best_fam == "NQ" else ["NF"]) if f in best_by_family]
+        for _rank, _maxA, _fam, _params in sorted(
+            candidates, key=lambda x: (x[0], x[1])
+        ):
+            frame_options = self._main_breaker_frame_candidates(
+                _params, breaker_amps, raw_ir, voltage, phase, raw
+            )
+
+            for frame, rated_aic, selected_trip, selected_part in frame_options:
+                score = (
+                    _maxA,
+                    _params[1],
+                    0 if frame in ("LA", "LH") else 1,
+                    rated_aic,
+                )
+
+                previous = best_by_family.get(_fam)
+
+                if previous is None or score < previous[0]:
+                    best_by_family[_fam] = (
+                        score,
+                        _maxA,
+                        _params,
+                        frame,
+                        selected_trip,
+                        selected_part,
+                    )
+
+        if not best_by_family:
+            return {
+                "error": (
+                    f"No permitted NQ/NF main-breaker frame can produce "
+                    f"{breaker_amps}A at {raw_ir}kAIC / {voltage}V. "
+                    "Main breaker requires review."
+                )
+            }
+
+        family_try_order = [
+            f for f in ("NQ", "NF") if f in best_by_family
+        ]
 
         requested_family_amps = bus_amps
         requested_family_spaces = spaces
@@ -2016,12 +2186,18 @@ class PanelboardEngine(BaseEngine):
         last_family_error = None
 
         for fam in family_try_order:
-            _maxA, fam_params = best_by_family[fam]
+            (
+                _score,
+                _maxA,
+                fam_params,
+                trial_full_frame_code,
+                trial_trip,
+                trial_part,
+            ) = best_by_family[fam]
 
             trial_attrs = dict(panelAttrs)
             trial_attrs["spaces"] = spaces
             trial_attrs["amperage"] = bus_amps
-            trial_full_frame_code = fam_params[2][0]
             trial_attrs["mainBreakerType"] = trial_full_frame_code
 
             trial_output, trial_bump_meta = self._try_build_main_breaker_family_with_bumps(
@@ -2041,6 +2217,8 @@ class PanelboardEngine(BaseEngine):
             panel_output = trial_output
             bump_meta = trial_bump_meta
             selected_family = fam
+            selected_trip = trial_trip
+            selected_part = trial_part
 
             # The panel may have been bumped to a different valid config.
             # Re-resolve final params so kits/frame/barrier come from the final config,
@@ -2052,6 +2230,7 @@ class PanelboardEngine(BaseEngine):
                 spaces=bump_meta["spaces"],
                 phase=phase,
                 lookup_voltage=lookup_voltage,
+                preferred_frame=trial_full_frame_code,
             )
 
             if resolved_final is None:
@@ -2072,10 +2251,15 @@ class PanelboardEngine(BaseEngine):
             # Preserve the actual frame used by the successful build when possible.
             final_frame_code = bump_meta.get("mainBreakerType") or trial_full_frame_code
 
-            # Safety: if the preserved frame is not valid for the final config,
-            # fall back to the first allowed frame from the final config.
+            # Never change to a different frame after choosing the assembly.
             if final_frame_code not in final_params[2]:
-                final_frame_code = final_params[2][0]
+                last_family_error = (
+                    "Final configuration does not allow the selected breaker frame."
+                )
+                panel_output = None
+                bump_meta = None
+                selected_family = None
+                continue
 
             full_frame_code = final_frame_code
             all_kits = list(final_params[3:-1])
@@ -2203,15 +2387,21 @@ class PanelboardEngine(BaseEngine):
             breaker_amps
         )
 
-        if set(best_params[2]) == {"LA","LH"} or full_frame_code == "LL":
-            rating_key = "LL"
-        elif full_frame_code in INTERRUPTING_RATINGS:
-            rating_key = full_frame_code
-        else:
-            rating_key = full_frame_code[0]
+        # Legacy LA/LH uses the builder's "LL" magnetic-trip path.
+        # PowerPacT LG/LJ/LL/LR uses the "L" electronic-trip path.
+        rating_key = (
+            "LL" if full_frame_code in ("LA", "LH")
+            else full_frame_code[0]
+        )
 
         rating_voltage = 240 if phase == "1PHASE" or voltage == 208 else voltage
-        snapped_ir = snap_int_rating(rating_key, rating_voltage, raw_ir)
+
+        snapped_ir = self._main_breaker_frame_aic(
+            full_frame_code, rating_voltage
+        )
+
+        if snapped_ir is not None and snapped_ir < raw_ir:
+            snapped_ir = None
 
         if snapped_ir is None:
             panel_output.setdefault("Notes", []).append(
@@ -2259,14 +2449,8 @@ class PanelboardEngine(BaseEngine):
         if rating_key in ("H","J"):
             intr_letter = mccb_builder.getInterruptingLetterHJ(rating_voltage, snapped_ir)
 
-        if rating_key == "LL":
-            trip = "MAGNETIC"
-        elif rating_key == "H" and intr_letter == "R":
-            trip = "ELECTRONIC"
-        elif rating_key in ("H","J"):
-            trip = raw.get("tripFunction", "MAGNETIC")
-        else:
-            trip = raw.get("tripFunction", "ELECTRONIC")
+        # Use the exact trip mode validated during candidate selection.
+        trip = selected_trip
 
         default_poles = 2 if phase == "1PHASE" and rating_key == "Q" else 3
         poles_count   = raw.get("poles", default_poles)
@@ -2284,48 +2468,16 @@ class PanelboardEngine(BaseEngine):
 
         breaker_part = mccb_builder.generateMccbPartNumber(breaker_attrs)
 
-        if isinstance(breaker_part, str) and breaker_part.startswith("Invalid interrupting rating"):
-            next_ir = snap_int_rating(rating_key, rating_voltage, breaker_attrs["intRating"] + 1)
+        if breaker_part != selected_part:
+            panel_output["Main Breaker Error"] = (
+                "Selected main breaker differs from the catalog-validated frame. "
+                "Main breaker requires review."
+            )
+            breaker_part = "Invalid selected main breaker mismatch"
 
-            if next_ir is None:
-                panel_output.setdefault("Notes", []).append(
-                    f"Main breaker frame {rating_key} could not be bumped to a valid interrupting rating "
-                    f"at or above {breaker_attrs['intRating']}kAIC. User review required."
-                )
-                panel_output["Main Breaker Error"] = breaker_part
-            else:
-                breaker_attrs["intRating"] = next_ir
-                breaker_part = mccb_builder.generateMccbPartNumber(breaker_attrs)
-
-        if isinstance(breaker_part, str) and "Allowed:" in breaker_part:
-            import re
-            m = re.search(r"Allowed: \[([0-9,\s]+)\]", breaker_part)
-            if m:
-                allowed_vals = sorted(int(x) for x in m.group(1).split(","))
-                if breaker_part.startswith("Invalid amperage"):
-                    for a in allowed_vals:
-                        if a >= breaker_amps:
-                            breaker_attrs["amperage"] = a
-                            break
-                else:
-                    for ir in allowed_vals:
-                        if ir >= breaker_attrs["intRating"]:
-                            breaker_attrs["intRating"] = ir
-                            break
-                breaker_part = mccb_builder.generateMccbPartNumber(breaker_attrs)
-
+        # Amperage, AIC, trip type, and frame have already been validated.
+        # Do not silently bump the breaker nominal rating or switch frames.
         chosen_full_frame = full_frame_code
-        if isinstance(breaker_part, str) and breaker_part.startswith("Invalid amperage"):
-            for alt_full in best_params[2]:
-                letter = alt_full[0]
-                if letter == breaker_attrs["frame"]:
-                    continue
-                breaker_attrs["frame"] = letter
-                chosen_full_frame = alt_full
-                cand = mccb_builder.generateMccbPartNumber(breaker_attrs)
-                if not (isinstance(cand, str) and cand.startswith("Invalid")):
-                    breaker_part = cand
-                    break
 
         all_kits    = list(best_params[3:-1])
         barrier_kit = best_params[-1]
@@ -2343,6 +2495,29 @@ class PanelboardEngine(BaseEngine):
                 breaker_part
             )
         else:
+            # Short-handle LA/LH breakers are required for these
+            # specific NQ/NF main-breaker mounting kits.
+            short_handle_kit = {
+                "NQ": "NQMB4LA",
+                "NF": "N400M",
+            }.get(best_fam)
+
+            expected_prefix = {
+                "LA": "LAL",
+                "LH": "LHL",
+            }.get(chosen_full_frame)
+
+            if (
+                short_handle_kit is not None
+                and expected_prefix is not None
+                and panel_output.get("Main Breaker Kit") == short_handle_kit
+                and isinstance(breaker_part, str)
+                and breaker_part == selected_part
+                and breaker_part.startswith(expected_prefix)
+                and not breaker_part.endswith("MB")
+            ):
+                breaker_part += "MB"
+
             panel_output["Main Breaker"] = breaker_part
 
             # Record the interrupting rating actually used to build
@@ -2787,10 +2962,22 @@ class PanelboardEngine(BaseEngine):
             pn = out["Part Number"]
             built_used_spaces += needed_spaces
 
-            actual_branch_ir = _safe_int(
-                out.get("Interrupting Rating"),
-                0
+            # BreakerSelector returns ratings such as "10k",
+            # "22k", "35k", or "65k".
+            # Normalize the unit before numeric conversion.
+            rating_text = str(
+                out.get("Interrupting Rating") or ""
+            ).strip().upper()
+
+            rating_text = (
+                rating_text
+                .replace("KAIC", "")
+                .replace("KA", "")
+                .removesuffix("K")
+                .strip()
             )
+
+            actual_branch_ir = _safe_int(rating_text, 0)
 
             if actual_branch_ir > 0:
                 built_branch_ir_values.append(
@@ -2841,9 +3028,174 @@ class PanelboardEngine(BaseEngine):
             final_branch_ir
         )
 
-        panel_result["_finalPanelIntRating"] = (
-            final_branch_ir
-        )
+        # A fully-rated NQ panel is limited by the lowest
+        # individual AIC among its main and branch breakers.
+        # This calculation does not replace manufacturer
+        # panelboard listing/label verification.
+        if rating_type == "FULLY_RATED":
+            has_main = _safe_int(
+                raw.get("mainBreakerAmperage"), 0
+            ) > 0
+
+            main_ir = _safe_int(
+                panel_result.get("_finalMainBreakerIntRating"), 0
+            )
+
+            requested_count = sum(
+                max(0, _safe_int(br.get("count"), 1))
+                for br in detected_breakers
+                if isinstance(br, dict)
+            )
+
+            built_count = sum(
+                _safe_int(entry.get("count"), 0)
+                for entry in summary.values()
+                if isinstance(entry, dict)
+                and entry.get("Part Number")
+            )
+
+            if not built_branch_ir_values or built_count != requested_count:
+                panel_result["_finalPanelIntRating"] = None
+                panel_result.setdefault("Notes", []).append(
+                    "Cannot establish fully-rated NQ breaker AIC: "
+                    "not all requested branch breakers were built. "
+                    "User review required."
+                )
+
+            elif has_main and (
+                main_ir <= 0
+                or not panel_result.get("Main Breaker")
+                or panel_result.get("Main Breaker Error")
+            ):
+                panel_result["_finalPanelIntRating"] = None
+                panel_result.setdefault("Notes", []).append(
+                    "Cannot establish fully-rated NQ breaker AIC: "
+                    "the main breaker's interrupting rating is "
+                    "missing or invalid. User review required."
+                )
+
+            else:
+                limiting_ir = (
+                    min(main_ir, final_branch_ir)
+                    if has_main
+                    else final_branch_ir
+                )
+
+                if limiting_ir < requested_ir:
+                    panel_result["_finalPanelIntRating"] = None
+                    panel_result.setdefault("Notes", []).append(
+                        f"Fully-rated NQ breaker AIC of "
+                        f"{limiting_ir}kA is below the requested "
+                        f"{requested_ir}kA. User review required."
+                    )
+                else:
+                    panel_result["_finalPanelIntRating"] = limiting_ir
+
+        else:
+            series_verified = (
+                rating_type == "SERIES_RATED"
+                and requested_ir == 25
+                and voltage in (208, 240)
+                and _safe_int(raw.get("poles"), 0) == 3
+                and str(
+                    panel_result.get("Main Breaker") or ""
+                ).upper().startswith("JDL3")
+                and panel_result.get("Main Breaker Kit") == "NQMB2HJ"
+                and _safe_int(
+                    panel_result.get("_finalMainBreakerIntRating"), 0
+                ) >= 25
+                and final_branch_ir == 10
+            )
+
+            expected_count = sum(
+                max(0, _safe_int(br.get("count"), 0))
+                for br in detected_breakers
+                if isinstance(br, dict)
+            )
+
+            built_count = sum(
+                _safe_int(entry.get("count"), 0)
+                for entry in summary.values()
+                if isinstance(entry, dict)
+                and entry.get("Part Number")
+            )
+
+            if (
+                expected_count <= 0
+                or built_count != expected_count
+                or not summary
+            ):
+                series_verified = False
+
+            allowed_ranges = {
+                1: (15, 70),
+                2: (15, 125),
+                3: (15, 100),
+            }
+
+            for entry in summary.values():
+                if not isinstance(entry, dict):
+                    series_verified = False
+                    continue
+
+                part_number = str(
+                    entry.get("Part Number") or ""
+                ).upper()
+
+                match = re.fullmatch(
+                    r"QOB([123])(\d{2,3})",
+                    part_number,
+                )
+
+                if match is None:
+                    series_verified = False
+                    continue
+
+                poles = int(match.group(1))
+                amps = int(match.group(2))
+
+                low, high = allowed_ranges[poles]
+
+                if not low <= amps <= high:
+                    series_verified = False
+
+                rating_text = str(
+                    entry.get("Interrupting Rating") or ""
+                ).strip().upper()
+
+                rating_text = (
+                    rating_text
+                    .replace("KAIC", "")
+                    .replace("KA", "")
+                    .removesuffix("K")
+                    .strip()
+                )
+
+                if _safe_int(rating_text, 0) != 10:
+                    series_verified = False
+
+            if series_verified:
+                panel_result["_finalPanelIntRating"] = 25
+                panel_result["_seriesRatingSource"] = (
+                    "Square D 2024 Panelboards Digest, "
+                    "Table 9.1, pages 9-2 and 9-3"
+                )
+
+            else:
+                panel_result["_finalPanelIntRating"] = None
+                panel_result["_seriesRatingSource"] = None
+
+                note = (
+                    "Series-rated NQ assembly has not been "
+                    "verified against an implemented manufacturer "
+                    "combination listing. Assembled-panel interrupting "
+                    "rating is unverified. User review required."
+                )
+
+                notes = panel_result.setdefault("Notes", [])
+
+                if note not in notes:
+                    notes.append(note)
 
         # Fully rated: explain defaulting and any upward
         # product-rating bump in one note.
@@ -2868,12 +3220,14 @@ class PanelboardEngine(BaseEngine):
                     )
                 else:
                     note = (
-                        f"Interrupting rating increased from "
+                        f"NQ branch-breaker AIC increased from "
                         f"{requested_ir}kAIC to "
                         f"{final_branch_ir}kAIC because "
                         f"{requested_ir}kAIC is not an available "
-                        f"NQ branch-breaker rating. The next "
-                        f"supported rating was selected."
+                        f"NQ branch-breaker rating. "
+                        f"This refers only to branch breakers; "
+                        f"the assembled-panel rating is "
+                        f"evaluated separately."
                     )
 
                 notes = panel_result.setdefault(
@@ -3022,12 +3376,14 @@ class PanelboardEngine(BaseEngine):
                 )
             else:
                 note = (
-                    f"Interrupting rating increased from "
+                    f"NF branch-breaker AIC increased from "
                     f"{requested_ir}kAIC to "
                     f"{final_branch_ir}kAIC because "
                     f"{requested_ir}kAIC is not an available "
-                    f"NF breaker rating. The next supported "
-                    f"rating was selected."
+                    f"NF branch-breaker rating. "
+                    f"This refers only to branch breakers; "
+                    f"the assembled-panel rating is "
+                    f"evaluated separately."
                 )
 
             notes = panel_result.setdefault(
@@ -3782,13 +4138,14 @@ class PanelboardEngine(BaseEngine):
                     )
                 else:
                     note = (
-                        f"Interrupting rating increased from "
+                        f"I-LINE branch-breaker AIC increased from "
                         f"{requested_ir}kAIC to "
                         f"{final_branch_ir}kAIC because "
-                        f"{requested_ir}kAIC is not an available "
-                        f"I-LINE branch-breaker rating for the "
-                        f"selected breaker frames. The next "
-                        f"supported rating was selected."
+                        f"{requested_ir}kAIC is not available "
+                        f"for the selected branch-breaker frames. "
+                        f"This refers only to branch breakers; "
+                        f"the assembled-panel rating is "
+                        f"evaluated separately."
                     )
 
                 notes = panel_result.setdefault(
@@ -4276,3 +4633,2105 @@ class TransformerEngine(BaseEngine):
             "_debug": {"attempts": attempts_meta[:10]}
         }
 
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    import contextlib
+    import io
+    from collections import Counter
+
+    print("\n=== ARGUS MAIN-BREAKER + FULL-JOB REGRESSION ===")
+
+    passed = 0
+    failed = []
+    known_issues = []
+
+    def check(label, actual, expected):
+        global passed
+        if actual == expected:
+            passed += 1
+            print(f"PASS | {label}")
+        else:
+            failed.append(label)
+            print(f"FAIL | {label}")
+            print(f"  Expected: {expected!r}")
+            print(f"  Actual:   {actual!r}")
+
+    def ka(value):
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            text = str(value).strip().upper().replace("KAIC", "")
+            text = text.replace("KA", "").removesuffix("K")
+            return float(text)
+        except (TypeError, ValueError):
+            return 0.0
+
+    three_pole = [
+        {"poles": 1, "amperage": 20, "count": 3, "specialFeatures": ""},
+        {"poles": 3, "amperage": 30, "count": 1, "specialFeatures": ""},
+    ]
+    two_pole = [
+        {"poles": 1, "amperage": 20, "count": 3, "specialFeatures": ""},
+        {"poles": 2, "amperage": 30, "count": 1, "specialFeatures": ""},
+    ]
+
+    def scenario(name, voltage, bus, main, spaces, aic, material,
+                 rating, enclosure, trim, interior, kit, breaker, box,
+                 expected_trim, branch_parts, branches=None):
+        return {
+            "name": name,
+            "voltage": voltage,
+            "bus": bus,
+            "main": main,
+            "spaces": spaces,
+            "aic": aic,
+            "material": material,
+            "rating": rating,
+            "enclosure": enclosure,
+            "trim": trim,
+            "interior": interior,
+            "kit": kit,
+            "breaker": breaker,
+            "box": box,
+            "expected_trim": expected_trim,
+            "branch_parts": branch_parts,
+            "branches": branches if branches is not None else three_pole,
+        }
+
+    cases = [
+        scenario("NQ-LA-208-AL", 208, 400, 300, 30, 35,
+                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
+                 "NQ430L4", "NQMB4LA", "LAL36300MB",
+                 "MH62BE", "NC62VS", {"QHB120": 3, "QHB330": 1}),
+        scenario("NQ-LH-240-3R", 240, 400, 400, 30, 65,
+                 "COPPER", "FULLY_RATED", "NEMA3R", "SURFACE",
+                 "NQ430L4C", "NQMB4LA", "LHL36400MB",
+                 "MH62WP", None, {"QHB120": 3, "QHB330": 1}),
+        scenario("NF-LH-480-CU", 480, 400, 300, 42, 35,
+                 "COPPER", "FULLY_RATED", "NEMA1", "FLUSH",
+                 "NF442L4C", "N400M", "LHL36300MB",
+                 "MH68BE", "NC68VF", {"EGB14020": 3, "EGB34030": 1}),
+        scenario("NQ-JD-25K-FULL", 240, 225, 200, 30, 25,
+                 "COPPER", "FULLY_RATED", "NEMA1", "SURFACE",
+                 "NQ430L2C", "NQMB2HJ", "JDL36200",
+                 "MH44BE", "NC44S", {"QHB120": 3, "QHB230": 1},
+                 two_pole),
+        scenario("NQ-JD-25K-SERIES", 240, 225, 200, 30, 25,
+                 "COPPER", "SERIES_RATED", "NEMA1", "SURFACE",
+                 "NQ430L2C", "NQMB2HJ", "JDL36200",
+                 "MH44BE", "NC44S", {"QOB120": 3, "QOB230": 1},
+                 two_pole),
+        scenario("NQ-MLO-208-AL", 208, 225, None, 30, 22,
+                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
+                 "NQ430L2", None, None,
+                 "MH32BE", "NC32S", {"QOB120VH": 3, "QOB330VH": 1}),
+        scenario("NQ-MLO-240-AL", 240, 225, None, 30, 22,
+                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
+                 "NQ430L2", None, None,
+                 "MH32BE", "NC32S", {"QOB120VH": 3, "QOB330VH": 1}),
+        scenario("NF-MLO-480-3R", 480, 250, None, 30, 35,
+                 "COPPER", "FULLY_RATED", "NEMA3R", "SURFACE",
+                 "NF430L2C", None, None,
+                 "MH38WP", None, {"EGB14020": 3, "EGB34030": 1}),
+        scenario("NF-JG-480-AL", 480, 250, 200, 42, 35,
+                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
+                 "NF442L2", "N250MJ", "JGL36200",
+                 "MH56BE", "NC56S", {"EGB14020": 3, "EGB34030": 1}),
+    ]
+
+    def job_attrs(case, *, spd_marker=False):
+        attrs = {
+            "amperage": case["bus"],
+            "voltage": case["voltage"],
+            "spaces": case["spaces"],
+            "intRating": case["aic"],
+            "material": case["material"],
+            "panelRatingType": case["rating"],
+            "enclosure": case["enclosure"],
+            "trimStyle": case["trim"],
+            "allowPlugOn": False,
+            "feedThruLugs": False,
+            "poles": 3,
+            "grounding": False,
+            "detected_breakers": [dict(b) for b in case["branches"]],
+        }
+        if case["main"] is not None:
+            attrs["mainBreakerAmperage"] = case["main"]
+        if spd_marker != "OMIT":
+            attrs["spd"] = spd_marker
+        return attrs
+
+    job_defaults = {"panelboards": {
+        "allow_feed_thru_lugs": False,
+        "allow_plug_on_breakers": False,
+    }}
+
+    def run_job(items):
+        payload = {"defaults": job_defaults, "items": items}
+        with contextlib.redirect_stdout(io.StringIO()):
+            return process_job(payload)
+
+    print("\n--- Full-job BOM and attribute checks ---")
+    outputs = run_job([
+        {"type": "panelboard", "name": c["name"], "attrs": job_attrs(c)}
+        for c in cases
+    ])
+    check("All panel names returned", set(outputs), {c["name"] for c in cases})
+
+    for c in cases:
+        name = c["name"]
+        out = outputs.get(name, {})
+        if not isinstance(out, dict):
+            out = {"error": repr(out)}
+
+        family = "NQ" if c["interior"].startswith("NQ") else "NF"
+        other = "NF" if family == "NQ" else "NQ"
+        entries = out.get(f"Branch Breakers ({family})", [])
+        actual_counts = Counter()
+
+        if isinstance(entries, list):
+            for row in entries:
+                if isinstance(row, dict) and row.get("Part Number"):
+                    actual_counts[str(row["Part Number"])] += int(
+                        row.get("count", 0) or 0
+                    )
+
+        print(f"\n{name}: {c['bus']}A / {c['main'] or 'MLO'} / "
+              f"{c['voltage']}V / {c['aic']}kA / {c['rating']} / "
+              f"{c['material']} / {c['enclosure']} / {c['trim']}")
+        print(f"  Interior={out.get('Interior')}  Main={out.get('Main Breaker')}")
+        print(f"  Kit={out.get('Main Breaker Kit')}  Box={out.get('Box')}")
+        print(f"  Trim={out.get('Trim')}  Branches={dict(actual_counts)}")
+
+        if out.get("Notes"):
+            print(f"  Notes={out['Notes']}")
+
+        check(f"{name}: no engine error", not any(
+            key in out for key in ("error", "Skipped", "Main Breaker Error")
+        ), True)
+        check(f"{name}: interior", out.get("Interior"), c["interior"])
+        check(f"{name}: main", out.get("Main Breaker"), c["breaker"])
+        check(f"{name}: kit", out.get("Main Breaker Kit"), c["kit"])
+        check(f"{name}: enclosure", out.get("Box"), c["box"])
+        check(f"{name}: trim", out.get("Trim"), c["expected_trim"])
+        check(f"{name}: branches and quantities", actual_counts,
+              Counter(c["branch_parts"]))
+        check(f"{name}: no wrong-family branches", not bool(out.get(
+            f"Branch Breakers ({other})"
+        )), True)
+        check(f"{name}: final bus rating",
+              ka(out.get("_finalPanelAmperage")) >= c["bus"], True)
+        check(f"{name}: preserved voltage",
+              out.get("_finalPanelVoltage"), c["voltage"])
+        check(f"{name}: requested AIC",
+              ka(out.get("_requestedPanelIntRating")), float(c["aic"]))
+        check(f"{name}: main amps",
+              out.get("_finalMainBreakerAmperage"), c["main"])
+        check(f"{name}: bus material",
+              str(out.get("Interior", "")).endswith("C"),
+              c["material"] == "COPPER")
+        check(f"{name}: branch count",
+              sum(actual_counts.values()),
+              sum(b["count"] for b in c["branches"]))
+
+        if c["rating"] == "FULLY_RATED":
+            check(f"{name}: fully-rated branch AIC",
+                  bool(entries) and all(
+                      ka(b.get("Interrupting Rating")) >= c["aic"]
+                      for b in entries
+                  ), True)
+        else:
+            # This particular JD + 1P/2P QOB combination is listed
+            # in Schneider's 2024 NQ series table (page 9-2).
+            check(f"{name}: listed JD/QOB series configuration",
+                  c["voltage"] in (208, 240)
+                  and c["aic"] <= 25
+                  and out.get("Main Breaker") == "JDL36200"
+                  and all(b["poles"] in (1, 2) for b in c["branches"])
+                  and actual_counts == Counter({
+                      "QOB120": 3, "QOB230": 1
+                  }), True)
+
+    print("\n--- Targeted regression checks from MB1-A/B/C and MB2-A ---")
+
+    nq = nqPanelboard()
+    configs = list(nq.iterMainBreakerConfigurations())
+    check("MB1-B: NQ merged configurations", len(configs), 36)
+
+    for spaces in (30, 42, 54, 72, 84):
+        found = {
+            tuple(params[2])
+            for (minimum, maximum, count, phase, voltage), params in configs
+            if (minimum, maximum, count, phase, voltage)
+            == (125, 400, spaces, "3PHASE", 208)
+        }
+        check(f"MB1-B: LA/LH + LG/LJ/LL for {spaces} spaces", found,
+              {("LA", "LH"), ("LG", "LJ", "LL")})
+
+    eng = PanelboardEngine("REGRESSION_CHECK", {})
+
+    for frame, kit in (("LA", "NQMB4LA"), ("LG", "NQMB6PPL")):
+        found = eng._find_main_breaker_config_params(
+            family="NQ", builder=nq, amps=400, spaces=30,
+            phase="3PHASE", lookup_voltage=208,
+            preferred_frame=frame,
+        )
+        check(f"MB1-C: final {frame} frame/kit",
+              found[1][3] if found else None, kit)
+
+    for frame, voltage, expected in (
+        ("LA", 240, 42), ("LH", 240, 65),
+        ("LH", 480, 35), ("LJ", 240, 100),
+    ):
+        check(f"MB1-C: {frame} AIC at {voltage}V",
+              eng._main_breaker_frame_aic(frame, voltage), expected)
+
+    def targeted_main(voltage, bus, main, spaces, aic, **extras):
+        raw = {
+            "amperage": bus,
+            "voltage": voltage,
+            "spaces": spaces,
+            "mainBreakerAmperage": main,
+            "intRating": aic,
+            "material": "ALUMINUM",
+            "panelRatingType": "FULLY_RATED",
+            "enclosure": "NEMA1",
+            "trimStyle": "SURFACE",
+            "allowPlugOn": False,
+            "feedThruLugs": False,
+            "detected_breakers": [],
+            **extras,
+        }
+        with contextlib.redirect_stdout(io.StringIO()):
+            return PanelboardEngine(
+                "TARGETED_MAIN", raw
+            )._build_main_breaker(raw)
+
+    for label, args, expected in (
+        ("MB1-C: 100k NQ LJ", (208, 400, 400, 30, 100),
+         ("NQMB6PPL", "LJL36400U31X")),
+        ("MB1-C: 600A NF LL", (480, 600, 600, 30, 100),
+         ("N600MPPL", "LLL36600U31X")),
+    ):
+        try:
+            result = targeted_main(*args)
+            actual = (
+                result.get("Main Breaker Kit"),
+                result.get("Main Breaker"),
+            )
+        except Exception as exc:
+            actual = (type(exc).__name__, str(exc))
+        check(label, actual, expected)
+
+    try:
+        rejected = targeted_main(
+            208, 400, 400, 30, 65, mainBreakerType="LA"
+        )
+        check("MB1-C: reject LA at 65kA",
+              isinstance(rejected, dict)
+              and "error" in rejected, True)
+    except Exception as exc:
+        check("MB1-C: reject LA at 65kA",
+              f"exception: {exc}", True)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        standalone_la = mccb().generateMccbPartNumber({
+            "frame": "L",
+            "termination": "LUG",
+            "poles": 3,
+            "amperage": 300,
+            "voltage": 240,
+            "intRating": 42,
+            "tripFunction": "MAGNETIC",
+            "grounding": False,
+        })
+    check("MB2-A: standalone LA stays unsuffixed",
+          standalone_la, "LAL36300")
+
+    print("\n--- Known production issues (NOT counted as passes) ---")
+
+
+    # SPD REGRESSION TESTS
+    # Complete jobs must build the same NQ BOM when SPD is absent.
+    print("\n--- SPD payload normalization checks ---")
+
+    comparison_keys = (
+        "Interior",
+        "Box",
+        "Trim",
+        "Main Breaker",
+        "Main Breaker Kit",
+        "Branch Breakers (NQ)",
+    )
+
+    for case_name in ("NQ-MLO-208-AL", "NQ-LA-208-AL"):
+        case = next(c for c in cases if c["name"] == case_name)
+        baseline = outputs[case_name]
+
+        for label, spd_value in (
+            ("numeric zero", 0),
+            ("string FALSE", "FALSE"),
+            ("None", None),
+            ("omitted", "OMIT"),
+        ):
+            probe_name = f"{case_name}-{label}"
+
+            result = run_job([{
+                "type": "panelboard",
+                "name": probe_name,
+                "attrs": job_attrs(case, spd_marker=spd_value),
+            }]).get(probe_name, {})
+
+            actual_bom = {
+                key: result.get(key)
+                for key in comparison_keys
+            }
+
+            expected_bom = {
+                key: baseline.get(key)
+                for key in comparison_keys
+            }
+
+            check(
+                f"{case_name}: {label} preserves full BOM",
+                actual_bom,
+                expected_bom,
+            )
+
+            check(
+                f"{case_name}: {label} has no SPD part",
+                "SPD" not in result,
+                True,
+            )
+
+    # Valid SPD ratings must still generate the proper SPD.
+    spd_case = next(
+        c for c in cases if c["name"] == "NQ-MLO-208-AL"
+    )
+
+    for label, spd_value in (
+        ("numeric 80", 80),
+        ("string 80kA", "80kA"),
+    ):
+        probe_name = f"VALID-SPD-{label}"
+
+        result = run_job([{
+            "type": "panelboard",
+            "name": probe_name,
+            "attrs": job_attrs(spd_case, spd_marker=spd_value),
+        }]).get(probe_name, {})
+
+        check(
+            f"Valid SPD {label}: NQ family",
+            str(result.get("Interior", "")).startswith("NQ"),
+            True,
+        )
+
+        check(
+            f"Valid SPD {label}: correct part",
+            result.get("SPD"),
+            "SSP02SBA08D",
+        )
+
+    # Malformed SPD ratings must still be rejected by the builder.
+    # They must not be silently treated as "no SPD".
+    for label, value in (
+        ("invalid text", "INVALID"),
+        ("boolean True without rating", True),
+    ):
+        attrs = job_attrs(spd_case, spd_marker=value)
+        attrs["typeOfMain"] = "MAIN LUG"
+
+        result = nqPanelboard().generateNqPanelboardPartNumber(
+            attrs
+        )
+
+        check(
+            f"Malformed SPD {label} rejected",
+            isinstance(result, str)
+            and result.startswith("Invalid SPD rating"),
+            True,
+        )
+
+
+    # Manufacturer catalog verification:
+    # Schneider 2024 Panelboards Digest, Table 9.1, page 9-3.
+    #
+    # At 25kA on the listed three-phase systems, JD main
+    # breakers support standard 3-pole QOB branches rated
+    # 15A through 100A. The 240V listing also applies to
+    # 208Y/120V under the catalog's voltage footnote.
+
+    print("\n--- Catalog-verified JD/QOB 3-pole series checks ---")
+
+    jd_series = next(
+        c for c in cases if c["name"] == "NQ-JD-25K-SERIES"
+    )
+
+    for voltage in (240, 208):
+        case = dict(jd_series)
+        case["voltage"] = voltage
+        case["branches"] = [dict(b) for b in three_pole]
+
+        probe_name = f"NQ-JD-25K-3P-{voltage}"
+
+        result = run_job([{
+            "type": "panelboard",
+            "name": probe_name,
+            "attrs": job_attrs(case),
+        }]).get(probe_name, {})
+
+        branch_counts = Counter()
+
+        for row in result.get("Branch Breakers (NQ)", []):
+            if isinstance(row, dict) and row.get("Part Number"):
+                branch_counts[str(row["Part Number"])] += int(
+                    row.get("count", 0) or 0
+                )
+
+        print(f"\n{probe_name}")
+        print(f"  Main={result.get('Main Breaker')}")
+        print(f"  Kit={result.get('Main Breaker Kit')}")
+        print(f"  Branches={dict(branch_counts)}")
+
+        check(
+            f"JD/QOB 3P {voltage}V: no engine errors",
+            not any(
+                k in result
+                for k in ("error", "Skipped", "Main Breaker Error")
+            ),
+            True,
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: interior",
+            result.get("Interior"),
+            "NQ430L2C",
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: main",
+            result.get("Main Breaker"),
+            "JDL36200",
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: mounting kit",
+            result.get("Main Breaker Kit"),
+            "NQMB2HJ",
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: branches",
+            branch_counts,
+            Counter({"QOB120": 3, "QOB330": 1}),
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: voltage preserved",
+            result.get("_finalPanelVoltage"),
+            voltage,
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: requested AIC preserved",
+            result.get("_requestedPanelIntRating"),
+            25,
+        )
+
+        check(
+            f"JD/QOB 3P {voltage}V: branch individual AIC",
+            ka(result.get("_finalBranchIntRating")),
+            10.0,
+        )
+
+
+    print("\n--- NQ actual branch AIC metadata checks ---")
+
+    expected_branch_ratings = {
+        "NQ-LA-208-AL": 65,
+        "NQ-LH-240-3R": 65,
+        "NQ-JD-25K-FULL": 65,
+        "NQ-JD-25K-SERIES": 10,
+        "NQ-MLO-208-AL": 22,
+        "NQ-MLO-240-AL": 22,
+    }
+
+    for name, expected_rating in expected_branch_ratings.items():
+        result = outputs[name]
+
+        check(
+            f"{name}: actual individual branch AIC metadata",
+            ka(result.get("_finalBranchIntRating")),
+            float(expected_rating),
+        )
+
+    # Separate issue: individual breaker AIC and an assembled
+    # panel's series/fully-rated SCCR are not the same thing.
+    # Track this until complete panel rating validation exists.
+    jd_series = outputs["NQ-JD-25K-SERIES"]
+    jd_fully = outputs["NQ-JD-25K-FULL"]
+
+    series_panel_rating = ka(
+        jd_series.get("_finalPanelIntRating")
+    )
+    fully_panel_rating = ka(
+        jd_fully.get("_finalPanelIntRating")
+    )
+
+    if series_panel_rating != 25 or fully_panel_rating > 25:
+        issue = (
+            "_finalPanelIntRating is derived from branch-breaker "
+            "AIC rather than a verified assembled-panel rating"
+        )
+
+        known_issues.append(issue)
+
+        print(f"KNOWN BUG | {issue}")
+        print(
+            f"  JD series panel metadata: {series_panel_rating}kA"
+        )
+        print(
+            f"  JD fully-rated panel metadata: {fully_panel_rating}kA"
+        )
+    else:
+        print(
+            "CHECK | JD panel rating metadata matches "
+            "the expected 25kA configurations"
+        )
+
+
+
+    print("\n--- NQ fully-rated panel AIC checks ---")
+
+    expected_panel_ratings = {
+        # LA main 42kA, QHB branches 65kA -> 42kA
+        "NQ-LA-208-AL": 42,
+
+        # LH main 65kA, QHB branches 65kA -> 65kA
+        "NQ-LH-240-3R": 65,
+
+        # JD main 25kA, QHB branches 65kA -> 25kA
+        "NQ-JD-25K-FULL": 25,
+
+        # MLO: branch breaker AIC is the limiting
+        # breaker rating within this generated BOM.
+        "NQ-MLO-208-AL": 22,
+        "NQ-MLO-240-AL": 22,
+    }
+
+    for name, expected in expected_panel_ratings.items():
+        result = outputs[name]
+
+        check(
+            f"{name}: fully-rated limiting breaker AIC",
+            ka(result.get("_finalPanelIntRating")),
+            float(expected),
+        )
+
+    # Do not assign a calculated assembled-panel rating
+    # when no branch breakers have been built.
+    empty_case = dict(next(
+        c for c in cases if c["name"] == "NQ-JD-25K-FULL"
+    ))
+    empty_case["branches"] = []
+
+    empty_result = run_job([{
+        "type": "panelboard",
+        "name": "NQ-NO-BRANCHES-PROBE",
+        "attrs": job_attrs(empty_case),
+    }]).get("NQ-NO-BRANCHES-PROBE", {})
+
+    check(
+        "NQ without built branches has no calculated panel AIC",
+        empty_result.get("_finalPanelIntRating"),
+        None,
+    )
+
+
+    print("\n--- MB2-C2: NQ series-rating verification ---")
+
+    jd_series_result = outputs["NQ-JD-25K-SERIES"]
+    jd_fully_result = outputs["NQ-JD-25K-FULL"]
+
+    check(
+        "JD/QOB listed series panel rating is 25kA",
+        ka(jd_series_result.get("_finalPanelIntRating")),
+        25.0,
+    )
+
+    check(
+        "JD/QHB fully-rated panel remains 25kA",
+        ka(jd_fully_result.get("_finalPanelIntRating")),
+        25.0,
+    )
+
+    check(
+        "JD/QOB individual branch rating stays 10kA",
+        ka(jd_series_result.get("_finalBranchIntRating")),
+        10.0,
+    )
+
+    for voltage in (208, 240):
+        case = dict(next(
+            c for c in cases
+            if c["name"] == "NQ-JD-25K-SERIES"
+        ))
+
+        case["voltage"] = voltage
+        case["branches"] = [dict(b) for b in three_pole]
+
+        name = f"MB2-C2-JD-{voltage}"
+
+        result = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": job_attrs(case),
+        }]).get(name, {})
+
+        check(
+            f"{voltage}V: listed series panel AIC",
+            result.get("_finalPanelIntRating"),
+            25,
+        )
+
+        check(
+            f"{voltage}V: individual branch AIC",
+            result.get("_finalBranchIntRating"),
+            10,
+        )
+
+        check(
+            f"{voltage}V: verified catalog source",
+            "Table 9.1" in str(
+                result.get("_seriesRatingSource") or ""
+            ),
+            True,
+        )
+
+        check(
+            f"{voltage}V: no series review flag",
+            not any(
+                "Series-rated NQ assembly has not been verified"
+                in str(note)
+                for note in result.get("Notes", [])
+            ),
+            True,
+        )
+
+    unverified_cases = [
+        ("NQ-LA-35K-SERIES", "NQ-LA-208-AL"),
+        ("NQ-MLO-22K-SERIES", "NQ-MLO-208-AL"),
+    ]
+
+    for name, original_name in unverified_cases:
+        case = dict(next(
+            c for c in cases if c["name"] == original_name
+        ))
+
+        case["rating"] = "SERIES_RATED"
+
+        result = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": job_attrs(case),
+        }]).get(name, {})
+
+        check(
+            f"{name}: no unverified panel AIC",
+            result.get("_finalPanelIntRating"),
+            None,
+        )
+
+        check(
+            f"{name}: review note present",
+            any(
+                "User review required" in str(note)
+                and "Series-rated NQ assembly" in str(note)
+                for note in result.get("Notes", [])
+            ),
+            True,
+        )
+
+    print("\n--- NEMA 3R bottom-feed note regression ---")
+
+    bottom_feed_note = (
+        "NEMA 3R panelboards must be bottom fed. "
+        "Verify field feed arrangement."
+    )
+
+    for name in ("NQ-LH-240-3R", "NF-MLO-480-3R"):
+        result = outputs[name]
+
+        check(
+            f"{name}: bottom-feed note appears exactly once",
+            result.get("Notes", []).count(bottom_feed_note),
+            1,
+        )
+
+    for name in ("NQ-LA-208-AL", "NF-LH-480-CU"):
+        result = outputs[name]
+
+        check(
+            f"{name}: no NEMA 3R bottom-feed note",
+            bottom_feed_note not in result.get("Notes", []),
+            True,
+        )
+
+    for original_name in ("NQ-MLO-208-AL", "NF-LH-480-CU"):
+        case = dict(next(
+            c for c in cases if c["name"] == original_name
+        ))
+
+        case["enclosure"] = "NEMA3R"
+        case["trim"] = "SURFACE"
+
+        name = f"{original_name}-OUTDOOR"
+
+        result = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": job_attrs(case),
+        }]).get(name, {})
+
+        check(
+            f"{name}: no generation error",
+            not any(
+                key in result
+                for key in ("error", "Skipped")
+            ),
+            True,
+        )
+
+        check(
+            f"{name}: weatherproof enclosure selected",
+            str(result.get("Box", "")).endswith("WP"),
+            True,
+        )
+
+        check(
+            f"{name}: bottom-feed note appears exactly once",
+            result.get("Notes", []).count(bottom_feed_note),
+            1,
+        )
+
+    print("\n--- PowerPacT L D9 enclosure regression ---")
+
+    nq_attrs = {
+        "typeOfMain": "MAIN BREAKER",
+        "amperage": 400,
+        "spaces": 30,
+        "voltage": 208,
+        "material": "COPPER",
+        "enclosure": "NEMA1",
+        "trimStyle": "SURFACE",
+        "mainBreakerType": "LA",
+    }
+
+    nq_la = nqPanelboard().generateNqPanelboardPartNumber(
+        dict(nq_attrs)
+    )
+
+    nq_attrs["mainBreakerType"] = "LJ"
+
+    nq_lj = nqPanelboard().generateNqPanelboardPartNumber(
+        dict(nq_attrs)
+    )
+
+    nq_attrs["enclosure"] = "NEMA3R"
+
+    nq_lj_outdoor = nqPanelboard().generateNqPanelboardPartNumber(
+        dict(nq_attrs)
+    )
+
+    check(
+        "NQ LA: standard enclosure preserved",
+        nq_la.get("Box"),
+        "MH62BE",
+    )
+
+    check(
+        "NQ LJ: deep D9 enclosure",
+        nq_lj.get("Box"),
+        "MH62D9",
+    )
+
+    check(
+        "NQ LJ: correct trim",
+        nq_lj.get("Trim"),
+        "NC62VS",
+    )
+
+    check(
+        "NQ LJ outdoor: no invented enclosure",
+        nq_lj_outdoor.get("Box"),
+        None,
+    )
+
+    check(
+        "NQ LJ outdoor: factory review required",
+        any(
+            "Factory assembly or manufacturer review" in str(note)
+            for note in nq_lj_outdoor.get("Notes", [])
+        ),
+        True,
+    )
+
+    nf_attrs = {
+        "typeOfMain": "MAIN BREAKER",
+        "amperage": 400,
+        "spaces": 30,
+        "voltage": 480,
+        "phase": "3PHASE",
+        "material": "COPPER",
+        "enclosure": "NEMA1",
+        "trimStyle": "SURFACE",
+        "mainBreakerType": "LH",
+    }
+
+    nf_lh = nfPanelboard().generateNfPanelboardPartNumber(
+        dict(nf_attrs)
+    )
+
+    nf_attrs["amperage"] = 600
+    nf_attrs["mainBreakerType"] = "LJ"
+
+    nf_lj = nfPanelboard().generateNfPanelboardPartNumber(
+        dict(nf_attrs)
+    )
+
+    nf_attrs["enclosure"] = "NEMA3R"
+
+    nf_lj_outdoor = nfPanelboard().generateNfPanelboardPartNumber(
+        dict(nf_attrs)
+    )
+
+    nf_attrs["enclosure"] = "NEMA1"
+    nf_attrs["spaces"] = 66
+
+    nf_lj_66 = nfPanelboard().generateNfPanelboardPartNumber(
+        dict(nf_attrs)
+    )
+
+    check(
+        "NF LH: standard enclosure preserved",
+        nf_lh.get("Box"),
+        "MH62BE",
+    )
+
+    check(
+        "NF LJ: deep D9 enclosure",
+        nf_lj.get("Box"),
+        "MH68D9",
+    )
+
+    check(
+        "NF LJ: three-point-latch trim",
+        nf_lj.get("Trim"),
+        "NC68VS3PNF",
+    )
+
+    check(
+        "NF LJ outdoor: no invented enclosure",
+        nf_lj_outdoor.get("Box"),
+        None,
+    )
+
+    check(
+        "NF LJ outdoor: factory review required",
+        any(
+            "Factory assembly or manufacturer review" in str(note)
+            for note in nf_lj_outdoor.get("Notes", [])
+        ),
+        True,
+    )
+
+    check(
+        "NF LJ 66-space: no unlisted enclosure",
+        nf_lj_66.get("Box"),
+        None,
+    )
+
+    check(
+        "NF LJ 66-space: manufacturer review note",
+        any(
+            "not listed as a merchandised assembly" in str(note)
+            for note in nf_lj_66.get("Notes", [])
+        ),
+        True,
+    )
+
+    nq_d9_case = dict(next(
+        c for c in cases if c["name"] == "NQ-LA-208-AL"
+    ))
+
+    nq_d9_case["bus"] = 400
+    nq_d9_case["main"] = 400
+    nq_d9_case["spaces"] = 30
+    nq_d9_case["aic"] = 65
+    nq_d9_case["material"] = "COPPER"
+
+    nq_d9_attrs = job_attrs(nq_d9_case)
+    nq_d9_attrs["mainBreakerType"] = "LJ"
+
+    nq_d9_result = run_job([{
+        "type": "panelboard",
+        "name": "NQ-D9-FULL-JOB",
+        "attrs": nq_d9_attrs,
+    }]).get("NQ-D9-FULL-JOB", {})
+
+    check(
+        "NQ D9 full job: correct enclosure",
+        nq_d9_result.get("Box"),
+        "MH62D9",
+    )
+
+    check(
+        "NQ D9 full job: correct main kit",
+        nq_d9_result.get("Main Breaker Kit"),
+        "NQMB6PPL",
+    )
+
+    check(
+        "NQ D9 full job: LJ main selected",
+        str(
+            nq_d9_result.get("Main Breaker") or ""
+        ).upper().startswith("LJL"),
+        True,
+    )
+
+    check(
+        "NQ D9 full job: all branch breakers built",
+        sum(
+            int(entry.get("count", 0))
+            for entry in nq_d9_result.get("Branch Breakers (NQ)", [])
+            if isinstance(entry, dict)
+            and entry.get("Part Number")
+        ),
+        sum(
+            int(br.get("count", 0))
+            for br in nq_d9_attrs["detected_breakers"]
+        ),
+    )
+
+    check(
+        "NQ D9 full job: 65kA panel rating preserved",
+        nq_d9_result.get("_finalPanelIntRating"),
+        65,
+    )
+
+    check(
+        "NQ D9 full job: correct trim",
+        nq_d9_result.get("Trim"),
+        "NC62VS",
+    )
+
+    nf_d9_case = dict(next(
+        c for c in cases if c["name"] == "NF-LH-480-CU"
+    ))
+
+    nf_d9_case["bus"] = 600
+    nf_d9_case["main"] = 600
+    nf_d9_case["spaces"] = 30
+    nf_d9_case["aic"] = 35
+    nf_d9_case["trim"] = "SURFACE"
+
+    nf_d9_result = run_job([{
+        "type": "panelboard",
+        "name": "NF-D9-FULL-JOB",
+        "attrs": job_attrs(nf_d9_case),
+    }]).get("NF-D9-FULL-JOB", {})
+
+    check(
+        "NF D9 full job: correct enclosure",
+        nf_d9_result.get("Box"),
+        "MH68D9",
+    )
+
+    check(
+        "NF D9 full job: correct main kit",
+        nf_d9_result.get("Main Breaker Kit"),
+        "N600MPPL",
+    )
+
+    check(
+        "NF D9 full job: correct trim",
+        nf_d9_result.get("Trim"),
+        "NC68VS3PNF",
+    )
+
+    nq_outdoor_attrs = dict(nq_d9_attrs)
+    nq_outdoor_attrs["enclosure"] = "NEMA3R"
+
+    nq_outdoor_result = run_job([{
+        "type": "panelboard",
+        "name": "NQ-D9-OUTDOOR-FULL-JOB",
+        "attrs": nq_outdoor_attrs,
+    }]).get("NQ-D9-OUTDOOR-FULL-JOB", {})
+
+    check(
+        "NQ PowerPacT L outdoor full job: no standalone box",
+        nq_outdoor_result.get("Box"),
+        None,
+    )
+
+    check(
+        "NQ PowerPacT L outdoor: bottom-feed note retained",
+        any(
+            "NEMA 3R panelboards must be bottom fed" in str(note)
+            for note in nq_outdoor_result.get("Notes", [])
+        ),
+        True,
+    )
+
+    check(
+        "NQ PowerPacT L outdoor: manufacturer review retained",
+        any(
+            "Factory assembly or manufacturer review" in str(note)
+            for note in nq_outdoor_result.get("Notes", [])
+        ),
+        True,
+    )
+
+    check(
+        "Existing NQ LA BOM stays standard depth",
+        outputs["NQ-LA-208-AL"].get("Box"),
+        "MH62BE",
+    )
+
+    check(
+        "Existing NF LH BOM stays standard depth",
+        outputs["NF-LH-480-CU"].get("Box"),
+        "MH68BE",
+    )
+
+    # ==============================================================
+    # ARGUS 2024 SCHNEIDER DIGEST / BOM / MINIMUM-HARDWARE AUDIT
+    # Paste ABOVE: total = passed + len(failed)
+    #
+    # Independent reference: 2024 Panelboards Digest:
+    # 9.3  (p9-7), 9.4  (p9-8),
+    # 9.44 (p9-23), 9.45 (p9-24),
+    # 9.9  (p9-12), 9.46 (p9-25).
+    #
+    # Scope: 3-phase merchandised NQ/NF panelboards, no FTL/SPD,
+    # no special branch features, non-service-entrance.
+    # Cost checks = catalog-minimum hardware, NOT distributor net $.
+    # ==============================================================
+
+    print("\n--- DIGEST AUDIT: independent catalog BOM oracle ---")
+    catalog_failures_at_start = len(failed)
+
+    # Row: family, bus A, spaces, bare aluminum interior,
+    # NEMA 1 box height, trim height, NEMA 3R box height,
+    # copper-only.
+    #
+    # Copper-only interiors include their mandatory C suffix.
+    # These are catalog values, NOT pulled from ARGUS's tables.
+
+    catalog_mlo = [
+        ("NQ", 100, 18, "NQ418L1", 26, 26, 26, False),
+        ("NQ", 100, 30, "NQ430L1", 32, 32, 32, False),
+
+        ("NQ", 225, 30, "NQ430L2", 32, 32, 32, False),
+        ("NQ", 225, 42, "NQ442L2", 38, 38, 38, False),
+        ("NQ", 225, 54, "NQ454L2", 38, 38, 38, False),
+        ("NQ", 225, 72, "NQ472L2", 44, 44, 44, False),
+        ("NQ", 225, 84, "NQ484L2", 50, 50, 50, False),
+
+        ("NQ", 400, 30, "NQ430L4", 50, 50, 50, False),
+        ("NQ", 400, 42, "NQ442L4", 50, 50, 50, False),
+        ("NQ", 400, 54, "NQ454L4", 56, 56, 56, False),
+        ("NQ", 400, 72, "NQ472L4", 62, 62, 62, False),
+        ("NQ", 400, 84, "NQ484L4C", 68, 68, 68, True),
+
+        ("NQ", 600, 30, "NQ430L6C", 50, 50, 62, True),
+        ("NQ", 600, 42, "NQ442L6C", 50, 50, 62, True),
+        ("NQ", 600, 54, "NQ454L6C", 56, 56, 68, True),
+        ("NQ", 600, 84, "NQ484L6C", 68, 68, 80, True),
+
+        ("NF", 125, 18, "NF418L1", 26, 26, 26, False),
+        ("NF", 125, 30, "NF430L1", 32, 32, 32, False),
+        ("NF", 125, 42, "NF442L1C", 38, 38, 38, True),
+        ("NF", 125, 54, "NF454L1C", 44, 44, 44, True),
+
+        ("NF", 250, 30, "NF430L2", 38, 38, 38, False),
+        ("NF", 250, 42, "NF442L2", 44, 44, 44, False),
+        ("NF", 250, 54, "NF454L2", 50, 50, 50, False),
+        ("NF", 250, 66, "NF466L2", 62, 62, 62, False),
+
+        ("NF", 400, 30, "NF430L4", 50, 50, 50, False),
+        ("NF", 400, 42, "NF442L4", 56, 56, 56, False),
+        ("NF", 400, 54, "NF454L4", 62, 62, 62, False),
+        ("NF", 400, 66, "NF466L4", 74, 74, 74, False),
+        ("NF", 400, 84, "NF484L4", 86, 86, 86, False),
+
+        ("NF", 600, 30, "NF430L6C", 50, 50, 62, True),
+        ("NF", 600, 42, "NF442L6C", 56, 56, 68, True),
+        ("NF", 600, 54, "NF454L6C", 62, 62, 74, True),
+        ("NF", 600, 66, "NF466L6C", 74, 74, 86, True),
+
+        # NF 600A/84-space outdoor is not merchandised.
+        ("NF", 600, 84, "NF484L6C", 86, 86, None, True),
+    ]
+
+    basic_branches = [
+        {
+            "poles": 1,
+            "amperage": 20,
+            "count": 3,
+            "specialFeatures": "",
+        },
+        {
+            "poles": 3,
+            "amperage": 30,
+            "count": 1,
+            "specialFeatures": "",
+        },
+    ]
+
+    def _audit_attrs(
+        bus, voltage, spaces, aic, material,
+        enclosure="NEMA1", trim="SURFACE",
+        main=None, frame=None, rating="FULLY_RATED"
+    ):
+        attrs = {
+            "amperage": bus,
+            "voltage": voltage,
+            "spaces": spaces,
+            "intRating": aic,
+            "material": material,
+            "panelRatingType": rating,
+            "enclosure": enclosure,
+            "trimStyle": trim,
+            "allowPlugOn": False,
+            "feedThruLugs": False,
+            "poles": 3,
+            "grounding": False,
+            "detected_breakers": [
+                dict(b) for b in basic_branches
+            ],
+        }
+
+        if main is not None:
+            attrs["mainBreakerAmperage"] = main
+
+        if frame:
+            attrs["mainBreakerType"] = frame
+
+        return attrs
+
+    def _audit_counts(output, family):
+        rows = output.get(f"Branch Breakers ({family})", [])
+
+        if not isinstance(rows, list):
+            return Counter()
+
+        counts = Counter()
+
+        for entry in rows:
+            if isinstance(entry, dict) and entry.get("Part Number"):
+                counts[str(entry["Part Number"])] += int(
+                    entry.get("count", 0)
+                )
+
+        return counts
+
+    def _audit_notes(output):
+        raw_notes = output.get("Notes") or []
+
+        if isinstance(raw_notes, list):
+            return [str(x) for x in raw_notes]
+
+        return [str(raw_notes)]
+
+    # ==============================================================
+    # PART 1: MAIN-LUG CATALOG MATRIX
+    # ==============================================================
+    # Each published row is tested with:
+    # - Aluminum and copper where allowed
+    # - NEMA 1 surface
+    # - NEMA 1 flush
+    # - NEMA 3R
+    #
+    # Uses the full process_job() path.
+
+    catalog_jobs = []
+    catalog_expect = {}
+
+    for (
+        family, bus, spaces, bare, n1,
+        trim_h, wp, copper_only
+    ) in catalog_mlo:
+
+        materials = (
+            ("COPPER",)
+            if copper_only
+            else ("ALUMINUM", "COPPER")
+        )
+
+        for material in materials:
+            for enclosure, trim in (
+                ("NEMA1", "SURFACE"),
+                ("NEMA1", "FLUSH"),
+                ("NEMA3R", "SURFACE"),
+            ):
+
+                if enclosure == "NEMA3R" and wp is None:
+                    continue
+
+                voltage = 208 if family == "NQ" else 480
+                aic = 22 if family == "NQ" else 35
+
+                interior = bare + (
+                    "C"
+                    if material == "COPPER"
+                    and not bare.endswith("C")
+                    else ""
+                )
+
+                height = (
+                    wp if enclosure == "NEMA3R" else n1
+                )
+
+                box = (
+                    f"MH{height}"
+                    f"{'WP' if enclosure == 'NEMA3R' else 'BE'}"
+                )
+
+                front = None
+
+                if enclosure != "NEMA3R":
+                    front = (
+                        f"NC{trim_h}"
+                        f"{'V' if bus >= 400 else ''}"
+                        f"{'F' if trim == 'FLUSH' else 'S'}"
+                    )
+
+                branch_prefix = (
+                    "QOB" if family == "NQ" else "EGB"
+                )
+
+                branch_suffix = (
+                    "VH" if family == "NQ" else ""
+                )
+
+                expected_branches = Counter({
+                    (
+                        f"{branch_prefix}"
+                        f"{'120' if family == 'NQ' else '14020'}"
+                        f"{branch_suffix}"
+                    ): 3,
+                    (
+                        f"{branch_prefix}"
+                        f"{'330' if family == 'NQ' else '34030'}"
+                        f"{branch_suffix}"
+                    ): 1,
+                })
+
+                name = (
+                    f"CAT-{family}-{bus}A-{spaces}S-"
+                    f"{material[:2]}-{enclosure}-{trim}"
+                )
+
+                catalog_jobs.append({
+                    "type": "panelboard",
+                    "name": name,
+                    "attrs": _audit_attrs(
+                        bus, voltage, spaces, aic,
+                        material, enclosure, trim
+                    ),
+                })
+
+                catalog_expect[name] = {
+                    "family": family,
+                    "bus": bus,
+                    "spaces": spaces,
+                    "voltage": voltage,
+                    "aic": aic,
+                    "interior": interior,
+                    "box": box,
+                    "trim": front,
+                    "branches": expected_branches,
+                    "enclosure": enclosure,
+                }
+
+    catalog_results = run_job(catalog_jobs)
+
+    check(
+        "DIGEST MLO: every fixture returned",
+        set(catalog_results),
+        set(catalog_expect),
+    )
+
+    for name, spec in catalog_expect.items():
+        out = catalog_results.get(name, {})
+
+        if not isinstance(out, dict):
+            out = {"error": str(out)}
+
+        family = spec["family"]
+
+        notes_text = " ".join(
+            _audit_notes(out)
+        ).lower()
+
+        actual_core = (
+            out.get("Interior"),
+            out.get("Box"),
+            out.get("Trim"),
+            out.get("Main Breaker"),
+            out.get("Main Breaker Kit"),
+        )
+
+        expected_core = (
+            spec["interior"],
+            spec["box"],
+            spec["trim"],
+            None,
+            None,
+        )
+
+        check(
+            f"{name}: DIGEST interior/box/front",
+            actual_core,
+            expected_core,
+        )
+
+        check(
+            f"{name}: no error or skipped item",
+            not any(
+                k in out for k in (
+                    "error",
+                    "Skipped",
+                    "Main Breaker Error",
+                )
+            ),
+            True,
+        )
+
+        check(
+            f"{name}: catalog minimum bus/spaces",
+            (
+                out.get("_finalPanelAmperage"),
+                out.get("_finalPanelSpaces"),
+            ),
+            (
+                spec["bus"],
+                spec["spaces"],
+            ),
+        )
+
+        check(
+            f"{name}: actual branch parts/quantities",
+            _audit_counts(out, family),
+            spec["branches"],
+        )
+
+        check(
+            f"{name}: selected branch rating covers requirement",
+            ka(out.get("_finalBranchIntRating")) >= spec["aic"],
+            True,
+        )
+
+        check(
+            f"{name}: request voltage/AIC preserved",
+            (
+                out.get("_finalPanelVoltage"),
+                ka(out.get("_requestedPanelIntRating")),
+            ),
+            (
+                spec["voltage"],
+                float(spec["aic"]),
+            ),
+        )
+
+        if spec["enclosure"] == "NEMA3R":
+            check(
+                f"{name}: NEMA3R bottom-feed note",
+                "must be bottom fed" in notes_text,
+                True,
+            )
+
+    print(
+        f"DIGEST MLO MATRIX: "
+        f"{len(catalog_expect)} complete jobs evaluated"
+    )
+
+    # ==============================================================
+    # PART 2: MAIN-BREAKER CATALOG BOM AUDIT
+    # ==============================================================
+    # NQ/NF, H/J and legacy/PowerPacT L main-breaker examples.
+    # Full-job construction with the requested breaker frame.
+
+    print("\n--- DIGEST AUDIT: main-breaker kits, depth and full BOM ---")
+
+    catalog_mb = [
+        # name, family, bus, main, voltage, spaces,
+        # aic, material, forced frame, interior,
+        # breaker, kit, box, trim part, trim style
+
+        (
+            "NQ-JD-25", "NQ", 225, 200, 240, 30,
+            25, "COPPER", "JD",
+            "NQ430L2C", "JDL36200", "NQMB2HJ",
+            "MH44BE", "NC44S", "SURFACE",
+        ),
+        (
+            "NQ-JG-65", "NQ", 225, 200, 208, 30,
+            65, "COPPER", "JG",
+            "NQ430L2C", "JGL36200", "NQMB2HJ",
+            "MH44BE", "NC44S", "SURFACE",
+        ),
+        (
+            "NQ-LA-35", "NQ", 400, 300, 208, 30,
+            35, "ALUMINUM", "LA",
+            "NQ430L4", "LAL36300MB", "NQMB4LA",
+            "MH62BE", "NC62VS", "SURFACE",
+        ),
+        (
+            "NQ-LH-65", "NQ", 400, 400, 240, 30,
+            65, "COPPER", "LH",
+            "NQ430L4C", "LHL36400MB", "NQMB4LA",
+            "MH62BE", "NC62VS", "SURFACE",
+        ),
+        (
+            "NQ-LJ-65", "NQ", 400, 400, 208, 30,
+            65, "COPPER", "LJ",
+            "NQ430L4C", "LJL36400U31X", "NQMB6PPL",
+            "MH62D9", "NC62VS", "SURFACE",
+        ),
+        (
+            "NF-JG-35", "NF", 250, 200, 480, 42,
+            35, "ALUMINUM", "JG",
+            "NF442L2", "JGL36200", "N250MJ",
+            "MH56BE", "NC56S", "SURFACE",
+        ),
+        (
+            "NF-LH-35", "NF", 400, 300, 480, 42,
+            35, "COPPER", "LH",
+            "NF442L4C", "LHL36300MB", "N400M",
+            "MH68BE", "NC68VF", "FLUSH",
+        ),
+        (
+            "NF-LL-65", "NF", 600, 600, 480, 30,
+            65, "COPPER", "LL",
+            "NF430L6C", "LLL36600U31X", "N600MPPL",
+            "MH68D9", "NC68VS3PNF", "SURFACE",
+        ),
+    ]
+
+    mb_jobs = []
+    mb_expect = {}
+
+    for (
+        short, family, bus, main, voltage, spaces,
+        aic, material, frame, interior, breaker,
+        kit, box, front, trim
+    ) in catalog_mb:
+
+        name = f"CAT-MB-{short}"
+
+        mb_jobs.append({
+            "type": "panelboard",
+            "name": name,
+            "attrs": _audit_attrs(
+                bus, voltage, spaces, aic, material,
+                trim=trim,
+                main=main,
+                frame=frame,
+            ),
+        })
+
+        mb_expect[name] = (
+            family, aic, interior, breaker,
+            kit, box, front, bus, main
+        )
+
+    mb_results = run_job(mb_jobs)
+
+    for name, spec in mb_expect.items():
+        (
+            family, aic, interior, breaker,
+            kit, box, front, bus, main
+        ) = spec
+
+        out = mb_results.get(name, {})
+
+        if not isinstance(out, dict):
+            out = {"error": str(out)}
+
+        check(
+            f"{name}: DIGEST main/interior/kit/depth/trim",
+            (
+                out.get("Interior"),
+                out.get("Main Breaker"),
+                out.get("Main Breaker Kit"),
+                out.get("Box"),
+                out.get("Trim"),
+            ),
+            (
+                interior,
+                breaker,
+                kit,
+                box,
+                front,
+            ),
+        )
+
+        check(
+            f"{name}: correct main trip and panel amps",
+            (
+                out.get("_finalMainBreakerAmperage"),
+                out.get("_finalPanelAmperage"),
+            ),
+            (main, bus),
+        )
+
+        check(
+            f"{name}: no error and all branches present",
+            not any(
+                k in out
+                for k in (
+                    "error",
+                    "Skipped",
+                    "Main Breaker Error",
+                )
+            )
+            and sum(_audit_counts(out, family).values()) == 4,
+            True,
+        )
+
+        check(
+            f"{name}: individual branch ratings meet full rating",
+            bool(out.get(f"Branch Breakers ({family})"))
+            and all(
+                ka(x.get("Interrupting Rating")) >= aic
+                for x in out.get(
+                    f"Branch Breakers ({family})", []
+                )
+                if isinstance(x, dict)
+            ),
+            True,
+        )
+
+        if family == "NQ":
+            check(
+                f"{name}: breaker-limited panel AIC >= required",
+                ka(out.get("_finalPanelIntRating")) >= aic,
+                True,
+            )
+
+    print(
+        f"DIGEST MB MATRIX: "
+        f"{len(catalog_mb)} complete jobs evaluated"
+    )
+
+    # ==============================================================
+    # PART 3: MINIMUM HARDWARE / BUMPING
+    # ==============================================================
+    # This evaluates minimum published bus and space tiers.
+    # It does NOT claim actual lowest distributor price.
+
+    print("\n--- DIGEST AUDIT: minimum size and no unnecessary upsizing ---")
+
+    least_hardware = [
+        # family, voltage, requested bus, requested spaces,
+        # catalog bus, catalog spaces, expected interior
+
+        ("NQ", 208, 210, 30, 225, 30, "NQ430L2"),
+        ("NQ", 240, 210, 31, 225, 42, "NQ442L2"),
+        ("NQ", 208, 226, 30, 400, 30, "NQ430L4"),
+        ("NQ", 208, 390, 43, 400, 54, "NQ454L4"),
+        ("NQ", 208, 401, 30, 600, 30, "NQ430L6C"),
+
+        ("NF", 480, 225, 30, 250, 30, "NF430L2"),
+        ("NF", 480, 251, 30, 400, 30, "NF430L4"),
+        ("NF", 480, 390, 43, 400, 54, "NF454L4"),
+        ("NF", 480, 401, 30, 600, 30, "NF430L6C"),
+    ]
+
+    bump_jobs = []
+    bump_specs = {}
+
+    for (
+        family, voltage, bus, spaces,
+        expected_bus, expected_spaces, expected_interior
+    ) in least_hardware:
+
+        name = f"CAT-MIN-{family}-{bus}A-{spaces}S"
+
+        material = (
+            "COPPER"
+            if expected_bus == 600
+            else "ALUMINUM"
+        )
+
+        bump_jobs.append({
+            "type": "panelboard",
+            "name": name,
+            "attrs": _audit_attrs(
+                bus,
+                voltage,
+                spaces,
+                22 if family == "NQ" else 35,
+                material,
+            ),
+        })
+
+        bump_specs[name] = (
+            expected_bus,
+            expected_spaces,
+            expected_interior,
+        )
+
+    bump_results = run_job(bump_jobs)
+
+    for name, (
+        expected_bus, expected_spaces, expected_interior
+    ) in bump_specs.items():
+
+        out = bump_results.get(name, {})
+
+        check(
+            f"{name}: cheapest hardware tier (not priced)",
+            (
+                out.get("_finalPanelAmperage"),
+                out.get("_finalPanelSpaces"),
+                out.get("Interior"),
+            ),
+            (
+                expected_bus,
+                expected_spaces,
+                expected_interior,
+            ),
+        )
+
+    # ==============================================================
+    # PART 4: ASSEMBLED-PANEL AIC / SERIES RATINGS
+    # ==============================================================
+
+    print("\n--- DIGEST AUDIT: catalog restrictions and rating integrity ---")
+
+    for name in (
+        "NQ-JD-25K-FULL",
+        "NQ-JD-25K-SERIES",
+    ):
+        out = outputs[name]
+
+        check(
+            f"{name}: 25kA assembled rating is not branch AIC",
+            out.get("_finalPanelIntRating"),
+            25,
+        )
+
+    check(
+        "Listed JD/QOB series: 10kA individual branches",
+        outputs["NQ-JD-25K-SERIES"].get(
+            "_finalBranchIntRating"
+        ),
+        10,
+    )
+
+    check(
+        "Listed JD/QOB series: manufacturer source recorded",
+        "Table 9.1" in str(
+            outputs["NQ-JD-25K-SERIES"].get(
+                "_seriesRatingSource"
+            ) or ""
+        ),
+        True,
+    )
+
+    unsupported_series = [
+        (
+            "NQ-LA-NOT-LISTED",
+            _audit_attrs(
+                400, 208, 30, 35, "ALUMINUM",
+                main=300,
+                frame="LA",
+                rating="SERIES_RATED",
+            ),
+        ),
+        (
+            "NF-MLO-UNVERIFIED",
+            _audit_attrs(
+                250, 480, 30, 35, "COPPER",
+                rating="SERIES_RATED",
+            ),
+        ),
+    ]
+
+    for name, attrs in unsupported_series:
+
+        out = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": attrs,
+        }]).get(name, {})
+
+        check(
+            f"{name}: no unverified series-panel AIC claim",
+            out.get("_finalPanelIntRating"),
+            None,
+        )
+
+        check(
+            f"{name}: review note exists",
+            any(
+                "review" in note.lower()
+                for note in _audit_notes(out)
+            ),
+            True,
+        )
+
+    # ==============================================================
+    # PART 5: POWERPACT L / FACTORY-ASSEMBLY RESTRICTIONS
+    # ==============================================================
+
+    for family, bus, voltage, frame in (
+        ("NQ", 400, 208, "LJ"),
+        ("NF", 600, 480, "LL"),
+    ):
+
+        name = f"CAT-{family}-PPL-3R"
+
+        attrs = _audit_attrs(
+            bus,
+            voltage,
+            30,
+            65,
+            "COPPER",
+            enclosure="NEMA3R",
+            main=bus,
+            frame=frame,
+        )
+
+        out = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": attrs,
+        }]).get(name, {})
+
+        check(
+            f"{name}: no invented standalone outdoor enclosure",
+            out.get("Box"),
+            None,
+        )
+
+        check(
+            f"{name}: factory review note",
+            any(
+                "factory assembly" in note.lower()
+                or "manufacturer review" in note.lower()
+                for note in _audit_notes(out)
+            ),
+            True,
+        )
+
+        check(
+            f"{name}: bottom-feed note",
+            any(
+                "bottom fed" in note.lower()
+                for note in _audit_notes(out)
+            ),
+            True,
+        )
+
+    # ==============================================================
+    # PART 6: COPPER-ONLY INTERIORS
+    # ==============================================================
+    # A catalog-required copper upgrade should not be silent.
+
+    for family, bus, spaces, voltage in (
+        ("NQ", 400, 84, 208),
+        ("NQ", 600, 30, 208),
+        ("NF", 600, 30, 480),
+    ):
+
+        name = f"CAT-COPPER-ONLY-{family}-{bus}-{spaces}"
+
+        attrs = _audit_attrs(
+            bus,
+            voltage,
+            spaces,
+            22 if family == "NQ" else 35,
+            "ALUMINUM",
+        )
+
+        out = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": attrs,
+        }]).get(name, {})
+
+        notes_text = " ".join(
+            _audit_notes(out)
+        ).lower()
+
+        copper_part_selected = str(
+            out.get("Interior") or ""
+        ).endswith("C")
+
+        check(
+            f"{name}: copper-only request does not silently upgrade",
+            not copper_part_selected or any(
+                word in notes_text
+                for word in (
+                    "copper",
+                    "aluminum",
+                    "material",
+                    "review",
+                )
+            ),
+            True,
+        )
+
+    # ==============================================================
+    # PART 7: NON-MERCHANDISED OUTDOOR CONFIGURATIONS
+    # ==============================================================
+
+    unsupported_name = "CAT-NF-600-84-3R-NO-STOCK-BOX"
+
+    unsupported_out = run_job([{
+        "type": "panelboard",
+        "name": unsupported_name,
+        "attrs": _audit_attrs(
+            600, 480, 84, 35,
+            "COPPER",
+            enclosure="NEMA3R",
+        ),
+    }]).get(unsupported_name, {})
+
+    check(
+        "NF 600/84 NEMA3R: no false merchandised WP box",
+        not (
+            str(
+                unsupported_out.get("Interior") or ""
+            ).startswith("NF")
+            and str(
+                unsupported_out.get("Box") or ""
+            ).endswith("WP")
+        ),
+        True,
+    )
+
+    # ==============================================================
+    # PART 8: MINIMUM MAIN-BREAKER HARDWARE
+    # ==============================================================
+    # At 400A / 65kA, LH satisfies the requirement without
+    # needing a larger PowerPacT L enclosure when no electronic
+    # trip, grounding, or other constraint requires it.
+
+    cheapest_main = run_job([{
+        "type": "panelboard",
+        "name": "CAT-MIN-MAIN-400A-65K",
+        "attrs": _audit_attrs(
+            400, 208, 30, 65,
+            "ALUMINUM",
+            main=400,
+        ),
+    }]).get("CAT-MIN-MAIN-400A-65K", {})
+
+    check(
+        "65kA 400A NQ: compact LH main used unless L is required",
+        (
+            cheapest_main.get("Main Breaker"),
+            cheapest_main.get("Box"),
+        ),
+        (
+            "LHL36400MB",
+            "MH62BE",
+        ),
+    )
+
+    # ==============================================================
+    # AUDIT SUMMARY
+    # ==============================================================
+
+    print("\n--- COST & CATALOG AUDIT SCOPE ---")
+
+    print(
+        "PASS/FAIL above checks catalog components, exact bus/space "
+        "tier, breaker quantities, outdoor boxes, and critical "
+        "listing rules."
+    )
+
+    print(
+        "NOT PRICED: Digest does not contain distributor net prices. "
+        "These checks cannot prove the lowest-dollar quote."
+    )
+
+    print(
+        "COST REVIEW: Verify optional copper ground bar, 100% versus "
+        "200% neutral, assembly labor, factory-only configurations, "
+        "and accessory-driven enclosure height before final pricing."
+    )
+
+    print(
+        "CATALOG SCOPE: 3-phase merchandised NQ/NF only; I-Line, "
+        "service-entrance kits, feed-through/sub-feed lugs, GFI, "
+        "special trip functions, and local >42-circuit rules need "
+        "their own manufacturer-backed checks."
+    )
+
+    catalog_new_failures = failed[catalog_failures_at_start:]
+
+    print(
+        f"DIGEST AUDIT SUMMARY: {len(catalog_expect)} MLO jobs, "
+        f"{len(catalog_mb)} main-breaker jobs, "
+        f"{len(least_hardware)} tier probes, "
+        f"{len(catalog_new_failures)} catalog-audit failures"
+    )
+
+    if catalog_new_failures:
+        print("FIRST CATALOG FINDINGS (up to 35):")
+
+        for issue in catalog_new_failures[:35]:
+            print(f"  - {issue}")
+
+        if len(catalog_new_failures) > 35:
+            print(
+                f"  ... and "
+                f"{len(catalog_new_failures) - 35} more"
+            )
+
+    # ==============================================================
+    # FINAL DIGEST AUDIT ADDENDUM
+    # Additional copper-only checks + grouped failure report
+    # ==============================================================
+
+    print("\n--- DIGEST FINAL ADDENDUM ---")
+
+    # NF 125A / 42- and 54-space interiors are copper-only.
+    # An aluminum request must produce the correct copper interior
+    # AND explain the material substitution.
+
+    for spaces, expected_interior in (
+        (42, "NF442L1C"),
+        (54, "NF454L1C"),
+    ):
+        name = f"CAT-NF-125A-{spaces}S-AL-REQUEST"
+
+        result = run_job([{
+            "type": "panelboard",
+            "name": name,
+            "attrs": _audit_attrs(
+                125,
+                480,
+                spaces,
+                35,
+                "ALUMINUM",
+            ),
+        }]).get(name, {})
+
+        check(
+            f"{name}: catalog-required copper interior",
+            result.get("Interior"),
+            expected_interior,
+        )
+
+        notes = " ".join(_audit_notes(result)).upper()
+
+        check(
+            f"{name}: aluminum-to-copper upgrade explained",
+            "ALUMINUM" in notes and "COPPER" in notes,
+            True,
+        )
+
+    # ==============================================================
+    # GROUP ALL CATALOG FAILURES BY ROOT CAUSE
+    # ==============================================================
+
+    print("\n" + "=" * 60)
+    print("ARGUS DIGEST AUDIT — GROUPED FINDINGS")
+    print("=" * 60)
+
+    categories = {
+        "NQ 600A enclosure sizing": [],
+        "NF 125A copper-only interiors": [],
+        "NF 600A main-lug trims": [],
+        "NF series-rating verification": [],
+        "Copper substitution notes": [],
+        "Other catalog discrepancies": [],
+    }
+
+    for label in failed[catalog_failures_at_start:]:
+
+        if label.startswith("CAT-NQ-600A-") and (
+            "DIGEST interior/box/front" in label
+        ):
+            category = "NQ 600A enclosure sizing"
+
+        elif label.startswith("CAT-NF-125A-") and (
+            "DIGEST interior/box/front" in label
+        ):
+            category = "NF 125A copper-only interiors"
+
+        elif label.startswith("CAT-NF-600A-") and (
+            "DIGEST interior/box/front" in label
+        ):
+            category = "NF 600A main-lug trims"
+
+        elif "NF-MLO-UNVERIFIED" in label:
+            category = "NF series-rating verification"
+
+        elif (
+            "COPPER-ONLY" in label
+            or "AL-REQUEST" in label
+        ):
+            category = "Copper substitution notes"
+
+        else:
+            category = "Other catalog discrepancies"
+
+        categories[category].append(label)
+
+    for category, issues in categories.items():
+        if not issues:
+            continue
+
+        print(f"\n{category}: {len(issues)} failed checks")
+
+        for issue in issues:
+            print(f"  - {issue}")
+
+    print("\n" + "-" * 60)
+    print(
+        "Total catalog-audit failures:",
+        len(failed[catalog_failures_at_start:])
+    )
+    print(
+        "Categories with failures:",
+        sum(bool(v) for v in categories.values())
+    )
+    print("-" * 60)
+
+    total = passed + len(failed)
+
+    print("\n" + "=" * 58)
+    print(f"REGRESSION: {passed}/{total} PASSED")
+    print(f"KNOWN PRODUCTION ISSUES: {len(known_issues)}")
+
+    for issue in known_issues:
+        print(f"  - {issue}")
+
+    if failed:
+        print("FAILED REGRESSIONS:")
+        for label in failed:
+            print(f"  - {label}")
+        raise AssertionError(
+            f"{len(failed)} regression checks failed"
+        )
+
+    print(
+        "Core regressions passed; "
+        "known issues are reported separately."
+    )
+    print("=" * 58)

@@ -94,23 +94,33 @@ class Disconnect():
             ("HEAVY_DUTY", True, 3, 600, 600, "NEMA3R"): ("H366R", "PKOGTA2", None),
             ("HEAVY_DUTY", True, 3, 600, 800, "NEMA3R"): ("H367R", "PKOGTA7", None),
             ("HEAVY_DUTY", True, 3, 600, 1200, "NEMA3R"): ("H368R", "PKOGTA8", None),
-            ("HEAVY_DUTY", True, 3, 600, 30, "NEMA1"): ("VH361N", "GTK03", None),
-            ("HEAVY_DUTY", True, 3, 600, 60, "NEMA1"): ("VH362N", "GTK0610", None),
-            ("HEAVY_DUTY", True, 3, 600, 100, "NEMA1"): ("VH363N", "GTK0610", None),
-            ("HEAVY_DUTY", True, 3, 600, 200, "NEMA1"): ("VH364N", "PKOGTA2", None),
-            ("HEAVY_DUTY", True, 3, 600, 400, "NEMA1"): ("H365N", "PKOGTA2", None),
-            ("HEAVY_DUTY", True, 3, 600, 600, "NEMA1"): ("H366N", "PKOGTA2", None),
-            ("HEAVY_DUTY", True, 3, 600, 800, "NEMA1"): ("H367N", "PKOGTA7", None),
-            ("HEAVY_DUTY", True, 3, 600, 1200, "NEMA1"): ("H368N", "PKOGTA8", None),
-            ("HEAVY_DUTY", True, 3, 600, 30, "NEMA3R"): ("VH361NRB", "GTK03", None),
-            ("HEAVY_DUTY", True, 3, 600, 60, "NEMA3R"): ("VH362NRB", "GTK0610", None),
-            ("HEAVY_DUTY", True, 3, 600, 100, "NEMA3R"): ("VH363NRB", "GTK0610", None),
-            ("HEAVY_DUTY", True, 3, 600, 200, "NEMA3R"): ("VH364NR", "PKOGTA2", None),
-            ("HEAVY_DUTY", True, 3, 600, 400, "NEMA3R"): ("H365NR", "PKOGTA2", None),
-            ("HEAVY_DUTY", True, 3, 600, 600, "NEMA3R"): ("H366NR", "PKOGTA2", None),
-            ("HEAVY_DUTY", True, 3, 600, 800, "NEMA3R"): ("H367NR", "PKOGTA7", None),
-            ("HEAVY_DUTY", True, 3, 600, 1200, "NEMA3R"): ("H368NR", "PKOGTA8", None),
+            # Factory-installed neutral variants are stored
+            # in disconnectFactoryNeutralLibrary below.
         }
+
+    # Heavy-duty fusible disconnects with factory-installed neutrals.
+    # Kept separate to prevent overwriting standard configurations.
+    disconnectFactoryNeutralLibrary = {
+        # NEMA1
+        ("HEAVY_DUTY", True, 3, 600, 30, "NEMA1"): ("VH361N", "GTK03", None),
+        ("HEAVY_DUTY", True, 3, 600, 60, "NEMA1"): ("VH362N", "GTK0610", None),
+        ("HEAVY_DUTY", True, 3, 600, 100, "NEMA1"): ("VH363N", "GTK0610", None),
+        ("HEAVY_DUTY", True, 3, 600, 200, "NEMA1"): ("VH364N", "PKOGTA2", None),
+        ("HEAVY_DUTY", True, 3, 600, 400, "NEMA1"): ("H365N", "PKOGTA2", None),
+        ("HEAVY_DUTY", True, 3, 600, 600, "NEMA1"): ("H366N", "PKOGTA2", None),
+        ("HEAVY_DUTY", True, 3, 600, 800, "NEMA1"): ("H367N", "PKOGTA7", None),
+        ("HEAVY_DUTY", True, 3, 600, 1200, "NEMA1"): ("H368N", "PKOGTA8", None),
+
+        # NEMA3R
+        ("HEAVY_DUTY", True, 3, 600, 30, "NEMA3R"): ("VH361NRB", "GTK03", None),
+        ("HEAVY_DUTY", True, 3, 600, 60, "NEMA3R"): ("VH362NRB", "GTK0610", None),
+        ("HEAVY_DUTY", True, 3, 600, 100, "NEMA3R"): ("VH363NRB", "GTK0610", None),
+        ("HEAVY_DUTY", True, 3, 600, 200, "NEMA3R"): ("VH364NR", "PKOGTA2", None),
+        ("HEAVY_DUTY", True, 3, 600, 400, "NEMA3R"): ("H365NR", "PKOGTA2", None),
+        ("HEAVY_DUTY", True, 3, 600, 600, "NEMA3R"): ("H366NR", "PKOGTA2", None),
+        ("HEAVY_DUTY", True, 3, 600, 800, "NEMA3R"): ("H367NR", "PKOGTA7", None),
+        ("HEAVY_DUTY", True, 3, 600, 1200, "NEMA3R"): ("H368NR", "PKOGTA8", None),
+    }
 
     def generateDisconnectPartNumber(self, attributes):
         """Generates disconnect part number from switch type, fusible, poles, voltage, amps, and enclosure."""
@@ -133,7 +143,12 @@ class Disconnect():
         if key not in self.disconnectLibrary:
             return "Invalid disconnect configuration."
 
-        partNumber, groundKit, neutralKit = self.disconnectLibrary[key]
+        # Select the factory-neutral variant when requested.
+        # Otherwise preserve standard disconnect selection.
+        if solidNeutral and key in self.disconnectFactoryNeutralLibrary:
+            partNumber, groundKit, neutralKit = self.disconnectFactoryNeutralLibrary[key]
+        else:
+            partNumber, groundKit, neutralKit = self.disconnectLibrary[key]
 
         # Fuses (optional)
         fusePartNumber = None
@@ -204,6 +219,17 @@ class breakerSelector:
         if not self.validateBreakerType():
             return {"Error": "Invalid breaker type. Valid options: ['QO', 'QOB', 'HOM', 'QOH', 'QH', 'QHB', 'QO-VH', 'QOB-VH']"}
 
+        # Automatically bump QO/QOB from 10kA to 22kA VH
+        # when required, before validating the amperage range.
+        requested_aic = self._requested_aic_ka()
+
+        if (
+            self.breakerType in ("QO", "QOB")
+            and requested_aic is not None
+            and 10 < requested_aic <= 22
+        ):
+            self.breakerType += "-VH"
+
         if not self.validatePoles():
             return {"Error": f"Invalid poles selection for {self.breakerType} breakers."}
 
@@ -212,14 +238,17 @@ class breakerSelector:
             return {"Error": f"Invalid amperage selection. Valid options for {self.poles}P {self.breakerType} breakers: {validAmperages}"}
 
         if not self.validateInterruptionRating():
-            validRatings = sorted(self.getAmperageOptionsByPoles()[self.amperage])
-            return {"Error": f"Invalid interruption rating for {self.amperage}A. Valid options: {validRatings}"}
+            return {
+                "Error": (
+                    f"Invalid or unsupported interrupting rating "
+                    f"{self.interruptionRating!r} for {self.breakerType} "
+                    f"{self.poles}P {self.amperage}A "
+                    f"(breaker rating: {self.getHiddenKRating()})."
+                )
+            }
 
         if self.specialFeatures and not self.validateSpecialFeatures():
             return {"Error": f"Invalid special feature '{self.specialFeatures}' for {self.amperage}A {self.poles}P breaker."}
-        
-        if self.breakerType in ["QO", "QOB"] and self.interruptionRating == 22:
-            self.breakerType += "-VH"
 
         if self.breakerType != "HOM":
             self.hiddenKRating = self.getHiddenKRating()
@@ -259,12 +288,50 @@ class breakerSelector:
         amperageMap = self.getAmperageOptionsByPoles()
         return self.amperage in amperageMap
 
+    def _requested_aic_ka(self):
+        """Normalize requested kAIC; None means unspecified, -1 means invalid."""
+        raw = self.interruptionRating
+
+        if raw is None or str(raw).strip() == "":
+            return None
+
+        text = str(raw).strip().upper().replace(" ", "")
+
+        if text.endswith("KA"):
+            text = text[:-2]
+        elif text.endswith("K"):
+            text = text[:-1]
+
+        try:
+            rating = float(text)
+        except (TypeError, ValueError):
+            return -1
+
+        # The rules engine sometimes uses 0 to mean no AIC supplied.
+        if rating == 0:
+            return None
+
+        if not 0 < rating < float("inf"):
+            return -1
+
+        return rating
+
     def validateInterruptionRating(self):
-        """Validates interruption rating; for HOM breakers the user value is ignored."""
-        # For HOM breakers, we ignore any user-supplied value.
-        if self.breakerType == "HOM":
+        """Ensure the selected breaker meets or exceeds requested kAIC."""
+        required = self._requested_aic_ka()
+
+        if required is None:
             return True
-        return True  # For all non-HOM types, the value is ignored and hidden k rating is used.
+
+        if required < 0:
+            return False
+
+        actual = self.getHiddenKRating()
+
+        if not actual:
+            return False
+
+        return float(actual.rstrip("kK")) >= required
 
     def validateSpecialFeatures(self):
         """Validates special features (CAFI, GFI, EPD, etc.) for the breaker type and amperage."""
@@ -467,6 +534,17 @@ class eFrameBreaker():
 # Start Loadcenters
 class loadcenter():
 
+    # Factory-installed ground-bar options sharing standard HOM keys.
+    # The main dictionary will retain the standard configurations.
+    homFactoryGroundBarOptions = {
+        ('HOM', 'NEMA1', '1PHASE', 'L', 125, 16, True, 'Included', False, 'Standard', False): 'HOM816L125PGC',
+        ('HOM', 'NEMA1', '1PHASE', 'L', 125, 24, True, 'Included', False, 'Standard', False): 'HOM1224L125PGC',
+        ('HOM', 'NEMA1', '1PHASE', 'L', 125, 40, True, 'Included', False, 'Standard', False): 'HOM2040L125PGC',
+        ('HOM', 'NEMA1', '1PHASE', 'L', 225, 60, True, 'Included', False, 'Standard', False): 'HOM3060L225PGC',
+        ('HOM', 'NEMA1', '1PHASE', 'L', 225, 80, True, 'Included', False, 'Standard', False): 'HOM4080L225PGC',
+        ('HOM', 'NEMA1', '1PHASE', 'L', 225, 84, True, 'Included', False, 'Standard', False): 'HOM4284L225PGC',
+    }
+
     # Helper function: Generate the additional ground bar kit for HOM load centers
     def generateHomGroundBar(self, homPartNumber, groundBarRequired):
         """
@@ -619,7 +697,12 @@ class loadcenter():
 
     def generateLoadcenterPartNumber(self, attributes):
         """Generates load center part number for HOM and QO types from enclosure, phasing, mains, and options."""
-        loadCenterType = attributes.get("loadCenterType")
+        loadCenterType = str(
+            attributes.get("loadCenterType") or ""
+        ).strip().upper()
+
+        if loadCenterType == "HOMELINE":
+            loadCenterType = "HOM"
         enclosure = attributes.get("enclosure")
         phasing = attributes.get("phasing")
         typeOfMain = attributes.get("typeOfMain")
@@ -652,15 +735,11 @@ class loadcenter():
             ('HOM', 'NEMA1', '1PHASE', 'L', 225, 80, True, 'Included', False, 'Standard', False): 'HOM4080L225PC',
             ('HOM', 'NEMA1', '1PHASE', 'L', 225, 84, True, 'Included', False, 'Standard', False): 'HOM4284L225PC',
             ('HOM', 'NEMA1', '1PHASE', 'L', 225, 120, True, 'Included', False, 'Standard', False): 'HOM60120L225PC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 16, True, 'Included', False, 'Standard', False): 'HOM816L125PGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 24, True, 'Included', False, 'Standard', False): 'HOM1224L125PGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 40, True, 'Included', False, 'Standard', False): 'HOM2040L125PGC',
+            # Other PGC alternatives with identical keys are stored
+            # in homFactoryGroundBarOptions.
             ('HOM', 'NEMA1', '1PHASE', 'L', 125, 48, True, 'Included', False, 'Standard', False): 'HOM2448L125PGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 60, True, 'Included', False, 'Standard', False): 'HOM3060L225PGC',
             ('HOM', 'NEMA1', '1PHASE', 'L', 225, 32, True, 'Included', False, 'Standard', False): 'HOM1632L225PGC',
             ('HOM', 'NEMA1', '1PHASE', 'L', 225, 40, True, 'Included', False, 'Standard', False): 'HOM2040L225PGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 80, True, 'Included', False, 'Standard', False): 'HOM4080L225PGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 84, True, 'Included', False, 'Standard', False): 'HOM4284L225PGC',
             # Main Breaker, PON, NEMA1
             ('HOM', 'NEMA1', '1PHASE', 'M', 100, 16, True, 'Included', False, 'Standard', False): 'HOM816M100PC',
             ('HOM', 'NEMA1', '1PHASE', 'M', 100, 24, True, 'Included', False, 'Standard', False): 'HOM1224M100PC',
@@ -677,14 +756,14 @@ class loadcenter():
             ('HOM', 'NEMA1', '1PHASE', 'M', 200, 120, True, 'Included', False, 'Standard', False): 'HOM60120M200PC',
             ('HOM', 'NEMA1', '1PHASE', 'M', 225, 84, True, 'Included', False, 'Standard', False): 'HOM4284M225PC',
             # PON, Quick Grip, NEMA1
-            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 48, True, 'Included', False, 'Standard', False): 'HOM2448L125PQGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 60, True, 'Included', False, 'Standard', False): 'HOM3060L125PQGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 60, True, 'Included', False, 'Standard', False): 'HOM3060L225PQGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 80, True, 'Included', False, 'Standard', False): 'HOM4080L225PQGC',
-            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 84, True, 'Included', False, 'Standard', False): 'HOM4284L225PQGC',
-            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 60, True, 'Included', False, 'Standard', False): 'HOM3060M200PQC',
-            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 80, True, 'Included', False, 'Standard', False): 'HOM4080M200PQC',
-            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 84, True, 'Included', False, 'Standard', False): 'HOM4284M200PQC',
+            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 48, True, 'Included', False, 'Standard', True): 'HOM2448L125PQGC',
+            ('HOM', 'NEMA1', '1PHASE', 'L', 125, 60, True, 'Included', False, 'Standard', True): 'HOM3060L125PQGC',
+            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 60, True, 'Included', False, 'Standard', True): 'HOM3060L225PQGC',
+            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 80, True, 'Included', False, 'Standard', True): 'HOM4080L225PQGC',
+            ('HOM', 'NEMA1', '1PHASE', 'L', 225, 84, True, 'Included', False, 'Standard', True): 'HOM4284L225PQGC',
+            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 60, True, 'Included', False, 'Standard', True): 'HOM3060M200PQC',
+            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 80, True, 'Included', False, 'Standard', True): 'HOM4080M200PQC',
+            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 84, True, 'Included', False, 'Standard', True): 'HOM4284M200PQC',
             # Main Lug, NEMA3R
             ('HOM', 'NEMA3R', '1PHASE', 'L', 70, 4, False, 'Included', False, 'Standard', False): 'HOM24L70RB',
             ('HOM', 'NEMA3R', '1PHASE', 'L', 100, 12, False, 'Included', False, 'Standard', False): 'HOM612L100RB',
@@ -723,9 +802,9 @@ class loadcenter():
             ('HOM', 'NEMA1', '1PHASE', 'M', 200, 60, True, 'Included', False, 'Value Pack', False): 'HOM3060M200PCVP',
             ('HOM', 'NEMA1', '1PHASE', 'M', 200, 80, True, 'Included', False, 'Value Pack', False): 'HOM4080M200PCVP',
             # PON, Quick Grip, Value Pack, NEMA1
-            ('HOM', 'NEMA1', '1PHASE', 'M', 100, 40, True, 'Included', False, 'Value Pack', False): 'HOM2040M100PQCVP',
-            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 60, True, 'Included', False, 'Value Pack', False): 'HOM3060M200PQCVP',
-            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 80, True, 'Included', False, 'Value Pack', False): 'HOM4080M200PQCVP',
+            ('HOM', 'NEMA1', '1PHASE', 'M', 100, 40, True, 'Included', False, 'Value Pack', True): 'HOM2040M100PQCVP',
+            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 60, True, 'Included', False, 'Value Pack', True): 'HOM3060M200PQCVP',
+            ('HOM', 'NEMA1', '1PHASE', 'M', 200, 80, True, 'Included', False, 'Value Pack', True): 'HOM4080M200PQCVP',
             # PON, Value Pack, NEMA3R, Main Breaker
             ('HOM', 'NEMA3R', '1PHASE', 'M', 125, 24, True, 'Included', False, 'Value Pack', False): 'HOM1224M125PRBVP',
             ('HOM', 'NEMA3R', '1PHASE', 'M', 200, 60, True, 'Included', False, 'Value Pack', False): 'HOM3060M200PRBVP',
@@ -736,6 +815,15 @@ class loadcenter():
                         plugOnNeutral, coverStyle, valuePack, specialApplication, quikGrip)
             if configKey in allowedConfigurationsHom:
                 homPartNumber = allowedConfigurationsHom[configKey]
+
+                # Prefer the existing factory-ground-bar model when
+                # a ground bar is requested and that option exists.
+                if groundBar is True:
+                    homPartNumber = self.homFactoryGroundBarOptions.get(
+                        configKey,
+                        homPartNumber
+                    )
+
                 result = {"Part Number": homPartNumber}
                 if groundBar is True:
                     gbResult = self.generateHomGroundBar(homPartNumber, True)
@@ -1392,12 +1480,10 @@ class nqPanelboard():
         (15, 225, 54, '3PHASE', 208): ('NQ454L2', 50, ['HD', 'HG', 'HJ', 'HL', 'HR', 'JD', 'JG', 'JJ', 'JL', 'JR', 'QB', 'QD', 'QG', 'QJ'], 'NQMB2HJ', 'NQMB2Q', 'NQHJQLLC'),
         (15, 225, 72, '3PHASE', 208): ('NQ472L2', 56, ['HD', 'HG', 'HJ', 'HL', 'HR', 'JD', 'JG', 'JJ', 'JL', 'JR', 'QB', 'QD', 'QG', 'QJ'], 'NQMB2HJ', 'NQMB2Q', 'NQHJQLLC'),
         (15, 225, 84, '3PHASE', 208): ('NQ484L2', 62, ['HD', 'HG', 'HJ', 'HL', 'HR', 'JD', 'JG', 'JJ', 'JL', 'JR', 'QB', 'QD', 'QG', 'QJ'], 'NQMB2HJ', 'NQMB2Q', 'NQHJQLLC'),
-        # 125-400A, 3PHASE (Allowed MCCB frames: LA, LH)
-        (125, 400, 30, '3PHASE', 208): ('NQ430L4', 62, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC'),
-        (125, 400, 42, '3PHASE', 208): ('NQ442L4', 62, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC'),
-        (125, 400, 54, '3PHASE', 208): ('NQ454L4', 68, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC'),
-        (125, 400, 72, '3PHASE', 208): ('NQ472L4', 74, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC'),
-        (125, 400, 84, '3PHASE', 208): ('NQ484L4C', 80, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC'),
+        # LA/LH configurations are stored in
+        # additionalMainBreakerConfigurations below.
+        # This prevents PowerPacT L configurations
+        # with identical lookup keys from overwriting them.
         # 125-400A, 3PHASE (Allowed MCCB frames: LG, LJ, LL)
         (125, 400, 30, '3PHASE', 208): ('NQ430L4', 62, ['LG', 'LJ', 'LL'], 'NQMB6PPL', 'NQPPLLLC'),
         (125, 400, 42, '3PHASE', 208): ('NQ442L4', 68, ['LG', 'LJ', 'LL'], 'NQMB6PPL', 'NQPPLLLC'),
@@ -1412,6 +1498,20 @@ class nqPanelboard():
         (125, 600, 84, '3PHASE', 208): ('NQ484L6C', 86, ['LG', 'LJ', 'LL'], 'NQMB6PPL', 'NQPPLLLC'),
 }
 
+    # Main-breaker configurations that share bus/space keys
+    # with another breaker family.
+    additionalMainBreakerConfigurations = [
+        ((125, 400, 30, '3PHASE', 208), ('NQ430L4', 62, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC')),
+        ((125, 400, 42, '3PHASE', 208), ('NQ442L4', 62, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC')),
+        ((125, 400, 54, '3PHASE', 208), ('NQ454L4', 68, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC')),
+        ((125, 400, 72, '3PHASE', 208), ('NQ472L4', 74, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC')),
+        ((125, 400, 84, '3PHASE', 208), ('NQ484L4C', 80, ['LA', 'LH'], 'NQMB4LA', 'NQLALLC')),
+    ]
+
+    def iterMainBreakerConfigurations(self):
+        yield from self.allowedConfigurationsBreaker.items()
+        yield from self.additionalMainBreakerConfigurations
+
     def generateNqPanelboardPartNumber(self, attributes):
         amperage = int(attributes.get("amperage"))
         spaces = int(attributes.get("spaces"))
@@ -1421,6 +1521,20 @@ class nqPanelboard():
         trimStyle = attributes.get("trimStyle", "").upper()
         voltage = int(str(attributes.get("voltage", "240")).replace("V", ""))
 
+        # Reject unsupported options instead of building a misleading BOM.
+        if material not in ('ALUMINUM', 'COPPER'):
+            return f"Invalid NQ material '{material}'."
+
+        if enclosure not in ('NEMA1', 'NEMA3R'):
+            return f"Invalid NQ enclosure '{enclosure}'."
+
+        if (
+            enclosure == 'NEMA1'
+            and trimStyle
+            and trimStyle not in ('FLUSH', 'SURFACE', 'HINGED FLUSH', 'HINGED SURFACE')
+        ):
+            return f"Invalid NQ trim style '{trimStyle}'."
+
         # infer phase from voltage (120 V → single-phase; everything else → 3-phase)
         phase = "1PHASE" if voltage == 120 else "3PHASE"
 
@@ -1428,12 +1542,33 @@ class nqPanelboard():
         lookup_voltage = voltage
         if phase == '3PHASE' and voltage == 240:
             lookup_voltage = 208
+        # Accept common SPD formats such as 80, "80k", and "80kA".
+        # Reject malformed values rather than silently omitting the SPD.
         spd_raw = attributes.get("spd", "")
-        try:
-            spd = int(str(spd_raw).strip().rstrip("kK").rstrip("A")) if str(spd_raw).strip() != "" else None
-        except ValueError:
+        spd_text = str(spd_raw).strip().upper() if spd_raw is not None else ""
+
+        # Normalize explicit "no SPD" values from real job payloads.
+        # False/0 must not invalidate the NQ configuration.
+        if spd_text in ("FALSE", "NO", "OFF", "NONE", "NULL", "0", "0.0"):
+            spd_text = ""
+
+        if spd_text:
+            for suffix in ("KA", "K", "A"):
+                if spd_text.endswith(suffix):
+                    spd_text = spd_text[:-len(suffix)].strip()
+                    break
+
+            try:
+                spd = int(spd_text)
+            except ValueError:
+                return f"Invalid SPD rating '{spd_raw}'."
+        else:
             spd = None
         feedThruLugs = attributes.get("feedThruLugs", False)
+
+        mainBreakerType = str(
+            attributes.get("mainBreakerType") or ""
+        ).strip().upper()        
 
         # Mappings for neutral part numbers
         neutralMap = {
@@ -1473,34 +1608,70 @@ class nqPanelboard():
             mccbFrames = None
             barrierKit = None
 
-        # Else, if Main Breaker was selected, then require a valid main_breaker_type.
+        # Select the configuration matching the requested frame.
+        # Preserve legacy lookup behavior when no frame is supplied.
         elif typeOfMain == 'MAIN BREAKER':
-            match = next(
-                k for k in configs
-                if k[0] <= amperage <= k[1]
-                and k[2] == spaces
-                and k[3] == phase
-                and k[4] == lookup_voltage
-            ) if configs else None
+            source = (
+                self.iterMainBreakerConfigurations()
+                if mainBreakerType
+                else self.allowedConfigurationsBreaker.items()
+            )
 
-            if not match:
-                return f"Invalid NQ BREAKER configuration: {amperage}A, {spaces} spaces, {phase}, {lookup_voltage}V"
+            matches = [
+                (key, parts)
+                for key, parts in source
+                if key[0] <= amperage <= key[1]
+                and key[2] == spaces
+                and key[3] == phase
+                and key[4] == lookup_voltage
+                and (
+                    not mainBreakerType
+                    or mainBreakerType in parts[2]
+                )
+            ]
 
-            # unpack interior, box, allowed frames, and kits
-            parts = configs[match]
-            interiorPartNumber, boxNumber, allowedMainBreakers = parts[0], parts[1], parts[2]
+            if not matches:
+                frame_text = (
+                    f", frame {mainBreakerType}"
+                    if mainBreakerType
+                    else ""
+                )
 
-            # unpack the two‐step kits list
+                return (
+                    f"Invalid NQ BREAKER configuration: "
+                    f"{amperage}A, {spaces} spaces, "
+                    f"{phase}, {lookup_voltage}V"
+                    f"{frame_text}"
+                )
+
+            match, parts = min(
+                matches,
+                key=lambda row: (
+                    row[0][1],
+                    row[1][1]
+                )
+            )
+
+            interiorPartNumber = parts[0]
+            boxNumber = parts[1]
+            allowedMainBreakers = parts[2]
+
             _hiddenMainBreakerKits = parts[3:-1]
-            barrierKit             = parts[-1]
-            # still expose Frames for rules engine
+            barrierKit = parts[-1]
+
             mccbFrames = allowedMainBreakers
+
+            # When a specific frame requires a larger interior,
+            # use that interior's actual bus rating for the
+            # remaining enclosure, trim, neutral, and FTL logic.
+            if mainBreakerType:
+                amperage = match[1]
 
         else:
             return "Invalid type of main."
 
-        # Add material suffix
-        if material == 'COPPER':
+        # Add the copper suffix only when it is not already present.
+        if material == 'COPPER' and not interiorPartNumber.endswith('C'):
             interiorPartNumber += mappings['materialMap'][material]
 
         # Determine SPD part number if specified
@@ -1511,10 +1682,15 @@ class nqPanelboard():
                 allowed = ", ".join(str(k) for k in sorted(spdMappings[phase].keys()))
                 return f"Invalid SPD rating '{spd_raw}' for {phase} NQ Panelboard. Allowed options: {allowed}."
 
-        # Determine trim part number for NEMA1 and NEMA3R
+        powpact_l_main = (
+            typeOfMain == 'MAIN BREAKER'
+            and 'NQMB6PPL' in _hiddenMainBreakerKits
+        )
+
         if enclosure == 'NEMA3R':
-            # NEMA3R enclosure doesn't require trim style input; uses WP suffix
-            trimPartNumber = f"MH{boxNumber}{mappings['enclosureMap'][enclosure]}"
+            trimPartNumber = (
+                None if powpact_l_main else f"MH{boxNumber}WP"
+            )
         else:
             # For NEMA1, determine trim based on trim style and amperage
             if trimStyle == '':
@@ -1525,15 +1701,25 @@ class nqPanelboard():
             else:
                 trimPartNumber = f"NC{boxNumber}{mappings['trimStyleMap'][trimStyle]}"
 
-        # Build enclosure output.
-        # NEMA3R weatherproof enclosures include their cover/trim.
+        if enclosure == 'NEMA3R':
+            boxPartNumber = trimPartNumber
+        else:
+            boxPartNumber = f"MH{boxNumber}{'D9' if powpact_l_main else 'BE'}"
+
         output = {
             "Interior": interiorPartNumber,
-            "Box": trimPartNumber if enclosure == 'NEMA3R' else f"MH{boxNumber}BE"
+            "Box": boxPartNumber
         }
 
         if enclosure != 'NEMA3R':
             output["Trim"] = trimPartNumber
+        elif powpact_l_main:
+            output.setdefault("Notes", []).append(
+                "PowerPacT L main-breaker NEMA 3R configurations have no "
+                "separately orderable merchandised enclosure. "
+                "Factory assembly or manufacturer review is required. "
+                "User review required."
+            )
         else:
             output.setdefault("Notes", []).append(
                 "NEMA 3R weatherproof enclosure includes the cover/trim. "
@@ -1591,6 +1777,12 @@ class nqPanelboard():
 
         # Feed‐Thru Lugs
         if feedThruLugs:
+            if amperage > 400:
+                return (
+                    "Feed-thru lugs are not available for NQ "
+                    f"configurations above 400A (selected {amperage}A interior)."
+                )
+
             if amperage <= 225:
                 output["Feed-Thru Lugs"] = "NQFTL2L" if spaces in [30,42] else "NQFTL2H"
             elif amperage == 400:
@@ -1714,7 +1906,7 @@ class nfPanelboard():
         trimStyle = trimStyle.upper()
         phase = attributes.get("phase", "3PHASE")
         voltage = int(attributes.get("voltage", 208))
-        mainBreakerType = attributes.get("mainBreakerType", "")
+        mainBreakerType = str(attributes.get("mainBreakerType") or "").strip().upper()
         feedThruLugs = attributes.get("feedThruLugs", False)
 
         breakerKit = None
@@ -1737,19 +1929,7 @@ class nfPanelboard():
         validVoltages = [208, 240, 480]
         if voltage not in validVoltages:
             return f"Invalid voltage '{voltage}'. Allowed options: {', '.join(map(str, validVoltages))}."
-
-        # Determine the appropriate FTL part number if applicable
-        ftlPartNumber = None
-        if feedThruLugs:
-            if amperage <= 125:
-                ftlPartNumber = mappings['ftlMap'][125]
-            elif 125 < amperage <= 250:
-                ftlPartNumber = mappings['ftlMap'][250]
-            elif 250 < amperage <= 400:
-                ftlPartNumber = mappings['ftlMap'][400]
-            else:
-                return "Feed-thru lugs are not available for configurations above 400A."
-        
+   
         # Extract configuration
         if typeOfMain == 'MAIN LUG':
             try:
@@ -1765,31 +1945,80 @@ class nfPanelboard():
             interiorPartNumber, boxNumber = self.allowedConfigurationsLug[configKey]
 
         elif typeOfMain == 'MAIN BREAKER':
-            try:
-                configKey = next(
-                    key for key in self.allowedConfigurationsBreaker
-                    if key[0] <= amperage <= key[1]
-                    and key[2] == spaces
-                    and key[3] == phase
-                    and voltage in key[4]
-                )
-            except StopIteration:
-                return f"Invalid NF BREAKER configuration: {amperage}A, {spaces} spaces, {phase}, {voltage}V"
-            interiorPartNumber, boxNumber, allowedMainBreakers, mainBreakerKit, serviceEntranceKit = \
-                self.allowedConfigurationsBreaker[configKey]
+            # Find configurations matching both the panel
+            # requirements AND the requested breaker frame.
+            matches = [
+                (key, parts)
+                for key, parts in self.allowedConfigurationsBreaker.items()
+                if key[0] <= amperage <= key[1]
+                and key[2] == spaces
+                and key[3] == phase
+                and voltage in key[4]
+                and mainBreakerType in parts[2]
+            ]
 
-            if mainBreakerType not in allowedMainBreakers:
-                return f"Invalid main breaker type '{mainBreakerType}'."
+            if not matches:
+                return (
+                    f"Invalid NF BREAKER configuration: {amperage}A, "
+                    f"{spaces} spaces, {phase}, {voltage}V, "
+                    f"frame {mainBreakerType or 'MISSING'}."
+                )
+
+            # Prefer the smallest matching bus configuration.
+            configKey, config = min(
+                matches,
+                key=lambda item: (item[0][1], item[1][1]),
+            )
+
+            (
+                interiorPartNumber,
+                boxNumber,
+                allowedMainBreakers,
+                mainBreakerKit,
+                serviceEntranceKit,
+            ) = config
+
             breakerKit = mainBreakerKit
+
+            # Use the actual selected interior rating.
+            # Example: requesting 125A with a J frame
+            # selects the 250A NF interior.
+            amperage = configKey[1]
+
+        # Determine FTL using the actual selected bus rating.
+        ftlPartNumber = None
+
+        if feedThruLugs:
+            if amperage <= 125:
+                ftlPartNumber = mappings['ftlMap'][125]
+            elif amperage <= 250:
+                ftlPartNumber = mappings['ftlMap'][250]
+            elif amperage <= 400:
+                ftlPartNumber = mappings['ftlMap'][400]
+            else:
+                return (
+                    "Feed-thru lugs are not available "
+                    "for configurations above 400A."
+                )
 
         # Only append a copper “C” if the part number doesn’t already end in C
         if material == 'COPPER' and not interiorPartNumber.endswith('C'):
             interiorPartNumber += mappings['materialMap'][material]
 
-        # Determine trim part number for NEMA1 and NEMA3R
+        powpact_l_main = (
+            typeOfMain == 'MAIN BREAKER'
+            and breakerKit == 'N600MPPL'
+        )
+
+        unlisted_l_spaces = (
+            powpact_l_main
+            and spaces not in (30, 42, 54)
+        )
+
         if enclosure == 'NEMA3R':
-            # --- special overrides for 600 A NEMA3R trims ---
-            if amperage == 600:
+            if powpact_l_main:
+                trimPartNumber = None
+            elif amperage == 600:
                 # map spaces → trim-box number for WP
                 _600r = {30: 62, 42: 68, 54: 74, 66: 86}
                 if spaces == 84:
@@ -1815,15 +2044,34 @@ class nfPanelboard():
             if enclosure == 'NEMA1' and amperage == 600:
                 trimPartNumber += "3PNF"
 
-        # Build enclosure output.
-        # NEMA3R weatherproof enclosures include their cover/trim.
+        if enclosure == 'NEMA3R':
+            boxPartNumber = trimPartNumber
+        elif unlisted_l_spaces:
+            boxPartNumber = None
+        else:
+            boxPartNumber = f"MH{boxNumber}{'D9' if powpact_l_main else 'BE'}"
+
         output = {
             "Interior": interiorPartNumber,
-            "Box": trimPartNumber if enclosure == 'NEMA3R' else f"MH{boxNumber}BE"
+            "Box": boxPartNumber
         }
 
-        if enclosure != 'NEMA3R':
+        if unlisted_l_spaces:
+            output.setdefault("Notes", []).append(
+                f"NF PowerPacT L main-breaker arrangement with {spaces} "
+                "spaces is not listed as a merchandised assembly. "
+                "Do not quote a standalone enclosure or trim. "
+                "Manufacturer review required."
+            )
+        elif enclosure != 'NEMA3R':
             output["Trim"] = trimPartNumber
+        elif powpact_l_main:
+            output.setdefault("Notes", []).append(
+                "PowerPacT L main-breaker NEMA 3R configurations have no "
+                "separately orderable merchandised enclosure. "
+                "Factory assembly or manufacturer review is required. "
+                "User review required."
+            )
         else:
             output.setdefault("Notes", []).append(
                 "NEMA 3R weatherproof enclosure includes the cover/trim. "
@@ -2085,36 +2333,17 @@ class iLinePanelboard():
         ('MAIN BREAKER', 400, 27, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ14734M', 'HCM73TSD', 'HC3273DB9'),
         # NEMA3R
         ('MAIN BREAKER', 400, 27, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ14734M', None, 'HCJ3273WP'),
-        # 36 SPACES X 600A X HCJ18736MP x HCM73T() X HC3273DB9
-        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ18736MP', 'HCM73TF', 'HC3273DB9'),
-        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ18736MP', 'HCM73TS', 'HC3273DB9'),
-        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ18736MP', 'HCM73TFD', 'HC3273DB9'),
-        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ18736MP', 'HCM73TSD', 'HC3273DB9'),
-        ('MAIN BREAKER', 600, 36, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ18736MP', None, 'HCJ3273WP'),
-        # 36 SPACES X 800A X HCJ18738MP x HCM73T() X HC3273DB9
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ18738MP', 'HCM73TF', 'HC3273DB9'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ18738MP', 'HCM73TS', 'HC3273DB9'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ18738MP', 'HCM73TFD', 'HC3273DB9'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ18738MP', 'HCM73TSD', 'HC3273DB9'),
-        ('MAIN BREAKER', 800, 36, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ18738MP', None, 'HCJ3273WP'),
+        # HCJ 600A / 36-space indoor configurations moved to
+        # HCJ_overlapping_breaker_configs below.
+        # HCJ 800A / 36-space indoor configurations moved below.
         # 45 SPACES X 400A X HCJ23734M x HCM73T() X HC3273DB9
         ('MAIN BREAKER', 400, 45, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ23734M', 'HCM73TF', 'HC3273DB9'),
         ('MAIN BREAKER', 400, 45, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ23734M', 'HCM73TS', 'HC3273DB9'),
         ('MAIN BREAKER', 400, 45, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ23734M', 'HCM73TFD', 'HC3273DB9'),
         ('MAIN BREAKER', 400, 45, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ23734M', 'HCM73TSD', 'HC3273DB9'),
         ('MAIN BREAKER', 400, 45, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ23734M', None, 'HCJ3273WP'),
-        # 72 SPACES X 600A X HCJ36916MP x HCM91T() X HC3291DB9
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ36916MP', 'HCM91TF', 'HC3291DB9'),
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ36916MP', 'HCM91TS', 'HC3291DB9'),
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ36916MP', 'HCM91TFD', 'HC3291DB9'),
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ36916MP', 'HCM91TSD', 'HC3291DB9'),
-        ('MAIN BREAKER', 600, 72, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ36916MP', None, 'HCJ3291WP'),
-        # 72 SPACES X 800A X HCJ36918MP x HCM91T() X HC3291DB9
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ36918MP', 'HCM91TF', 'HC3291DB9'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ36918MP', 'HCM91TS', 'HC3291DB9'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ36918MP', 'HCM91TFD', 'HC3291DB9'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ36918MP', 'HCM91TSD', 'HC3291DB9'),
-        ('MAIN BREAKER', 800, 72, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ36918MP', None, 'HCJ3291WP'),
+        # HCJ 600A / 72-space indoor configurations moved below.
+        # HCJ 800A / 72-space indoor configurations moved below.
         # 82 SPACES X 400A X HCJ41914M (aluminum)
         ('MAIN BREAKER', 400, 82, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ41914M', 'HCM91TF', 'HC3291DB9'),
         ('MAIN BREAKER', 400, 82, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ41914M', 'HCM91TS', 'HC3291DB9'),
@@ -2150,6 +2379,36 @@ class iLinePanelboard():
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCR-U', 'HCR548612U', 'HCR86TS', 'HC4486DB'),
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCR-U', 'HCR548612U', 'HCR86TFD', 'HC4486DB'),
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCR-U', 'HCR548612U', 'HCR86TSD', 'HC4486DB'),
+    }
+
+    # HCJ main-breaker configurations that overlap HCP dictionary keys.
+    # Kept separately so neither family overwrites the other.
+    HCJ_overlapping_breaker_configs = {
+        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ18736MP', 'HCM73TF', 'HC3273DB9'),
+        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ18736MP', 'HCM73TS', 'HC3273DB9'),
+        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ18736MP', 'HCM73TFD', 'HC3273DB9'),
+        ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ18736MP', 'HCM73TSD', 'HC3273DB9'),
+
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ18738MP', 'HCM73TF', 'HC3273DB9'),
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ18738MP', 'HCM73TS', 'HC3273DB9'),
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ18738MP', 'HCM73TFD', 'HC3273DB9'),
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ18738MP', 'HCM73TSD', 'HC3273DB9'),
+
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ36916MP', 'HCM91TF', 'HC3291DB9'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ36916MP', 'HCM91TS', 'HC3291DB9'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ36916MP', 'HCM91TFD', 'HC3291DB9'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ36916MP', 'HCM91TSD', 'HC3291DB9'),
+
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCJ', 'HCJ36918MP', 'HCM91TF', 'HC3291DB9'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCJ', 'HCJ36918MP', 'HCM91TS', 'HC3291DB9'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCJ', 'HCJ36918MP', 'HCM91TFD', 'HC3291DB9'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCJ', 'HCJ36918MP', 'HCM91TSD', 'HC3291DB9'),
+
+        # HCJ NEMA3R main-breaker configurations
+        ('MAIN BREAKER', 600, 36, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ18736MP', None, 'HCJ3273WP'),
+        ('MAIN BREAKER', 800, 36, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ18738MP', None, 'HCJ3273WP'),
+        ('MAIN BREAKER', 600, 72, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ36916MP', None, 'HCJ3291WP'),
+        ('MAIN BREAKER', 800, 72, 'NEMA3R', 'ALUMINUM'): ('HCJ', 'HCJ36918MP', None, 'HCJ3291WP'),        
     }
 
     def generateILinePanelboardPartNumber(self, attributes):
@@ -2248,7 +2507,16 @@ class iLinePanelboard():
                     self.HCRU_configs,
                 ]
         else:
-            config_sources = [self.allowedConfigurationsBreaker]
+            # Main-breaker HCJ and HCP configurations can share
+            # identical lookup keys. Search the recovered HCJ
+            # configurations first only when HCJ was requested.
+            if requested_panel_type == "HCJ":
+                config_sources = [
+                    self.HCJ_overlapping_breaker_configs,
+                    self.allowedConfigurationsBreaker,
+                ]
+            else:
+                config_sources = [self.allowedConfigurationsBreaker]
 
         # --- Build lookup key exactly as in flat tables ---
         if enclosure == 'NEMA3R':
@@ -2260,11 +2528,22 @@ class iLinePanelboard():
         else:
             key = (typeOfMain, amperage, spaces, enclosure, material, trimStyle)
 
-        # walk each series-dict until we find a match
+        # Match both the configuration key and requested
+        # I-Line family for main-breaker panels.
         for cfg in config_sources:
-            if key in cfg:
-                panelTypeLookup, interior, box, trimCode = cfg[key]
-                break
+            if key not in cfg:
+                continue
+
+            panelTypeLookup, interior, trimCode, boxCode = cfg[key]
+
+            if (
+                typeOfMain == "MAIN BREAKER"
+                and requested_panel_type
+                and panelTypeLookup != requested_panel_type
+            ):
+                continue
+
+            break
         else:
             return f"Invalid I-Line configuration: {key}"
 
@@ -2275,8 +2554,12 @@ class iLinePanelboard():
 
         result = {
             "Interior": interior,
-            "Box":      (trimCode if enclosure == 'NEMA3R' else box),
-            "Trim":     ("Included with NEMA3R" if enclosure=='NEMA3R' else trimCode)
+            "Box": boxCode,
+            "Trim": (
+                "Included with NEMA3R"
+                if enclosure == "NEMA3R"
+                else trimCode
+            ),
         }
 
         # --- SPD ---
@@ -3297,3 +3580,4 @@ class erms():
         }
 
 # End ERMS
+
