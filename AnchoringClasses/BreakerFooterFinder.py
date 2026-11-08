@@ -701,7 +701,12 @@ class BreakerFooterFinder:
         if self.reader is None:
             return []
 
+        profile_enabled = os.environ.get("ARGUS_PROFILE_HEADER_FOOTER") == "1"
+        profile_started = time.perf_counter()
+
         with self._ocr_lock():
+            lock_acquired = time.perf_counter()
+
             if self.debug:
                 print(f"[BreakerFooterFinder] OCR LOCK ACQUIRED for {dbg_label}")
 
@@ -721,6 +726,18 @@ class BreakerFooterFinder:
                 print(
                     f"[BreakerFooterFinder] OCR LOCK RELEASE for {dbg_label} "
                     f"(detections={len(out)})"
+                )
+
+            if profile_enabled:
+                profile_finished = time.perf_counter()
+
+                print(
+                    f"[PERF FooterOCR] {dbg_label or 'unnamed'} "
+                    f"lock_wait={lock_acquired - profile_started:.3f}s "
+                    f"ocr={profile_finished - lock_acquired:.3f}s "
+                    f"total={profile_finished - profile_started:.3f}s "
+                    f"hits={len(out)}",
+                    flush=True,
                 )
 
             return out

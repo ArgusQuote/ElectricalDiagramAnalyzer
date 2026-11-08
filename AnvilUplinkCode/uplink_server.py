@@ -173,7 +173,7 @@ _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV27 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv17 import BreakerTablePipeline, API_VERSION, reset_name_deduper
 import RulesEngine.RulesEngine8 as RE2  # must expose process_job(payload)
 

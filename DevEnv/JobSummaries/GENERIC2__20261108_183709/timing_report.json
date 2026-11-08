@@ -1,0 +1,160 @@
+{
+  "events": [
+    {
+      "panel": null,
+      "stage": "DEPENDENCY_IMPORTS",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 1.77793
+    },
+    {
+      "panel": null,
+      "stage": "PAGE_FILTER.INIT",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 0.001263
+    },
+    {
+      "panel": null,
+      "stage": "EASYOCR.MODEL_INIT",
+      "parent_stage": "PAGE_FILTER.READ_PDF",
+      "kind": "model",
+      "seconds": 1.95819
+    },
+    {
+      "panel": null,
+      "stage": "EASYOCR.READTEXT",
+      "parent_stage": "PAGE_FILTER.READ_PDF",
+      "kind": "ocr",
+      "seconds": 0.312477
+    },
+    {
+      "panel": null,
+      "stage": "PAGE_FILTER.READ_PDF",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 4.184954
+    },
+    {
+      "panel": null,
+      "stage": "PANEL_FINDER.INIT",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 0.002595
+    },
+    {
+      "panel": null,
+      "stage": "PANEL_FINDER.READ_PDF",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 8.147821
+    },
+    {
+      "panel": null,
+      "stage": "PIPELINE.INIT",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 9e-06
+    },
+    {
+      "panel": "PANEL_1: generic2_electrical_filtered_page001_panel01__tbl01.png",
+      "stage": "EASYOCR.MODEL_INIT",
+      "parent_stage": "PIPELINE.ENSURE_ANALYZER",
+      "kind": "model",
+      "seconds": 1.510207
+    },
+    {
+      "panel": "PANEL_1: generic2_electrical_filtered_page001_panel01__tbl01.png",
+      "stage": "PIPELINE.ENSURE_ANALYZER",
+      "parent_stage": "PANEL.PIPELINE_TOTAL",
+      "kind": "stage",
+      "seconds": 1.510279
+    },
+    {
+      "panel": "PANEL_1: generic2_electrical_filtered_page001_panel01__tbl01.png",
+      "stage": "PANEL.PIPELINE_TOTAL",
+      "parent_stage": "STARTUP",
+      "kind": "stage",
+      "seconds": 1.510304
+    }
+  ],
+  "summary": [
+    {
+      "panel": "GLOBAL",
+      "stage": "DEPENDENCY_IMPORTS",
+      "calls": 1,
+      "total_seconds": 1.77793,
+      "max_seconds": 1.77793
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "PAGE_FILTER.INIT",
+      "calls": 1,
+      "total_seconds": 0.001263,
+      "max_seconds": 0.001263
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "EASYOCR.MODEL_INIT",
+      "calls": 1,
+      "total_seconds": 1.95819,
+      "max_seconds": 1.95819
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "EASYOCR.READTEXT",
+      "calls": 1,
+      "total_seconds": 0.312477,
+      "max_seconds": 0.312477
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "PAGE_FILTER.READ_PDF",
+      "calls": 1,
+      "total_seconds": 4.184954,
+      "max_seconds": 4.184954
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "PANEL_FINDER.INIT",
+      "calls": 1,
+      "total_seconds": 0.002595,
+      "max_seconds": 0.002595
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "PANEL_FINDER.READ_PDF",
+      "calls": 1,
+      "total_seconds": 8.147821,
+      "max_seconds": 8.147821
+    },
+    {
+      "panel": "GLOBAL",
+      "stage": "PIPELINE.INIT",
+      "calls": 1,
+      "total_seconds": 9e-06,
+      "max_seconds": 9e-06
+    },
+    {
+      "panel": "PANEL_1: generic2_electrical_filtered_page001_panel01__tbl01.png",
+      "stage": "EASYOCR.MODEL_INIT",
+      "calls": 1,
+      "total_seconds": 1.510207,
+      "max_seconds": 1.510207
+    },
+    {
+      "panel": "PANEL_1: generic2_electrical_filtered_page001_panel01__tbl01.png",
+      "stage": "PIPELINE.ENSURE_ANALYZER",
+      "calls": 1,
+      "total_seconds": 1.510279,
+      "max_seconds": 1.510279
+    },
+    {
+      "panel": "PANEL_1: generic2_electrical_filtered_page001_panel01__tbl01.png",
+      "stage": "PANEL.PIPELINE_TOTAL",
+      "calls": 1,
+      "total_seconds": 1.510304,
+      "max_seconds": 1.510304
+    }
+  ]
+}

@@ -5,6 +5,9 @@ import os, re
 import sys
 import json
 import time
+import threading
+from functools import wraps
+from importlib import import_module
 from datetime import datetime
 from pathlib import Path
 
@@ -15,12 +18,277 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # ---------- IMPORTS ----------
+_PERF_IMPORT_START = time.perf_counter()
+
 from PageFilter.PageFilterV5 import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
-from OcrLibrary.BreakerTableParserAPIv17 import BreakerTablePipeline, API_VERSION
+from VisualDetectionToolLibrary.PanelSearchToolV27 import PanelBoardSearch
+from OcrLibrary.BreakerTableParserAPIv18 import BreakerTablePipeline, API_VERSION
+
+_PERF_IMPORT_TIME = time.perf_counter() - _PERF_IMPORT_START
+
+# ---------- PERFORMANCE TIMING (TEST ENV ONLY) ----------
+
+class PerformanceTracker:
+    def __init__(self):
+        self.events = []
+        self.lock = threading.Lock()
+        self.panel = None
+        self.active_stage = "STARTUP"
+        self.report_path = None
+
+    def wrap(self, cls, method, label, *, live=False, kind="stage"):
+        original = getattr(cls, method, None)
+
+        if not callable(original):
+            return
+
+        @wraps(original)
+        def timed(*args, **kwargs):
+            parent = self.active_stage
+            panel = self.panel
+
+            if kind == "stage":
+                self.active_stage = label
+
+            started = time.perf_counter()
+
+            if live:
+                print(
+                    f"[PERF START] {label} | {panel or 'GLOBAL'}",
+                    flush=True
+                )
+
+            try:
+                return original(*args, **kwargs)
+
+            finally:
+                elapsed = time.perf_counter() - started
+
+                if kind == "stage":
+                    self.active_stage = parent
+
+                with self.lock:
+                    self.events.append({
+                        "panel": panel,
+                        "stage": label,
+                        "parent_stage": parent,
+                        "kind": kind,
+                        "seconds": round(elapsed, 6),
+                    })
+
+                if live:
+                    print(
+                        f"[PERF END]   {label}: {elapsed:.3f}s",
+                        flush=True
+                    )
+
+        setattr(cls, method, timed)
+
+    def report(self):
+        with self.lock:
+            events = list(self.events)
+
+        groups = {}
+
+        for entry in events:
+            scope = entry["panel"] or "GLOBAL"
+            key = (scope, entry["stage"])
+
+            if key not in groups:
+                groups[key] = {
+                    "calls": 0,
+                    "total_seconds": 0.0,
+                    "max_seconds": 0.0,
+                }
+
+            group = groups[key]
+            group["calls"] += 1
+            group["total_seconds"] += entry["seconds"]
+            group["max_seconds"] = max(
+                group["max_seconds"],
+                entry["seconds"]
+            )
+
+        print("\n" + "=" * 75)
+        print("ARGUS PERFORMANCE REPORT (nested timings overlap)")
+        print("=" * 75)
+
+        for scope in dict.fromkeys(key[0] for key in groups):
+            print(f"\n--- {scope} ---")
+
+            for (group_scope, stage), group in groups.items():
+                if group_scope != scope:
+                    continue
+
+                avg = group["total_seconds"] / group["calls"]
+
+                print(
+                    f"{stage:39s}  "
+                    f"calls={group['calls']:4d}  "
+                    f"total={group['total_seconds']:8.3f}s  "
+                    f"avg={avg:7.3f}s  "
+                    f"max={group['max_seconds']:7.3f}s"
+                )
+
+            slow_ocr = sorted(
+                (
+                    event for event in events
+                    if event["kind"] == "ocr"
+                    and (event["panel"] or "GLOBAL") == scope
+                ),
+                key=lambda event: event["seconds"],
+                reverse=True
+            )[:3]
+
+            for event in slow_ocr:
+                print(
+                    f"  Slow OCR: {event['seconds']:.3f}s "
+                    f"in {event['parent_stage']}"
+                )
+
+        print(
+            "\nNOTE: Parent stages include child time. "
+            "Do not add them together."
+        )
+
+        if self.report_path:
+            payload = {
+                "events": events,
+                "summary": [
+                    {
+                        "panel": scope,
+                        "stage": stage,
+                        **data,
+                    }
+                    for (scope, stage), data in groups.items()
+                ],
+            }
+
+            try:
+                with open(
+                    self.report_path,
+                    "w",
+                    encoding="utf-8"
+                ) as file:
+                    json.dump(payload, file, indent=2)
+
+                print(f"[PERF SAVED] {self.report_path}")
+
+            except Exception as exc:
+                print(
+                    f"[PERF WARNING] Unable to save report: {exc}"
+                )
+
+
+PERF = PerformanceTracker()
+
+PERF.events.append({
+    "panel": None,
+    "stage": "DEPENDENCY_IMPORTS",
+    "parent_stage": "STARTUP",
+    "kind": "stage",
+    "seconds": round(_PERF_IMPORT_TIME, 6),
+})
+
+
+# ---------- HIGH-LEVEL TIMING ----------
+
+for cls, method, name, live in [
+    (PageFilter, "__init__", "PAGE_FILTER.INIT", True),
+    (PageFilter, "readPdf", "PAGE_FILTER.READ_PDF", True),
+    (PanelBoardSearch, "__init__", "PANEL_FINDER.INIT", True),
+    (PanelBoardSearch, "readPdf", "PANEL_FINDER.READ_PDF", True),
+    (BreakerTablePipeline, "__init__", "PIPELINE.INIT", True),
+    (BreakerTablePipeline, "_ensure_analyzer", "PIPELINE.ENSURE_ANALYZER", False),
+    (BreakerTablePipeline, "_ensure_header_parser", "PIPELINE.ENSURE_HEADER", False),
+    (BreakerTablePipeline, "run", "PANEL.PIPELINE_TOTAL", True),
+    (BreakerTablePipeline, "_build_review_overlay", "PANEL.REVIEW_OVERLAY", True),
+]:
+    PERF.wrap(cls, method, name, live=live)
+
+
+# ---------- INDIVIDUAL PANEL STAGES ----------
+
+api = import_module(BreakerTablePipeline.__module__)
+
+parser_module = import_module(
+    api.BreakerTableParser.__module__
+)
+
+analyzer_module = import_module(
+    api.BreakerTableAnalyzer.__module__
+)
+
+for cls, method, name, live in [
+    (api.BreakerTableAnalyzer, "analyze", "PANEL.ANALYZER", True),
+    (api.BreakerTableAnalyzer, "_prep", "PANEL.ANALYZER_PREP", False),
+    (api.PanelHeaderParser, "parse_panel", "PANEL.HEADER_PARSER", True),
+    (api.PanelHeaderParser, "_prep_for_ocr", "PANEL.HEADER_PREP", False),
+    (api.BreakerTableParser, "__init__", "PANEL.TABLE_INIT", False),
+    (api.BreakerTableParser, "parse_from_analyzer", "PANEL.TABLE_PARSER", True),
+    (analyzer_module.BreakerHeaderFinder, "analyze_rows", "PANEL.FIND_HEADER", True),
+    (analyzer_module.BreakerFooterFinder, "find_footer", "PANEL.FIND_FOOTER", True),
+]:
+    PERF.wrap(cls, method, name, live=live)
+
+
+# ---------- TABLE AND CELL TIMING ----------
+
+for class_name, method, name in [
+    ("HeaderBandScanner", "scan", "TABLE.HEADER_SCAN"),
+    ("SeparatedLayoutParser", "parse", "TABLE.SEPARATED_LAYOUT"),
+    ("CombinedLayoutParser", "parse", "TABLE.COMBINED_LAYOUT"),
+    ("SeparatedLayoutParser", "_ocr_body_column_by_rows", "TABLE.SEPARATED_COLUMN_OCR"),
+    ("CombinedLayoutParser", "_ocr_body_column_by_rows", "TABLE.COMBINED_COLUMN_OCR"),
+    ("SeparatedLayoutParser", "_ocr_row_band_tokens", "TABLE.SEPARATED_CELL_OCR"),
+    ("CombinedLayoutParser", "_ocr_row_band_tokens", "TABLE.COMBINED_CELL_OCR"),
+    ("BreakerTableParser", "_analyze_description_columns", "TABLE.DESCRIPTIONS"),
+]:
+    cls = getattr(parser_module, class_name, None)
+
+    if cls is not None:
+        PERF.wrap(cls, method, name)
+
+
+# ---------- IMAGE PREPROCESSING AND VISUAL CHECKS ----------
+
+for function_name, name in [
+    ("_prep_cell_for_ocr", "TABLE.CELL_IMAGE_PREP"),
+    ("_cell_has_visual_content", "TABLE.VISUAL_CONTENT_CHECK"),
+    ("_detect_visual_blank_placeholder", "TABLE.PLACEHOLDER_DETECT"),
+    ("_save_cell_prep_comparison", "TABLE.DEBUG_IMAGE_WRITE"),
+]:
+    PERF.wrap(parser_module, function_name, name)
+
+
+# ---------- EASYOCR MODEL AND CALL TIMING ----------
+
+try:
+    import easyocr
+
+    PERF.wrap(
+        easyocr.Reader,
+        "__init__",
+        "EASYOCR.MODEL_INIT",
+        live=True,
+        kind="model"
+    )
+
+    PERF.wrap(
+        easyocr.Reader,
+        "readtext",
+        "EASYOCR.READTEXT",
+        kind="ocr"
+    )
+
+except ImportError:
+    print(
+        "[PERF WARNING] EasyOCR unavailable; "
+        "OCR call timing disabled"
+    )
 
 # ---------- IO PATHS (fixed typos: PdfOutput / PanelSearchOutput) ----------
-INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/J.pdf").expanduser()
+INPUT_PDF       = Path("~/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/generic2.pdf").expanduser()
 FILTER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PdfOutput").expanduser()
 FINDER_OUT_DIR  = Path("~/ElectricalDiagramAnalyzer/DevEnv/PanelSearchOutput").expanduser()
 PIPE_OUT_DIR    = Path("~/ElectricalDiagramAnalyzer/DevEnv/ParserOutput").expanduser()
@@ -271,6 +539,15 @@ def build_rules_result_from_components(components: list[dict]) -> dict:
 
     return rules_result
 
+
+PERF.wrap(
+    sys.modules[__name__],
+    "build_rules_result_from_components",
+    "RULES_PLACEHOLDER",
+    live=True
+)
+
+
 def main():
     run_start_ts_ms = now_ts_ms()
     run_start_perf = time.perf_counter()
@@ -278,6 +555,8 @@ def main():
     job_id = build_job_id(INPUT_PDF)
     job_dir = SUMMARY_ROOT_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
+
+    PERF.report_path = job_dir / "timing_report.json"
 
     summary_json_path = job_dir / "summary.json"
     raw_dump_path = job_dir / "full_pipeline_breaker_dump.json"
@@ -334,6 +613,17 @@ def main():
 
     # ---- 3) BreakerTableParser API ----
     print("\n[ParserAPI] starting…")
+
+    # Experimental numeric OCR batching (DevEnv only).
+    os.environ["ARGUS_BATCH_NUMERIC_OCR"] = "0" # 0 normal (no batching), 1 batch numeric cells
+    os.environ["ARGUS_PROFILE_HEADER_FOOTER"] = "1"
+    os.environ.setdefault("ARGUS_REUSE_CAPPED_HEADER_OCR", "1")
+
+    print(
+        "[ParserAPI] Numeric cell batching:",
+        os.environ["ARGUS_BATCH_NUMERIC_OCR"]
+    )
+
     pipe = BreakerTablePipeline(debug=True)
     print("[ParserAPI] API_VERSION:", API_VERSION)
 
@@ -344,7 +634,8 @@ def main():
     total_hdr_breakers = 0
     total_tbl_breakers = 0
 
-    for img_path in crops:
+    for panel_index, img_path in enumerate(crops, start=1):
+        PERF.panel = f"PANEL_{panel_index}: {Path(img_path).name}"
         print(f"\n\n=========================")
         print(f"Analyzing crop: {img_path}")
         print(f"=========================")
@@ -447,6 +738,7 @@ def main():
             "table_breakers": ensure_json_safe(detected_breakers),
         })
 
+    PERF.panel = None
     parse_done_ts_ms = now_ts_ms()
     cycle_time_ms = int((time.perf_counter() - run_start_perf) * 1000)
 
@@ -497,4 +789,7 @@ def main():
     print(f"[Pipeline] cycle_time={summary['cycle_time_str']}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        PERF.report()

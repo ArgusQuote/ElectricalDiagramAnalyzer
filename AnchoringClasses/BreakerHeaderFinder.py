@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 
 import os
 import re
+import time
 import cv2
 import numpy as np
 
@@ -535,10 +536,47 @@ class BreakerHeaderFinder:
         self.header_y_abs = None
         self.header_bottom_y_abs = None
 
-        # OCR passes on the band
+        # Header OCR optimization:
+        # When both magnifications hit EasyOCR's 2560px detector
+        # canvas limit, their detector input resolution is identical.
+        # Reuse the first result while preserving the original
+        # two-pass token weighting.
+        profile_enabled = os.environ.get("ARGUS_PROFILE_HEADER_FOOTER") == "1"
+        reuse_enabled = os.environ.get("ARGUS_REUSE_CAPPED_HEADER_OCR") == "1"
+
+        canvas_size = 2560
+        max_dimension = max(roi.shape[:2])
+
+        both_passes_capped = (max_dimension * 1.6 >= canvas_size)
+
+        ocr_started = time.perf_counter()
+
         det_16 = self._run_ocr(roi, 1.6)
-        det_20 = self._run_ocr(roi, 2.0)
+        after_16 = time.perf_counter()
+
+        reused = False
+
+        if reuse_enabled and both_passes_capped and det_16 and self.last_ocr_error is None:
+            # Preserve the two-pass scoring and debug token counts.
+            det_20 = list(det_16)
+            reused = True
+        else:
+            # Original behavior for smaller images or unsuccessful OCR.
+            det_20 = self._run_ocr(roi, 2.0)
+
+        after_20 = time.perf_counter()
+
         det = det_16 + det_20
+
+        if profile_enabled:
+            print(
+                f"[PERF HeaderFinder] "
+                f"mag1.6={after_16 - ocr_started:.3f}s ({len(det_16)} hits), "
+                f"mag2.0={after_20 - after_16:.3f}s ({len(det_20)} hits), "
+                f"reused={reused}, "
+                f"total={after_20 - ocr_started:.3f}s",
+                flush=True,
+            )
 
         if self.debug:
             print(
