@@ -1,0 +1,96 @@
+[
+  {
+    "job": "E.pdf",
+    "crop": "E_electrical_filtered_page001_panel01.png",
+    "panel_v17": "(unnamed) (2)",
+    "panel_v18": "(unnamed) (2)",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "E.pdf",
+    "crop": "E_electrical_filtered_page001_panel02.png",
+    "panel_v17": "HC",
+    "panel_v18": "HC",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 8,
+    "v18_breakers": 8,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "E.pdf",
+    "crop": "E_electrical_filtered_page001_panel03.png",
+    "panel_v17": "LC",
+    "panel_v18": "LC",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 36,
+    "v18_breakers": 36,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "E.pdf",
+    "crop": "E_electrical_filtered_page001_panel04.png",
+    "panel_v17": "HCE",
+    "panel_v18": "HCE",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 14,
+    "v18_breakers": 14,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "E.pdf",
+    "crop": "E_electrical_filtered_page001_panel05.png",
+    "panel_v17": "LCE",
+    "panel_v18": "LCE",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 18,
+    "v18_breakers": 18,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]

@@ -1,6 +1,8 @@
 # OcrLibrary/BreakerTableParser15.py
+# Parser14 plus a last-resort cell classifier (MLCellReader) for trip / poles /
+# combo cells that neither the de-gridded nor the raw EasyOCR pass could read.
 from __future__ import annotations
-import os, re, cv2, time, numpy as np
+import os, re, cv2, numpy as np
 from typing import Dict, Optional, List, Tuple
 from difflib import SequenceMatcher
 
@@ -41,153 +43,72 @@ _CELL_PREP_EDGE_INSET_Y_FR  = 0.04   # residual border fringe shaved from top/bo
 _CELL_PREP_BG_PERCENTILE    = 90     # background level used to fill the shaved fringe
 
 from OcrLibrary.ocr_timeout import readtext_with_timeout as _readtext_with_timeout
- 
-class _BatchedDetectionAdapter:
+
+# Body-column roles the cell classifier was trained on.
+_CELL_CLASSIFIER_ROLES = ("trip", "poles", "combo")
+
+# Value-source tag on tokens, review cells, and breakers the classifier supplied,
+# so reviewers and downstream code can tell model reads from OCR reads.
+CELL_CLASSIFIER_SOURCE = "cell_classifier"
+
+
+def _row_read_by_classifier(row_top: int, row_bottom: int, col_tokens) -> bool:
+    """True when this column's text for the row band came from the cell classifier."""
+    for tok in col_tokens or ():
+        if tok.get("source") != CELL_CLASSIFIER_SOURCE:
+            continue
+        _, y1, _, y2 = tok["box_page"]
+        if row_top <= 0.5 * (y1 + y2) < row_bottom:
+            return True
+    return False
+
+
+def _cell_classifier_runtime_info() -> Dict:
+    """Which classifier models this process runs (or why it runs none), for job logs."""
+    try:
+        from MLCellReader.cell_fallback import CellFallbackReader
+    except ImportError as exc:
+        return {"enabled": False, "disabledReason": f"MLCellReader unavailable: {exc}"}
+    return CellFallbackReader.shared().describe()
+
+
+def _cell_classifier_summary(review_cells) -> Dict[str, int]:
+    """Count classifier-filled cells per role for one panel's result."""
+    counts: Dict[str, int] = {}
+    for cell in review_cells or ():
+        if cell.get("source") == CELL_CLASSIFIER_SOURCE:
+            role = str(cell.get("role") or "unknown")
+            counts[role] = counts.get(role, 0) + 1
+    return counts
+
+
+def _cell_classifier_row_tokens(row_gray, role: Optional[str]):
     """
-    Use EasyOCR's batched detection-and-recognition pipeline.
+    Ask the trained cell classifier to read one raw row band.
 
-    This retains text localization rather than treating the
-    entire numeric cell as one text box.
+    Returns a single-token list shaped like _ocr_row_band_tokens' output (box
+    spanning the whole cell, row-local coords), or [] when the classifier is
+    unavailable, unsure, or reads the cell as empty. Imported lazily so a host
+    without the models or torch keeps the OCR-only behavior.
     """
-
-    def __init__(self, reader):
-        self.reader = reader
-
-    def readtext(self, images, **kwargs):
-        return self.reader.readtext_batched(images, **kwargs)
-
-
-def _batch_numeric_cell_tokens(reader, cell_images, batch_size=16):
-    """
-    Run batched text detection and recognition on prepared cells.
-
-    Returns row-local OCR tokens for each original cell.
-    If the batch fails, returns None so the existing
-    per-cell OCR fallback is used.
-    """
-    if not cell_images:
+    if role not in _CELL_CLASSIFIER_ROLES or row_gray is None or row_gray.size == 0:
+        return []
+    try:
+        from MLCellReader.cell_fallback import CellFallbackReader
+    except ImportError as exc:
+        print(f"[{PARSER_VERSION}] cell classifier unavailable: {exc}")
         return []
 
-    all_results = []
+    reader = CellFallbackReader.shared()
+    if not reader.enabled:
+        return []
+    reading = reader.read_cell(role, row_gray)
+    if reading is None:
+        return []
+    text, conf = reading
+    h_row, w_row = row_gray.shape[:2]
+    return [(text, conf, (0, 0, w_row - 1, h_row - 1))]
 
-    for start in range(0, len(cell_images), batch_size):
-        group = cell_images[start:start + batch_size]
-
-        # Keep the same upscaling as the original cell reader.
-        scaled = [
-            cv2.resize(
-                cell,
-                None,
-                fx=_HDR_OCR_SCALE,
-                fy=_HDR_OCR_SCALE,
-                interpolation=cv2.INTER_CUBIC,
-            )
-            for cell in group
-        ]
-
-        # EasyOCR requires equal dimensions within a batch.
-        # Padding maintains the original image scale.
-        max_h = max(img.shape[0] for img in scaled)
-        max_w = max(img.shape[1] for img in scaled)
-
-        padded = []
-
-        for img in scaled:
-            h, w = img.shape[:2]
-
-            canvas = np.full(
-                (max_h, max_w),
-                255,
-                dtype=np.uint8
-            )
-
-            canvas[:h, :w] = img
-            padded.append(canvas)
-
-        try:
-            results = _readtext_with_timeout(
-                _BatchedDetectionAdapter(reader),
-                padded,
-                batch_size=batch_size,
-                workers=0,
-                allowlist=_HDR_OCR_ALLOWLIST,
-                detail=1,
-                paragraph=False,
-                mag_ratio=1.0,
-                contrast_ths=0.05,
-                adjust_contrast=0.7,
-                text_threshold=0.4,
-                low_text=0.25,
-            )
-
-        except Exception as exc:
-            print(
-                f"[{PARSER_VERSION}][BATCH] "
-                f"Detection batch failed: {exc}"
-            )
-            return None
-
-        if (
-            not isinstance(results, (list, tuple))
-            or len(results) != len(group)
-        ):
-            return None
-
-        for cell, detections in zip(group, results):
-            if not isinstance(detections, (list, tuple)):
-                return None
-
-            height, width = cell.shape[:2]
-            tokens = []
-
-            for detection in detections:
-                try:
-                    box, text, confidence = detection
-
-                    text = str(text or "").strip()
-                    confidence = float(confidence or 0.0)
-
-                    if not text:
-                        continue
-
-                    min_conf = _HDR_MIN_CONF
-
-                    if len(text) == 1:
-                        min_conf *= 0.7
-
-                    if confidence < min_conf:
-                        continue
-
-                    # Convert the detected text coordinates
-                    # from upscaled pixels to original cell pixels.
-                    xs = [
-                        int(point[0] / _HDR_OCR_SCALE)
-                        for point in box
-                    ]
-                    ys = [
-                        int(point[1] / _HDR_OCR_SCALE)
-                        for point in box
-                    ]
-
-                    x1 = max(0, min(width - 1, min(xs)))
-                    x2 = max(0, min(width - 1, max(xs)))
-                    y1 = max(0, min(height - 1, min(ys)))
-                    y2 = max(0, min(height - 1, max(ys)))
-
-                except (TypeError, ValueError, IndexError):
-                    return None
-
-                tokens.append(
-                    (
-                        text,
-                        confidence,
-                        (x1, y1, x2, y2),
-                    )
-                )
-
-            all_results.append(tokens)
-
-    return all_results
 
 def _prep_gray_like_analyzer12(src_path: str) -> Optional[np.ndarray]:
     """
@@ -2347,6 +2268,7 @@ class SeparatedLayoutParser:
         row_bands_strip,
         debug_prep_path: Optional[str] = None,
         row_value_ok=None,
+        classifier_role: Optional[str] = None,
     ):
         """
         OCR a single trip/poles body strip ROW-BY-ROW.
@@ -2364,6 +2286,9 @@ class SeparatedLayoutParser:
           - row_value_ok: optional predicate taking this row's token list and
                         returning whether it yields a usable value for this
                         column's role. Enables the raw-cell fallback below.
+          - classifier_role: 'trip' / 'poles' to let the cell classifier read
+                        rows that both OCR passes left unusable (needs
+                        row_value_ok); None keeps this column OCR-only.
 
         Returns:
           Flat list of OCR tokens, each with box_page coordinates.
@@ -2380,61 +2305,6 @@ class SeparatedLayoutParser:
             else None
         )
 
-        # Test-only: batch prepared numeric cells for this column.
-        # Original row checks and raw-cell fallbacks remain unchanged.
-        prepped_cache = {}
-        batched_tokens = {}
-
-        if (
-            os.environ.get("ARGUS_BATCH_NUMERIC_OCR", "0") == "1"
-            and row_value_ok is not None
-        ):
-            batch_keys = []
-            batch_images = []
-
-            for raw_top, raw_bottom in row_bands_strip:
-                top = max(0, min(H_strip - 1, int(raw_top)))
-                bottom = max(top + 1, min(H_strip, int(raw_bottom)))
-
-                raw_cell = strip_gray[top:bottom, :]
-                if raw_cell.size == 0:
-                    continue
-
-                key = (top, bottom)
-                prepared = _prep_cell_for_ocr(raw_cell)
-
-                prepped_cache[key] = prepared
-                batch_keys.append(key)
-                batch_images.append(prepared)
-
-            started = time.perf_counter()
-
-            results = _batch_numeric_cell_tokens(
-                self.reader,
-                batch_images
-            )
-
-            elapsed = time.perf_counter() - started
-
-            if results is not None and len(results) == len(batch_keys):
-                batched_tokens = dict(zip(batch_keys, results))
-
-                usable = sum(
-                    1 for item in results if row_value_ok(item)
-                )
-
-                print(
-                    f"[{PARSER_VERSION}][BATCH] "
-                    f"numeric cells={len(results)}, usable={usable}, "
-                    f"recognition={elapsed:.3f}s"
-                )
-
-            else:
-                print(
-                    f"[{PARSER_VERSION}][BATCH] failed after "
-                    f"{elapsed:.3f}s; using original per-cell OCR"
-                )
-
         for (row_top, row_bottom) in row_bands_strip:
             row_top = max(0, min(H_strip - 1, int(row_top)))
             row_bottom = max(row_top + 1, min(H_strip, int(row_bottom)))
@@ -2447,20 +2317,13 @@ class SeparatedLayoutParser:
 
             # Strip the table borders out of this cell first. The crop keeps its
             # exact dimensions, so the box mapping further down stays valid.
-            key = (row_top, row_bottom)
-
-            row_prepped = prepped_cache.get(key)
-
-            if row_prepped is None:
-                row_prepped = _prep_cell_for_ocr(row_gray)
+            row_prepped = _prep_cell_for_ocr(row_gray)
 
             if prep_vis is not None:
                 prep_vis[row_top:row_bottom, :] = row_prepped
 
-            row_tokens = batched_tokens.get(key)
-
-            if row_tokens is None or not row_value_ok(row_tokens):
-                row_tokens = self._ocr_row_band_tokens(row_prepped)
+            row_tokens = self._ocr_row_band_tokens(row_prepped)
+            row_source = None
 
             # De-gridding wins on cells whose borders touch the glyphs, but on a
             # minority of cells it drops a trailing digit or leaves a fragment
@@ -2478,6 +2341,19 @@ class SeparatedLayoutParser:
                             f"y={body_y_top + row_top}-{body_y_top + row_bottom} "
                             f"x={x_left}: {[t[0] for t in raw_tokens]}"
                         )
+                elif classifier_role:
+                    # Last resort, on the raw crop the classifier was trained on.
+                    # Its reading must still pass the same value check as OCR.
+                    ml_tokens = _cell_classifier_row_tokens(row_gray, classifier_role)
+                    if ml_tokens and row_value_ok(ml_tokens):
+                        row_tokens = ml_tokens
+                        row_source = CELL_CLASSIFIER_SOURCE
+                        if self.debug:
+                            print(
+                                f"[{PARSER_VERSION}] cell classifier recovered {classifier_role} row "
+                                f"y={body_y_top + row_top}-{body_y_top + row_bottom} "
+                                f"x={x_left}: {ml_tokens[0][0]!r} conf={ml_tokens[0][1]:.2f}"
+                            )
 
             for txt_clean, conf_f, (x1_row, y1_row, x2_row, y2_row) in row_tokens:
                 # Map row-local -> STRIP-LOCAL -> PAGE
@@ -2486,13 +2362,14 @@ class SeparatedLayoutParser:
                 y1_page = body_y_top + row_top + y1_row
                 y2_page = body_y_top + row_top + y2_row
 
-                tokens.append(
-                    {
-                        "text": txt_clean,
-                        "conf": conf_f,
-                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                    }
-                )
+                token = {
+                    "text": txt_clean,
+                    "conf": conf_f,
+                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                }
+                if row_source:
+                    token["source"] = row_source
+                tokens.append(token)
 
         if prep_vis is not None:
             _save_cell_prep_comparison(strip_gray, prep_vis, debug_prep_path)
@@ -2801,6 +2678,7 @@ class SeparatedLayoutParser:
                 row_bands_strip=row_bands_strip,
                 debug_prep_path=cellprep_path,
                 row_value_ok=self._make_row_value_checker(col.get("role")),
+                classifier_role=col.get("role") if col.get("role") in ("trip", "poles") else None,
             )
 
         # Debug overlays unchanged (works for specialFeatures too)
@@ -2905,6 +2783,11 @@ class SeparatedLayoutParser:
 
                 amps = self._parse_trip_value(trip_text)
                 poles = self._parse_poles_value(poles_text)
+                classifier_fields = [
+                    field
+                    for field, col_tokens in (("amperage", trip_tokens), ("poles", poles_tokens))
+                    if _row_read_by_classifier(row_top, row_bottom, col_tokens)
+                ]
 
                 trip_has_text = bool(str(trip_text or "").strip())
                 poles_has_text = bool(str(poles_text or "").strip())
@@ -3051,6 +2934,8 @@ class SeparatedLayoutParser:
                             "value": int(amps),
                         }
                     )
+                    if "amperage" in classifier_fields:
+                        review_cells[-1]["source"] = CELL_CLASSIFIER_SOURCE
                 else:
                     review_cells.append(
                         {
@@ -3092,6 +2977,8 @@ class SeparatedLayoutParser:
                             "value": int(poles),
                         }
                     )
+                    if "poles" in classifier_fields:
+                        review_cells[-1]["source"] = CELL_CLASSIFIER_SOURCE
                 else:
                     review_cells.append(
                         {
@@ -3144,6 +3031,10 @@ class SeparatedLayoutParser:
                     "tripText": trip_text,
                     "polesText": poles_text,
                 }
+
+                if classifier_fields:
+                    rec["source"] = CELL_CLASSIFIER_SOURCE
+                    rec["classifierFields"] = classifier_fields
 
                 if gfi_flag:
                     rec["specialFeatures"] = gfi_flag
@@ -3379,6 +3270,7 @@ class CombinedLayoutParser:
         row_bands_strip,
         debug_prep_path: Optional[str] = None,
         row_value_ok=None,
+        classifier_role: Optional[str] = None,
     ):
         """
         OCR a single combo body strip ROW-BY-ROW.
@@ -3396,6 +3288,9 @@ class CombinedLayoutParser:
           - row_value_ok: optional predicate taking this row's token list and
                         returning whether it yields a usable amps/poles pair.
                         Enables the raw-cell fallback below.
+          - classifier_role: 'combo' to let the cell classifier read rows that
+                        both OCR passes left unusable (needs row_value_ok);
+                        None keeps this column OCR-only.
 
         Returns:
           Flat list of OCR tokens, each with box_page coordinates.
@@ -3430,6 +3325,7 @@ class CombinedLayoutParser:
                 prep_vis[row_top:row_bottom, :] = row_prepped
 
             row_tokens = self._ocr_row_band_tokens(row_prepped)
+            row_source = None
 
             # See the note on the separated-layout parser: a successful prepped
             # read always wins, but a cell the de-gridding damaged is re-read
@@ -3445,6 +3341,17 @@ class CombinedLayoutParser:
                             f"y={body_y_top + row_top}-{body_y_top + row_bottom} "
                             f"x={x_left}: {[t[0] for t in raw_tokens]}"
                         )
+                elif classifier_role:
+                    ml_tokens = _cell_classifier_row_tokens(row_gray, classifier_role)
+                    if ml_tokens and row_value_ok(ml_tokens):
+                        row_tokens = ml_tokens
+                        row_source = CELL_CLASSIFIER_SOURCE
+                        if self.debug:
+                            print(
+                                f"[{PARSER_VERSION}] cell classifier recovered combo row "
+                                f"y={body_y_top + row_top}-{body_y_top + row_bottom} "
+                                f"x={x_left}: {ml_tokens[0][0]!r} conf={ml_tokens[0][1]:.2f}"
+                            )
 
             for txt_clean, conf_f, (x1_row, y1_row, x2_row, y2_row) in row_tokens:
                 # Map row-local -> STRIP-LOCAL -> PAGE
@@ -3453,13 +3360,14 @@ class CombinedLayoutParser:
                 y1_page = body_y_top + row_top + y1_row
                 y2_page = body_y_top + row_top + y2_row
 
-                tokens.append(
-                    {
-                        "text": txt_clean,
-                        "conf": conf_f,
-                        "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
-                    }
-                )
+                token = {
+                    "text": txt_clean,
+                    "conf": conf_f,
+                    "box_page": [int(x1_page), int(y1_page), int(x2_page), int(y2_page)],
+                }
+                if row_source:
+                    token["source"] = row_source
+                tokens.append(token)
 
         if prep_vis is not None:
             _save_cell_prep_comparison(strip_gray, prep_vis, debug_prep_path)
@@ -4042,6 +3950,7 @@ class CombinedLayoutParser:
                 row_bands_strip=row_bands_strip,
                 debug_prep_path=cellprep_path,
                 row_value_ok=self._combo_row_value_ok,
+                classifier_role="combo" if col.get("role") == "combo" else None,
             )
 
         # Debug overlays unchanged (works for specialFeatures too)
@@ -4136,6 +4045,11 @@ class CombinedLayoutParser:
                 )
 
                 combo_pairs = self._parse_combo_cell(combo_text)
+                combo_by_classifier = _row_read_by_classifier(
+                    row_top,
+                    row_bottom,
+                    combo_tokens,
+                )
 
                 combo_text_normalized = (
                     str(combo_text or "").strip().upper()
@@ -4223,6 +4137,8 @@ class CombinedLayoutParser:
                             ],
                         }
                     )
+                    if combo_by_classifier:
+                        review_cells[-1]["source"] = CELL_CLASSIFIER_SOURCE
                 elif combo_has_text or combo_has_marks:
                     review_cells.append(
                         {
@@ -4282,6 +4198,10 @@ class CombinedLayoutParser:
                         "poles": int(poles),
                         "comboText": combo_text,
                     }
+
+                    if combo_by_classifier:
+                        rec["source"] = CELL_CLASSIFIER_SOURCE
+                        rec["classifierFields"] = ["amperage", "poles"]
 
                     if gfi_flag:
                         rec["specialFeatures"] = gfi_flag
@@ -5303,6 +5223,10 @@ class BreakerTableParser:
             "existingBreakerNote": existing_breaker_note,
             "reviewCells": review_cells,
             "breakerPositionIssues": breaker_position_issues,
+            "cellClassifier": {
+                **_cell_classifier_runtime_info(),
+                "filledCells": _cell_classifier_summary(review_cells),
+            },
             "headerScan": header_scan,
             "separatedScan": separated_scan,
             "combinedScan": combined_scan,

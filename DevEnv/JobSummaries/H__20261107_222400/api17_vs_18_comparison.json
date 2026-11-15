@@ -1,0 +1,16 @@
+[
+  {
+    "job": "H.pdf",
+    "crop": "H_electrical_filtered_page001_panel01.png",
+    "panel_v17": "P",
+    "panel_v18": "P",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 19,
+    "v18_breakers": 19,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  }
+]

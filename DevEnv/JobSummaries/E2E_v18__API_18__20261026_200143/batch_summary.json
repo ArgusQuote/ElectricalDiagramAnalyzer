@@ -1,0 +1,38 @@
+{
+  "batch_id": "E2E_v18__API_18__20261026_200143",
+  "batch_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/E2E_v18__API_18__20261026_200143",
+  "input_dir": "/tmp/e2e_in",
+  "artifact_root": "/tmp/e2e_art_18",
+  "api_version": "API_18",
+  "parser_debug": false,
+  "pdf_count": 1,
+  "success_count": 1,
+  "failure_count": 0,
+  "cycle_time_ms": 57893,
+  "cycle_time_str": "00:00:57:893",
+  "results": [
+    {
+      "pdf": "/tmp/e2e_in/B.pdf",
+      "pdf_name": "B.pdf",
+      "job_id": "B__20261026_200143",
+      "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/B__20261026_200143",
+      "summary_path": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/B__20261026_200143/summary.json",
+      "panel_count": 3,
+      "table_breakers_total": 118,
+      "panels_with_status": 0,
+      "panels_ready_for_rules": 0,
+      "cycle_time_ms": 57877,
+      "cycle_time_str": "00:00:57:877",
+      "ok": true
+    }
+  ],
+  "failures": [],
+  "totals": {
+    "panels": 3,
+    "table_breakers": 118,
+    "panels_with_status": 0,
+    "panels_ready_for_rules": 0
+  },
+  "review_overlays_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/E2E_v18__API_18__20261026_200143/review_overlays",
+  "review_overlay_count": 3
+}

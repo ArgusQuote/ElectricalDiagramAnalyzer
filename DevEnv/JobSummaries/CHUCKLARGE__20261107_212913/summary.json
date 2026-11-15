@@ -1,0 +1,1285 @@
+{
+  "ok": true,
+  "job_id": "CHUCKLARGE__20261107_212913",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucklarge.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel06.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel07.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel08.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel09.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel06.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel07.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel08.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel09.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel06.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel07.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel08.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel09.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel06.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel07.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel08.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel09.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel06.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel07.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel08.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel09.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page008_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page008_panel02.png"
+  ],
+  "image_count": 47,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "O1EDHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel01.png",
+      "panelStatus": "detected but skipped (O1EDHA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1SDHA7",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel02.png",
+      "panelStatus": "detected but skipped (O1SDHA7)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 250,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 250,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NDLA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel03.png",
+      "panelStatus": "detected but skipped (O1NDLA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NSHB1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel04.png",
+      "panelStatus": "detected but skipped (O1NSHB1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NSHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel05.png",
+      "panelStatus": "detected but skipped (O1NSHA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NDHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel06.png",
+      "panelStatus": "detected but skipped (O1NDHA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 800,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 800,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1GSHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel07.png",
+      "panelStatus": "detected but skipped (O1GSHA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 800,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 800,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NDHB1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel08.png",
+      "panelStatus": "detected but skipped (O1NDHB1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 500,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 500,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CDHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page003_panel09.png",
+      "panelStatus": "detected but skipped (O1CDHA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CPHA7",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPHA7",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPHB1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPHB2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel04.png",
+      "panelStatus": "detected but skipped (O1NPHB2)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPHB3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel05.png",
+      "panelStatus": "detected but skipped (O1NPHB3)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NDLB1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel06.png",
+      "panelStatus": "detected but skipped (O1NDLB1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CDLA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel07.png",
+      "panelStatus": "detected but skipped (O1CDLA1)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPHA2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel08.png",
+      "panelStatus": "detected but skipped (O1NPHA2)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPHA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page004_panel09.png",
+      "panelStatus": "detected but skipped (O1NPHA3)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CPHA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CPHA2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1SPHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1SPHA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel05.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1SPHA2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel06.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "01EPHA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel07.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "OTEPHA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel08.png",
+      "panelStatus": "detected but skipped (OTEPHA3)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "OTEPHA2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page005_panel09.png",
+      "panelStatus": "detected but skipped (OTEPHA2)",
+      "panelNote": "Could not determine panel size/spaces.",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": 65,
+        "mainBreakerAmperage": 400,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLB2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLB1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 22,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLAs",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLB3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel05.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLBA",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel06.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLA2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel07.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLBSI",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel08.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1NPLAA",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page006_panel09.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1SPLA7",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "OTEPLA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 150,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 150,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1SPLA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CPLA2I",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "OTCPLAA",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel05.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "01SPLA2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel06.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 125,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CPLA1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel07.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "O1CPLA3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel08.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "01CPLAS",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page007_panel09.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "OTEPLA2I",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page008_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "OTEPLA3 (2)",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PanelSearchOutput/chucklarge_electrical_filtered_page008_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 150,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 150,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "O1EDHA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1SDHA7": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NDLA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NSHB1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NSHA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NDHA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1GSHA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NDHB1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1CDHA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1CPHA7": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPHA7": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPHB1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPHB2": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NPHB3": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NDLB1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1CDLA1": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NPHA2": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NPHA3": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NPLA1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1CPHA3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1CPHA2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1SPHA1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1SPHA3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1SPHA2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "01EPHA1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "OTEPHA3": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "OTEPHA2": {
+      "Skipped": "Could not determine panel size/spaces."
+    },
+    "O1NPLA3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLB2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLB1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLAs": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLB3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLBA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLA2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLBSI": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1NPLAA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1SPLA7": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "OTEPLA3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1SPLA3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1CPLA2I": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "OTCPLAA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "01SPLA2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1CPLA1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "O1CPLA3": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "01CPLAS": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "OTEPLA2I": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "OTEPLA3 (2)": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 1438686,
+  "cycle_time_str": "00:23:58:686",
+  "noticed_ts_ms": 1794086953659,
+  "parse_done_ts_ms": 1794088392346,
+  "debug": {
+    "kept_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKLARGE__20261107_212913/PdfOutput/chucklarge_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_18",
+    "header_breakers_total": 0,
+    "table_breakers_total": 1234
+  }
+}

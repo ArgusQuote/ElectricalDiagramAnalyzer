@@ -1,0 +1,182 @@
+[
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel01.png",
+    "panel_v17": "B2",
+    "panel_v18": "B2",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 35,
+    "v18_breakers": 35,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel02.png",
+    "panel_v17": "B2 (2)",
+    "panel_v18": "B2 (2)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 34,
+    "v18_breakers": 34,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel03.png",
+    "panel_v17": "A2B",
+    "panel_v18": "A2B",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 1,
+    "v18_breakers": 1,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel04.png",
+    "panel_v17": "A2B (2)",
+    "panel_v18": "A2B (2)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 35,
+    "v18_breakers": 35,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel05.png",
+    "panel_v17": "B2 (3)",
+    "panel_v18": "B2 (3)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 33,
+    "v18_breakers": 33,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel06.png",
+    "panel_v17": "C2B",
+    "panel_v18": "C2B",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 31,
+    "v18_breakers": 31,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel07.png",
+    "panel_v17": "CZA",
+    "panel_v18": "CZA",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 34,
+    "v18_breakers": 34,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel08.png",
+    "panel_v17": "CZA (2)",
+    "panel_v18": "CZA (2)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 35,
+    "v18_breakers": 35,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "makayla2.pdf",
+    "crop": "makayla2_electrical_filtered_page001_panel09.png",
+    "panel_v17": "CZA (3)",
+    "panel_v18": "CZA (3)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 36,
+    "v18_breakers": 36,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]

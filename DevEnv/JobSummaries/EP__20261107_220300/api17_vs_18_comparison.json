@@ -1,0 +1,44 @@
+[
+  {
+    "job": "EP.pdf",
+    "crop": "EP_electrical_filtered_page001_panel02.png",
+    "panel_v17": "A (4)",
+    "panel_v18": "A (4)",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 18,
+    "v18_breakers": 18,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "EP.pdf",
+    "crop": "EP_electrical_filtered_page002_panel01.png",
+    "panel_v17": "WIREFILL",
+    "panel_v18": "WIREFILL",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "EP.pdf",
+    "crop": "EP_electrical_filtered_page002_panel02.png",
+    "panel_v17": "(unnamed) (3)",
+    "panel_v18": "(unnamed) (3)",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  }
+]

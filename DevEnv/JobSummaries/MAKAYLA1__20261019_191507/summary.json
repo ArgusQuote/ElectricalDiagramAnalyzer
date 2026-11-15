@@ -1,0 +1,197 @@
+{
+  "ok": true,
+  "job_id": "MAKAYLA1__20261019_191507",
+  "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/MAKAYLA1__20261019_191507",
+  "saved_pdf": "/home/marco/Documents/pdfToScan/makayla1.pdf",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/MAKAYLA1__20261019_191507",
+  "images": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel05.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel06.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel07.png"
+  ],
+  "image_count": 7,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (8)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 225,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EX",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EX (2)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EX (3)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 200,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EX (4)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel05.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 200,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EX PANEL 1OHA",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel06.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EX (5)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PanelSearchOutput/makayla1_electrical_filtered_page001_panel07.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "(unnamed) (8)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EX": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EX (2)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EX (3)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EX (4)": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EX PANEL 1OHA": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EX (5)": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 67442,
+  "cycle_time_str": "00:01:07:442",
+  "noticed_ts_ms": 1792455307941,
+  "parse_done_ts_ms": 1792455375383,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/makayla1/PdfOutput/makayla1_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_15",
+    "header_breakers_total": 0,
+    "table_breakers_total": 0,
+    "parser_debug": false
+  }
+}

@@ -1,0 +1,3 @@
+job,crop,panel_v17,panel_v18,status,changed_fields,breaker_differences,v17_breakers,v18_breakers,raw_changed,error
+chucksmall.pdf,chucksmall_electrical_filtered_page001_panel01.png,OTEPLA2I,OTEPLA2I,RAW_ONLY,,0,42,42,True,
+chucksmall.pdf,chucksmall_electrical_filtered_page001_panel02.png,OTEPLA3,OTEPLA3,RAW_ONLY,,0,37,37,True,

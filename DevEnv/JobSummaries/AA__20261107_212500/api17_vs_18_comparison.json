@@ -1,0 +1,58 @@
+[
+  {
+    "job": "AA.pdf",
+    "crop": "AA_electrical_filtered_page001_panel01.png",
+    "panel_v17": "L1",
+    "panel_v18": "L1",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "AA.pdf",
+    "crop": "AA_electrical_filtered_page001_panel02.png",
+    "panel_v17": "L2",
+    "panel_v18": "L2",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "AA.pdf",
+    "crop": "AA_electrical_filtered_page001_panel03.png",
+    "panel_v17": "H1",
+    "panel_v18": "H1",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "AA.pdf",
+    "crop": "AA_electrical_filtered_page001_panel04.png",
+    "panel_v17": "L3",
+    "panel_v18": "L3",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  }
+]

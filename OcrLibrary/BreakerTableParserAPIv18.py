@@ -44,7 +44,7 @@ def reset_name_deduper():
 
 from OcrLibrary.BreakerTableAnalyzer12 import BreakerTableAnalyzer, ANALYZER_VERSION
 from OcrLibrary.PanelHeaderParserV12   import PanelParser as PanelHeaderParser
-from OcrLibrary.BreakerTableParser14   import BreakerTableParser, PARSER_VERSION
+from OcrLibrary.BreakerTableParser15   import BreakerTableParser, PARSER_VERSION
  
 class BreakerTablePipeline:
     def __init__(self, *, debug: bool = True, reader=None):
@@ -230,20 +230,9 @@ class BreakerTablePipeline:
         # optional faint fill
         if fill_alpha and fill_alpha > 0.0:
             a = float(max(0.0, min(1.0, fill_alpha)))
-
-            # Blend only the highlighted rectangle, not the full image.
-            region = vis[y1:y2 + 1, x1:x2 + 1]
-            overlay = region.copy()
-            overlay[:] = color_bgr
-
-            cv2.addWeighted(
-                overlay,
-                a,
-                region,
-                1.0 - a,
-                0,
-                dst=region
-            )
+            overlay = vis.copy()
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color_bgr, -1)
+            cv2.addWeighted(overlay, a, vis, 1.0 - a, 0, dst=vis)
 
         # outline
         cv2.rectangle(vis, (x1, y1), (x2, y2), color_bgr, int(thickness))
@@ -387,6 +376,9 @@ class BreakerTablePipeline:
         #   good combo cell     -> GREEN
         #   unreadable/invalid  -> RED
         #
+        # Either layout:
+        #   value supplied by the cell classifier -> ORANGE "ML" (verify by eye)
+        #
         # Empty cells are intentionally absent from reviewCells and therefore
         # receive no overlay.
 
@@ -398,6 +390,7 @@ class BreakerTablePipeline:
         GREEN = (0, 200, 0)    # BGR: valid amps or valid combined cell
         BLUE = (255, 0, 0)     # BGR: valid poles cell
         RED = (0, 0, 255)      # BGR: occupied but unreadable/invalid
+        ORANGE = (0, 140, 255) # BGR: value read by the cell classifier, not OCR
 
         for cell in review_cells:
             if not isinstance(cell, dict):
@@ -420,6 +413,12 @@ class BreakerTablePipeline:
             if status == "issue":
                 color = RED
                 label = "CHECK"
+                fill_alpha = 0.18
+                thickness = 3
+
+            elif status == "good" and cell.get("source") == "cell_classifier":
+                color = ORANGE
+                label = "ML"
                 fill_alpha = 0.18
                 thickness = 3
 
@@ -464,19 +463,7 @@ class BreakerTablePipeline:
 
     def _ensure_analyzer(self):
         if self._analyzer is None:
-            self._analyzer = BreakerTableAnalyzer(
-                debug=self.debug,
-                reader=self._shared_reader
-            )
-
-            # Reuse the reader the analyzer already initialized.
-            if self._shared_reader is None:
-                self._shared_reader = getattr(
-                    self._analyzer,
-                    "reader",
-                    None
-                )
-
+            self._analyzer = BreakerTableAnalyzer(debug=self.debug, reader=self._shared_reader)
         return self._analyzer
 
     def _ensure_header_parser(self):

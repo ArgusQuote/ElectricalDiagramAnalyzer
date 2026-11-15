@@ -1,0 +1,365 @@
+{
+  "ok": true,
+  "job_id": "ELECTRICAL_SET_MARK_UP__20261019_191725",
+  "job_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/ELECTRICAL_SET_MARK_UP__20261019_191725",
+  "saved_pdf": "/home/marco/Documents/Diagrams/ELECTRICAL SET (Mark Up).pdf",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/ELECTRICAL_SET_MARK_UP__20261019_191725",
+  "images": [
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page001_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page001_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel03.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel04.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page004_panel01.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page004_panel02.png",
+    "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page004_panel03.png"
+  ],
+  "image_count": 13,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "LIGHT",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page001_panel01.png",
+      "panelStatus": "detected but skipped (LIGHT)",
+      "panelNote": "Lighting schedule detected",
+      "specialHeaderType": {
+        "kind": "lighting_schedule",
+        "note": "Lighting schedule detected",
+        "matched_text": "LIGHTING FIXTURE SCHEDULE LIGHTING FIXTURE SCHEDULE",
+        "matched_tokens": [
+          "FIXTURE",
+          "LIGHT",
+          "SCHEDULE"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "ID",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page001_panel02.png",
+      "panelStatus": "detected but skipped (ID)",
+      "panelNote": "Equipment schedule detected",
+      "specialHeaderType": {
+        "kind": "equipment_schedule",
+        "note": "Equipment schedule detected",
+        "matched_text": "ELECTRICAL EQUIPMENT SCHEDULE ELECTRICAL EQUIPMENT SCHEDULE",
+        "matched_tokens": [
+          "ELECTRICAL",
+          "EQUIPMENT",
+          "SCHEDULE"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L7L1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": 300,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L6L1",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": 300,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L7L2",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "L6L2",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page002_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 10,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (9)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel01.png",
+      "panelStatus": "detected but skipped ((unnamed) (9))",
+      "panelNote": "Switchboard detected",
+      "specialHeaderType": {
+        "kind": "switchboard",
+        "note": "Switchboard detected",
+        "matched_text": "Switchboard: (E) MSB-A Switchboard: (E) MSB-A",
+        "matched_tokens": [
+          "A",
+          "E",
+          "MSB",
+          "SWITCHBOARD"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "(unnamed) (10)",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel02.png",
+      "panelStatus": "detected but skipped ((unnamed) (10))",
+      "panelNote": "Switchboard detected",
+      "specialHeaderType": {
+        "kind": "switchboard",
+        "note": "Switchboard detected",
+        "matched_text": "Switchboard: MSB-B Switchboard: MSB-B",
+        "matched_tokens": [
+          "B",
+          "MSB",
+          "SWITCHBOARD"
+        ]
+      },
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EL7H",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "ELGH",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page003_panel04.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 225,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EJLGLM",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page004_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "ELGEH",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page004_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "ELGEL",
+      "source": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PanelSearchOutput/ELECTRICAL SET (Mark Up)_electrical_filtered_page004_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "specialHeaderType": null,
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "LIGHT": {
+      "Skipped": "Lighting schedule detected"
+    },
+    "ID": {
+      "Skipped": "Equipment schedule detected"
+    },
+    "L7L1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "L6L1": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "L7L2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "L6L2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "(unnamed) (9)": {
+      "Skipped": "Switchboard detected"
+    },
+    "(unnamed) (10)": {
+      "Skipped": "Switchboard detected"
+    },
+    "EL7H": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "ELGH": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "EJLGLM": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "ELGEH": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "ELGEL": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 184020,
+  "cycle_time_str": "00:03:04:020",
+  "noticed_ts_ms": 1792455445279,
+  "parse_done_ts_ms": 1792455629300,
+  "debug": {
+    "kept_pages": [
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "dropped_pages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "filtered_pdf": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/BatchRuns_cellharvest/ELECTRICAL SET (Mark Up)/PdfOutput/ELECTRICAL SET (Mark Up)_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_15",
+    "header_breakers_total": 0,
+    "table_breakers_total": 324,
+    "parser_debug": false
+  }
+}

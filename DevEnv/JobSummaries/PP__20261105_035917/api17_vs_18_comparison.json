@@ -1,0 +1,42 @@
+[
+  {
+    "job": "PP.pdf",
+    "crop": "PP_page001_panel01.png",
+    "panel_v17": "P (2)",
+    "panel_v18": "P (2)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 36,
+    "v18_breakers": 36,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "PP.pdf",
+    "crop": "PP_page001_panel02.png",
+    "panel_v17": "MDP (3)",
+    "panel_v18": "MDP (3)",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 7,
+    "v18_breakers": 7,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]

@@ -1,0 +1,220 @@
+{
+  "ok": true,
+  "job_id": "NOAMPS__20261107_225940",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/NoAmps.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel06.png"
+  ],
+  "image_count": 6,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "EQUIP.",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel01.png",
+      "panelStatus": "detected but skipped (EQUIP.)",
+      "panelNote": "Equipment schedule detected",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": {
+        "kind": "equipment_schedule",
+        "note": "Equipment schedule detected",
+        "matched_text": "EQUIPMENT SCHEDULE EQUIPMENT SCHEDULE",
+        "matched_tokens": [
+          "EQUIPMENT",
+          "SCHEDULE"
+        ]
+      },
+      "suspectedExisting": true,
+      "existingReason": "x",
+      "existingDetection": "x",
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "x",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "EP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 150,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": 150,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "PP3",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel03.png",
+      "panelStatus": "detected but skipped (PP3)",
+      "panelNote": "Missing/invalid: bus amps | 3 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "hasExistingBreakers": true,
+      "existingBreakerCount": 3,
+      "existingBreakerNote": "3 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": null,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "PP2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel04.png",
+      "panelStatus": "detected but skipped (PP2)",
+      "panelNote": "Missing/invalid: bus amps | 6 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "hasExistingBreakers": true,
+      "existingBreakerCount": 6,
+      "existingBreakerNote": "6 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": null,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "LP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel05.png",
+      "panelStatus": "detected but skipped (LP)",
+      "panelNote": "Missing/invalid: bus amps | 4 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "hasExistingBreakers": true,
+      "existingBreakerCount": 4,
+      "existingBreakerNote": "4 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": null,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": 65,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "PP1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PanelSearchOutput/NoAmps_electrical_filtered_page001_panel06.png",
+      "panelStatus": "detected but skipped (PP1)",
+      "panelNote": "Missing/invalid: bus amps | 8 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "hasExistingBreakers": true,
+      "existingBreakerCount": 8,
+      "existingBreakerNote": "8 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope.",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": null,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": null,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "EQUIP.": {
+      "Skipped": "Equipment schedule detected"
+    },
+    "EP": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "PP3": {
+      "Skipped": "Missing/invalid: bus amps | 3 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope."
+    },
+    "PP2": {
+      "Skipped": "Missing/invalid: bus amps | 6 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope."
+    },
+    "LP": {
+      "Skipped": "Missing/invalid: bus amps | 4 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope."
+    },
+    "PP1": {
+      "Skipped": "Missing/invalid: bus amps | 8 breaker(s) marked EX/EXISTING in their descriptions. Review supply scope."
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 245288,
+  "cycle_time_str": "00:04:05:288",
+  "noticed_ts_ms": 1794092380581,
+  "parse_done_ts_ms": 1794092625869,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/NOAMPS__20261107_225940/PdfOutput/NoAmps_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_18",
+    "header_breakers_total": 0,
+    "table_breakers_total": 219
+  }
+}

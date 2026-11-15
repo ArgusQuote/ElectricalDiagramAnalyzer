@@ -1,0 +1,222 @@
+{
+  "ok": true,
+  "job_id": "K__20261107_223042",
+  "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042",
+  "saved_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/K.pdf",
+  "output_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042",
+  "images": [
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel01.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel02.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel03.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel04.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel05.png",
+    "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel06.png"
+  ],
+  "image_count": 6,
+  "components": [
+    {
+      "type": "panelboard",
+      "name": "N EPP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel01.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 100,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 100,
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "N EDP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel02.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": false,
+      "existingReason": "",
+      "existingDetection": "",
+      "attrs": {
+        "amperage": 400,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "E PP SEC2",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel03.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": true,
+      "existingReason": "Panel name field contains an '(E)' existing-panel designation: 'PANEL: (E) PP (SEC2)'.",
+      "existingDetection": "e_parenthetical_prefix",
+      "attrs": {
+        "amperage": 150,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "DP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel04.png",
+      "panelStatus": "detected but skipped (DP)",
+      "panelNote": "Switchboard detected",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": {
+        "kind": "switchboard",
+        "note": "Switchboard detected",
+        "matched_text": "SWITCHBOARD: (E) PANEL DP SWITCHBOARD: (E) PANEL DP",
+        "matched_tokens": [
+          "DP",
+          "E",
+          "PANEL",
+          "SWITCHBOARD"
+        ]
+      },
+      "suspectedExisting": true,
+      "existingReason": "x",
+      "existingDetection": "x",
+      "attrs": {
+        "amperage": "x",
+        "spaces": "NONE",
+        "voltage": "x",
+        "intRating": "x",
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "E LP",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel05.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": true,
+      "existingReason": "Panel name field contains an '(E)' existing-panel designation: 'PANEL: (E) LP'.",
+      "existingDetection": "e_parenthetical_prefix",
+      "attrs": {
+        "amperage": 125,
+        "spaces": "NONE",
+        "voltage": 480,
+        "intRating": null,
+        "mainBreakerAmperage": "NONE",
+        "detected_breakers": []
+      }
+    },
+    {
+      "type": "panelboard",
+      "name": "E PP SEC1",
+      "source": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PanelSearchOutput/K_electrical_filtered_page001_panel06.png",
+      "panelStatus": "",
+      "panelNote": "",
+      "hasExistingBreakers": false,
+      "existingBreakerCount": 0,
+      "existingBreakerNote": "",
+      "specialHeaderType": null,
+      "suspectedExisting": true,
+      "existingReason": "Panel name field contains an '(E)' existing-panel designation: 'PANEL: (E) PP (SEC1)'.",
+      "existingDetection": "e_parenthetical_prefix",
+      "attrs": {
+        "amperage": 150,
+        "spaces": "NONE",
+        "voltage": 208,
+        "intRating": null,
+        "mainBreakerAmperage": 150,
+        "detected_breakers": []
+      }
+    }
+  ],
+  "rules_result": {
+    "N EPP": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "N EDP": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "E PP SEC2": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "DP": {
+      "Skipped": "Switchboard detected"
+    },
+    "E LP": {
+      "Skipped": "Missing required attributes: spaces"
+    },
+    "E PP SEC1": {
+      "Skipped": "Missing required attributes: spaces"
+    }
+  },
+  "ui_overrides": {
+    "panelboards": {
+      "bussing_material": "ALUMINUM",
+      "allow_plug_on_breakers": true,
+      "rating_type": "FULLY_RATED",
+      "allow_feed_thru_lugs": true,
+      "default_trim_style": "FLUSH",
+      "enclosure": "NEMA1",
+      "allow_square_d_spd": true
+    },
+    "transformers": {
+      "winding_material": "ALUMINUM",
+      "temperature_rating": 150,
+      "default_type": "3PHASESTANDARD",
+      "weathershield": false,
+      "mounting": "FLOOR",
+      "resin_enclosure": "3R"
+    },
+    "disconnects": {
+      "allow_littlefuse": true,
+      "default_switch_type": "GENERAL_DUTY",
+      "default_enclosure": "NEMA1",
+      "default_fusible": true,
+      "default_ground_required": true,
+      "default_solid_neutral": true
+    }
+  },
+  "cycle_time_ms": 165371,
+  "cycle_time_str": "00:02:45:371",
+  "noticed_ts_ms": 1794090642842,
+  "parse_done_ts_ms": 1794090808214,
+  "debug": {
+    "kept_pages": [
+      1
+    ],
+    "dropped_pages": [],
+    "filtered_pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/K__20261107_223042/PdfOutput/K_electrical_filtered.pdf",
+    "pagefilter_log_json": "",
+    "api_version": "API_18",
+    "header_breakers_total": 0,
+    "table_breakers_total": 160
+  }
+}

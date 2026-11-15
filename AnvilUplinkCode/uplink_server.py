@@ -173,9 +173,9 @@ _log_run_fingerprint("init")
 
 # ---------- IMPORTS FROM REPO ----------
 from PageFilter.PageFilterV3 import PageFilter
-from VisualDetectionToolLibrary.PanelSearchToolV27 import PanelBoardSearch
+from VisualDetectionToolLibrary.PanelSearchToolV26 import PanelBoardSearch
 from OcrLibrary.BreakerTableParserAPIv18 import BreakerTablePipeline, API_VERSION, reset_name_deduper
-import RulesEngine.RulesEngine8 as RE2  # must expose process_job(payload)
+import RulesEngine.RulesEngine7 as RE2  # must expose process_job(payload)
 
 # Persistent worker subprocesses set this env var so module-level
 # initialization (Anvil connection, warmup, worker threads) is skipped.
@@ -3514,6 +3514,12 @@ def _merge_component_from_btp(result_dict: dict, src_img: str) -> dict:
     if notes:
         comp["notes"] = notes
         comp["attrs"]["breaker_data_suppressed"] = True
+
+    # Parser15+ reports which cell-classifier models ran and which cells they
+    # filled; kept for audit only, the Rules Engine never reads it.
+    cell_classifier = (prs or {}).get("cellClassifier")
+    if isinstance(cell_classifier, dict):
+        comp["cellClassifier"] = cell_classifier
 
     return comp
 

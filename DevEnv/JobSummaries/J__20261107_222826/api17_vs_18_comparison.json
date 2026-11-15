@@ -1,0 +1,58 @@
+[
+  {
+    "job": "J.pdf",
+    "crop": "J_electrical_filtered_page001_panel01.png",
+    "panel_v17": "MANUFACTURER",
+    "panel_v18": "MANUFACTURER",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "J.pdf",
+    "crop": "J_electrical_filtered_page001_panel02.png",
+    "panel_v17": "BA",
+    "panel_v18": "BA",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 42,
+    "v18_breakers": 42,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "J.pdf",
+    "crop": "J_electrical_filtered_page001_panel03.png",
+    "panel_v17": "MDP",
+    "panel_v18": "MDP",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 14,
+    "v18_breakers": 14,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "J.pdf",
+    "crop": "J_electrical_filtered_page001_panel04.png",
+    "panel_v17": "2A",
+    "panel_v18": "2A",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 13,
+    "v18_breakers": 13,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  }
+]

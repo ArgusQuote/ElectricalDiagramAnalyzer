@@ -1,0 +1,210 @@
+[
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page001_panel01.png",
+    "panel_v17": "L7L1",
+    "panel_v18": "L7L1",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 70,
+    "v18_breakers": 70,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page001_panel02.png",
+    "panel_v17": "L6L1",
+    "panel_v18": "L6L1",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 73,
+    "v18_breakers": 73,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page001_panel03.png",
+    "panel_v17": "L7L2",
+    "panel_v18": "L7L2",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 32,
+    "v18_breakers": 32,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page001_panel04.png",
+    "panel_v17": "L6L2",
+    "panel_v18": "L6L2",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 20,
+    "v18_breakers": 20,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page002_panel01.png",
+    "panel_v17": "(unnamed) (8)",
+    "panel_v18": "(unnamed) (8)",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page002_panel02.png",
+    "panel_v17": "(unnamed) (9)",
+    "panel_v18": "(unnamed) (9)",
+    "status": "MATCH",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 0,
+    "v18_breakers": 0,
+    "raw_changed": false,
+    "raw_differences": [],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page002_panel03.png",
+    "panel_v17": "EL7H",
+    "panel_v18": "EL7H",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 6,
+    "v18_breakers": 6,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page002_panel04.png",
+    "panel_v17": "ELGH",
+    "panel_v18": "ELGH",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 24,
+    "v18_breakers": 24,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page003_panel01.png",
+    "panel_v17": "EJLGLM",
+    "panel_v18": "EJLGLM",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 18,
+    "v18_breakers": 18,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page003_panel02.png",
+    "panel_v17": "EJLGEH",
+    "panel_v18": "EJLGEH",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 46,
+    "v18_breakers": 46,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  },
+  {
+    "job": "Panels_Example.pdf",
+    "crop": "Panels_Example_electrical_filtered_page003_panel03.png",
+    "panel_v17": "ELGEL",
+    "panel_v18": "ELGEL",
+    "status": "RAW_ONLY",
+    "field_differences": [],
+    "breaker_differences": [],
+    "v17_breakers": 25,
+    "v18_breakers": 25,
+    "raw_changed": true,
+    "raw_differences": [
+      {
+        "path": "parser.parserVersion",
+        "v17": "\"BreakerParser14\"",
+        "v18": "\"BreakerParser15\""
+      }
+    ],
+    "error": ""
+  }
+]

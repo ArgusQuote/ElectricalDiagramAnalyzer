@@ -35,6 +35,9 @@ _PARSER_APIS = {
     "13": "OcrLibrary.BreakerTableParserAPIv13",
     "14": "OcrLibrary.BreakerTableParserAPIv14",
     "15": "OcrLibrary.BreakerTableParserAPIv15",
+    "16": "OcrLibrary.BreakerTableParserAPIv16",
+    "17": "OcrLibrary.BreakerTableParserAPIv17",
+    "18": "OcrLibrary.BreakerTableParserAPIv18",
 }
 DEFAULT_PARSER_API = "15"
 

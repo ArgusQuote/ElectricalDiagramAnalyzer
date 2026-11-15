@@ -1,0 +1,52 @@
+{
+  "summary": {
+    "jobs_processed": 1,
+    "job_failures": 0,
+    "panels_compared": 2,
+    "matches": 0,
+    "changed": 0,
+    "incomplete": 0,
+    "raw_only": 2,
+    "errors": 0,
+    "breaker_type_differences": 0,
+    "gfi_type_differences": 0,
+    "absolute_breaker_quantity_differences": 0
+  },
+  "jobs": [
+    {
+      "job": "chucksmall.pdf",
+      "pdf": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/SourcePdf/chucksmall.pdf",
+      "job_dir": "/home/paperspace/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/CHUCKSMALL__20261105_012216",
+      "panels": [
+        {
+          "job": "chucksmall.pdf",
+          "crop": "chucksmall_electrical_filtered_page001_panel01.png",
+          "panel_v17": "OTEPLA2I",
+          "panel_v18": "OTEPLA2I",
+          "status": "RAW_ONLY",
+          "field_differences": [],
+          "breaker_differences": [],
+          "v17_breakers": 42,
+          "v18_breakers": 42,
+          "raw_changed": true,
+          "error": ""
+        },
+        {
+          "job": "chucksmall.pdf",
+          "crop": "chucksmall_electrical_filtered_page001_panel02.png",
+          "panel_v17": "OTEPLA3",
+          "panel_v18": "OTEPLA3",
+          "status": "RAW_ONLY",
+          "field_differences": [],
+          "breaker_differences": [],
+          "v17_breakers": 37,
+          "v18_breakers": 37,
+          "raw_changed": true,
+          "error": ""
+        }
+      ],
+      "status": "DONE",
+      "time_seconds": 92.06
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-# OcrLibrary/BreakerTableParserAPIv15.py
+# OcrLibrary/BreakerTableParserAPIv16.py
 import sys, os, inspect
 import re
 import cv2
@@ -10,7 +10,7 @@ _REPO_ROOT  = os.path.dirname(_OCRLIB_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-API_VERSION = "API_15"
+API_VERSION = "API_16"
 API_ORIGIN  = __file__
 
 SNAP_MAP = {

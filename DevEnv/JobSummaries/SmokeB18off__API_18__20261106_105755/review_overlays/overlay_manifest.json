@@ -1,0 +1,29 @@
+{
+  "batch_id": "SmokeB18off__API_18__20261106_105755",
+  "batch_summary": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/SmokeB18off__API_18__20261106_105755/batch_summary.json",
+  "output_dir": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/SmokeB18off__API_18__20261106_105755/review_overlays",
+  "overlay_count": 3,
+  "overlays": [
+    {
+      "pdf_stem": "B",
+      "panel_name": "A",
+      "source": "/tmp/smoke_art18off/B/PanelSearchOutput/review_overlays/A_review_overlay.png",
+      "dest": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/SmokeB18off__API_18__20261106_105755/review_overlays/B__A_review_overlay.png",
+      "dest_name": "B__A_review_overlay.png"
+    },
+    {
+      "pdf_stem": "B",
+      "panel_name": "B",
+      "source": "/tmp/smoke_art18off/B/PanelSearchOutput/review_overlays/B_review_overlay.png",
+      "dest": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/SmokeB18off__API_18__20261106_105755/review_overlays/B__B_review_overlay.png",
+      "dest_name": "B__B_review_overlay.png"
+    },
+    {
+      "pdf_stem": "B",
+      "panel_name": "LIA",
+      "source": "/tmp/smoke_art18off/B/PanelSearchOutput/review_overlays/LIA_review_overlay.png",
+      "dest": "/home/marco/ElectricalDiagramAnalyzer/DevEnv/JobSummaries/SmokeB18off__API_18__20261106_105755/review_overlays/B__LIA_review_overlay.png",
+      "dest_name": "B__LIA_review_overlay.png"
+    }
+  ]
+}
