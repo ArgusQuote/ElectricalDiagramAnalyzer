@@ -230,9 +230,20 @@ class BreakerTablePipeline:
         # optional faint fill
         if fill_alpha and fill_alpha > 0.0:
             a = float(max(0.0, min(1.0, fill_alpha)))
-            overlay = vis.copy()
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), color_bgr, -1)
-            cv2.addWeighted(overlay, a, vis, 1.0 - a, 0, dst=vis)
+
+            # Blend only the highlighted rectangle, not the full image.
+            region = vis[y1:y2 + 1, x1:x2 + 1]
+            overlay = region.copy()
+            overlay[:] = color_bgr
+
+            cv2.addWeighted(
+                overlay,
+                a,
+                region,
+                1.0 - a,
+                0,
+                dst=region
+            )
 
         # outline
         cv2.rectangle(vis, (x1, y1), (x2, y2), color_bgr, int(thickness))
@@ -463,7 +474,19 @@ class BreakerTablePipeline:
 
     def _ensure_analyzer(self):
         if self._analyzer is None:
-            self._analyzer = BreakerTableAnalyzer(debug=self.debug, reader=self._shared_reader)
+            self._analyzer = BreakerTableAnalyzer(
+                debug=self.debug,
+                reader=self._shared_reader
+            )
+
+            # Reuse the reader the analyzer already initialized.
+            if self._shared_reader is None:
+                self._shared_reader = getattr(
+                    self._analyzer,
+                    "reader",
+                    None
+                )
+
         return self._analyzer
 
     def _ensure_header_parser(self):
