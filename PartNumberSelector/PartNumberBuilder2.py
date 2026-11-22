@@ -356,9 +356,34 @@ class breakerSelector:
                 return self.amperage in allowed
             else:
                 return False
+
+        # Class A GFI combinations are more restrictive than
+        # standard QO/QOB breaker availability.
+        # Schneider 2024 Digest: Tables 7.9 and 9.8.
+        if self.specialFeatures == "GFI":
+            gfi_amperages = {
+                "QO": {
+                    1: (15, 20, 30),
+                    2: (15, 20, 25, 30, 35, 40, 45, 50, 60),
+                    3: (15, 20, 30, 40, 50),
+                },
+                "QOB": {
+                    1: (15, 20, 25, 30),
+                    2: (15, 20, 25, 30, 40, 50, 60),
+                    3: (15, 20, 30, 40, 50),
+                },
+                "QO-VH": {1: (15, 20)},
+                "QOB-VH": {1: (15, 20, 25, 30)},
+            }
+
+            return self.amperage in gfi_amperages.get(
+                self.breakerType, {}
+            ).get(self.poles, ())
+        
         # For all other breaker types, use the standard special feature map.
         specialFeatureMap = self.getSpecialFeatureMap()
         return self.specialFeatures in specialFeatureMap.get(self.amperage, [])
+
 
     def getAmperageOptionsByPoles(self):
         # QOH mapping (unchanged)
@@ -372,9 +397,9 @@ class breakerSelector:
             if self.poles == 1:
                 return { 15: [22], 20: [22], 25: [22], 30: [22], 40: [22], 50: [22], 60: [22], 70: [22],}
             elif self.poles == 2:
-                return { 15: [22], 20: [22], 25: [22], 30: [22], 40: [22], 50: [22], 60: [22], 70: [22], 80: [22], 90: [22], 100: [22], 110: [22], 125: [22], 150: [22], 175: [22], 200: [22],}
+                return {a: [22] for a in [15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150] + ([200] if self.breakerType == "QO-VH" else [])}
             elif self.poles == 3:
-                return { 15: [22], 20: [22], 25: [22], 30: [22], 40: [22], 50: [22], 60: [22], 70: [22], 80: [22], 90: [22], 100: [22],}
+                return {a: [22] for a in [15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100] + ([110, 125, 150] if self.breakerType == "QOB-VH" else [])}
         # QO and QOB mapping
         elif self.breakerType in ["QO", "QOB"]:
             if self.poles == 1:
@@ -392,6 +417,7 @@ class breakerSelector:
         else:
             # Fallback (should not occur)
             return {}
+
 
     def getSpecialFeatureMap(self):
         # Standard mapping used for non-HOM types.
@@ -1687,10 +1713,16 @@ class nqPanelboard():
             and 'NQMB6PPL' in _hiddenMainBreakerKits
         )
 
+
         if enclosure == 'NEMA3R':
+            if typeOfMain == 'MAIN LUG' and amperage == 600:
+                wp_box_heights = {30: 62, 42: 62, 54: 68, 84: 80}
+                boxNumber = wp_box_heights.get(spaces, boxNumber)
+
             trimPartNumber = (
                 None if powpact_l_main else f"MH{boxNumber}WP"
             )
+
         else:
             # For NEMA1, determine trim based on trim style and amperage
             if trimStyle == '':
@@ -1706,13 +1738,21 @@ class nqPanelboard():
         else:
             boxPartNumber = f"MH{boxNumber}{'D9' if powpact_l_main else 'BE'}"
 
+
         output = {
             "Interior": interiorPartNumber,
             "Box": boxPartNumber
         }
 
+        if material == 'ALUMINUM' and interiorPartNumber.endswith('C'):
+            output.setdefault("Notes", []).append(
+                f"Requested ALUMINUM bus, but {interiorPartNumber} is COPPER-only. "
+                "Catalog-required material substitution; user review required."
+            )
+
         if enclosure != 'NEMA3R':
             output["Trim"] = trimPartNumber
+
         elif powpact_l_main:
             output.setdefault("Notes", []).append(
                 "PowerPacT L main-breaker NEMA 3R configurations have no "
@@ -2041,7 +2081,7 @@ class nfPanelboard():
                 trimPartNumber = f"NC{boxNumber}V{mappings['trimStyleMap'][trimStyle]}"
             else:
                 trimPartNumber = f"NC{boxNumber}{mappings['trimStyleMap'][trimStyle]}"
-            if enclosure == 'NEMA1' and amperage == 600:
+            if enclosure == 'NEMA1' and amperage == 600 and typeOfMain == 'MAIN BREAKER':
                 trimPartNumber += "3PNF"
 
         if enclosure == 'NEMA3R':
@@ -2051,12 +2091,20 @@ class nfPanelboard():
         else:
             boxPartNumber = f"MH{boxNumber}{'D9' if powpact_l_main else 'BE'}"
 
+
         output = {
             "Interior": interiorPartNumber,
             "Box": boxPartNumber
         }
 
+        if material == 'ALUMINUM' and interiorPartNumber.endswith('C'):
+            output.setdefault("Notes", []).append(
+                f"Requested ALUMINUM bus, but {interiorPartNumber} is COPPER-only. "
+                "Catalog-required material substitution; user review required."
+            )
+
         if unlisted_l_spaces:
+
             output.setdefault("Notes", []).append(
                 f"NF PowerPacT L main-breaker arrangement with {spaces} "
                 "spaces is not listed as a merchandised assembly. "
@@ -2361,19 +2409,21 @@ class iLinePanelboard():
         ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCP', 'HCP18686M', 'HCW68TS', 'HC4268DB'),
         ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCP', 'HCP18686M', 'HCW68TFD', 'HC4268DB'),
         ('MAIN BREAKER', 600, 36, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCP', 'HCP18686M', 'HCW68TSD', 'HC4268DB'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCP', 'HCP18688M', 'HCW68TF', 'HC4268DB'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCP', 'HCP18688M', 'HCW68TS', 'HC4268DB'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCP', 'HCP18688M', 'HCW68TFD', 'HC4268DB'),
-        ('MAIN BREAKER', 800, 36, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCP', 'HCP18688M', 'HCW68TSD', 'HC4268DB'),
+
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'COPPER', 'FLUSH'): ('HCP', 'HCP18688M', 'HCW68TF', 'HC4268DB'),
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'COPPER', 'SURFACE'): ('HCP', 'HCP18688M', 'HCW68TS', 'HC4268DB'),
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'COPPER', 'FLUSH WITH DOOR'): ('HCP', 'HCP18688M', 'HCW68TFD', 'HC4268DB'),
+        ('MAIN BREAKER', 800, 36, 'NEMA1', 'COPPER', 'SURFACE WITH DOOR'): ('HCP', 'HCP18688M', 'HCW68TSD', 'HC4268DB'),
         # 72 Spaces
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCP', 'HCP36866M', 'HCW86TF', 'HC4268DB'),
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCP', 'HCP36866M', 'HCW86TS', 'HC4268DB'),
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCP', 'HCP36866M', 'HCW86TFD', 'HC4268DB'),
-        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCP', 'HCP36866M', 'HCW86TSD', 'HC4268DB'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCP', 'HCP36868M', 'HCW86TF', 'HC4286DB'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCP', 'HCP36868M', 'HCW86TS', 'HC4286DB'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCP', 'HCP36868M', 'HCW86TFD', 'HC4286DB'),
-        ('MAIN BREAKER', 800, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCP', 'HCP36868M', 'HCW86TSD', 'HC4286DB'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCP', 'HCP36866M', 'HCW86TF', 'HC4286DB'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCP', 'HCP36866M', 'HCW86TS', 'HC4286DB'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'FLUSH WITH DOOR'): ('HCP', 'HCP36866M', 'HCW86TFD', 'HC4286DB'),
+        ('MAIN BREAKER', 600, 72, 'NEMA1', 'ALUMINUM', 'SURFACE WITH DOOR'): ('HCP', 'HCP36866M', 'HCW86TSD', 'HC4286DB'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'COPPER', 'FLUSH'): ('HCP', 'HCP36868M', 'HCW86TF', 'HC4286DB'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'COPPER', 'SURFACE'): ('HCP', 'HCP36868M', 'HCW86TS', 'HC4286DB'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'COPPER', 'FLUSH WITH DOOR'): ('HCP', 'HCP36868M', 'HCW86TFD', 'HC4286DB'),
+        ('MAIN BREAKER', 800, 72, 'NEMA1', 'COPPER', 'SURFACE WITH DOOR'): ('HCP', 'HCP36868M', 'HCW86TSD', 'HC4286DB'),
+
         # HCR-U Main Breaker (Requires selection of MCCB, e.g., PG, PJ, PL, RGC, RJC, RLC)
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'FLUSH'): ('HCR-U', 'HCR548612U', 'HCR86TF', 'HC4486DB'),
         ('MAIN BREAKER', 1200, 108, 'NEMA1', 'ALUMINUM', 'SURFACE'): ('HCR-U', 'HCR548612U', 'HCR86TS', 'HC4486DB'),

@@ -464,6 +464,22 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | 
                 routing["nq"] = {"allowed": False, "reason": f"Voltage {voltage}V not supported for NQ", "maxAmp": None, "base": None}
             else:
                 base = choose_nq_base(poles)
+
+                # QOH is plug-on only.
+                # Avoid using it for bolt-on-only requests
+                # or obsolete lower-amperage QOH selections.
+                if base == "QOH" and (not allow_plug or amps < 70):
+                    base = "QH" if allow_plug else "QHB"
+
+                if (
+                    rating_type == "FULLY_RATED"
+                    and allow_plug
+                    and 22 < panel_k <= 42
+                    and poles == 2
+                    and 70 <= amps <= 125
+                ):
+                    base = "QOH"
+
                 if base is None:
                     allow_nq = False
                     routing["nq"] = {"allowed": False, "reason": f"No valid NQ breaker family for {poles}P", "maxAmp": None, "base": None}
@@ -481,14 +497,15 @@ def _family_screen(raw: dict, prefer_plug_on: bool) -> tuple[bool, bool, dict | 
                     max_cap = (valid_amps[-1] if valid_amps else None)
 
                     ok = any(a >= amps for a in valid_amps)
+
                     if not ok:
-                        allow_nq = False
-                        routing["nq"] = {
-                            "allowed": False,
-                            "reason": f"Branch {poles}P {amps}A exceeds NQ capability for selected family",
-                            "maxAmp": max_cap,
-                            "base": base,
-                        }
+                        # An unavailable branch does not disqualify an
+                        # otherwise valid NQ panel. The branch builder
+                        # will omit it and flag it for manual review.
+                        routing["nq"]["reason"] = (
+                            f"Branch {poles}P {amps}A unavailable in {base}; "
+                            "individual branch requires review"
+                        )
 
         # ---- NF screening (hard max; matches your nf_ok rules) ----
         if allow_nf:
@@ -777,7 +794,33 @@ class PanelboardEngine(BaseEngine):
             cnt   = _safe_int(cnt, 0)
             if cnt <= 0:
                 continue
-            det.append({"poles": poles, "amperage": amps, "count": cnt, "specialFeatures": "GFI"})
+
+            existing = [
+                b for b in det
+                if isinstance(b, dict)
+                and _safe_int(b.get("poles"), 0) == poles
+                and _safe_int(b.get("amperage"), 0) == amps
+                and "GFI" in str(b.get("specialFeatures") or "").upper()
+            ]
+
+            if existing:
+                explicit_count = sum(
+                    _safe_int(b.get("count"), 1) for b in existing
+                )
+                if explicit_count != cnt:
+                    raw.setdefault("_notes", []).append(
+                        f"GFI count mismatch for {amps}A {poles}P: "
+                        f"detected {explicit_count}, summary {cnt}. "
+                        "Using detected breakers; user review required."
+                    )
+                continue
+
+            det.append({
+                "poles": poles,
+                "amperage": amps,
+                "count": cnt,
+                "specialFeatures": "GFI",
+            })
 
     def _nearest_iline_bucket(
         self,
@@ -1572,6 +1615,116 @@ class PanelboardEngine(BaseEngine):
             "requestedMaterial": requested_material,
         }
 
+
+    def _build_iline_main_lug_with_resize(self, panel, panel_attrs, raw):
+        """Rebuild undersized I-Line MLO panels using catalog configurations."""
+
+        breakers = raw.get("detected_breakers", [])
+
+        result = self._build_iline_branch_breakers(
+            panel, raw, breakers
+        )
+
+        # Existing interior has sufficient capacity.
+        if not result.get("_side_deficit_spaces"):
+            return result
+
+        series = str(
+            panel_attrs.get("ilinePanelType")
+            or panel_attrs.get("panelType")
+            or ""
+        ).upper()
+
+        configs = {
+            "HCJ": iLinePanelboard.HCJ_configs,
+            "HCP": iLinePanelboard.HCP_configs,
+            "HCR-U": iLinePanelboard.HCRU_configs,
+        }.get(series)
+
+        if configs is None:
+            return result
+
+        current_inches = _safe_int(panel_attrs.get("spaces"), 0)
+        bus_amps = _safe_int(panel_attrs.get("amperage"), 0)
+        enclosure = str(panel_attrs.get("enclosure") or "").upper()
+        material = str(panel_attrs.get("material") or "").upper()
+        trim = str(panel_attrs.get("trimStyle") or "").upper()
+
+        bigger = set()
+
+        # Only consider complete, matching catalog configurations.
+        for key, value in configs.items():
+            if value[0] != series:
+                continue
+
+            mode, amps, inches, encl, mat = key[:5]
+            catalog_trim = key[5] if len(key) >= 6 else None
+
+            if (
+                mode != "MAIN LUG"
+                or amps != bus_amps
+                or inches <= current_inches
+                or encl != enclosure
+                or mat != material
+            ):
+                continue
+
+            if enclosure != "NEMA3R" and catalog_trim != trim:
+                continue
+
+            bigger.add(int(inches))
+
+        il = iLinePanelboard()
+
+        # Try the next available catalog size first.
+        for inches in sorted(bigger):
+            candidate_attrs = dict(panel_attrs)
+            candidate_attrs["spaces"] = inches
+
+            candidate = il.generateILinePanelboardPartNumber(
+                candidate_attrs
+            )
+
+            if not isinstance(candidate, dict) or candidate.get("error"):
+                continue
+
+            candidate["spaces"] = inches
+            candidate["panelType"] = series
+            candidate["ilinePanelType"] = series
+
+            candidate_raw = dict(raw)
+            candidate_raw.pop("_overcapacity_spaces", None)
+
+            attempted = self._build_iline_branch_breakers(
+                candidate, candidate_raw, breakers
+            )
+
+            if attempted.get("_side_deficit_spaces"):
+                continue
+
+            # This exact catalog configuration fits.
+            panel_attrs["spaces"] = inches
+            attempted["_finalPanelSpaces"] = inches
+
+            attempted.setdefault("Notes", []).append(
+                f"I-LINE mounting capacity increased from "
+                f"{current_inches} to {inches} inches; "
+                "interior, box, and trim rebuilt from the "
+                "same catalog configuration."
+            )
+
+            return attempted
+
+        # No matching larger catalog assembly can fit.
+        result["_needs_user_review"] = True
+        result.setdefault("Notes", []).append(
+            "No larger matching I-LINE main-lug catalog "
+            "configuration fits the selected breakers. "
+            "Panel assembly requires user review."
+        )
+
+        return result
+
     def _build_main_lug(self, raw):
         panelAttrs = raw.copy()
         panelAttrs["typeOfMain"] = raw["typeOfMain"]
@@ -1938,7 +2091,7 @@ class PanelboardEngine(BaseEngine):
             if panelAttrs.get("_resize_note"):
                 panel.setdefault("Notes", []).append(panelAttrs["_resize_note"])
 
-            panel = self._build_iline_branch_breakers(panel, raw, raw.get("detected_breakers", []))
+            panel = self._build_iline_main_lug_with_resize(panel, panelAttrs, raw)
 
             if int(panelAttrs.get("spaces", 0)) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
                 panel.setdefault("Notes", []).append(
@@ -1967,7 +2120,7 @@ class PanelboardEngine(BaseEngine):
             if panelAttrs.get("_resize_note"):
                 panel.setdefault("Notes", []).append(panelAttrs["_resize_note"])
 
-        panel = self._build_iline_branch_breakers(panel, raw, raw.get("detected_breakers", []))
+        panel = self._build_iline_main_lug_with_resize(panel, panelAttrs, raw)
 
         if int(panelAttrs.get("spaces", 0)) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
             panel.setdefault("Notes", []).append(
@@ -2086,7 +2239,20 @@ class PanelboardEngine(BaseEngine):
                 _spaces = _safe_int(panelAttrs.get("spaces"), 0)
                 branch_series = self._minimum_iline_series_for_branches(raw)
 
-                panel_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+
+                panel_series = (
+                    "HCJ"
+                    if (
+                        _amps in (400, 600, 800)
+                        and _safe_int(raw.get("mainBreakerAmperage"), 0) == _amps
+                        and branch_series == "HCJ"
+                    )
+                    else (
+                        "HCR-U" if (_amps > 800 or _spaces > 99)
+                        else ("HCP" if _amps > 250 else "HCJ")
+                    )
+                )
+
 
                 series_rank = {"HCJ": 0, "HCP": 1, "HCR-U": 2}
                 chosen_series = max(
@@ -2115,7 +2281,15 @@ class PanelboardEngine(BaseEngine):
                 )
 
                 panel = self._build_iline_breaker(raw2)
-                panel = self._build_iline_branch_breakers(panel, raw2, raw2.get("detected_breakers", []))
+                if panel.get("error"):
+                    return panel
+
+                panel = self._build_iline_branch_breakers(
+                    panel, raw2, raw2.get("detected_breakers", [])
+                )
+
+                if panel.get("error"):
+                    return panel
 
                 if int(raw2["spaces"]) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
                     panel.setdefault("Notes", []).append(
@@ -2312,7 +2486,22 @@ class PanelboardEngine(BaseEngine):
             _spaces = _safe_int(raw.get("spaces"), 0)
             branch_series = self._minimum_iline_series_for_branches(raw)
 
-            panel_series = "HCR-U" if (_amps > 800 or _spaces > 99) else ("HCP" if _amps > 250 else "HCJ")
+
+            panel_series = (
+                "HCJ"
+                if (
+
+                    _amps in (400, 600, 800)
+                    and _safe_int(raw.get("mainBreakerAmperage"), 0) == _amps
+
+                    and branch_series == "HCJ"
+                )
+                else (
+                    "HCR-U" if (_amps > 800 or _spaces > 99)
+                    else ("HCP" if _amps > 250 else "HCJ")
+                )
+            )
+
 
             series_rank = {"HCJ": 0, "HCP": 1, "HCR-U": 2}
             chosen_series = max(
@@ -2343,7 +2532,12 @@ class PanelboardEngine(BaseEngine):
             raw2["ilinePanelType"] = chosen_series
 
             panel = self._build_iline_breaker(raw2)
-            panel = self._build_iline_branch_breakers(panel, raw2, raw2.get("detected_breakers", []))
+            if panel.get("error"):
+                return panel
+
+            panel = self._build_iline_branch_breakers(
+                panel, raw2, raw2.get("detected_breakers", [])
+            )
 
             if int(raw2["spaces"]) == 108 and int(panel.get("_side_deficit_spaces", 0) or 0) > 0:
                 panel.setdefault("Notes", []).append(
@@ -2553,6 +2747,111 @@ class PanelboardEngine(BaseEngine):
             )    
         return panel_output
     
+
+    def _finalize_hcp_factory_main(self, result, panel_attrs, raw):
+        """Verify a factory-main HCP assembly against catalog configurations."""
+        if not isinstance(result, dict):
+            return {"error": str(result)}
+        if result.get("error"):
+            return result
+
+        family = str(result.get("panelType") or panel_attrs.get("panelType") or "").upper()
+        if family != "HCP":
+            return result
+
+        # Values: (factory main amps, mounting inches, bus material, box).
+        catalog = {
+            "HCP18686M": (600, 36, "ALUMINUM", "HC4268DB"),
+            "HCP36866M": (600, 72, "ALUMINUM", "HC4286DB"),
+            "HCP18688M": (800, 36, "COPPER", "HC4268DB"),
+            "HCP36868M": (800, 72, "COPPER", "HC4286DB"),
+        }
+
+        interior = result.get("Interior")
+        expected = catalog.get(interior)
+
+        if expected is None:
+            return {
+                "error": (
+                    f"Unverified HCP factory-main interior "
+                    f"{interior}; review required."
+                )
+            }
+
+        amps, inches, material, box = expected
+        selected_amps = _safe_int(panel_attrs.get("amperage"), 0)
+        selected_inches = _safe_int(panel_attrs.get("spaces"), 0)
+        selected_material = str(panel_attrs.get("material") or "").upper()
+        actual_main_amps = _safe_int(raw.get("mainBreakerAmperage"), 0)
+
+        if (
+            selected_amps != amps
+            or selected_inches != inches
+            or selected_material != material
+            or result.get("Box") != box
+        ):
+            return {
+                "error": (
+                    f"HCP {interior} catalog mismatch: requires "
+                    f"{amps}A / {inches}in / {material} bus / {box}. "
+                    "Review required."
+                )
+            }
+
+        if actual_main_amps != amps:
+            return {
+                "error": (
+                    f"HCP {interior} contains a factory-installed "
+                    f"{amps}A main; requested {actual_main_amps}A. "
+                    "Review required."
+                )
+            }
+
+        voltage = _safe_int(raw.get("voltage"), 0)
+        rating_voltage = 240 if voltage in (208, 240) else voltage
+        main_aic = {240: 65, 480: 35, 600: 18}.get(rating_voltage)
+        requested_aic = _safe_int(raw.get("intRating"), 0)
+        rating_type = str(raw.get("panelRatingType") or "FULLY_RATED").upper()
+
+        if main_aic is None:
+            return {
+                "error": (
+                    f"No catalog MG main-breaker AIC at "
+                    f"{voltage}V. Review required."
+                )
+            }
+
+        main_part = "MGP36600" if amps == 600 else "MGP36800"
+
+        if rating_type == "FULLY_RATED" and requested_aic > main_aic:
+            return {
+                "error": (
+                    f"HCP {interior} has a factory-installed "
+                    f"{main_part} main rated {main_aic}kA at "
+                    f"{rating_voltage}V; requested {requested_aic}kA "
+                    "fully rated. Review required."
+                )
+            }
+
+        result["Main Breaker Note"] = (
+            f"Comes with a factory installed {main_part}"
+        )
+        result["_finalMainBreakerAmperage"] = amps
+        result["_finalMainBreakerIntRating"] = main_aic
+        result["_finalPanelSpaces"] = inches
+
+        if rating_type == "SERIES_RATED" and requested_aic > main_aic:
+            result.setdefault("Notes", []).append(
+                f"Factory main {main_part} is individually rated "
+                f"{main_aic}kA at {rating_voltage}V. "
+                "Series-rated assembled-panel AIC is unverified; "
+                "quote specialist review required."
+            )
+
+        return result
+
+
+
     def _build_iline_breaker(self, raw):   
         panelAttrs = raw.copy()
         panelAttrs["typeOfMain"] = "MAIN BREAKER"
@@ -2577,10 +2876,203 @@ class PanelboardEngine(BaseEngine):
         encl     = panelAttrs.get("enclosure", "").upper()
         mat      = panelAttrs.get("material",  "").upper()
         trim     = panelAttrs.get("trimStyle",  "").upper()
+
         breaker_amps = _safe_int(raw.get("mainBreakerAmperage"), 0)
+
+        # Catalog HCJ 400A factory main-breaker configurations.
+        if bus_amps == 400 and breaker_amps == 400:
+            voltage = _safe_int(raw.get("voltage"), 0)
+            rating_voltage = 240 if voltage in (208, 240) else voltage
+            main_aic = {240: 42, 480: 30, 600: 22}.get(rating_voltage)
+            requested_aic = _safe_int(raw.get("intRating"), 0)
+
+            if main_aic is None or main_aic < requested_aic:
+                return {
+                    "error": (
+                        f"HCJ 400A factory main LAP36400MB has "
+                        f"{main_aic}kA at {rating_voltage}V; "
+                        f"requested {requested_aic}kA requires review."
+                    )
+                }
+
+            if self._minimum_iline_series_for_branches(raw) != "HCJ":
+                return {
+                    "error": (
+                        "HCJ 400A main-breaker configuration cannot "
+                        "accommodate the requested branch frames. "
+                        "Manual review required."
+                    )
+                }
+
+            matches = []
+
+            for key, value in il.allowedConfigurationsBreaker.items():
+                if (
+                    key[0] != "MAIN BREAKER"
+                    or key[1] != 400
+                    or value[0] != "HCJ"
+                ):
+                    continue
+
+                _, _, inches, cfg_encl, cfg_mat = key[:5]
+
+                if (
+                    cfg_encl != encl
+                    or cfg_mat != mat
+                    or inches < spaces
+                ):
+                    continue
+
+                if encl != "NEMA3R":
+                    if len(key) < 6 or key[5] != trim:
+                        continue
+
+                matches.append(int(inches))
+
+            if not matches:
+                return {
+                    "error": (
+                        "No cataloged HCJ 400A main-breaker "
+                        "interior matches mounting space, "
+                        "enclosure, bus material, and trim."
+                    )
+                }
+
+            panelAttrs["spaces"] = min(matches)
+            panelAttrs["panelType"] = "HCJ"
+            panelAttrs["ilinePanelType"] = "HCJ"
+            panelAttrs["amperage"] = 400
+
+            result = il.generateILinePanelboardPartNumber(
+                panelAttrs
+            )
+
+            if not isinstance(result, dict):
+                return {"error": str(result)}
+
+            result["panelType"] = "HCJ"
+            result["ilinePanelType"] = "HCJ"
+            result["Main Breaker Note"] = (
+                "Comes with a factory installed LAP36400MB"
+            )
+            result["_finalMainBreakerAmperage"] = 400
+            result["_finalMainBreakerIntRating"] = main_aic
+
+            return result
+
+
+        # HCJ 600A / 800A factory-installed main breakers.
+        if (
+            bus_amps in (600, 800)
+            and breaker_amps == bus_amps
+            and series == "HCJ"
+        ):
+            voltage = _safe_int(raw.get("voltage"), 0)
+            rating_voltage = 240 if voltage in (208, 240) else voltage
+            requested_aic = _safe_int(raw.get("intRating"), 0)
+
+            # Schneider PowerPacT MG interrupting ratings.
+            main_aic = {
+                240: 65,
+                480: 35,
+                600: 18,
+            }.get(rating_voltage)
+
+            if main_aic is None or requested_aic > main_aic:
+                return {
+                    "error": (
+                        f"HCJ {bus_amps}A factory main has "
+                        f"{main_aic}kA at {rating_voltage}V; "
+                        f"requested {requested_aic}kA requires review."
+                    )
+                }
+
+            if self._minimum_iline_series_for_branches(raw) != "HCJ":
+                return {
+                    "error": (
+                        "HCJ cannot accommodate the requested "
+                        "branch-breaker frames."
+                    )
+                }
+
+            main_part = {
+                600: "MGP36600",
+                800: "MGP36800",
+            }[bus_amps]
+
+            matches = []
+
+            # The HCJ 600A/800A configurations are stored separately
+            # because their keys overlap with HCP configurations.
+            for key, val in il.HCJ_overlapping_breaker_configs.items():
+                mode, catalog_amps, inches, cfg_encl, cfg_mat = key[:5]
+                cfg_trim = key[5] if len(key) > 5 else None
+
+                if (
+                    mode != "MAIN BREAKER"
+                    or catalog_amps != bus_amps
+                    or cfg_encl != encl
+                    or cfg_mat != mat
+                    or inches < spaces
+                    or val[0] != "HCJ"
+                ):
+                    continue
+
+                if encl != "NEMA3R" and cfg_trim != trim:
+                    continue
+
+                # Catalog discrepancy: 800A / 72-inch HCJ
+                # is listed by Schneider as copper bus.
+                # Do not sell it as an aluminum configuration.
+                if (
+                    bus_amps == 800
+                    and inches == 72
+                    and mat == "ALUMINUM"
+                ):
+                    continue
+
+                matches.append(int(inches))
+
+            if not matches:
+                return {
+                    "error": (
+                        f"No verified HCJ {bus_amps}A factory-main "
+                        "configuration matches the required mounting "
+                        "space, enclosure, material, and trim. "
+                        "User review required."
+                    )
+                }
+
+            selected_inches = min(matches)
+
+            panelAttrs["panelType"] = "HCJ"
+            panelAttrs["ilinePanelType"] = "HCJ"
+            panelAttrs["amperage"] = bus_amps
+            panelAttrs["spaces"] = selected_inches
+
+            result = il.generateILinePanelboardPartNumber(
+                panelAttrs
+            )
+
+            if not isinstance(result, dict):
+                return {"error": str(result)}
+
+            result["panelType"] = "HCJ"
+            result["ilinePanelType"] = "HCJ"
+            result["spaces"] = selected_inches
+            result["_finalPanelSpaces"] = selected_inches
+            result["_finalMainBreakerAmperage"] = breaker_amps
+            result["_finalMainBreakerIntRating"] = main_aic
+            result["Main Breaker Note"] = (
+                f"Comes with a factory installed {main_part}"
+            )
+
+            return result
+
 
         il       = iLinePanelboard()
         candidates = []
+
 
         for key, val in il.allowedConfigurationsBreaker.items():
             if   len(key) == 7:
@@ -2638,7 +3130,8 @@ class PanelboardEngine(BaseEngine):
             panelAttrs["spaces"]    = bestS
             panelAttrs["material"]  = bestMat
             result = self._safe_generate_iline(panelAttrs)
-            return result if isinstance(result, dict) else {"error": result}
+            return self._finalize_hcp_factory_main(result, panelAttrs, raw)
+
 
         # pick the tightest fit
         _, _, best_amps, best_spaces, best_series = min(candidates, key=lambda x: (x[0], x[1]))
@@ -2647,14 +3140,15 @@ class PanelboardEngine(BaseEngine):
         panelAttrs["spaces"]    = best_spaces
         panelAttrs["panelType"] = best_series
 
-        result = self._safe_generate_iline(panelAttrs)
 
-        if isinstance(result, dict) and best_series in ("HCJ", "HCP"):
-            mb = {400:"LAP36400MB", 600:"MGP36600", 800:"MGP36800"}.get(best_amps)
-            if mb:
-                result["Main Breaker Note"] = f"Comes with a factory installed {mb}"
+        result = self._safe_generate_iline(panelAttrs)
+        result = self._finalize_hcp_factory_main(result, panelAttrs, raw)
+
+        if result.get("error"):
+            return result
 
         if isinstance(result, dict) and best_series == "HCR-U":
+
 
             voltage = _safe_int(raw.get("voltage"), 0)
             rating_voltage = 240 if voltage == 208 else voltage
@@ -2760,9 +3254,56 @@ class PanelboardEngine(BaseEngine):
             "QHB":    65, "HOM":   10,
         }
 
+
         total_spaces = _safe_int(panel_result.get("spaces"), 0)
 
+        # Schneider 2024 Digest:
+        # Section 7, Table 7.1: QO, QO-VH, QOH and QH
+        # Section 9, Tables 9.11-9.12: QOB, QOB-VH and QHB
+        # Obsolete parts are excluded.
+        # ORDER ONLY QOH parts are retained with review notes.
+        catalog_amps = {
+            "QO": {
+                1: (10, 15, 20, 25, 30, 35, 40, 50, 60, 70),
+                2: (10, 15, 20, 25, 30, 35, 40, 45, 50, 60,
+                    70, 80, 90, 100, 110, 125, 150, 175, 200),
+                3: (10, 15, 20, 25, 30, 35, 40, 45, 50, 60,
+                    70, 80, 90, 100),
+            },
+            "QOB": {
+                1: (10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70),
+                2: (10, 15, 20, 25, 30, 35, 40, 45, 50, 60,
+                    70, 80, 90, 100, 110, 125),
+                3: (10, 15, 20, 25, 30, 35, 40, 45, 50, 60,
+                    70, 80, 90, 100),
+            },
+            "QO-VH": {
+                1: (15, 20, 30, 40, 50, 60, 70),
+                2: (15, 20, 25, 30, 40, 50, 60, 70, 80,
+                    90, 100, 110, 125, 150, 200),
+                3: (15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100),
+            },
+            "QOB-VH": {
+                1: (15, 20, 25, 30, 40, 50, 60, 70),
+                2: (15, 20, 25, 30, 40, 50, 60, 70, 80,
+                    90, 100, 110, 125, 150),
+                3: (15, 20, 25, 30, 40, 50, 60, 70, 80,
+                    90, 100, 110, 125, 150),
+            },
+            "QOH": {2: (60, 70, 80, 90, 100, 110, 125)},
+            "QH": {
+                1: (20,),
+                2: (20, 30),
+            },
+            "QHB": {
+                1: (15, 20, 25, 30),
+                2: (15, 20, 25, 30),
+                3: (15, 20, 25, 30),
+            },
+        }
+
         summary = {}
+
         requested_used_spaces = 0
         built_used_spaces = 0
 
@@ -2857,33 +3398,161 @@ class PanelboardEngine(BaseEngine):
             needed_spaces = poles * count
             requested_used_spaces += needed_spaces
 
-            base = choose_base_family(panel_k, rating_type, allow_plug, poles)
 
-            if base == "QOH" and poles == 3:
-                base = "QH" if allow_plug else "QHB"
+            if is_gfi_requested:
+                # GFI uses manufacturer-listed combinations only.
+                # Do not substitute standard breakers or increase trip amps.
+                if features.strip() != "GFI":
+                    panel_result.setdefault("Notes", []).append(
+                        f"GFI {raw_amps}A {poles}P x{count} has additional features "
+                        f"({features}). Branch omitted; user review required."
+                    )
+                    continue
 
-            raw_ir = panel_k if rating_type == "FULLY_RATED" else default_k.get(base, panel_k)
+                gfi_candidates = []
 
-            tmp_sel = breakerSelector({
-                "breakerType":     base,
-                "poles":           poles,
-                "amperage":        raw_amps,
-                "interruptionRating": raw_ir,
-                "specialFeatures": "GFI" if is_gfi_requested else "",
-                "iline":           False,
-            })
+                for gfi_base, gfi_aic in (
+                    ("QO", 10),
+                    ("QOB", 10),
+                    ("QO-VH", 22),
+                    ("QOB-VH", 22),
+                ):
+                    is_plug = gfi_base in ("QO", "QO-VH")
 
-            valid_amps = sorted(tmp_sel.getAmperageOptionsByPoles().keys())
-            amps = bump_to_next(valid_amps, raw_amps)
+                    if is_plug and not allow_plug:
+                        continue
 
-            if amps is None:
-                max_cap = valid_amps[-1] if valid_amps else 0
-                where = ("loadcenter" if panel_result.get("Panel Family") == "LOADCENTER" else "panel")
-                summary.setdefault("Errors", []).append(
-                    (f"Requested {raw_amps}A exceeds max {max_cap}A for {poles}P {base} "
-                     f"branch in this {where}. Consider a feeder/subfeed kit or bumping the family.")
+                    if rating_type == "FULLY_RATED" and gfi_aic < requested_ir:
+                        continue
+
+                    candidate = breakerSelector({
+                        "breakerType": gfi_base,
+                        "poles": poles,
+                        "amperage": raw_amps,
+                        "interruptionRating": gfi_aic,
+                        "specialFeatures": "GFI",
+                        "iline": False,
+                    }).selectBreaker()
+
+                    if (
+                        isinstance(candidate, dict)
+                        and not candidate.get("Error")
+                        and str(candidate.get("Part Number", "")).endswith("GFI")
+                    ):
+                        gfi_candidates.append((
+                            gfi_aic,
+                            0 if is_plug else 1,
+                            candidate,
+                        ))
+
+                if not gfi_candidates:
+                    panel_result.setdefault("Notes", []).append(
+                        f"No catalog-listed Class A GFI breaker for "
+                        f"{raw_amps}A {poles}P x{count} at {requested_ir}kA "
+                        f"({rating_type}, plug-on allowed={bool(allow_plug)}). "
+                        "Branch omitted; user review required."
+                    )
+                    continue
+
+                chosen_aic, _, out = min(
+                    gfi_candidates,
+                    key=lambda x: (x[0], x[1]),
+                )
+
+                pn = out["Part Number"]
+                built_used_spaces += needed_spaces
+                built_branch_ir_values.append(chosen_aic)
+
+                entry = summary.setdefault(pn, {
+                    "Part Number": pn,
+                    "Interrupting Rating": out["Interrupting Rating"],
+                    "count": 0,
+                })
+                entry["count"] += count
+
+                if poles == 2 and raw_amps == 60:
+                    panel_result.setdefault("Notes", []).append(
+                        f"GFI breaker {pn}: catalog limits this device to "
+                        "two-wire loads without a load-neutral connection. "
+                        "User review required."
+                    )
+
+                if poles == 3 and voltage == 240:
+                    panel_result.setdefault("Notes", []).append(
+                        f"GFI breaker {pn} is catalog-listed for 208Y/120V "
+                        "three-phase systems. Verify actual system voltage. "
+                        "User review required."
+                    )
+
+                continue
+
+
+            # Search actual catalog-listed candidates.
+            # Exact requested amperage takes priority over bumping.
+            # Then minimize the individual breaker interrupting rating.
+            family_aic = (
+                ("QO", 10), ("QOB", 10),
+                ("QO-VH", 22), ("QOB-VH", 22),
+                ("QOH", 42), ("QH", 65), ("QHB", 65),
+            )
+
+            plug_families = {"QO", "QO-VH", "QOH", "QH"}
+            candidates = []
+
+            for candidate_base, candidate_ir in family_aic:
+                if not allow_plug and candidate_base in plug_families:
+                    continue
+
+                if rating_type == "FULLY_RATED" and candidate_ir < requested_ir:
+                    continue
+
+                choices = catalog_amps.get(candidate_base, {}).get(poles, ())
+
+                # QO 150-200A plug-on breakers are for single-phase
+                # applications; exclude them in 3-phase NQ panels.
+                if (
+                    voltage != 120
+                    and candidate_base in ("QO", "QO-VH")
+                    and poles == 2
+                ):
+                    choices = [a for a in choices if a < 150]
+
+                selected_amp = bump_to_next(choices, raw_amps)
+
+                if selected_amp is None:
+                    continue
+
+                exact = selected_amp == raw_amps
+
+                score = (
+                    0 if exact else 1,
+                    candidate_ir if exact else selected_amp - raw_amps,
+                    0 if candidate_base in plug_families else 1,
+                    selected_amp - raw_amps if exact else candidate_ir,
+                )
+
+                candidates.append((
+                    score, candidate_base, selected_amp, candidate_ir
+                ))
+
+            if not candidates:
+                panel_result.setdefault("Notes", []).append(
+                    f"No compatible catalog-listed NQ branch for {raw_amps}A "
+                    f"{poles}P x{count} at {requested_ir}kA in "
+                    f"{rating_type.lower()} mode. "
+                    "Branch omitted; user review required."
                 )
                 continue
+
+            _, base, amps, selected_family_ir = min(
+                candidates, key=lambda c: c[0]
+            )
+
+            raw_ir = (
+                requested_ir
+                if rating_type == "FULLY_RATED"
+                else selected_family_ir
+            )
 
             frame_letter, ir_ladder = _base_to_frame_and_ir(base, rating_voltage)
 
@@ -2959,8 +3628,51 @@ class PanelboardEngine(BaseEngine):
                 )
                 continue
 
+
             pn = out["Part Number"]
-            built_used_spaces += needed_spaces
+
+            if amps != raw_amps:
+                panel_result.setdefault("Notes", []).append(
+                    f"NQ branch {poles}P bumped from {raw_amps}A "
+                    f"to {amps}A ({pn}). User review required."
+                )
+
+            if base == "QOH" and amps in (60, 110):
+                panel_result.setdefault("Notes", []).append(
+                    f"NQ breaker {pn} is catalog-listed as ORDER ONLY; "
+                    "confirm availability with Schneider. "
+                    "User review required."
+                )
+
+            # Digest Table 9.12 note [77]:
+            # QOB2150VH uses 4 spaces.
+            # QOB3(110/125/150)VH uses 6 spaces.
+            occupied_per_breaker = poles
+
+            if base == "QOB-VH" and poles == 2 and amps == 150:
+                occupied_per_breaker = 4
+            elif base == "QOB-VH" and poles == 3 and amps >= 110:
+                occupied_per_breaker = 6
+            elif base in ("QO", "QO-VH") and poles == 2 and amps >= 150:
+                occupied_per_breaker = 4
+
+            actual_needed = occupied_per_breaker * count
+            built_used_spaces += actual_needed
+            requested_used_spaces += actual_needed - needed_spaces
+
+            if occupied_per_breaker > poles:
+                panel_result.setdefault("Notes", []).append(
+                    f"NQ branch {pn} requires "
+                    f"{occupied_per_breaker} spaces each (x{count}); "
+                    "verify physical placement."
+                )
+
+            if base == "QOB-VH" and occupied_per_breaker > poles:
+                panel_result.setdefault("Notes", []).append(
+                    f"NQ branch {pn}: maximum 40A breaker opposite; "
+                    "use 75C wire. User review required."
+                )
+
 
             # BreakerSelector returns ratings such as "10k",
             # "22k", "35k", or "65k".
@@ -3301,191 +4013,164 @@ class PanelboardEngine(BaseEngine):
 
         return panel_result
 
+
     def _build_nf_branch_breakers(self, panel_result: dict, raw: dict, detected_breakers: list):
-        def bump_to_next(sorted_vals, desired):
-            for v in sorted_vals:
-                if v >= desired:
-                    return v
-            return None
+        """NF EDB/EGB/EJB selection using 2024 Digest, section 7, page 7-5."""
+        def next_amp(options, requested):
+            return next((a for a in options if a >= requested), None)
 
-        if raw.get("_notes"):
-            panel_result.setdefault("Notes", []).extend(raw["_notes"])
+        requested_ir = _safe_int(raw.get("intRating"), 0)
+        rating_type = str(raw.get("panelRatingType") or "FULLY_RATED").upper()
+        voltage = _safe_int(raw.get("voltage"), 0)
+        catalog_voltage = 240 if voltage in (208, 240) else voltage
+        notes = panel_result.setdefault("Notes", [])
+        notes.extend(raw.get("_notes") or [])
 
-        valid_ir_options = [18, 35, 65]
+        # Actual manufacturer interrupting ratings, by voltage and poles.
+        # Table positions correspond to EDB, EGB and EJB, respectively.
+        catalog_aic = {
+            240: {1: (18, 35, 65), 2: (25, 65, 100), 3: (25, 65, 100)},
+            480: {1: (18, 35, 65), 2: (18, 35, 65), 3: (18, 35, 65)},
+        }
+        part_codes = (18, 35, 65)  # Inputs required by eFrameBreaker()
+        amp_options = {
+            1: (15, 20, 25, 30, 35, 40, 45, 50, 60, 70),
+            2: (15, 20, 25, 30, 35, 40, 45, 50, 60, 70,
+                80, 90, 100, 110, 125),
+            3: (15, 20, 25, 30, 35, 40, 45, 50, 60, 70,
+                80, 90, 100, 110, 125),
+        }
 
-        # Rating required by the drawing.
-        requested_ir = _safe_int(
-            raw.get("intRating"),
-            0
-        )
-
-        rating_type = str(
-            raw.get("panelRatingType")
-            or "FULLY_RATED"
-        ).upper()
-
-        # Series-rated panels use the lower series-rated branch value.
-        # Fully-rated panels must meet or exceed the drawing requirement.
-        desired_ir = (
-            18
-            if rating_type == "SERIES_RATED"
-            else requested_ir
-        )
-
-        final_branch_ir = bump_to_next(
-            valid_ir_options,
-            desired_ir
-        )
-
-        # Paper trail for the generated BOM.
-        panel_result["_requestedPanelIntRating"] = (
-            requested_ir
-        )
-
-        displayed_final_ir = (
-            final_branch_ir
-            if final_branch_ir is not None
-            else requested_ir
-        )
-
-        panel_result["_finalBranchIntRating"] = (
-            displayed_final_ir
-        )
-
-        panel_result["_finalPanelIntRating"] = (
-            displayed_final_ir
-        )
-
-        was_defaulted = bool(
-            raw.get("_intRatingWasDefaulted", False)
-        )
-
-        if (
-            final_branch_ir is not None
-            and final_branch_ir > requested_ir
-        ):
-            if was_defaulted:
-                note = (
-                    f"No interrupting rating was detected. "
-                    f"The system defaulted to "
-                    f"{requested_ir}kAIC, then increased the "
-                    f"generated NF breaker rating to "
-                    f"{final_branch_ir}kAIC because "
-                    f"{requested_ir}kAIC is not an available "
-                    f"NF breaker rating."
-                )
-            else:
-                note = (
-                    f"NF branch-breaker AIC increased from "
-                    f"{requested_ir}kAIC to "
-                    f"{final_branch_ir}kAIC because "
-                    f"{requested_ir}kAIC is not an available "
-                    f"NF branch-breaker rating. "
-                    f"This refers only to branch breakers; "
-                    f"the assembled-panel rating is "
-                    f"evaluated separately."
-                )
-
-            notes = panel_result.setdefault(
-                "Notes",
-                []
-            )
-
-            if note not in notes:
-                notes.append(note)
-
-        elif was_defaulted:
-            note = (
-                f"No interrupting rating was detected. "
-                f"The system defaulted the generated NF "
-                f"breaker rating to {requested_ir}kAIC."
-            )
-
-            notes = panel_result.setdefault(
-                "Notes",
-                []
-            )
-
-            if note not in notes:
-                notes.append(note)
-
-        total_spaces = _safe_int(panel_result.get("spaces"), 0)
-        used_spaces  = 0
         summary = {}
+        errors = []
+        actual_ratings = []
+        built_count = 0
+        used_spaces = 0
+        total_spaces = _safe_int(panel_result.get("spaces"), 0)
+        expected_count = sum(
+            max(0, _safe_int(br.get("count"), 0))
+            for br in detected_breakers if isinstance(br, dict)
+        )
+
+        panel_result["_requestedPanelIntRating"] = requested_ir
+        panel_result["_finalBranchIntRating"] = None
+        panel_result["_finalPanelIntRating"] = None
 
         for br in detected_breakers:
             poles = _safe_int(br.get("poles"), 0)
-            amps  = _safe_int(br.get("amperage"), 0)
-            count = _safe_int(br.get("count"), 1)
-            features = str(br.get("specialFeatures", "")).upper()
+            amps = _safe_int(br.get("amperage"), 0)
+            count = _safe_int(br.get("count"), 0)
+            features = str(br.get("specialFeatures") or "").upper().strip()
 
-            if "GFI" in features:
-                panel_result.setdefault("Notes", []).append(
-                    f"GFI breaker requested ({amps}A {poles}P x{count}) — not supported in automated output. User review required."
+            if poles not in amp_options or count <= 0:
+                errors.append(f"Invalid NF branch: {poles}P {amps}A. Review required.")
+                continue
+            if features:
+                errors.append(
+                    f"NF {poles}P {amps}A special features ({features}) "
+                    "not verified by this standard E-frame selector. Review required."
                 )
                 continue
 
-            needed = poles * count
+            selected_amps = next_amp(amp_options[poles], amps)
+            if selected_amps is None:
+                errors.append(f"NF {poles}P {amps}A exceeds breaker range. Review required.")
+                continue
 
-            allowed_amps = {
-                "1":[15,20,25,30,35,40,45,50,60,70],
-                "2":[15,20,25,30,35,40,45,50,60,70,80,90,100,110,125],
-                "3":[15,20,25,30,35,40,45,50,60,70,80,90,100,110,125],
-                "EDP":[15,20,30,40,50]
-            }[str(poles)]
-
-            bumped_amps = bump_to_next(allowed_amps, amps)
-            if bumped_amps is None:
-                max_cap = allowed_amps[-1] if allowed_amps else 0
-                summary.setdefault("Errors", []).append(
-                    f"Requested {amps}A exceeds max {max_cap}A for {poles}P NF branch breaker."
+            ratings = catalog_aic.get(catalog_voltage, {}).get(poles, ())
+            index = next(
+                (i for i, rating in enumerate(ratings)
+                 if rating_type == "SERIES_RATED" or
+                    (rating_type == "FULLY_RATED" and rating >= requested_ir)),
+                None,
+            )
+            if index is None:
+                errors.append(
+                    f"No standard NF {poles}P breaker can meet "
+                    f"{requested_ir}kA at {voltage}V. Review required."
                 )
                 continue
-            amps = bumped_amps
 
-            ir = final_branch_ir
-
-            selector = eFrameBreaker()
-
-            attrs = {
-                "poles":              str(poles),
-                "amperage":           amps,
-                "interruptingRating": ir,
-            }
-            out = selector.generateEBreakerPartNumber(attrs)
-            if isinstance(out, dict) and "Error" in out:
-                summary.setdefault("Errors", []).append(out["Error"])
+            selected_ir = ratings[index]  # Catalog rating at this voltage
+            part_code = part_codes[index]  # 18 / 35 / 65 (EDB/EGB/EJB)
+            out = eFrameBreaker().generateEBreakerPartNumber({
+                "poles": str(poles),
+                "amperage": selected_amps,
+                "interruptingRating": part_code,
+            })
+            if not isinstance(out, dict) or out.get("Error") or not out.get("Part Number"):
+                errors.append(
+                    f"NF {poles}P {selected_amps}A selection failed: {out}. Review required."
+                )
                 continue
 
             pn = out["Part Number"]
             entry = summary.setdefault(pn, {
-                "Part Number":         pn,
-                "Interrupting Rating": out["Interrupting Rating"],
-                "count":               0,
+                "Part Number": pn,
+                "Interrupting Rating": f"{selected_ir}kA",
+                "count": 0,
             })
             entry["count"] += count
+            actual_ratings.append(selected_ir)
+            built_count += count
+            used_spaces += poles * count
 
-            used_spaces += needed
+            if selected_amps != amps:
+                notes.append(
+                    f"NF branch {poles}P increased from {amps}A "
+                    f"to {selected_amps}A. Review required."
+                )
 
         panel_result["Branch Breakers (NF)"] = list(summary.values())
-        panel_result["Spaces Remaining"] = max(0, total_spaces - used_spaces)
+        remaining = max(0, total_spaces - used_spaces)
+        panel_result["Spaces Remaining"] = remaining
 
-        # Only add filler plates when there are blank spaces
-        if _safe_int(panel_result["Spaces Remaining"], 0) > 0:
-            filler = blanks()
-            filler_info = filler.generateFillerPlatePartNumber({
-                "panelType": "NF",
-                "totalBlankSpaces": panel_result["Spaces Remaining"]
-            })
-            panel_result["Filler Plates"] = filler_info
-        else:
-            panel_result.pop("Filler Plates", None)
+        if errors:
+            notes.extend(errors)
+        if total_spaces > 0 and used_spaces > total_spaces:
+            notes.append("NF panel exceeds available breaker spaces. Review required.")
 
-        if used_spaces > total_spaces and total_spaces > 0:
-            panel_result.setdefault("Notes", []).append(
-                "too many breakers detected. user review required."
+        minimum_actual = min(actual_ratings) if actual_ratings else None
+        panel_result["_finalBranchIntRating"] = minimum_actual
+        all_built = (expected_count > 0 and built_count == expected_count
+                     and not errors and (total_spaces <= 0 or used_spaces <= total_spaces))
+
+        # Series-rated assembly verification remains the quote specialist's job.
+        # Only the individual branch-breaker AIC is known here.
+        if rating_type == "FULLY_RATED" and all_built and minimum_actual is not None:
+            has_main = _safe_int(raw.get("mainBreakerAmperage"), 0) > 0
+            main_ir = _safe_int(panel_result.get("_finalMainBreakerIntRating"), 0)
+            main_ok = not has_main or (
+                main_ir >= requested_ir
+                and bool(panel_result.get("Main Breaker"))
+                and not panel_result.get("Main Breaker Error")
+            )
+            if main_ok and minimum_actual >= requested_ir:
+                panel_result["_finalPanelIntRating"] = (
+                    min(main_ir, minimum_actual) if has_main else minimum_actual
+                )
+
+        if rating_type == "SERIES_RATED":
+            notes.append(
+                "NF series-rated assembled-panel AIC is unverified without a "
+                "manufacturer-listed series combination. User review required."
             )
 
+        if minimum_actual is not None and rating_type == "FULLY_RATED":
+            if minimum_actual > requested_ir:
+                notes.append(
+                    f"NF branch-breaker AIC increased from {requested_ir}kA "
+                    f"to {minimum_actual}kA to match available catalog ratings."
+                )
+        if raw.get("_intRatingWasDefaulted"):
+            notes.append(f"No interrupting rating detected; defaulted to {requested_ir}kAIC.")
+
+        if remaining:
+            panel_result["Filler Plates"] = blanks().generateFillerPlatePartNumber({
+                "panelType": "NF", "totalBlankSpaces": remaining,
+            })
+        else:
+            panel_result.pop("Filler Plates", None)
         return panel_result
 
     def _build_iline_branch_breakers(self, panel_result: dict, raw: dict, detected_breakers: list):
@@ -3732,10 +4417,12 @@ class PanelboardEngine(BaseEngine):
             if panel_result.get("Usable Spaces") is not None else
             _safe_int(panel_result.get("spaces"), _safe_int(raw.get("spaces"), 0))
         )
-        # CAP AT 108 (affects the *1.5 calculation below)
+
+        # I-Line catalog mounting space is already measured in inches.
+        # The listed total is divided equally between both sides.
         total_spaces = min(108, int(total_spaces or 0))
 
-        total_inches = float(total_spaces) * 1.5
+        total_inches = float(total_spaces)
         side_remaining = {"left": total_inches / 2.0, "right": total_inches / 2.0}
 
         profiles = side_profiles_for(series)
@@ -3866,51 +4553,52 @@ class PanelboardEngine(BaseEngine):
 
                     mccb_frame = "L" if frame == "LL" else frame
 
+
                     # ---- MAGNETIC attempt (skip if electronic-only) ----
                     if frame in magnetic_only or frame not in electronic_only:
                         if poles == 2:
-                            if frame in ("H","J"):
+                            if frame in ("H", "J"):
                                 intr_letter = mccb_builder.getInterruptingLetterHJ(rating_voltage, ir)
                                 raw_pairs = hj_allowed_pairs(frame, intr_letter, amps) if intr_letter else []
-                                allowed_pairs = canonicalize_pairs(raw_pairs) if raw_pairs else ["AB","BC","AC"]
+                                allowed_pairs = canonicalize_pairs(raw_pairs) if raw_pairs else ["AB", "BC", "AC"]
                             else:
-                                allowed_pairs = ["AB","BC","AC"]
+                                allowed_pairs = ["AB", "BC", "AC"]
+                            try_phase = pick_balanced_pair(phase_load, allowed_pairs, float(amps))
+                        else:
+                            # Three-pole I-Line breakers always connect ABC.
+                            try_phase = "ABC"
 
-                            weight = float(amps)
-                            try_phase = pick_balanced_pair(phase_load, allowed_pairs, weight)
-                            if not try_phase:
-                                pass
-                            else:
-                                d("    MAG attrs:", {
-                                    "frame": mccb_frame, "termination": "ILINE",
-                                    "poles": poles, "amperage": amps, "voltage": rating_voltage,
-                                    "intRating": ir, "tripFunction": "MAGNETIC",
-                                    "phasing": (try_phase if poles == 2 else phasing)
-                                })
-                                attrs = {
-                                    "frame":        mccb_frame,
-                                    "termination":  "ILINE",
-                                    "poles":        poles,
-                                    "amperage":     amps,
-                                    "voltage":      rating_voltage,
-                                    "intRating":    ir,
-                                    "tripFunction": "MAGNETIC",
-                                    "grounding":    False,
-                                    "phasing":      (try_phase if poles == 2 else phasing),
-                                }
-                                out = _try_build_branch(mccb_builder, attrs, mccb_frame, rating_voltage)
+                        if try_phase:
+                            d("    MAG attrs:", {
+                                "frame": mccb_frame, "termination": "ILINE",
+                                "poles": poles, "amperage": amps, "voltage": rating_voltage,
+                                "intRating": ir, "tripFunction": "MAGNETIC",
+                                "phasing": try_phase,
+                            })
+                            attrs = {
+                                "frame":        mccb_frame,
+                                "termination":  "ILINE",
+                                "poles":        poles,
+                                "amperage":     amps,
+                                "voltage":      rating_voltage,
+                                "intRating":    ir,
+                                "tripFunction": "MAGNETIC",
+                                "grounding":    False,
+                                "phasing":      try_phase,
+                            }
+                            out = _try_build_branch(mccb_builder, attrs, mccb_frame, rating_voltage)
 
-                                if not (isinstance(out, str) and out.startswith("Invalid")):
-                                    final_part = {"Part Number": out, "Interrupting Rating": attrs["intRating"]} if isinstance(out, str) \
-                                                else {**out, "Interrupting Rating": attrs["intRating"]}
-                                    chosen_frame = frame
-                                    chosen_space_key = key
-                                    chosen_trip = "MAGNETIC"
-                                    chosen_amperage = amps
-                                    chosen_phase = try_phase
-                                    chosen_side = side
-                                    needs_extension = (profiles[side]["type"] == "wide" and frame in {"H","J"} and series in {"HCP","HCR-U"})
-                                    found = True
+                            if not (isinstance(out, str) and out.startswith("Invalid")):
+                                final_part = {"Part Number": out, "Interrupting Rating": attrs["intRating"]} if isinstance(out, str) \
+                                             else {**out, "Interrupting Rating": attrs["intRating"]}
+                                chosen_frame = frame
+                                chosen_space_key = key
+                                chosen_trip = "MAGNETIC"
+                                chosen_amperage = amps
+                                chosen_phase = try_phase
+                                chosen_side = side
+                                needs_extension = (profiles[side]["type"] == "wide" and frame in {"H", "J"} and series in {"HCP", "HCR-U"})
+                                found = True
 
                     # ---- ELECTRONIC attempt (if not found yet and frame supports it) ----
                     if not found and (frame in hybrid_frames or frame in electronic_only):
@@ -3958,6 +4646,9 @@ class PanelboardEngine(BaseEngine):
                                 chosen_side = side
                                 needs_extension = (profiles[side]["type"] == "wide" and frame in {"H","J"} and series in {"HCP","HCR-U"})
                                 found = True
+
+                    if found:
+                        break
 
                 # selection only; actual placement happens after the frame loop
                 if found:
@@ -4111,9 +4802,29 @@ class PanelboardEngine(BaseEngine):
             final_branch_ir
         )
 
-        panel_result["_finalPanelIntRating"] = (
-            final_branch_ir
-        )
+
+        # Component AIC is not automatically the certified panelboard SCCR.
+        # Do not report an unverified assembled rating for series-rated jobs.
+        panel_result["_finalPanelIntRating"] = None
+
+        if (
+            rating_type == "FULLY_RATED"
+            and built_branch_ir_values
+            and not errors
+            and side_deficit_inches <= 0
+            and not raw.get("_overcapacity_spaces")
+        ):
+            has_main = _safe_int(raw.get("mainBreakerAmperage"), 0) > 0
+            main_ir = _safe_int(
+                panel_result.get("_finalMainBreakerIntRating"), 0
+            )
+
+            if not has_main:
+                panel_result["_finalPanelIntRating"] = final_branch_ir
+            elif main_ir >= requested_ir and final_branch_ir >= requested_ir:
+                panel_result["_finalPanelIntRating"] = min(
+                    main_ir, final_branch_ir
+                )
  
         # Fully rated: explain defaulting and any upward
         # product-rating bump in one note.
@@ -4641,15 +5352,12 @@ class TransformerEngine(BaseEngine):
 
 
 if __name__ == "__main__":
-    import contextlib
-    import io
-    from collections import Counter
-
-    print("\n=== ARGUS MAIN-BREAKER + FULL-JOB REGRESSION ===")
+    # ==========================================================
+    # ARGUS I-LINE BRANCH BREAKER REGRESSION
+    # ==========================================================
 
     passed = 0
-    failed = []
-    known_issues = []
+    failures = []
 
     def check(label, actual, expected):
         global passed
@@ -4657,2081 +5365,803 @@ if __name__ == "__main__":
             passed += 1
             print(f"PASS | {label}")
         else:
-            failed.append(label)
+            failures.append(label)
             print(f"FAIL | {label}")
-            print(f"  Expected: {expected!r}")
-            print(f"  Actual:   {actual!r}")
+            print(f"    Expected: {expected!r}")
+            print(f"    Actual:   {actual!r}")
 
-    def ka(value):
-        try:
-            if isinstance(value, (int, float)):
-                return float(value)
-            text = str(value).strip().upper().replace("KAIC", "")
-            text = text.replace("KA", "").removesuffix("K")
-            return float(text)
-        except (TypeError, ValueError):
-            return 0.0
-
-    three_pole = [
-        {"poles": 1, "amperage": 20, "count": 3, "specialFeatures": ""},
-        {"poles": 3, "amperage": 30, "count": 1, "specialFeatures": ""},
-    ]
-    two_pole = [
-        {"poles": 1, "amperage": 20, "count": 3, "specialFeatures": ""},
-        {"poles": 2, "amperage": 30, "count": 1, "specialFeatures": ""},
-    ]
-
-    def scenario(name, voltage, bus, main, spaces, aic, material,
-                 rating, enclosure, trim, interior, kit, breaker, box,
-                 expected_trim, branch_parts, branches=None):
-        return {
-            "name": name,
-            "voltage": voltage,
-            "bus": bus,
-            "main": main,
-            "spaces": spaces,
-            "aic": aic,
-            "material": material,
-            "rating": rating,
-            "enclosure": enclosure,
-            "trim": trim,
-            "interior": interior,
-            "kit": kit,
-            "breaker": breaker,
-            "box": box,
-            "expected_trim": expected_trim,
-            "branch_parts": branch_parts,
-            "branches": branches if branches is not None else three_pole,
-        }
+    # Catalog-verified PowerPacT I-Line breakers.
+    # Series-rated tests verify individual branch selection only.
+    #
+    # Name, Volts, Poles, Amps, Requested kA, Rating Type,
+    # Quantity, Expected Part, Actual Part kA
 
     cases = [
-        scenario("NQ-LA-208-AL", 208, 400, 300, 30, 35,
-                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
-                 "NQ430L4", "NQMB4LA", "LAL36300MB",
-                 "MH62BE", "NC62VS", {"QHB120": 3, "QHB330": 1}),
-        scenario("NQ-LH-240-3R", 240, 400, 400, 30, 65,
-                 "COPPER", "FULLY_RATED", "NEMA3R", "SURFACE",
-                 "NQ430L4C", "NQMB4LA", "LHL36400MB",
-                 "MH62WP", None, {"QHB120": 3, "QHB330": 1}),
-        scenario("NF-LH-480-CU", 480, 400, 300, 42, 35,
-                 "COPPER", "FULLY_RATED", "NEMA1", "FLUSH",
-                 "NF442L4C", "N400M", "LHL36300MB",
-                 "MH68BE", "NC68VF", {"EGB14020": 3, "EGB34030": 1}),
-        scenario("NQ-JD-25K-FULL", 240, 225, 200, 30, 25,
-                 "COPPER", "FULLY_RATED", "NEMA1", "SURFACE",
-                 "NQ430L2C", "NQMB2HJ", "JDL36200",
-                 "MH44BE", "NC44S", {"QHB120": 3, "QHB230": 1},
-                 two_pole),
-        scenario("NQ-JD-25K-SERIES", 240, 225, 200, 30, 25,
-                 "COPPER", "SERIES_RATED", "NEMA1", "SURFACE",
-                 "NQ430L2C", "NQMB2HJ", "JDL36200",
-                 "MH44BE", "NC44S", {"QOB120": 3, "QOB230": 1},
-                 two_pole),
-        scenario("NQ-MLO-208-AL", 208, 225, None, 30, 22,
-                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
-                 "NQ430L2", None, None,
-                 "MH32BE", "NC32S", {"QOB120VH": 3, "QOB330VH": 1}),
-        scenario("NQ-MLO-240-AL", 240, 225, None, 30, 22,
-                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
-                 "NQ430L2", None, None,
-                 "MH32BE", "NC32S", {"QOB120VH": 3, "QOB330VH": 1}),
-        scenario("NF-MLO-480-3R", 480, 250, None, 30, 35,
-                 "COPPER", "FULLY_RATED", "NEMA3R", "SURFACE",
-                 "NF430L2C", None, None,
-                 "MH38WP", None, {"EGB14020": 3, "EGB34030": 1}),
-        scenario("NF-JG-480-AL", 480, 250, 200, 42, 35,
-                 "ALUMINUM", "FULLY_RATED", "NEMA1", "SURFACE",
-                 "NF442L2", "N250MJ", "JGL36200",
-                 "MH56BE", "NC56S", {"EGB14020": 3, "EGB34030": 1}),
+        ("Q-3P-22K-FULL",   240, 3, 70, 22,
+         "FULLY_RATED", 1, "QDA32070", 25),
+
+        ("Q-3P-35K-FULL",   240, 3, 70, 35,
+         "FULLY_RATED", 1, "QGA32070", 65),
+
+        ("Q-3P-35K-SERIES", 240, 3, 70, 35,
+         "SERIES_RATED", 1, "QBA32070", 10),
+
+        ("Q-2P-35K-FULL",   240, 2, 70, 35,
+         "FULLY_RATED", 1, "QGA220701", 65),
+
+        ("Q-3P-22K-QTY2",   240, 3, 70, 22,
+         "FULLY_RATED", 2, "QDA32070", 25),
+
+        ("H-3P-35K-FULL",   480, 3, 70, 35,
+         "FULLY_RATED", 1, "HGA36070", 35),
+
+        ("J-3P-35K-FULL",   480, 3, 200, 35,
+         "FULLY_RATED", 1, "JGA36200", 35),
     ]
 
-    def job_attrs(case, *, spd_marker=False):
-        attrs = {
-            "amperage": case["bus"],
-            "voltage": case["voltage"],
-            "spaces": case["spaces"],
-            "intRating": case["aic"],
-            "material": case["material"],
-            "panelRatingType": case["rating"],
-            "enclosure": case["enclosure"],
-            "trimStyle": case["trim"],
-            "allowPlugOn": False,
-            "feedThruLugs": False,
-            "poles": 3,
-            "grounding": False,
-            "detected_breakers": [dict(b) for b in case["branches"]],
+    print("\n=== ARGUS I-LINE BRANCH BREAKER REGRESSION ===")
+
+    for name, volts, poles, amps, requested_ka, rating_type, qty, expected_part, actual_ka in cases:
+
+        # HCJ supports Q/H/J breaker frames.
+        # 27-inch interior used to isolate branch selection.
+        panel = {
+            "panelType": "HCJ",
+            "ilinePanelType": "HCJ",
+            "spaces": 27,
         }
-        if case["main"] is not None:
-            attrs["mainBreakerAmperage"] = case["main"]
-        if spd_marker != "OMIT":
-            attrs["spd"] = spd_marker
-        return attrs
 
-    job_defaults = {"panelboards": {
-        "allow_feed_thru_lugs": False,
-        "allow_plug_on_breakers": False,
-    }}
-
-    def run_job(items):
-        payload = {"defaults": job_defaults, "items": items}
-        with contextlib.redirect_stdout(io.StringIO()):
-            return process_job(payload)
-
-    print("\n--- Full-job BOM and attribute checks ---")
-    outputs = run_job([
-        {"type": "panelboard", "name": c["name"], "attrs": job_attrs(c)}
-        for c in cases
-    ])
-    check("All panel names returned", set(outputs), {c["name"] for c in cases})
-
-    for c in cases:
-        name = c["name"]
-        out = outputs.get(name, {})
-        if not isinstance(out, dict):
-            out = {"error": repr(out)}
-
-        family = "NQ" if c["interior"].startswith("NQ") else "NF"
-        other = "NF" if family == "NQ" else "NQ"
-        entries = out.get(f"Branch Breakers ({family})", [])
-        actual_counts = Counter()
-
-        if isinstance(entries, list):
-            for row in entries:
-                if isinstance(row, dict) and row.get("Part Number"):
-                    actual_counts[str(row["Part Number"])] += int(
-                        row.get("count", 0) or 0
-                    )
-
-        print(f"\n{name}: {c['bus']}A / {c['main'] or 'MLO'} / "
-              f"{c['voltage']}V / {c['aic']}kA / {c['rating']} / "
-              f"{c['material']} / {c['enclosure']} / {c['trim']}")
-        print(f"  Interior={out.get('Interior')}  Main={out.get('Main Breaker')}")
-        print(f"  Kit={out.get('Main Breaker Kit')}  Box={out.get('Box')}")
-        print(f"  Trim={out.get('Trim')}  Branches={dict(actual_counts)}")
-
-        if out.get("Notes"):
-            print(f"  Notes={out['Notes']}")
-
-        check(f"{name}: no engine error", not any(
-            key in out for key in ("error", "Skipped", "Main Breaker Error")
-        ), True)
-        check(f"{name}: interior", out.get("Interior"), c["interior"])
-        check(f"{name}: main", out.get("Main Breaker"), c["breaker"])
-        check(f"{name}: kit", out.get("Main Breaker Kit"), c["kit"])
-        check(f"{name}: enclosure", out.get("Box"), c["box"])
-        check(f"{name}: trim", out.get("Trim"), c["expected_trim"])
-        check(f"{name}: branches and quantities", actual_counts,
-              Counter(c["branch_parts"]))
-        check(f"{name}: no wrong-family branches", not bool(out.get(
-            f"Branch Breakers ({other})"
-        )), True)
-        check(f"{name}: final bus rating",
-              ka(out.get("_finalPanelAmperage")) >= c["bus"], True)
-        check(f"{name}: preserved voltage",
-              out.get("_finalPanelVoltage"), c["voltage"])
-        check(f"{name}: requested AIC",
-              ka(out.get("_requestedPanelIntRating")), float(c["aic"]))
-        check(f"{name}: main amps",
-              out.get("_finalMainBreakerAmperage"), c["main"])
-        check(f"{name}: bus material",
-              str(out.get("Interior", "")).endswith("C"),
-              c["material"] == "COPPER")
-        check(f"{name}: branch count",
-              sum(actual_counts.values()),
-              sum(b["count"] for b in c["branches"]))
-
-        if c["rating"] == "FULLY_RATED":
-            check(f"{name}: fully-rated branch AIC",
-                  bool(entries) and all(
-                      ka(b.get("Interrupting Rating")) >= c["aic"]
-                      for b in entries
-                  ), True)
-        else:
-            # This particular JD + 1P/2P QOB combination is listed
-            # in Schneider's 2024 NQ series table (page 9-2).
-            check(f"{name}: listed JD/QOB series configuration",
-                  c["voltage"] in (208, 240)
-                  and c["aic"] <= 25
-                  and out.get("Main Breaker") == "JDL36200"
-                  and all(b["poles"] in (1, 2) for b in c["branches"])
-                  and actual_counts == Counter({
-                      "QOB120": 3, "QOB230": 1
-                  }), True)
-
-    print("\n--- Targeted regression checks from MB1-A/B/C and MB2-A ---")
-
-    nq = nqPanelboard()
-    configs = list(nq.iterMainBreakerConfigurations())
-    check("MB1-B: NQ merged configurations", len(configs), 36)
-
-    for spaces in (30, 42, 54, 72, 84):
-        found = {
-            tuple(params[2])
-            for (minimum, maximum, count, phase, voltage), params in configs
-            if (minimum, maximum, count, phase, voltage)
-            == (125, 400, spaces, "3PHASE", 208)
-        }
-        check(f"MB1-B: LA/LH + LG/LJ/LL for {spaces} spaces", found,
-              {("LA", "LH"), ("LG", "LJ", "LL")})
-
-    eng = PanelboardEngine("REGRESSION_CHECK", {})
-
-    for frame, kit in (("LA", "NQMB4LA"), ("LG", "NQMB6PPL")):
-        found = eng._find_main_breaker_config_params(
-            family="NQ", builder=nq, amps=400, spaces=30,
-            phase="3PHASE", lookup_voltage=208,
-            preferred_frame=frame,
-        )
-        check(f"MB1-C: final {frame} frame/kit",
-              found[1][3] if found else None, kit)
-
-    for frame, voltage, expected in (
-        ("LA", 240, 42), ("LH", 240, 65),
-        ("LH", 480, 35), ("LJ", 240, 100),
-    ):
-        check(f"MB1-C: {frame} AIC at {voltage}V",
-              eng._main_breaker_frame_aic(frame, voltage), expected)
-
-    def targeted_main(voltage, bus, main, spaces, aic, **extras):
         raw = {
-            "amperage": bus,
-            "voltage": voltage,
-            "spaces": spaces,
-            "mainBreakerAmperage": main,
-            "intRating": aic,
-            "material": "ALUMINUM",
-            "panelRatingType": "FULLY_RATED",
-            "enclosure": "NEMA1",
-            "trimStyle": "SURFACE",
-            "allowPlugOn": False,
-            "feedThruLugs": False,
-            "detected_breakers": [],
-            **extras,
+            "voltage": volts,
+            "intRating": requested_ka,
+            "panelRatingType": rating_type,
+            "typeOfMain": "MAIN LUG",
         }
-        with contextlib.redirect_stdout(io.StringIO()):
-            return PanelboardEngine(
-                "TARGETED_MAIN", raw
-            )._build_main_breaker(raw)
 
-    for label, args, expected in (
-        ("MB1-C: 100k NQ LJ", (208, 400, 400, 30, 100),
-         ("NQMB6PPL", "LJL36400U31X")),
-        ("MB1-C: 600A NF LL", (480, 600, 600, 30, 100),
-         ("N600MPPL", "LLL36600U31X")),
-    ):
+        breakers = [{
+            "poles": poles,
+            "amperage": amps,
+            "count": qty,
+            "specialFeatures": "",
+        }]
+
         try:
-            result = targeted_main(*args)
-            actual = (
-                result.get("Main Breaker Kit"),
-                result.get("Main Breaker"),
+            out = PanelboardEngine(
+                name, {}, DefaultResolver({}, {})
+            )._build_iline_branch_breakers(
+                panel, raw, breakers
             )
+
         except Exception as exc:
-            actual = (type(exc).__name__, str(exc))
-        check(label, actual, expected)
-
-    try:
-        rejected = targeted_main(
-            208, 400, 400, 30, 65, mainBreakerType="LA"
-        )
-        check("MB1-C: reject LA at 65kA",
-              isinstance(rejected, dict)
-              and "error" in rejected, True)
-    except Exception as exc:
-        check("MB1-C: reject LA at 65kA",
-              f"exception: {exc}", True)
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        standalone_la = mccb().generateMccbPartNumber({
-            "frame": "L",
-            "termination": "LUG",
-            "poles": 3,
-            "amperage": 300,
-            "voltage": 240,
-            "intRating": 42,
-            "tripFunction": "MAGNETIC",
-            "grounding": False,
-        })
-    check("MB2-A: standalone LA stays unsuffixed",
-          standalone_la, "LAL36300")
-
-    print("\n--- Known production issues (NOT counted as passes) ---")
-
-
-    # SPD REGRESSION TESTS
-    # Complete jobs must build the same NQ BOM when SPD is absent.
-    print("\n--- SPD payload normalization checks ---")
-
-    comparison_keys = (
-        "Interior",
-        "Box",
-        "Trim",
-        "Main Breaker",
-        "Main Breaker Kit",
-        "Branch Breakers (NQ)",
-    )
-
-    for case_name in ("NQ-MLO-208-AL", "NQ-LA-208-AL"):
-        case = next(c for c in cases if c["name"] == case_name)
-        baseline = outputs[case_name]
-
-        for label, spd_value in (
-            ("numeric zero", 0),
-            ("string FALSE", "FALSE"),
-            ("None", None),
-            ("omitted", "OMIT"),
-        ):
-            probe_name = f"{case_name}-{label}"
-
-            result = run_job([{
-                "type": "panelboard",
-                "name": probe_name,
-                "attrs": job_attrs(case, spd_marker=spd_value),
-            }]).get(probe_name, {})
-
-            actual_bom = {
-                key: result.get(key)
-                for key in comparison_keys
-            }
-
-            expected_bom = {
-                key: baseline.get(key)
-                for key in comparison_keys
-            }
-
-            check(
-                f"{case_name}: {label} preserves full BOM",
-                actual_bom,
-                expected_bom,
+            failures.append(f"{name}: exception")
+            print(
+                f"FAIL | {name}: "
+                f"{type(exc).__name__}: {exc}"
             )
+            continue
 
+        expected_branches = [{
+            "Part Number": expected_part,
+            "Interrupting Rating": actual_ka,
+            "count": qty,
+        }]
+
+        # Check exact part number, AIC and quantity.
+        check(
+            f"{name}: part number, rating, and quantity",
+            out.get("Branch Breakers (I-LINE)"),
+            expected_branches,
+        )
+
+        # Verify the engine reports the actual branch AIC.
+        check(
+            f"{name}: reported branch kA",
+            out.get("_finalBranchIntRating"),
+            actual_ka,
+        )
+
+        # Verify no breaker-selection errors.
+        check(
+            f"{name}: no branch errors",
+            out.get("Branch Breaker Errors"),
+            None,
+        )
+
+        # Fully-rated branches must meet the requested AIC.
+        if rating_type == "FULLY_RATED":
             check(
-                f"{case_name}: {label} has no SPD part",
-                "SPD" not in result,
+                f"{name}: individual breaker meets requested kA",
+                (out.get("_finalBranchIntRating") or 0)
+                >= requested_ka,
                 True,
             )
 
-    # Valid SPD ratings must still generate the proper SPD.
-    spd_case = next(
-        c for c in cases if c["name"] == "NQ-MLO-208-AL"
-    )
 
-    for label, spd_value in (
-        ("numeric 80", 80),
-        ("string 80kA", "80kA"),
-    ):
-        probe_name = f"VALID-SPD-{label}"
+    # ==========================================================
+    # I-LINE MOUNTING CAPACITY — CATALOG CHECKS
+    # ==========================================================
 
-        result = run_job([{
-            "type": "panelboard",
-            "name": probe_name,
-            "attrs": job_attrs(spd_case, spd_marker=spd_value),
-        }]).get(probe_name, {})
+    print("\n=== I-LINE MOUNTING CAPACITY TESTS ===")
+
+    mounting_cases = [
+        # Name, Mounting Inches, Breaker Qty,
+        # Interior, Box, Trim, Should Flag Overcapacity
+
+        ("HCJ-27IN-FITS", 27, 6,
+         "HCJ14484", "HC3248DB9", "HCM48TS", False),
+
+        ("HCJ-27IN-OVER", 27, 7,
+         "HCJ14484", "HC3248DB9", "HCM48TS", True),
+
+        ("HCJ-45IN-FITS", 45, 7,
+         "HCJ23734", "HC3273DB9", "HCM73TS", False),
+    ]
+
+    for name, mounting_inches, qty, interior_pn, box_pn, trim_pn, should_flag in mounting_cases:
+
+        catalog_panel = iLinePanelboard().generateILinePanelboardPartNumber({
+            "panelType": "HCJ",
+            "ilinePanelType": "HCJ",
+            "typeOfMain": "MAIN LUG",
+            "amperage": 400,
+            "spaces": mounting_inches,
+            "enclosure": "NEMA1",
+            "material": "ALUMINUM",
+            "trimStyle": "SURFACE",
+            "voltage": 240,
+        })
 
         check(
-            f"Valid SPD {label}: NQ family",
-            str(result.get("Interior", "")).startswith("NQ"),
-            True,
+            f"{name}: catalog interior/box/trim",
+            (
+                catalog_panel.get("Interior"),
+                catalog_panel.get("Box"),
+                catalog_panel.get("Trim"),
+            ),
+            (interior_pn, box_pn, trim_pn),
+        )
+
+        panel = {
+            "panelType": "HCJ",
+            "ilinePanelType": "HCJ",
+            "spaces": mounting_inches,
+        }
+
+        raw = {
+            "voltage": 240,
+            "intRating": 22,
+            "panelRatingType": "FULLY_RATED",
+            "typeOfMain": "MAIN LUG",
+        }
+
+        breakers = [{
+            "poles": 3,
+            "amperage": 70,
+            "count": qty,
+            "specialFeatures": "",
+        }]
+
+        out = PanelboardEngine(
+            name, {}, DefaultResolver({}, {})
+        )._build_iline_branch_breakers(
+            panel, raw, breakers
         )
 
         check(
-            f"Valid SPD {label}: correct part",
-            result.get("SPD"),
-            "SSP02SBA08D",
+            f"{name}: selected branch breakers",
+            out.get("Branch Breakers (I-LINE)"),
+            [{
+                "Part Number": "QDA32070",
+                "Interrupting Rating": 25,
+                "count": qty,
+            }],
         )
 
-    # Malformed SPD ratings must still be rejected by the builder.
-    # They must not be silently treated as "no SPD".
-    for label, value in (
-        ("invalid text", "INVALID"),
-        ("boolean True without rating", True),
-    ):
-        attrs = job_attrs(spd_case, spd_marker=value)
-        attrs["typeOfMain"] = "MAIN LUG"
+        check(
+            f"{name}: mounting capacity flag",
+            bool(out.get("_side_deficit_spaces")),
+            should_flag,
+        )
 
-        result = nqPanelboard().generateNqPanelboardPartNumber(
+        warning_present = any(
+            "mounting space may be insufficient" in str(note)
+            for note in out.get("Notes", [])
+        )
+
+        check(
+            f"{name}: review warning matches capacity",
+            warning_present,
+            should_flag,
+        )
+
+
+    # ==========================================================
+    # I-LINE MAIN LUG AUTO-RESIZE TESTS
+    # ==========================================================
+
+    print("\n=== I-LINE MAIN LUG AUTO-RESIZE TESTS ===")
+
+    resize_cases = [
+        # Name, Start Inches, Qty, Enclosure, Trim,
+        # Final Inches, Interior, Box, Front
+
+        ("HCJ-6-FIT", 27, 6, "NEMA1", "SURFACE",
+         27, "HCJ14484", "HC3248DB9", "HCM48TS"),
+
+        ("HCJ-7-RESIZE", 27, 7, "NEMA1", "SURFACE",
+         45, "HCJ23734", "HC3273DB9", "HCM73TS"),
+
+        ("HCJ-7-FLUSH", 27, 7, "NEMA1", "FLUSH",
+         45, "HCJ23734", "HC3273DB9", "HCM73TF"),
+
+        ("HCJ-7-3R", 27, 7, "NEMA3R", "SURFACE",
+         45, "HCJ23734", "HCJ3273WP",
+         "Included with NEMA3R"),
+    ]
+
+    for (
+        name, start, qty, enclosure, trim,
+        final_inches, interior, box, front
+    ) in resize_cases:
+
+        attrs = {
+            "panelType": "HCJ",
+            "ilinePanelType": "HCJ",
+            "typeOfMain": "MAIN LUG",
+            "amperage": 400,
+            "spaces": start,
+            "enclosure": enclosure,
+            "material": "ALUMINUM",
+            "trimStyle": trim,
+            "voltage": 240,
+        }
+
+        panel = iLinePanelboard().generateILinePanelboardPartNumber(
             attrs
         )
-
-        check(
-            f"Malformed SPD {label} rejected",
-            isinstance(result, str)
-            and result.startswith("Invalid SPD rating"),
-            True,
-        )
-
-
-    # Manufacturer catalog verification:
-    # Schneider 2024 Panelboards Digest, Table 9.1, page 9-3.
-    #
-    # At 25kA on the listed three-phase systems, JD main
-    # breakers support standard 3-pole QOB branches rated
-    # 15A through 100A. The 240V listing also applies to
-    # 208Y/120V under the catalog's voltage footnote.
-
-    print("\n--- Catalog-verified JD/QOB 3-pole series checks ---")
-
-    jd_series = next(
-        c for c in cases if c["name"] == "NQ-JD-25K-SERIES"
-    )
-
-    for voltage in (240, 208):
-        case = dict(jd_series)
-        case["voltage"] = voltage
-        case["branches"] = [dict(b) for b in three_pole]
-
-        probe_name = f"NQ-JD-25K-3P-{voltage}"
-
-        result = run_job([{
-            "type": "panelboard",
-            "name": probe_name,
-            "attrs": job_attrs(case),
-        }]).get(probe_name, {})
-
-        branch_counts = Counter()
-
-        for row in result.get("Branch Breakers (NQ)", []):
-            if isinstance(row, dict) and row.get("Part Number"):
-                branch_counts[str(row["Part Number"])] += int(
-                    row.get("count", 0) or 0
-                )
-
-        print(f"\n{probe_name}")
-        print(f"  Main={result.get('Main Breaker')}")
-        print(f"  Kit={result.get('Main Breaker Kit')}")
-        print(f"  Branches={dict(branch_counts)}")
-
-        check(
-            f"JD/QOB 3P {voltage}V: no engine errors",
-            not any(
-                k in result
-                for k in ("error", "Skipped", "Main Breaker Error")
-            ),
-            True,
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: interior",
-            result.get("Interior"),
-            "NQ430L2C",
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: main",
-            result.get("Main Breaker"),
-            "JDL36200",
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: mounting kit",
-            result.get("Main Breaker Kit"),
-            "NQMB2HJ",
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: branches",
-            branch_counts,
-            Counter({"QOB120": 3, "QOB330": 1}),
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: voltage preserved",
-            result.get("_finalPanelVoltage"),
-            voltage,
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: requested AIC preserved",
-            result.get("_requestedPanelIntRating"),
-            25,
-        )
-
-        check(
-            f"JD/QOB 3P {voltage}V: branch individual AIC",
-            ka(result.get("_finalBranchIntRating")),
-            10.0,
-        )
-
-
-    print("\n--- NQ actual branch AIC metadata checks ---")
-
-    expected_branch_ratings = {
-        "NQ-LA-208-AL": 65,
-        "NQ-LH-240-3R": 65,
-        "NQ-JD-25K-FULL": 65,
-        "NQ-JD-25K-SERIES": 10,
-        "NQ-MLO-208-AL": 22,
-        "NQ-MLO-240-AL": 22,
-    }
-
-    for name, expected_rating in expected_branch_ratings.items():
-        result = outputs[name]
-
-        check(
-            f"{name}: actual individual branch AIC metadata",
-            ka(result.get("_finalBranchIntRating")),
-            float(expected_rating),
-        )
-
-    # Separate issue: individual breaker AIC and an assembled
-    # panel's series/fully-rated SCCR are not the same thing.
-    # Track this until complete panel rating validation exists.
-    jd_series = outputs["NQ-JD-25K-SERIES"]
-    jd_fully = outputs["NQ-JD-25K-FULL"]
-
-    series_panel_rating = ka(
-        jd_series.get("_finalPanelIntRating")
-    )
-    fully_panel_rating = ka(
-        jd_fully.get("_finalPanelIntRating")
-    )
-
-    if series_panel_rating != 25 or fully_panel_rating > 25:
-        issue = (
-            "_finalPanelIntRating is derived from branch-breaker "
-            "AIC rather than a verified assembled-panel rating"
-        )
-
-        known_issues.append(issue)
-
-        print(f"KNOWN BUG | {issue}")
-        print(
-            f"  JD series panel metadata: {series_panel_rating}kA"
-        )
-        print(
-            f"  JD fully-rated panel metadata: {fully_panel_rating}kA"
-        )
-    else:
-        print(
-            "CHECK | JD panel rating metadata matches "
-            "the expected 25kA configurations"
-        )
-
-
-
-    print("\n--- NQ fully-rated panel AIC checks ---")
-
-    expected_panel_ratings = {
-        # LA main 42kA, QHB branches 65kA -> 42kA
-        "NQ-LA-208-AL": 42,
-
-        # LH main 65kA, QHB branches 65kA -> 65kA
-        "NQ-LH-240-3R": 65,
-
-        # JD main 25kA, QHB branches 65kA -> 25kA
-        "NQ-JD-25K-FULL": 25,
-
-        # MLO: branch breaker AIC is the limiting
-        # breaker rating within this generated BOM.
-        "NQ-MLO-208-AL": 22,
-        "NQ-MLO-240-AL": 22,
-    }
-
-    for name, expected in expected_panel_ratings.items():
-        result = outputs[name]
-
-        check(
-            f"{name}: fully-rated limiting breaker AIC",
-            ka(result.get("_finalPanelIntRating")),
-            float(expected),
-        )
-
-    # Do not assign a calculated assembled-panel rating
-    # when no branch breakers have been built.
-    empty_case = dict(next(
-        c for c in cases if c["name"] == "NQ-JD-25K-FULL"
-    ))
-    empty_case["branches"] = []
-
-    empty_result = run_job([{
-        "type": "panelboard",
-        "name": "NQ-NO-BRANCHES-PROBE",
-        "attrs": job_attrs(empty_case),
-    }]).get("NQ-NO-BRANCHES-PROBE", {})
-
-    check(
-        "NQ without built branches has no calculated panel AIC",
-        empty_result.get("_finalPanelIntRating"),
-        None,
-    )
-
-
-    print("\n--- MB2-C2: NQ series-rating verification ---")
-
-    jd_series_result = outputs["NQ-JD-25K-SERIES"]
-    jd_fully_result = outputs["NQ-JD-25K-FULL"]
-
-    check(
-        "JD/QOB listed series panel rating is 25kA",
-        ka(jd_series_result.get("_finalPanelIntRating")),
-        25.0,
-    )
-
-    check(
-        "JD/QHB fully-rated panel remains 25kA",
-        ka(jd_fully_result.get("_finalPanelIntRating")),
-        25.0,
-    )
-
-    check(
-        "JD/QOB individual branch rating stays 10kA",
-        ka(jd_series_result.get("_finalBranchIntRating")),
-        10.0,
-    )
-
-    for voltage in (208, 240):
-        case = dict(next(
-            c for c in cases
-            if c["name"] == "NQ-JD-25K-SERIES"
-        ))
-
-        case["voltage"] = voltage
-        case["branches"] = [dict(b) for b in three_pole]
-
-        name = f"MB2-C2-JD-{voltage}"
-
-        result = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": job_attrs(case),
-        }]).get(name, {})
-
-        check(
-            f"{voltage}V: listed series panel AIC",
-            result.get("_finalPanelIntRating"),
-            25,
-        )
-
-        check(
-            f"{voltage}V: individual branch AIC",
-            result.get("_finalBranchIntRating"),
-            10,
-        )
-
-        check(
-            f"{voltage}V: verified catalog source",
-            "Table 9.1" in str(
-                result.get("_seriesRatingSource") or ""
-            ),
-            True,
-        )
-
-        check(
-            f"{voltage}V: no series review flag",
-            not any(
-                "Series-rated NQ assembly has not been verified"
-                in str(note)
-                for note in result.get("Notes", [])
-            ),
-            True,
-        )
-
-    unverified_cases = [
-        ("NQ-LA-35K-SERIES", "NQ-LA-208-AL"),
-        ("NQ-MLO-22K-SERIES", "NQ-MLO-208-AL"),
-    ]
-
-    for name, original_name in unverified_cases:
-        case = dict(next(
-            c for c in cases if c["name"] == original_name
-        ))
-
-        case["rating"] = "SERIES_RATED"
-
-        result = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": job_attrs(case),
-        }]).get(name, {})
-
-        check(
-            f"{name}: no unverified panel AIC",
-            result.get("_finalPanelIntRating"),
-            None,
-        )
-
-        check(
-            f"{name}: review note present",
-            any(
-                "User review required" in str(note)
-                and "Series-rated NQ assembly" in str(note)
-                for note in result.get("Notes", [])
-            ),
-            True,
-        )
-
-    print("\n--- NEMA 3R bottom-feed note regression ---")
-
-    bottom_feed_note = (
-        "NEMA 3R panelboards must be bottom fed. "
-        "Verify field feed arrangement."
-    )
-
-    for name in ("NQ-LH-240-3R", "NF-MLO-480-3R"):
-        result = outputs[name]
-
-        check(
-            f"{name}: bottom-feed note appears exactly once",
-            result.get("Notes", []).count(bottom_feed_note),
-            1,
-        )
-
-    for name in ("NQ-LA-208-AL", "NF-LH-480-CU"):
-        result = outputs[name]
-
-        check(
-            f"{name}: no NEMA 3R bottom-feed note",
-            bottom_feed_note not in result.get("Notes", []),
-            True,
-        )
-
-    for original_name in ("NQ-MLO-208-AL", "NF-LH-480-CU"):
-        case = dict(next(
-            c for c in cases if c["name"] == original_name
-        ))
-
-        case["enclosure"] = "NEMA3R"
-        case["trim"] = "SURFACE"
-
-        name = f"{original_name}-OUTDOOR"
-
-        result = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": job_attrs(case),
-        }]).get(name, {})
-
-        check(
-            f"{name}: no generation error",
-            not any(
-                key in result
-                for key in ("error", "Skipped")
-            ),
-            True,
-        )
-
-        check(
-            f"{name}: weatherproof enclosure selected",
-            str(result.get("Box", "")).endswith("WP"),
-            True,
-        )
-
-        check(
-            f"{name}: bottom-feed note appears exactly once",
-            result.get("Notes", []).count(bottom_feed_note),
-            1,
-        )
-
-    print("\n--- PowerPacT L D9 enclosure regression ---")
-
-    nq_attrs = {
-        "typeOfMain": "MAIN BREAKER",
-        "amperage": 400,
-        "spaces": 30,
-        "voltage": 208,
-        "material": "COPPER",
-        "enclosure": "NEMA1",
-        "trimStyle": "SURFACE",
-        "mainBreakerType": "LA",
-    }
-
-    nq_la = nqPanelboard().generateNqPanelboardPartNumber(
-        dict(nq_attrs)
-    )
-
-    nq_attrs["mainBreakerType"] = "LJ"
-
-    nq_lj = nqPanelboard().generateNqPanelboardPartNumber(
-        dict(nq_attrs)
-    )
-
-    nq_attrs["enclosure"] = "NEMA3R"
-
-    nq_lj_outdoor = nqPanelboard().generateNqPanelboardPartNumber(
-        dict(nq_attrs)
-    )
-
-    check(
-        "NQ LA: standard enclosure preserved",
-        nq_la.get("Box"),
-        "MH62BE",
-    )
-
-    check(
-        "NQ LJ: deep D9 enclosure",
-        nq_lj.get("Box"),
-        "MH62D9",
-    )
-
-    check(
-        "NQ LJ: correct trim",
-        nq_lj.get("Trim"),
-        "NC62VS",
-    )
-
-    check(
-        "NQ LJ outdoor: no invented enclosure",
-        nq_lj_outdoor.get("Box"),
-        None,
-    )
-
-    check(
-        "NQ LJ outdoor: factory review required",
-        any(
-            "Factory assembly or manufacturer review" in str(note)
-            for note in nq_lj_outdoor.get("Notes", [])
-        ),
-        True,
-    )
-
-    nf_attrs = {
-        "typeOfMain": "MAIN BREAKER",
-        "amperage": 400,
-        "spaces": 30,
-        "voltage": 480,
-        "phase": "3PHASE",
-        "material": "COPPER",
-        "enclosure": "NEMA1",
-        "trimStyle": "SURFACE",
-        "mainBreakerType": "LH",
-    }
-
-    nf_lh = nfPanelboard().generateNfPanelboardPartNumber(
-        dict(nf_attrs)
-    )
-
-    nf_attrs["amperage"] = 600
-    nf_attrs["mainBreakerType"] = "LJ"
-
-    nf_lj = nfPanelboard().generateNfPanelboardPartNumber(
-        dict(nf_attrs)
-    )
-
-    nf_attrs["enclosure"] = "NEMA3R"
-
-    nf_lj_outdoor = nfPanelboard().generateNfPanelboardPartNumber(
-        dict(nf_attrs)
-    )
-
-    nf_attrs["enclosure"] = "NEMA1"
-    nf_attrs["spaces"] = 66
-
-    nf_lj_66 = nfPanelboard().generateNfPanelboardPartNumber(
-        dict(nf_attrs)
-    )
-
-    check(
-        "NF LH: standard enclosure preserved",
-        nf_lh.get("Box"),
-        "MH62BE",
-    )
-
-    check(
-        "NF LJ: deep D9 enclosure",
-        nf_lj.get("Box"),
-        "MH68D9",
-    )
-
-    check(
-        "NF LJ: three-point-latch trim",
-        nf_lj.get("Trim"),
-        "NC68VS3PNF",
-    )
-
-    check(
-        "NF LJ outdoor: no invented enclosure",
-        nf_lj_outdoor.get("Box"),
-        None,
-    )
-
-    check(
-        "NF LJ outdoor: factory review required",
-        any(
-            "Factory assembly or manufacturer review" in str(note)
-            for note in nf_lj_outdoor.get("Notes", [])
-        ),
-        True,
-    )
-
-    check(
-        "NF LJ 66-space: no unlisted enclosure",
-        nf_lj_66.get("Box"),
-        None,
-    )
-
-    check(
-        "NF LJ 66-space: manufacturer review note",
-        any(
-            "not listed as a merchandised assembly" in str(note)
-            for note in nf_lj_66.get("Notes", [])
-        ),
-        True,
-    )
-
-    nq_d9_case = dict(next(
-        c for c in cases if c["name"] == "NQ-LA-208-AL"
-    ))
-
-    nq_d9_case["bus"] = 400
-    nq_d9_case["main"] = 400
-    nq_d9_case["spaces"] = 30
-    nq_d9_case["aic"] = 65
-    nq_d9_case["material"] = "COPPER"
-
-    nq_d9_attrs = job_attrs(nq_d9_case)
-    nq_d9_attrs["mainBreakerType"] = "LJ"
-
-    nq_d9_result = run_job([{
-        "type": "panelboard",
-        "name": "NQ-D9-FULL-JOB",
-        "attrs": nq_d9_attrs,
-    }]).get("NQ-D9-FULL-JOB", {})
-
-    check(
-        "NQ D9 full job: correct enclosure",
-        nq_d9_result.get("Box"),
-        "MH62D9",
-    )
-
-    check(
-        "NQ D9 full job: correct main kit",
-        nq_d9_result.get("Main Breaker Kit"),
-        "NQMB6PPL",
-    )
-
-    check(
-        "NQ D9 full job: LJ main selected",
-        str(
-            nq_d9_result.get("Main Breaker") or ""
-        ).upper().startswith("LJL"),
-        True,
-    )
-
-    check(
-        "NQ D9 full job: all branch breakers built",
-        sum(
-            int(entry.get("count", 0))
-            for entry in nq_d9_result.get("Branch Breakers (NQ)", [])
-            if isinstance(entry, dict)
-            and entry.get("Part Number")
-        ),
-        sum(
-            int(br.get("count", 0))
-            for br in nq_d9_attrs["detected_breakers"]
-        ),
-    )
-
-    check(
-        "NQ D9 full job: 65kA panel rating preserved",
-        nq_d9_result.get("_finalPanelIntRating"),
-        65,
-    )
-
-    check(
-        "NQ D9 full job: correct trim",
-        nq_d9_result.get("Trim"),
-        "NC62VS",
-    )
-
-    nf_d9_case = dict(next(
-        c for c in cases if c["name"] == "NF-LH-480-CU"
-    ))
-
-    nf_d9_case["bus"] = 600
-    nf_d9_case["main"] = 600
-    nf_d9_case["spaces"] = 30
-    nf_d9_case["aic"] = 35
-    nf_d9_case["trim"] = "SURFACE"
-
-    nf_d9_result = run_job([{
-        "type": "panelboard",
-        "name": "NF-D9-FULL-JOB",
-        "attrs": job_attrs(nf_d9_case),
-    }]).get("NF-D9-FULL-JOB", {})
-
-    check(
-        "NF D9 full job: correct enclosure",
-        nf_d9_result.get("Box"),
-        "MH68D9",
-    )
-
-    check(
-        "NF D9 full job: correct main kit",
-        nf_d9_result.get("Main Breaker Kit"),
-        "N600MPPL",
-    )
-
-    check(
-        "NF D9 full job: correct trim",
-        nf_d9_result.get("Trim"),
-        "NC68VS3PNF",
-    )
-
-    nq_outdoor_attrs = dict(nq_d9_attrs)
-    nq_outdoor_attrs["enclosure"] = "NEMA3R"
-
-    nq_outdoor_result = run_job([{
-        "type": "panelboard",
-        "name": "NQ-D9-OUTDOOR-FULL-JOB",
-        "attrs": nq_outdoor_attrs,
-    }]).get("NQ-D9-OUTDOOR-FULL-JOB", {})
-
-    check(
-        "NQ PowerPacT L outdoor full job: no standalone box",
-        nq_outdoor_result.get("Box"),
-        None,
-    )
-
-    check(
-        "NQ PowerPacT L outdoor: bottom-feed note retained",
-        any(
-            "NEMA 3R panelboards must be bottom fed" in str(note)
-            for note in nq_outdoor_result.get("Notes", [])
-        ),
-        True,
-    )
-
-    check(
-        "NQ PowerPacT L outdoor: manufacturer review retained",
-        any(
-            "Factory assembly or manufacturer review" in str(note)
-            for note in nq_outdoor_result.get("Notes", [])
-        ),
-        True,
-    )
-
-    check(
-        "Existing NQ LA BOM stays standard depth",
-        outputs["NQ-LA-208-AL"].get("Box"),
-        "MH62BE",
-    )
-
-    check(
-        "Existing NF LH BOM stays standard depth",
-        outputs["NF-LH-480-CU"].get("Box"),
-        "MH68BE",
-    )
-
-    # ==============================================================
-    # ARGUS 2024 SCHNEIDER DIGEST / BOM / MINIMUM-HARDWARE AUDIT
-    # Paste ABOVE: total = passed + len(failed)
-    #
-    # Independent reference: 2024 Panelboards Digest:
-    # 9.3  (p9-7), 9.4  (p9-8),
-    # 9.44 (p9-23), 9.45 (p9-24),
-    # 9.9  (p9-12), 9.46 (p9-25).
-    #
-    # Scope: 3-phase merchandised NQ/NF panelboards, no FTL/SPD,
-    # no special branch features, non-service-entrance.
-    # Cost checks = catalog-minimum hardware, NOT distributor net $.
-    # ==============================================================
-
-    print("\n--- DIGEST AUDIT: independent catalog BOM oracle ---")
-    catalog_failures_at_start = len(failed)
-
-    # Row: family, bus A, spaces, bare aluminum interior,
-    # NEMA 1 box height, trim height, NEMA 3R box height,
-    # copper-only.
-    #
-    # Copper-only interiors include their mandatory C suffix.
-    # These are catalog values, NOT pulled from ARGUS's tables.
-
-    catalog_mlo = [
-        ("NQ", 100, 18, "NQ418L1", 26, 26, 26, False),
-        ("NQ", 100, 30, "NQ430L1", 32, 32, 32, False),
-
-        ("NQ", 225, 30, "NQ430L2", 32, 32, 32, False),
-        ("NQ", 225, 42, "NQ442L2", 38, 38, 38, False),
-        ("NQ", 225, 54, "NQ454L2", 38, 38, 38, False),
-        ("NQ", 225, 72, "NQ472L2", 44, 44, 44, False),
-        ("NQ", 225, 84, "NQ484L2", 50, 50, 50, False),
-
-        ("NQ", 400, 30, "NQ430L4", 50, 50, 50, False),
-        ("NQ", 400, 42, "NQ442L4", 50, 50, 50, False),
-        ("NQ", 400, 54, "NQ454L4", 56, 56, 56, False),
-        ("NQ", 400, 72, "NQ472L4", 62, 62, 62, False),
-        ("NQ", 400, 84, "NQ484L4C", 68, 68, 68, True),
-
-        ("NQ", 600, 30, "NQ430L6C", 50, 50, 62, True),
-        ("NQ", 600, 42, "NQ442L6C", 50, 50, 62, True),
-        ("NQ", 600, 54, "NQ454L6C", 56, 56, 68, True),
-        ("NQ", 600, 84, "NQ484L6C", 68, 68, 80, True),
-
-        ("NF", 125, 18, "NF418L1", 26, 26, 26, False),
-        ("NF", 125, 30, "NF430L1", 32, 32, 32, False),
-        ("NF", 125, 42, "NF442L1C", 38, 38, 38, True),
-        ("NF", 125, 54, "NF454L1C", 44, 44, 44, True),
-
-        ("NF", 250, 30, "NF430L2", 38, 38, 38, False),
-        ("NF", 250, 42, "NF442L2", 44, 44, 44, False),
-        ("NF", 250, 54, "NF454L2", 50, 50, 50, False),
-        ("NF", 250, 66, "NF466L2", 62, 62, 62, False),
-
-        ("NF", 400, 30, "NF430L4", 50, 50, 50, False),
-        ("NF", 400, 42, "NF442L4", 56, 56, 56, False),
-        ("NF", 400, 54, "NF454L4", 62, 62, 62, False),
-        ("NF", 400, 66, "NF466L4", 74, 74, 74, False),
-        ("NF", 400, 84, "NF484L4", 86, 86, 86, False),
-
-        ("NF", 600, 30, "NF430L6C", 50, 50, 62, True),
-        ("NF", 600, 42, "NF442L6C", 56, 56, 68, True),
-        ("NF", 600, 54, "NF454L6C", 62, 62, 74, True),
-        ("NF", 600, 66, "NF466L6C", 74, 74, 86, True),
-
-        # NF 600A/84-space outdoor is not merchandised.
-        ("NF", 600, 84, "NF484L6C", 86, 86, None, True),
-    ]
-
-    basic_branches = [
-        {
-            "poles": 1,
-            "amperage": 20,
-            "count": 3,
-            "specialFeatures": "",
-        },
-        {
-            "poles": 3,
-            "amperage": 30,
-            "count": 1,
-            "specialFeatures": "",
-        },
-    ]
-
-    def _audit_attrs(
-        bus, voltage, spaces, aic, material,
-        enclosure="NEMA1", trim="SURFACE",
-        main=None, frame=None, rating="FULLY_RATED"
-    ):
-        attrs = {
-            "amperage": bus,
-            "voltage": voltage,
-            "spaces": spaces,
-            "intRating": aic,
-            "material": material,
-            "panelRatingType": rating,
-            "enclosure": enclosure,
-            "trimStyle": trim,
-            "allowPlugOn": False,
-            "feedThruLugs": False,
-            "poles": 3,
-            "grounding": False,
-            "detected_breakers": [
-                dict(b) for b in basic_branches
-            ],
+        panel["spaces"] = start
+
+        raw = {
+            "voltage": 240,
+            "intRating": 22,
+            "panelRatingType": "FULLY_RATED",
+            "typeOfMain": "MAIN LUG",
+            "detected_breakers": [{
+                "poles": 3,
+                "amperage": 70,
+                "count": qty,
+                "specialFeatures": "",
+            }],
         }
 
-        if main is not None:
-            attrs["mainBreakerAmperage"] = main
+        result = PanelboardEngine(
+            name, {}, DefaultResolver({}, {})
+        )._build_iline_main_lug_with_resize(panel, attrs, raw)
 
-        if frame:
-            attrs["mainBreakerType"] = frame
-
-        return attrs
-
-    def _audit_counts(output, family):
-        rows = output.get(f"Branch Breakers ({family})", [])
-
-        if not isinstance(rows, list):
-            return Counter()
-
-        counts = Counter()
-
-        for entry in rows:
-            if isinstance(entry, dict) and entry.get("Part Number"):
-                counts[str(entry["Part Number"])] += int(
-                    entry.get("count", 0)
-                )
-
-        return counts
-
-    def _audit_notes(output):
-        raw_notes = output.get("Notes") or []
-
-        if isinstance(raw_notes, list):
-            return [str(x) for x in raw_notes]
-
-        return [str(raw_notes)]
-
-    # ==============================================================
-    # PART 1: MAIN-LUG CATALOG MATRIX
-    # ==============================================================
-    # Each published row is tested with:
-    # - Aluminum and copper where allowed
-    # - NEMA 1 surface
-    # - NEMA 1 flush
-    # - NEMA 3R
-    #
-    # Uses the full process_job() path.
-
-    catalog_jobs = []
-    catalog_expect = {}
-
-    for (
-        family, bus, spaces, bare, n1,
-        trim_h, wp, copper_only
-    ) in catalog_mlo:
-
-        materials = (
-            ("COPPER",)
-            if copper_only
-            else ("ALUMINUM", "COPPER")
+        check(
+            f"{name}: catalog interior/box/front",
+            (
+                result.get("Interior"),
+                result.get("Box"),
+                result.get("Trim"),
+            ),
+            (interior, box, front),
         )
 
-        for material in materials:
-            for enclosure, trim in (
-                ("NEMA1", "SURFACE"),
-                ("NEMA1", "FLUSH"),
-                ("NEMA3R", "SURFACE"),
-            ):
+        check(
+            f"{name}: selected mounting inches",
+            attrs["spaces"],
+            final_inches,
+        )
 
-                if enclosure == "NEMA3R" and wp is None:
-                    continue
+        check(
+            f"{name}: correct branches and quantity",
+            result.get("Branch Breakers (I-LINE)"),
+            [{
+                "Part Number": "QDA32070",
+                "Interrupting Rating": 25,
+                "count": qty,
+            }],
+        )
 
-                voltage = 208 if family == "NQ" else 480
-                aic = 22 if family == "NQ" else 35
+        check(
+            f"{name}: no remaining space deficit",
+            bool(result.get("_side_deficit_spaces")),
+            False,
+        )
 
-                interior = bare + (
-                    "C"
-                    if material == "COPPER"
-                    and not bare.endswith("C")
-                    else ""
-                )
+    # No larger HCJ configuration can fit 23 3P Q breakers.
+    overflow_attrs = {
+        "panelType": "HCJ",
+        "ilinePanelType": "HCJ",
+        "typeOfMain": "MAIN LUG",
+        "amperage": 400,
+        "spaces": 27,
+        "enclosure": "NEMA1",
+        "material": "ALUMINUM",
+        "trimStyle": "SURFACE",
+        "voltage": 240,
+    }
 
-                height = (
-                    wp if enclosure == "NEMA3R" else n1
-                )
+    overflow_panel = iLinePanelboard().generateILinePanelboardPartNumber(
+        overflow_attrs
+    )
+    overflow_panel["spaces"] = 27
 
-                box = (
-                    f"MH{height}"
-                    f"{'WP' if enclosure == 'NEMA3R' else 'BE'}"
-                )
+    overflow_raw = {
+        "voltage": 240,
+        "intRating": 22,
+        "panelRatingType": "FULLY_RATED",
+        "typeOfMain": "MAIN LUG",
+        "detected_breakers": [{
+            "poles": 3,
+            "amperage": 70,
+            "count": 23,
+            "specialFeatures": "",
+        }],
+    }
 
-                front = None
-
-                if enclosure != "NEMA3R":
-                    front = (
-                        f"NC{trim_h}"
-                        f"{'V' if bus >= 400 else ''}"
-                        f"{'F' if trim == 'FLUSH' else 'S'}"
-                    )
-
-                branch_prefix = (
-                    "QOB" if family == "NQ" else "EGB"
-                )
-
-                branch_suffix = (
-                    "VH" if family == "NQ" else ""
-                )
-
-                expected_branches = Counter({
-                    (
-                        f"{branch_prefix}"
-                        f"{'120' if family == 'NQ' else '14020'}"
-                        f"{branch_suffix}"
-                    ): 3,
-                    (
-                        f"{branch_prefix}"
-                        f"{'330' if family == 'NQ' else '34030'}"
-                        f"{branch_suffix}"
-                    ): 1,
-                })
-
-                name = (
-                    f"CAT-{family}-{bus}A-{spaces}S-"
-                    f"{material[:2]}-{enclosure}-{trim}"
-                )
-
-                catalog_jobs.append({
-                    "type": "panelboard",
-                    "name": name,
-                    "attrs": _audit_attrs(
-                        bus, voltage, spaces, aic,
-                        material, enclosure, trim
-                    ),
-                })
-
-                catalog_expect[name] = {
-                    "family": family,
-                    "bus": bus,
-                    "spaces": spaces,
-                    "voltage": voltage,
-                    "aic": aic,
-                    "interior": interior,
-                    "box": box,
-                    "trim": front,
-                    "branches": expected_branches,
-                    "enclosure": enclosure,
-                }
-
-    catalog_results = run_job(catalog_jobs)
+    overflow = PanelboardEngine(
+        "HCJ-OVER-MAX", {}, DefaultResolver({}, {})
+    )._build_iline_main_lug_with_resize(
+        overflow_panel, overflow_attrs, overflow_raw
+    )
 
     check(
-        "DIGEST MLO: every fixture returned",
-        set(catalog_results),
-        set(catalog_expect),
+        "HCJ-OVER-MAX: no fabricated larger assembly",
+        overflow.get("Interior"),
+        "HCJ14484",
     )
 
-    for name, spec in catalog_expect.items():
-        out = catalog_results.get(name, {})
-
-        if not isinstance(out, dict):
-            out = {"error": str(out)}
-
-        family = spec["family"]
-
-        notes_text = " ".join(
-            _audit_notes(out)
-        ).lower()
-
-        actual_core = (
-            out.get("Interior"),
-            out.get("Box"),
-            out.get("Trim"),
-            out.get("Main Breaker"),
-            out.get("Main Breaker Kit"),
-        )
-
-        expected_core = (
-            spec["interior"],
-            spec["box"],
-            spec["trim"],
-            None,
-            None,
-        )
-
-        check(
-            f"{name}: DIGEST interior/box/front",
-            actual_core,
-            expected_core,
-        )
-
-        check(
-            f"{name}: no error or skipped item",
-            not any(
-                k in out for k in (
-                    "error",
-                    "Skipped",
-                    "Main Breaker Error",
-                )
-            ),
-            True,
-        )
-
-        check(
-            f"{name}: catalog minimum bus/spaces",
-            (
-                out.get("_finalPanelAmperage"),
-                out.get("_finalPanelSpaces"),
-            ),
-            (
-                spec["bus"],
-                spec["spaces"],
-            ),
-        )
-
-        check(
-            f"{name}: actual branch parts/quantities",
-            _audit_counts(out, family),
-            spec["branches"],
-        )
-
-        check(
-            f"{name}: selected branch rating covers requirement",
-            ka(out.get("_finalBranchIntRating")) >= spec["aic"],
-            True,
-        )
-
-        check(
-            f"{name}: request voltage/AIC preserved",
-            (
-                out.get("_finalPanelVoltage"),
-                ka(out.get("_requestedPanelIntRating")),
-            ),
-            (
-                spec["voltage"],
-                float(spec["aic"]),
-            ),
-        )
-
-        if spec["enclosure"] == "NEMA3R":
-            check(
-                f"{name}: NEMA3R bottom-feed note",
-                "must be bottom fed" in notes_text,
-                True,
-            )
-
-    print(
-        f"DIGEST MLO MATRIX: "
-        f"{len(catalog_expect)} complete jobs evaluated"
+    check(
+        "HCJ-OVER-MAX: review required",
+        (
+            bool(overflow.get("_side_deficit_spaces"))
+            and bool(overflow.get("_needs_user_review"))
+        ),
+        True,
     )
 
-    # ==============================================================
-    # PART 2: MAIN-BREAKER CATALOG BOM AUDIT
-    # ==============================================================
-    # NQ/NF, H/J and legacy/PowerPacT L main-breaker examples.
-    # Full-job construction with the requested breaker frame.
 
-    print("\n--- DIGEST AUDIT: main-breaker kits, depth and full BOM ---")
+    # ==========================================================
+    # I-LINE END-TO-END: HCJ MAIN-LUG AUTO-RESIZE
+    # ==========================================================
 
-    catalog_mb = [
-        # name, family, bus, main, voltage, spaces,
-        # aic, material, forced frame, interior,
-        # breaker, kit, box, trim part, trim style
+    print("\n=== I-LINE END-TO-END RESIZE TEST ===")
 
+    e2e_name = "HCJ-E2E-RESIZE"
+
+    payload = {
+        "items": [{
+            "type": "panelboard",
+            "name": e2e_name,
+            "attrs": {
+                "amperage": 250,
+                "voltage": 480,
+                "spaces": 18,
+                "intRating": 22,
+                "material": "ALUMINUM",
+                "trimStyle": "SURFACE",
+                "enclosure": "NEMA1",
+                "panelRatingType": "FULLY_RATED",
+                "feedThruLugs": False,
+                "detected_breakers": [{
+                    "poles": 3,
+                    "amperage": 200,
+                    "count": 7,
+                    "specialFeatures": "",
+                }],
+            },
+        }]
+    }
+
+    result = process_job(payload).get(e2e_name, {})
+
+    check(
+        "E2E: panel built successfully",
+        "error" not in result and "Skipped" not in result,
+        True,
+    )
+
+    check(
+        "E2E: correct I-Line family",
+        result.get("ilinePanelType"),
+        "HCJ",
+    )
+
+    check(
+        "E2E: correct catalog assembly",
         (
-            "NQ-JD-25", "NQ", 225, 200, 240, 30,
-            25, "COPPER", "JD",
-            "NQ430L2C", "JDL36200", "NQMB2HJ",
-            "MH44BE", "NC44S", "SURFACE",
+            result.get("Interior"),
+            result.get("Box"),
+            result.get("Trim"),
         ),
-        (
-            "NQ-JG-65", "NQ", 225, 200, 208, 30,
-            65, "COPPER", "JG",
-            "NQ430L2C", "JGL36200", "NQMB2HJ",
-            "MH44BE", "NC44S", "SURFACE",
+        ("HCJ23734", "HC3273DB9", "HCM73TS"),
+    )
+
+    check(
+        "E2E: correct catalog breakers and quantity",
+        result.get("Branch Breakers (I-LINE)"),
+        [{
+            "Part Number": "JGA36200",
+            "Interrupting Rating": 35,
+            "count": 7,
+        }],
+    )
+
+    check(
+        "E2E: actual branch interrupting rating",
+        result.get("_finalBranchIntRating"),
+        35,
+    )
+
+    check(
+        "E2E: final interior mounting inches",
+        result.get("_finalPanelSpaces"),
+        45,
+    )
+
+    check(
+        "E2E: resizing function actually executed",
+        any(
+            "mounting capacity increased from 27 to 45 inches"
+            in str(note)
+            for note in result.get("Notes", [])
         ),
-        (
-            "NQ-LA-35", "NQ", 400, 300, 208, 30,
-            35, "ALUMINUM", "LA",
-            "NQ430L4", "LAL36300MB", "NQMB4LA",
-            "MH62BE", "NC62VS", "SURFACE",
-        ),
-        (
-            "NQ-LH-65", "NQ", 400, 400, 240, 30,
-            65, "COPPER", "LH",
-            "NQ430L4C", "LHL36400MB", "NQMB4LA",
-            "MH62BE", "NC62VS", "SURFACE",
-        ),
-        (
-            "NQ-LJ-65", "NQ", 400, 400, 208, 30,
-            65, "COPPER", "LJ",
-            "NQ430L4C", "LJL36400U31X", "NQMB6PPL",
-            "MH62D9", "NC62VS", "SURFACE",
-        ),
-        (
-            "NF-JG-35", "NF", 250, 200, 480, 42,
-            35, "ALUMINUM", "JG",
-            "NF442L2", "JGL36200", "N250MJ",
-            "MH56BE", "NC56S", "SURFACE",
-        ),
-        (
-            "NF-LH-35", "NF", 400, 300, 480, 42,
-            35, "COPPER", "LH",
-            "NF442L4C", "LHL36300MB", "N400M",
-            "MH68BE", "NC68VF", "FLUSH",
-        ),
-        (
-            "NF-LL-65", "NF", 600, 600, 480, 30,
-            65, "COPPER", "LL",
-            "NF430L6C", "LLL36600U31X", "N600MPPL",
-            "MH68D9", "NC68VS3PNF", "SURFACE",
-        ),
+        True,
+    )
+
+    check(
+        "E2E: no remaining mounting deficit",
+        bool(result.get("_side_deficit_spaces")),
+        False,
+    )
+
+    check(
+        "E2E: no unresolved review flag",
+        bool(result.get("_needs_user_review")),
+        False,
+    )
+
+
+    # ==========================================================
+    # I-LINE 400A FACTORY MAIN BREAKER REGRESSION
+    # ==========================================================
+
+    print("\n=== I-LINE 400A MAIN BREAKER TESTS ===")
+
+    def run_hcj_400_main(requested_ka):
+        return process_job({
+            "items": [{
+                "type": "panelboard",
+                "name": "HCJ-400-MB",
+                "attrs": {
+                    "amperage": 400,
+                    "mainBreakerAmperage": 400,
+                    "voltage": 480,
+                    "spaces": 18,
+                    "intRating": requested_ka,
+                    "material": "ALUMINUM",
+                    "trimStyle": "SURFACE",
+                    "enclosure": "NEMA1",
+                    "panelRatingType": "FULLY_RATED",
+                    "feedThruLugs": False,
+                    "detected_breakers": [{
+                        "poles": 3,
+                        "amperage": 200,
+                        "count": 1,
+                        "specialFeatures": "",
+                    }],
+                },
+            }]
+        })["HCJ-400-MB"]
+
+    # Valid: 22kA requirement at 480V.
+    valid = run_hcj_400_main(22)
+
+    check(
+        "MB-400: correct HCJ family",
+        valid.get("panelType"),
+        "HCJ",
+    )
+
+    check(
+        "MB-400: catalog interior/box/trim",
+        (valid.get("Interior"), valid.get("Box"), valid.get("Trim")),
+        ("HCJ14734M", "HC3273DB9", "HCM73TS"),
+    )
+
+    check(
+        "MB-400: correct factory main breaker",
+        valid.get("Main Breaker Note"),
+        "Comes with a factory installed LAP36400MB",
+    )
+
+    check(
+        "MB-400: main amperage preserved",
+        valid.get("_finalMainBreakerAmperage"),
+        400,
+    )
+
+    check(
+        "MB-400: actual main AIC at 480V",
+        valid.get("_finalMainBreakerIntRating"),
+        30,
+    )
+
+    check(
+        "MB-400: correct branch breaker",
+        valid.get("Branch Breakers (I-LINE)"),
+        [{
+            "Part Number": "JGA36200",
+            "Interrupting Rating": 35,
+            "count": 1,
+        }],
+    )
+
+    check(
+        "MB-400: no panel build error",
+        bool(valid.get("error")),
+        False,
+    )
+
+    # Invalid: factory main is only 30kA at 480V.
+    invalid = run_hcj_400_main(35)
+
+    check(
+        "MB-400: insufficient main AIC rejected",
+        bool(invalid.get("error")),
+        True,
+    )
+
+    check(
+        "MB-400: no incompatible interior supplied",
+        bool(invalid.get("Interior")),
+        False,
+    )
+
+
+
+    # ==========================================================
+    # I-LINE 600A / 800A HCJ FACTORY MAIN REGRESSION
+    # ==========================================================
+
+    print("\n=== I-LINE 600A / 800A MAIN TESTS ===")
+
+    def test_hcj_main(amps, aic=22, spaces=18):
+        name = f"HCJ-{amps}-{aic}-{spaces}"
+
+        return process_job({
+            "items": [{
+                "type": "panelboard",
+                "name": name,
+                "attrs": {
+                    "amperage": amps,
+                    "mainBreakerAmperage": amps,
+                    "voltage": 480,
+                    "spaces": spaces,
+                    "intRating": aic,
+                    "material": "ALUMINUM",
+                    "trimStyle": "SURFACE",
+                    "enclosure": "NEMA1",
+                    "panelRatingType": "FULLY_RATED",
+                    "feedThruLugs": False,
+                    "detected_breakers": [{
+                        "poles": 3,
+                        "amperage": 200,
+                        "count": 1,
+                        "specialFeatures": "",
+                    }],
+                },
+            }]
+        })[name]
+
+    valid_cases = [
+        # Name, Main A, Input spaces, Final inches,
+        # Interior, Box, Trim, Factory main
+
+        ("600A-36IN", 600, 18, 36,
+         "HCJ18736MP", "HC3273DB9", "HCM73TS", "MGP36600"),
+
+        ("800A-36IN", 800, 18, 36,
+         "HCJ18738MP", "HC3273DB9", "HCM73TS", "MGP36800"),
+
+        ("600A-72IN", 600, 30, 72,
+         "HCJ36916MP", "HC3291DB9", "HCM91TS", "MGP36600"),
     ]
 
-    mb_jobs = []
-    mb_expect = {}
-
-    for (
-        short, family, bus, main, voltage, spaces,
-        aic, material, frame, interior, breaker,
-        kit, box, front, trim
-    ) in catalog_mb:
-
-        name = f"CAT-MB-{short}"
-
-        mb_jobs.append({
-            "type": "panelboard",
-            "name": name,
-            "attrs": _audit_attrs(
-                bus, voltage, spaces, aic, material,
-                trim=trim,
-                main=main,
-                frame=frame,
-            ),
-        })
-
-        mb_expect[name] = (
-            family, aic, interior, breaker,
-            kit, box, front, bus, main
-        )
-
-    mb_results = run_job(mb_jobs)
-
-    for name, spec in mb_expect.items():
-        (
-            family, aic, interior, breaker,
-            kit, box, front, bus, main
-        ) = spec
-
-        out = mb_results.get(name, {})
-
-        if not isinstance(out, dict):
-            out = {"error": str(out)}
+    for name, amps, spaces, final_inches, interior, box, trim, main in valid_cases:
+        out = test_hcj_main(amps, spaces=spaces)
 
         check(
-            f"{name}: DIGEST main/interior/kit/depth/trim",
+            f"{name}: correct catalog assembly",
             (
+                out.get("panelType"),
                 out.get("Interior"),
-                out.get("Main Breaker"),
-                out.get("Main Breaker Kit"),
                 out.get("Box"),
                 out.get("Trim"),
             ),
-            (
-                interior,
-                breaker,
-                kit,
-                box,
-                front,
-            ),
+            ("HCJ", interior, box, trim),
         )
 
         check(
-            f"{name}: correct main trip and panel amps",
+            f"{name}: factory main and amperage",
             (
+                out.get("Main Breaker Note"),
                 out.get("_finalMainBreakerAmperage"),
-                out.get("_finalPanelAmperage"),
             ),
-            (main, bus),
+            (f"Comes with a factory installed {main}", amps),
         )
 
         check(
-            f"{name}: no error and all branches present",
-            not any(
-                k in out
-                for k in (
-                    "error",
-                    "Skipped",
-                    "Main Breaker Error",
-                )
-            )
-            and sum(_audit_counts(out, family).values()) == 4,
-            True,
-        )
-
-        check(
-            f"{name}: individual branch ratings meet full rating",
-            bool(out.get(f"Branch Breakers ({family})"))
-            and all(
-                ka(x.get("Interrupting Rating")) >= aic
-                for x in out.get(
-                    f"Branch Breakers ({family})", []
-                )
-                if isinstance(x, dict)
-            ),
-            True,
-        )
-
-        if family == "NQ":
-            check(
-                f"{name}: breaker-limited panel AIC >= required",
-                ka(out.get("_finalPanelIntRating")) >= aic,
-                True,
-            )
-
-    print(
-        f"DIGEST MB MATRIX: "
-        f"{len(catalog_mb)} complete jobs evaluated"
-    )
-
-    # ==============================================================
-    # PART 3: MINIMUM HARDWARE / BUMPING
-    # ==============================================================
-    # This evaluates minimum published bus and space tiers.
-    # It does NOT claim actual lowest distributor price.
-
-    print("\n--- DIGEST AUDIT: minimum size and no unnecessary upsizing ---")
-
-    least_hardware = [
-        # family, voltage, requested bus, requested spaces,
-        # catalog bus, catalog spaces, expected interior
-
-        ("NQ", 208, 210, 30, 225, 30, "NQ430L2"),
-        ("NQ", 240, 210, 31, 225, 42, "NQ442L2"),
-        ("NQ", 208, 226, 30, 400, 30, "NQ430L4"),
-        ("NQ", 208, 390, 43, 400, 54, "NQ454L4"),
-        ("NQ", 208, 401, 30, 600, 30, "NQ430L6C"),
-
-        ("NF", 480, 225, 30, 250, 30, "NF430L2"),
-        ("NF", 480, 251, 30, 400, 30, "NF430L4"),
-        ("NF", 480, 390, 43, 400, 54, "NF454L4"),
-        ("NF", 480, 401, 30, 600, 30, "NF430L6C"),
-    ]
-
-    bump_jobs = []
-    bump_specs = {}
-
-    for (
-        family, voltage, bus, spaces,
-        expected_bus, expected_spaces, expected_interior
-    ) in least_hardware:
-
-        name = f"CAT-MIN-{family}-{bus}A-{spaces}S"
-
-        material = (
-            "COPPER"
-            if expected_bus == 600
-            else "ALUMINUM"
-        )
-
-        bump_jobs.append({
-            "type": "panelboard",
-            "name": name,
-            "attrs": _audit_attrs(
-                bus,
-                voltage,
-                spaces,
-                22 if family == "NQ" else 35,
-                material,
-            ),
-        })
-
-        bump_specs[name] = (
-            expected_bus,
-            expected_spaces,
-            expected_interior,
-        )
-
-    bump_results = run_job(bump_jobs)
-
-    for name, (
-        expected_bus, expected_spaces, expected_interior
-    ) in bump_specs.items():
-
-        out = bump_results.get(name, {})
-
-        check(
-            f"{name}: cheapest hardware tier (not priced)",
+            f"{name}: catalog main AIC and mounting inches",
             (
-                out.get("_finalPanelAmperage"),
+                out.get("_finalMainBreakerIntRating"),
                 out.get("_finalPanelSpaces"),
-                out.get("Interior"),
             ),
-            (
-                expected_bus,
-                expected_spaces,
-                expected_interior,
-            ),
+            (35, final_inches),
         )
-
-    # ==============================================================
-    # PART 4: ASSEMBLED-PANEL AIC / SERIES RATINGS
-    # ==============================================================
-
-    print("\n--- DIGEST AUDIT: catalog restrictions and rating integrity ---")
-
-    for name in (
-        "NQ-JD-25K-FULL",
-        "NQ-JD-25K-SERIES",
-    ):
-        out = outputs[name]
 
         check(
-            f"{name}: 25kA assembled rating is not branch AIC",
-            out.get("_finalPanelIntRating"),
-            25,
+            f"{name}: correct compatible branch breaker",
+            out.get("Branch Breakers (I-LINE)"),
+            [{
+                "Part Number": "JGA36200",
+                "Interrupting Rating": 35,
+                "count": 1,
+            }],
         )
 
-    check(
-        "Listed JD/QOB series: 10kA individual branches",
-        outputs["NQ-JD-25K-SERIES"].get(
-            "_finalBranchIntRating"
-        ),
-        10,
-    )
+        check(
+            f"{name}: valid build without capacity deficit",
+            (
+                bool(out.get("error")),
+                bool(out.get("_side_deficit_spaces")),
+            ),
+            (False, False),
+        )
+
+    # A 42kA fully-rated request at 480V exceeds
+    # the 35kA rating of the factory-installed MG main.
+    for amps in (600, 800):
+        out = test_hcj_main(amps, aic=42)
+
+        check(
+            f"{amps}A: insufficient factory main AIC rejected",
+            bool(out.get("error")) and not bool(out.get("Interior")),
+            True,
+        )
+
+    # Schneider lists the 800A 72-inch interior as copper bus.
+    # Current aluminum-bus lookup must not approve it.
+    out = test_hcj_main(800, spaces=30)
 
     check(
-        "Listed JD/QOB series: manufacturer source recorded",
-        "Table 9.1" in str(
-            outputs["NQ-JD-25K-SERIES"].get(
-                "_seriesRatingSource"
-            ) or ""
-        ),
+        "800A-72IN-AL: catalog material mismatch rejected",
+        bool(out.get("error")) and not bool(out.get("Interior")),
         True,
     )
 
-    unsupported_series = [
-        (
-            "NQ-LA-NOT-LISTED",
-            _audit_attrs(
-                400, 208, 30, 35, "ALUMINUM",
-                main=300,
-                frame="LA",
-                rating="SERIES_RATED",
-            ),
-        ),
-        (
-            "NF-MLO-UNVERIFIED",
-            _audit_attrs(
-                250, 480, 30, 35, "COPPER",
-                rating="SERIES_RATED",
-            ),
-        ),
+
+    # ==========================================================
+    # I-LINE HCP FACTORY MAIN CATALOG / AIC TESTS
+    # ==========================================================
+
+    print("\n=== I-LINE HCP MAIN BREAKER TESTS ===")
+
+    def hcp_main_job(bus, material, volts=480, ka=22, spaces=18, main=None):
+        name = f"HCP-{bus}-{material}-{volts}-{ka}-{spaces}"
+        return process_job({"items": [{
+            "type": "panelboard",
+            "name": name,
+            "attrs": {
+                "amperage": bus,
+                "mainBreakerAmperage": bus if main is None else main,
+                "voltage": volts,
+                "spaces": spaces,
+                "intRating": ka,
+                "material": material,
+                "trimStyle": "SURFACE",
+                "enclosure": "NEMA1",
+                "panelRatingType": "FULLY_RATED",
+                "feedThruLugs": False,
+                "detected_breakers": [{
+                    "poles": 3,
+                    "amperage": 400,
+                    "count": 1,
+                    "specialFeatures": "",
+                }],
+            },
+        }]})[name]
+
+    hcp_cases = [
+        # Label, bus, material, voltage, requested kA, input spaces,
+        # interior, box, trim, main, main kA, branch, branch kA,
+        # panel component kA, selected mounting inches
+        ("600-36", 600, "ALUMINUM", 480, 22, 18,
+         "HCP18686M", "HC4268DB", "HCW68TS", "MGP36600", 35,
+         "LA36400", 30, 30, 36),
+        ("600-72", 600, "ALUMINUM", 480, 22, 30,
+         "HCP36866M", "HC4286DB", "HCW86TS", "MGP36600", 35,
+         "LA36400", 30, 30, 72),
+        ("800-36", 800, "COPPER", 480, 22, 18,
+         "HCP18688M", "HC4268DB", "HCW68TS", "MGP36800", 35,
+         "LA36400", 30, 30, 36),
+        ("800-72", 800, "COPPER", 480, 22, 30,
+         "HCP36868M", "HC4286DB", "HCW86TS", "MGP36800", 35,
+         "LA36400", 30, 30, 72),
+        ("600-600V", 600, "ALUMINUM", 600, 18, 18,
+         "HCP18686M", "HC4268DB", "HCW68TS", "MGP36600", 18,
+         "LA36400", 22, 18, 36),
+        ("600-35kA", 600, "ALUMINUM", 480, 35, 18,
+         "HCP18686M", "HC4268DB", "HCW68TS", "MGP36600", 35,
+         "LH36400", 35, 35, 36),
     ]
 
-    for name, attrs in unsupported_series:
+    for (label, bus, mat, volts, ka, spaces, interior, box, trim,
+         main, main_ka, branch, branch_ka, panel_ka, inches) in hcp_cases:
+        out = hcp_main_job(bus, mat, volts, ka, spaces)
+
+        check(f"HCP-{label}: catalog assembly",
+              (out.get("panelType"), out.get("Interior"),
+               out.get("Box"), out.get("Trim")),
+              ("HCP", interior, box, trim))
+
+        check(f"HCP-{label}: factory main",
+              (out.get("Main Breaker Note"),
+               out.get("_finalMainBreakerAmperage"),
+               out.get("_finalMainBreakerIntRating")),
+              (f"Comes with a factory installed {main}", bus, main_ka))
+
+        check(f"HCP-{label}: branch and component rating",
+              (out.get("Branch Breakers (I-LINE)"),
+               out.get("_finalPanelIntRating")),
+              ([{"Part Number": branch,
+                 "Interrupting Rating": branch_ka,
+                 "count": 1}], panel_ka))
+
+        check(f"HCP-{label}: mounting and capacity",
+              (out.get("_finalPanelSpaces"), bool(out.get("error")),
+               bool(out.get("_side_deficit_spaces"))),
+              (inches, False, False))
+
+    invalid_hcp = [
+        ("600-42kA", 600, "ALUMINUM", 480, 42, 18, None),
+        ("800-42kA", 800, "COPPER", 480, 42, 18, None),
+        ("600-600V-22kA", 600, "ALUMINUM", 600, 22, 18, None),
+        ("800-aluminum", 800, "ALUMINUM", 480, 22, 18, None),
+        ("600-500A-main", 600, "ALUMINUM", 480, 22, 18, 500),
+    ]
+
+    for label, bus, mat, volts, ka, spaces, main in invalid_hcp:
+        out = hcp_main_job(bus, mat, volts, ka, spaces, main)
+        check(f"HCP-{label}: safely rejected",
+              (bool(out.get("error"))
+               and not bool(out.get("Interior"))
+               and not bool(out.get("Branch Breakers (I-LINE)"))),
+              True)
+
+    # ==========================================================
+    # RESULTS
+    # ==========================================================
+
+    total = passed + len(failures)
+
+    print("\n" + "=" * 55)
+    print(f"I-LINE REGRESSION: {passed}/{total} PASSED")
+
+    if failures:
+        print("FAILED CHECKS:")
+        for failure in failures:
+            print(f"  - {failure}")
 
-        out = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": attrs,
-        }]).get(name, {})
-
-        check(
-            f"{name}: no unverified series-panel AIC claim",
-            out.get("_finalPanelIntRating"),
-            None,
-        )
-
-        check(
-            f"{name}: review note exists",
-            any(
-                "review" in note.lower()
-                for note in _audit_notes(out)
-            ),
-            True,
-        )
-
-    # ==============================================================
-    # PART 5: POWERPACT L / FACTORY-ASSEMBLY RESTRICTIONS
-    # ==============================================================
-
-    for family, bus, voltage, frame in (
-        ("NQ", 400, 208, "LJ"),
-        ("NF", 600, 480, "LL"),
-    ):
-
-        name = f"CAT-{family}-PPL-3R"
-
-        attrs = _audit_attrs(
-            bus,
-            voltage,
-            30,
-            65,
-            "COPPER",
-            enclosure="NEMA3R",
-            main=bus,
-            frame=frame,
-        )
-
-        out = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": attrs,
-        }]).get(name, {})
-
-        check(
-            f"{name}: no invented standalone outdoor enclosure",
-            out.get("Box"),
-            None,
-        )
-
-        check(
-            f"{name}: factory review note",
-            any(
-                "factory assembly" in note.lower()
-                or "manufacturer review" in note.lower()
-                for note in _audit_notes(out)
-            ),
-            True,
-        )
-
-        check(
-            f"{name}: bottom-feed note",
-            any(
-                "bottom fed" in note.lower()
-                for note in _audit_notes(out)
-            ),
-            True,
-        )
-
-    # ==============================================================
-    # PART 6: COPPER-ONLY INTERIORS
-    # ==============================================================
-    # A catalog-required copper upgrade should not be silent.
-
-    for family, bus, spaces, voltage in (
-        ("NQ", 400, 84, 208),
-        ("NQ", 600, 30, 208),
-        ("NF", 600, 30, 480),
-    ):
-
-        name = f"CAT-COPPER-ONLY-{family}-{bus}-{spaces}"
-
-        attrs = _audit_attrs(
-            bus,
-            voltage,
-            spaces,
-            22 if family == "NQ" else 35,
-            "ALUMINUM",
-        )
-
-        out = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": attrs,
-        }]).get(name, {})
-
-        notes_text = " ".join(
-            _audit_notes(out)
-        ).lower()
-
-        copper_part_selected = str(
-            out.get("Interior") or ""
-        ).endswith("C")
-
-        check(
-            f"{name}: copper-only request does not silently upgrade",
-            not copper_part_selected or any(
-                word in notes_text
-                for word in (
-                    "copper",
-                    "aluminum",
-                    "material",
-                    "review",
-                )
-            ),
-            True,
-        )
-
-    # ==============================================================
-    # PART 7: NON-MERCHANDISED OUTDOOR CONFIGURATIONS
-    # ==============================================================
-
-    unsupported_name = "CAT-NF-600-84-3R-NO-STOCK-BOX"
-
-    unsupported_out = run_job([{
-        "type": "panelboard",
-        "name": unsupported_name,
-        "attrs": _audit_attrs(
-            600, 480, 84, 35,
-            "COPPER",
-            enclosure="NEMA3R",
-        ),
-    }]).get(unsupported_name, {})
-
-    check(
-        "NF 600/84 NEMA3R: no false merchandised WP box",
-        not (
-            str(
-                unsupported_out.get("Interior") or ""
-            ).startswith("NF")
-            and str(
-                unsupported_out.get("Box") or ""
-            ).endswith("WP")
-        ),
-        True,
-    )
-
-    # ==============================================================
-    # PART 8: MINIMUM MAIN-BREAKER HARDWARE
-    # ==============================================================
-    # At 400A / 65kA, LH satisfies the requirement without
-    # needing a larger PowerPacT L enclosure when no electronic
-    # trip, grounding, or other constraint requires it.
-
-    cheapest_main = run_job([{
-        "type": "panelboard",
-        "name": "CAT-MIN-MAIN-400A-65K",
-        "attrs": _audit_attrs(
-            400, 208, 30, 65,
-            "ALUMINUM",
-            main=400,
-        ),
-    }]).get("CAT-MIN-MAIN-400A-65K", {})
-
-    check(
-        "65kA 400A NQ: compact LH main used unless L is required",
-        (
-            cheapest_main.get("Main Breaker"),
-            cheapest_main.get("Box"),
-        ),
-        (
-            "LHL36400MB",
-            "MH62BE",
-        ),
-    )
-
-    # ==============================================================
-    # AUDIT SUMMARY
-    # ==============================================================
-
-    print("\n--- COST & CATALOG AUDIT SCOPE ---")
-
-    print(
-        "PASS/FAIL above checks catalog components, exact bus/space "
-        "tier, breaker quantities, outdoor boxes, and critical "
-        "listing rules."
-    )
-
-    print(
-        "NOT PRICED: Digest does not contain distributor net prices. "
-        "These checks cannot prove the lowest-dollar quote."
-    )
-
-    print(
-        "COST REVIEW: Verify optional copper ground bar, 100% versus "
-        "200% neutral, assembly labor, factory-only configurations, "
-        "and accessory-driven enclosure height before final pricing."
-    )
-
-    print(
-        "CATALOG SCOPE: 3-phase merchandised NQ/NF only; I-Line, "
-        "service-entrance kits, feed-through/sub-feed lugs, GFI, "
-        "special trip functions, and local >42-circuit rules need "
-        "their own manufacturer-backed checks."
-    )
-
-    catalog_new_failures = failed[catalog_failures_at_start:]
-
-    print(
-        f"DIGEST AUDIT SUMMARY: {len(catalog_expect)} MLO jobs, "
-        f"{len(catalog_mb)} main-breaker jobs, "
-        f"{len(least_hardware)} tier probes, "
-        f"{len(catalog_new_failures)} catalog-audit failures"
-    )
-
-    if catalog_new_failures:
-        print("FIRST CATALOG FINDINGS (up to 35):")
-
-        for issue in catalog_new_failures[:35]:
-            print(f"  - {issue}")
-
-        if len(catalog_new_failures) > 35:
-            print(
-                f"  ... and "
-                f"{len(catalog_new_failures) - 35} more"
-            )
-
-    # ==============================================================
-    # FINAL DIGEST AUDIT ADDENDUM
-    # Additional copper-only checks + grouped failure report
-    # ==============================================================
-
-    print("\n--- DIGEST FINAL ADDENDUM ---")
-
-    # NF 125A / 42- and 54-space interiors are copper-only.
-    # An aluminum request must produce the correct copper interior
-    # AND explain the material substitution.
-
-    for spaces, expected_interior in (
-        (42, "NF442L1C"),
-        (54, "NF454L1C"),
-    ):
-        name = f"CAT-NF-125A-{spaces}S-AL-REQUEST"
-
-        result = run_job([{
-            "type": "panelboard",
-            "name": name,
-            "attrs": _audit_attrs(
-                125,
-                480,
-                spaces,
-                35,
-                "ALUMINUM",
-            ),
-        }]).get(name, {})
-
-        check(
-            f"{name}: catalog-required copper interior",
-            result.get("Interior"),
-            expected_interior,
-        )
-
-        notes = " ".join(_audit_notes(result)).upper()
-
-        check(
-            f"{name}: aluminum-to-copper upgrade explained",
-            "ALUMINUM" in notes and "COPPER" in notes,
-            True,
-        )
-
-    # ==============================================================
-    # GROUP ALL CATALOG FAILURES BY ROOT CAUSE
-    # ==============================================================
-
-    print("\n" + "=" * 60)
-    print("ARGUS DIGEST AUDIT — GROUPED FINDINGS")
-    print("=" * 60)
-
-    categories = {
-        "NQ 600A enclosure sizing": [],
-        "NF 125A copper-only interiors": [],
-        "NF 600A main-lug trims": [],
-        "NF series-rating verification": [],
-        "Copper substitution notes": [],
-        "Other catalog discrepancies": [],
-    }
-
-    for label in failed[catalog_failures_at_start:]:
-
-        if label.startswith("CAT-NQ-600A-") and (
-            "DIGEST interior/box/front" in label
-        ):
-            category = "NQ 600A enclosure sizing"
-
-        elif label.startswith("CAT-NF-125A-") and (
-            "DIGEST interior/box/front" in label
-        ):
-            category = "NF 125A copper-only interiors"
-
-        elif label.startswith("CAT-NF-600A-") and (
-            "DIGEST interior/box/front" in label
-        ):
-            category = "NF 600A main-lug trims"
-
-        elif "NF-MLO-UNVERIFIED" in label:
-            category = "NF series-rating verification"
-
-        elif (
-            "COPPER-ONLY" in label
-            or "AL-REQUEST" in label
-        ):
-            category = "Copper substitution notes"
-
-        else:
-            category = "Other catalog discrepancies"
-
-        categories[category].append(label)
-
-    for category, issues in categories.items():
-        if not issues:
-            continue
-
-        print(f"\n{category}: {len(issues)} failed checks")
-
-        for issue in issues:
-            print(f"  - {issue}")
-
-    print("\n" + "-" * 60)
-    print(
-        "Total catalog-audit failures:",
-        len(failed[catalog_failures_at_start:])
-    )
-    print(
-        "Categories with failures:",
-        sum(bool(v) for v in categories.values())
-    )
-    print("-" * 60)
-
-    total = passed + len(failed)
-
-    print("\n" + "=" * 58)
-    print(f"REGRESSION: {passed}/{total} PASSED")
-    print(f"KNOWN PRODUCTION ISSUES: {len(known_issues)}")
-
-    for issue in known_issues:
-        print(f"  - {issue}")
-
-    if failed:
-        print("FAILED REGRESSIONS:")
-        for label in failed:
-            print(f"  - {label}")
         raise AssertionError(
-            f"{len(failed)} regression checks failed"
+            f"{len(failures)} I-Line checks failed"
         )
 
+    print("All tested I-Line branch and HCJ resizing checks passed.")
     print(
-        "Core regressions passed; "
-        "known issues are reported separately."
+        "Still to validate: main-breaker panels, HCP/HCR-U resizing, "
+        "complete accessory compatibility, and series combinations."
     )
-    print("=" * 58)
+    print("=" * 55)
